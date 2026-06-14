@@ -118,7 +118,7 @@
     .ccbtn i{font-size:13px;color:var(--color-text-secondary);line-height:1}
     .ccbtn.pal-open i{color:var(--ac)}
     .cbar{width:18px;height:4px;border-radius:2px;flex-shrink:0}
-    .pal{display:none;position:absolute;top:35px;right:0;background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:10px;padding:10px;z-index:40;grid-template-columns:repeat(6,24px);gap:5px;box-shadow:0 6px 20px rgba(0,0,0,.14)}
+    .pal{display:none;position:fixed;background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:10px;padding:10px;z-index:9999;grid-template-columns:repeat(6,24px);gap:5px;box-shadow:0 6px 20px rgba(0,0,0,.14)}
     .pal.open{display:grid}
     .sw{width:24px;height:24px;border-radius:5px;cursor:pointer;border:1px solid rgba(0,0,0,.08);transition:transform .1s,box-shadow .1s}
     .sw:hover{transform:scale(1.2);box-shadow:0 2px 8px rgba(0,0,0,.2)}
@@ -417,20 +417,27 @@ function buildPal(pid,bid,tgt){
   const el=document.getElementById(pid);if(!el)return;
   el.innerHTML=COLORS.map(c=>'<div class="sw" style="background:'+c+'" onmousedown="applyC(event,\''+c+'\',\''+pid+'\',\''+bid+'\',\''+tgt+'\')"></div>').join('');
 }
+function positionPal(pal,btn){
+  const r=btn.getBoundingClientRect();
+  pal.style.top=(r.bottom+6)+'px';
+  pal.style.left=Math.max(8,r.right-pal.offsetWidth)+'px';
+}
 function saveSelAndTogglePal(e,palId,btnId){
   e.preventDefault();saveSel();
-  const isOpen=document.getElementById(palId)?.classList.contains('open');
+  const pal=document.getElementById(palId),btn=document.getElementById(btnId);
+  const isOpen=pal?.classList.contains('open');
   document.querySelectorAll('.pal').forEach(p=>p.classList.remove('open'));
   document.querySelectorAll('.ccbtn').forEach(b=>b.classList.remove('pal-open'));
-  if(!isOpen){document.getElementById(palId)?.classList.add('open');document.getElementById(btnId)?.classList.add('pal-open')}
+  if(!isOpen&&pal&&btn){btn.classList.add('pal-open');pal.classList.add('open');positionPal(pal,btn)}
 }
 function saveSelDraftAndTogglePal(e,id){
   e.preventDefault();saveSel();
   const palId='p-'+id,btnId='ccb-'+id;
-  const isOpen=document.getElementById(palId)?.classList.contains('open');
+  const pal=document.getElementById(palId),btn=document.getElementById(btnId);
+  const isOpen=pal?.classList.contains('open');
   document.querySelectorAll('.pal').forEach(p=>p.classList.remove('open'));
   document.querySelectorAll('.ccbtn').forEach(b=>b.classList.remove('pal-open'));
-  if(!isOpen){document.getElementById(palId)?.classList.add('open');document.getElementById(btnId)?.classList.add('pal-open')}
+  if(!isOpen&&pal&&btn){btn.classList.add('pal-open');pal.classList.add('open');positionPal(pal,btn)}
 }
 function applyC(e,c,pid,bid,tgt){
   e.preventDefault();
