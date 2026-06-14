@@ -195,6 +195,8 @@
     .fb.ua-btn{border-color:#F09595;color:#993556;background:#FBEAF0}.fb.ua-btn:hover{background:#F4C0D1}
 
     .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(50px);background:var(--color-text-primary);color:var(--color-background-primary);padding:9px 20px;border-radius:10px;font-size:13.5px;opacity:0;transition:all .25s;pointer-events:none;z-index:99;white-space:nowrap;font-family:var(--font-sans)}
+    @keyframes cloudFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+    .cloud-saving{animation:cloudFloat .7s ease-in-out infinite;color:#534AB7 !important}
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   </style>
 </head>
@@ -293,15 +295,42 @@
     </div>
   </div>
   <div class="toast" id="toast"></div>
+  <div id="cloud-status" style="position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;font-size:12.5px;color:#888;background:rgba(255,255,255,0.92);backdrop-filter:blur(8px);padding:6px 14px;border-radius:20px;border:1px solid #e0e0e0;box-shadow:0 2px 10px rgba(0,0,0,.08);transition:opacity .4s;opacity:0;pointer-events:none;font-family:var(--font-sans)">
+    <i id="cloud-icon" class="ti ti-cloud" style="font-size:15px"></i>
+    <span id="cloud-text">تم الحفظ سحابياً</span>
+  </div>
 </div>
 
 <script>
 const FB_URL='https://noteclaude-a5b3b-default-rtdb.europe-west1.firebasedatabase.app';
-let fbSaveTimer=null;
+let fbSaveTimer=null,fbHideTimer=null;
+function showCloudStatus(saving){
+  const el=document.getElementById('cloud-status');
+  const ic=document.getElementById('cloud-icon');
+  const tx=document.getElementById('cloud-text');
+  if(!el)return;
+  clearTimeout(fbHideTimer);
+  el.style.opacity='1';
+  if(saving){
+    ic.className='ti ti-cloud-upload cloud-saving';
+    ic.style.color='#534AB7';
+    tx.textContent='جاري الحفظ...';
+    tx.style.color='#534AB7';
+  }else{
+    ic.className='ti ti-cloud-check';
+    ic.style.color='#1D9E75';
+    tx.textContent='تم الحفظ سحابياً';
+    tx.style.color='#1D9E75';
+    fbHideTimer=setTimeout(()=>{el.style.opacity='0'},2500);
+  }
+}
 function fbSave(data){
   clearTimeout(fbSaveTimer);
+  showCloudStatus(true);
   fbSaveTimer=setTimeout(()=>{
-    fetch(FB_URL+'/data.json',{method:'PUT',body:JSON.stringify(data),headers:{'Content-Type':'application/json'}}).catch(()=>{});
+    fetch(FB_URL+'/data.json',{method:'PUT',body:JSON.stringify(data),headers:{'Content-Type':'application/json'}})
+      .then(()=>showCloudStatus(false))
+      .catch(()=>showCloudStatus(false));
   },800);
 }
 async function fbLoad(){
