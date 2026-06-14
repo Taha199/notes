@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ملاحظاتي</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css"/>
+  <style>
+    :root {
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --ac: #534AB7;
+      --acl: #EEEDFE;
+      --acm: #AFA9EC;
+      --color-background-primary: #ffffff;
+      --color-background-secondary: #f5f5f4;
+      --color-text-primary: #1c1c1e;
+      --color-text-secondary: #6b6b6b;
+      --color-text-tertiary: #a0a0a0;
+      --color-border-primary: #d1d1d1;
+      --color-border-secondary: #e0e0e0;
+      --color-border-tertiary: #ebebeb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --color-background-primary: #1c1c1e;
+        --color-background-secondary: #2c2c2e;
+        --color-text-primary: #f5f5f5;
+        --color-text-secondary: #ababab;
+        --color-text-tertiary: #6b6b6b;
+        --color-border-primary: #3a3a3c;
+        --color-border-secondary: #3a3a3c;
+        --color-border-tertiary: #2c2c2e;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: var(--font-sans); background: var(--color-background-primary); }
+
+    #app{display:flex;height:100vh;font-family:var(--font-sans);direction:rtl;overflow:hidden;background:var(--color-background-primary);position:relative}
+    #sb{width:240px;min-width:240px;background:var(--color-background-secondary);border-left:1px solid var(--color-border-tertiary);display:flex;flex-direction:column;transition:width .25s,min-width .25s;overflow:hidden}
+    #sb.col{width:60px;min-width:60px}
+    .sb-top{display:flex;align-items:center;justify-content:space-between;padding:16px 14px;border-bottom:1px solid var(--color-border-tertiary);min-height:58px}
+    .sb-logo{display:flex;align-items:center;gap:9px;transition:opacity .2s}
+    #sb.col .sb-logo{opacity:0;width:0;pointer-events:none}
+    .logo-ic{width:30px;height:30px;border-radius:9px;background:var(--ac);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;flex-shrink:0}
+    .logo-tx{font-size:15px;font-weight:600;color:var(--color-text-primary);white-space:nowrap}
+    .sb-tgl{background:transparent;border:none;cursor:pointer;color:var(--color-text-secondary);font-size:20px;display:flex;padding:5px;border-radius:8px;flex-shrink:0}
+    .sb-tgl:hover{background:var(--color-background-primary)}
+    nav{flex:1;padding:10px 8px;display:flex;flex-direction:column;gap:2px}
+    .ni{display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:10px;cursor:pointer;border:none;background:transparent;color:var(--color-text-secondary);font-size:14px;width:100%;text-align:right;white-space:nowrap;transition:background .12s,color .12s;position:relative}
+    .ni:hover{background:var(--color-background-primary);color:var(--color-text-primary)}
+    .ni.active{background:var(--acl);color:var(--ac);font-weight:500}
+    .ni.active i{color:var(--ac)}
+    .ni i{font-size:18px;flex-shrink:0}
+    .nl{overflow:hidden;white-space:nowrap}
+    #sb.col .nl{opacity:0;width:0}
+    .nb{margin-right:auto;font-size:11px;padding:2px 8px;border-radius:20px;flex-shrink:0;font-weight:500}
+    .nb.blue{background:#E6F1FB;color:#185FA5}.nb.amber{background:#FAEEDA;color:#854F0B}.nb.gray{background:var(--color-border-tertiary);color:var(--color-text-secondary)}
+    #sb.col .nb{opacity:0;width:0;padding:0;overflow:hidden}
+    .ni[data-tip]:hover::after{content:attr(data-tip);position:absolute;right:58px;top:50%;transform:translateY(-50%);background:var(--color-text-primary);color:var(--color-background-primary);font-size:12px;padding:5px 12px;border-radius:8px;white-space:nowrap;pointer-events:none;z-index:20;display:none}
+    #sb.col .ni[data-tip]:hover::after{display:block}
+    .sb-div{margin:4px 10px;border-top:1px solid var(--color-border-tertiary)}
+    .sb-footer{padding:10px 8px;border-top:1px solid var(--color-border-tertiary)}
+    .sb-user{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px}
+    .av{width:32px;height:32px;border-radius:50%;background:var(--ac);color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .ui{overflow:hidden}
+    #sb.col .ui{opacity:0;width:0}
+    .un{font-size:13.5px;font-weight:500;color:var(--color-text-primary);white-space:nowrap}
+    .us{font-size:11.5px;color:var(--color-text-tertiary)}
+
+    #main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+    .mh{padding:14px 18px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between;min-height:58px;gap:10px;flex-shrink:0}
+    .mh-l{display:flex;align-items:center;gap:9px}
+    .mh-l i{font-size:20px;color:var(--ac)}
+    .mh h2{font-size:16px;font-weight:600;color:var(--color-text-primary)}
+    .mh-r{display:flex;align-items:center;gap:9px}
+    .srch{position:relative}
+    .srch i{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--color-text-tertiary)}
+    .srch input{padding:8px 32px 8px 12px;border:1px solid var(--color-border-secondary);border-radius:9px;background:var(--color-background-secondary);font-size:13.5px;color:var(--color-text-primary);outline:none;width:180px;font-family:var(--font-sans);direction:rtl}
+    .srch input:focus{border-color:var(--acm)}
+    .new-btn{display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:500;padding:8px 15px;border-radius:9px;background:var(--ac);color:#fff;border:none;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
+    .new-btn:hover{opacity:.88}
+
+    #dz{flex-shrink:0;border-bottom:1px solid var(--color-border-tertiary)}
+    #dz:empty{display:none}
+    .dp{width:100%;display:flex;flex-direction:column;background:var(--color-background-primary)}
+    .dp+.dp{border-top:1px solid var(--color-border-tertiary)}
+    .dp-hd{display:flex;align-items:center;justify-content:space-between;padding:7px 15px;border-bottom:1px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+    .dp-lbl{font-size:12px;font-weight:500;color:var(--color-text-secondary);display:flex;align-items:center;gap:5px}
+    .dp-x{background:transparent;border:none;cursor:pointer;font-size:15px;color:var(--color-text-tertiary);padding:3px 7px;border-radius:6px;display:flex;align-items:center}
+    .dp-x:hover{background:var(--color-border-tertiary)}
+
+    /* ═══ TOOLBAR ═══ */
+    .tbar{display:flex;align-items:center;gap:3px;padding:6px 13px;border-bottom:1px solid var(--color-border-tertiary);background:var(--color-background-secondary);flex-shrink:0;overflow-x:auto}
+    .tsep{width:1px;height:18px;background:var(--color-border-secondary);margin:0 3px;flex-shrink:0;opacity:.5}
+    .fsg{display:flex;align-items:center;background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:7px;overflow:hidden;flex-shrink:0}
+    .fsb{width:24px;height:27px;border:none;background:transparent;cursor:pointer;font-size:15px;font-weight:700;color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;transition:background .1s;line-height:1}
+    .fsb:hover{background:var(--acl);color:var(--ac)}
+    .fsv{width:32px;height:27px;border:none;border-left:1px solid var(--color-border-tertiary);border-right:1px solid var(--color-border-tertiary);background:transparent;text-align:center;font-size:12px;font-weight:600;color:var(--color-text-primary);outline:none;font-family:var(--font-sans);cursor:text}
+    .fsv::-webkit-inner-spin-button,.fsv::-webkit-outer-spin-button{-webkit-appearance:none}
+    .tb{background:transparent;border:none;cursor:pointer;width:31px;height:29px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--color-text-tertiary);font-size:15px;transition:background .1s,color .1s,transform .08s,box-shadow .08s;flex-shrink:0;position:relative;outline:none}
+    .tb:hover{background:var(--color-background-primary);color:var(--color-text-secondary)}
+    .tb.on{background:#000000 !important;color:#ffffff !important;border-radius:8px;transform:translateY(-1.5px);box-shadow:0 4px 0 0 rgba(0,0,0,.85),0 6px 10px rgba(0,0,0,.4)}
+    .tb.on:hover{background:#111 !important}
+    .alg{display:flex;align-items:center;background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:7px;overflow:visible;flex-shrink:0}
+    .alg .tb{border-radius:0;width:28px;height:27px;border:none}
+    .alg .tb:first-child{border-radius:7px 0 0 7px}
+    .alg .tb:last-child{border-radius:0 7px 7px 0}
+    .alg .tb+.tb{border-right:1px solid var(--color-border-tertiary)}
+    .alg .tb:hover{background:var(--color-background-secondary)}
+    .alg .tb.on{border-radius:7px !important;z-index:1}
+    .cw{position:relative;flex-shrink:0}
+    .ccbtn{background:transparent;border:none;cursor:pointer;width:31px;height:29px;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:background .1s;flex-shrink:0}
+    .ccbtn:hover{background:var(--color-background-primary)}
+    .ccbtn.pal-open{background:var(--acl)}
+    .ccbtn i{font-size:13px;color:var(--color-text-secondary);line-height:1}
+    .ccbtn.pal-open i{color:var(--ac)}
+    .cbar{width:18px;height:4px;border-radius:2px;flex-shrink:0}
+    .pal{display:none;position:absolute;top:35px;right:0;background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:10px;padding:10px;z-index:40;grid-template-columns:repeat(6,24px);gap:5px;box-shadow:0 6px 20px rgba(0,0,0,.14)}
+    .pal.open{display:grid}
+    .sw{width:24px;height:24px;border-radius:5px;cursor:pointer;border:1px solid rgba(0,0,0,.08);transition:transform .1s,box-shadow .1s}
+    .sw:hover{transform:scale(1.2);box-shadow:0 2px 8px rgba(0,0,0,.2)}
+
+    .dp-ti{width:100%;border:none;outline:none;font-family:var(--font-sans);font-size:14px;font-weight:500;color:var(--color-text-primary);background:transparent;padding:9px 15px;border-bottom:1px solid var(--color-border-tertiary);direction:rtl}
+    .dp-ti::placeholder{color:var(--color-text-tertiary);font-weight:400}
+    .dp-ed{outline:none;font-family:var(--font-sans);font-size:14px;color:var(--color-text-primary);line-height:1.7;padding:9px 15px;direction:rtl;overflow-y:auto;min-height:70px;max-height:110px}
+    .dp-ed:empty::before{content:attr(data-ph);color:var(--color-text-tertiary);pointer-events:none}
+    .dp-ed ul,.m-ed ul{padding-right:20px;list-style:disc}
+    .dp-ed ol,.m-ed ol{padding-right:20px;list-style:decimal}
+    .dp-ft{display:flex;align-items:center;justify-content:space-between;padding:8px 15px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+    .dp-ch{font-size:12px;color:var(--color-text-tertiary)}
+    .dp-save{display:flex;align-items:center;gap:5px;font-size:13px;font-weight:500;padding:7px 18px;border-radius:8px;background:var(--ac);color:#fff;border:none;cursor:pointer;transition:opacity .15s}
+    .dp-save:hover{opacity:.88}
+    .dp-save:disabled{opacity:.3;cursor:not-allowed}
+
+    .mb{flex:1;overflow-y:auto;padding:18px 20px}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+    .sc{border:1px solid var(--color-border-tertiary);border-radius:12px;padding:14px 16px;text-align:center;background:var(--color-background-secondary);cursor:pointer;transition:border-color .15s}
+    .sc:hover{border-color:var(--acm)}
+    .sn{font-size:24px;font-weight:600}.sl{font-size:12px;color:var(--color-text-secondary);margin-top:4px}
+    .sec{font-size:11.5px;font-weight:500;color:var(--color-text-secondary);margin-bottom:11px;display:flex;align-items:center;justify-content:space-between;letter-spacing:.04em;text-transform:uppercase}
+    .sec-l{display:flex;align-items:center;gap:6px}
+    .sec-l i{font-size:14px}
+    .see-all{font-size:12px;color:var(--ac);cursor:pointer;background:transparent;border:none;font-family:var(--font-sans);padding:4px 9px;border-radius:7px;transition:background .1s}
+    .see-all:hover{background:var(--acl)}
+    .sec-gap{margin-top:20px}
+    .nlist{display:flex;flex-direction:column;gap:8px}
+    .nc{width:100%;background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:12px;cursor:pointer;transition:border-color .15s,box-shadow .15s;overflow:hidden}
+    .nc:hover{border-color:var(--color-border-secondary);box-shadow:0 2px 12px rgba(0,0,0,.07)}
+    .nc.fav{border-color:#FAC775;background:#FFFBF0}
+    .nc-body{padding:14px 17px;display:flex;align-items:center;gap:14px}
+    .nc-content{flex:1;min-width:0}
+    .nc-title{font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .nc.fav .nc-title{color:#633806}
+    .nc-text{font-size:13px;color:var(--color-text-secondary);line-height:1.55;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+    .nc.fav .nc-text{color:#854F0B}
+    .nc-side{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0}
+    .nc-date{font-size:11.5px;color:var(--color-text-tertiary);white-space:nowrap}
+    .nc-acts{display:flex;align-items:center;gap:5px}
+    .act{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:1px solid var(--color-border-secondary);background:var(--color-background-primary);cursor:pointer;color:var(--color-text-secondary);font-size:16px;transition:all .14s;flex-shrink:0}
+    .act:hover{transform:scale(1.06)}
+    .act.done{color:#0F6E56;border-color:#5DCAA5;background:#E1F5EE}.act.done:hover{background:#9FE1CB}
+    .act.fav-on{color:#BA7517;border-color:#FAC775;background:#FAEEDA}.act.fav-on:hover{background:#FAC775}
+    .act.fav-off:hover{color:#BA7517;border-color:#FAC775;background:#FAEEDA}
+    .act.del:hover{color:#A32D2D;border-color:#F09595;background:#FCEBEB}
+    .act.arch-off:hover{color:var(--ac);border-color:var(--acm);background:var(--acl)}
+    .empty{text-align:center;padding:3rem;color:var(--color-text-tertiary);font-size:14px}
+    .empty i{font-size:38px;display:block;margin:0 auto 12px;opacity:.3}
+
+    /* Modal */
+    #ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:50;align-items:center;justify-content:center}
+    #ov.open{display:flex}
+    .modal{background:var(--color-background-primary);border-radius:16px;width:92%;max-width:520px;max-height:90vh;display:flex;flex-direction:column;border:1px solid var(--color-border-secondary);overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+    .mhd{display:flex;align-items:center;justify-content:space-between;padding:12px 15px;border-bottom:1px solid var(--color-border-tertiary);flex-shrink:0}
+    .mhd-l{display:flex;align-items:center;gap:8px}
+    .lkb{display:flex;align-items:center;gap:5px;font-size:12.5px;padding:6px 12px;border-radius:8px;border:1px solid var(--color-border-secondary);background:transparent;cursor:pointer;color:var(--color-text-secondary);font-family:var(--font-sans);transition:all .15s}
+    .lkb.locked{border-color:var(--acm);color:var(--ac);background:var(--acl)}
+    .apill{font-size:11.5px;padding:4px 10px;border-radius:20px;background:#E1F5EE;color:#0F6E56;font-weight:500;display:none;align-items:center;gap:4px;border:1px solid #5DCAA5}
+    .mhd-r{display:flex;align-items:center;gap:5px}
+    .xbtn{background:transparent;border:none;cursor:pointer;font-size:20px;color:var(--color-text-secondary);display:flex;padding:5px;border-radius:8px}
+    .xbtn:hover{background:var(--color-background-secondary)}
+    .mtbar{display:flex;align-items:center;gap:3px;padding:6px 13px;border-bottom:1px solid var(--color-border-tertiary);background:var(--color-background-secondary);flex-shrink:0;overflow-x:auto;transition:opacity .2s}
+    .m-ti{width:100%;border:none;outline:none;font-family:var(--font-sans);font-size:16px;font-weight:600;color:var(--color-text-primary);background:transparent;padding:12px 15px 11px;border-bottom:1px solid var(--color-border-tertiary);direction:rtl;flex-shrink:0}
+    .m-ed{flex:1;outline:none;font-family:var(--font-sans);font-size:14px;color:var(--color-text-primary);line-height:1.85;padding:12px 15px;direction:rtl;overflow-y:auto;min-height:150px}
+    .m-ed[contenteditable=false]{pointer-events:none}
+    .mft{padding:11px 15px;border-top:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+    .mft-meta{font-size:11.5px;color:var(--color-text-tertiary)}
+    .mft-acts{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+    .fb{display:flex;align-items:center;gap:5px;font-size:12.5px;padding:7px 12px;border-radius:8px;border:1px solid var(--color-border-secondary);background:transparent;cursor:pointer;color:var(--color-text-secondary);font-family:var(--font-sans);transition:all .15s}
+    .fb:hover{background:var(--color-background-secondary)}
+    .fb.sv{background:var(--ac);color:#fff;border-color:transparent}.fb.sv:hover{opacity:.88}
+    .fb.dl:hover{border-color:#F09595;color:#A32D2D;background:#FCEBEB}
+    .fb.done-btn{border-color:#5DCAA5;color:#0F6E56;background:#E1F5EE}.fb.done-btn:hover{background:#9FE1CB}
+    .fb.ua-btn{border-color:#F09595;color:#993556;background:#FBEAF0}.fb.ua-btn:hover{background:#F4C0D1}
+
+    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(50px);background:var(--color-text-primary);color:var(--color-background-primary);padding:9px 20px;border-radius:10px;font-size:13.5px;opacity:0;transition:all .25s;pointer-events:none;z-index:99;white-space:nowrap;font-family:var(--font-sans)}
+    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  </style>
+</head>
+<body>
+<div id="app">
+  <div id="sb">
+    <div class="sb-top">
+      <div class="sb-logo">
+        <div class="logo-ic"><i class="ti ti-notes"></i></div>
+        <span class="logo-tx">ملاحظاتي</span>
+      </div>
+      <button class="sb-tgl" onclick="toggleSb()"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
+    </div>
+    <nav>
+      <button class="ni active" data-page="home" data-tip="الرئيسية" onclick="goTo('home',this)"><i class="ti ti-home"></i><span class="nl">الصفحة الرئيسية</span></button>
+      <button class="ni" data-page="library" data-tip="المكتبة" onclick="goTo('library',this)"><i class="ti ti-books"></i><span class="nl">مكتبة الملاحظات</span><span class="nb blue" id="bn">0</span></button>
+      <button class="ni" data-page="unread" data-tip="غير مدروسة" onclick="goTo('unread',this)"><i class="ti ti-book-off"></i><span class="nl">غير مدروسة</span><span class="nb blue" id="bu">0</span></button>
+      <button class="ni" data-page="fav" data-tip="المفضلة" onclick="goTo('fav',this)"><i class="ti ti-star"></i><span class="nl">المفضلة</span><span class="nb amber" id="bf">0</span></button>
+      <div class="sb-div"></div>
+      <button class="ni" data-page="archive" data-tip="الأرشيف" onclick="goTo('archive',this)"><i class="ti ti-archive"></i><span class="nl">الأرشيف</span><span class="nb gray" id="ba">0</span></button>
+    </nav>
+    <div class="sb-footer">
+      <div class="sb-user">
+        <div class="av">م</div>
+        <div class="ui"><div class="un">مستخدم</div><div class="us">ملاحظاتي الشخصية</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="main">
+    <div class="mh">
+      <div class="mh-l"><i id="pi" class="ti ti-home"></i><h2 id="pt">الصفحة الرئيسية</h2></div>
+      <div class="mh-r">
+        <div class="srch"><i class="ti ti-search"></i><input type="text" id="srchIn" placeholder="بحث..." oninput="render()"/></div>
+        <button class="new-btn" onclick="newNote()"><i class="ti ti-plus"></i> ملاحظة جديدة</button>
+      </div>
+    </div>
+    <div id="dz"></div>
+    <div class="mb" id="mb"></div>
+  </div>
+
+  <div id="ov" onclick="ovClick(event)">
+    <div class="modal">
+      <div class="mhd">
+        <div class="mhd-l">
+          <button class="lkb locked" id="lkBtn" onclick="toggleLock()"><i class="ti ti-lock" id="lkIc"></i><span id="lkLbl">مقفل</span></button>
+          <span class="apill" id="archPill"><i class="ti ti-check"></i> مدروسة ومؤرشفة</span>
+        </div>
+        <div class="mhd-r">
+          <button class="act fav-off" id="mFav" onclick="mToggleFav()"><i class="ti ti-star" id="mFavIc"></i></button>
+          <button class="xbtn" onclick="closeModal()"><i class="ti ti-x"></i></button>
+        </div>
+      </div>
+      <div class="mtbar" id="mtbar">
+        <div class="fsg">
+          <button class="fsb" onmousedown="ev(event,()=>changeMSize(-1))">−</button>
+          <input class="fsv" id="mFsv" value="13" type="number" min="8" max="72" onchange="setMSize(+this.value)" onfocus="this.select()"/>
+          <button class="fsb" onmousedown="ev(event,()=>changeMSize(1))">+</button>
+        </div>
+        <div class="tsep"></div>
+        <div class="cw">
+          <button class="ccbtn" id="mccbtn" onmousedown="saveSelAndTogglePal(event,'mpal','mccbtn')" title="لون الخط">
+            <i class="ti ti-letter-a"></i>
+            <div class="cbar" id="mbar" style="background:#534AB7"></div>
+          </button>
+          <div class="pal" id="mpal"></div>
+        </div>
+        <div class="tsep"></div>
+        <button class="tb" data-cmd="bold"          onmousedown="mxDown(event,'bold')"          title="تفخيم"><i class="ti ti-bold"></i></button>
+        <button class="tb" data-cmd="italic"        onmousedown="mxDown(event,'italic')"        title="مائل"><i class="ti ti-italic"></i></button>
+        <button class="tb" data-cmd="underline"     onmousedown="mxDown(event,'underline')"     title="تسطير"><i class="ti ti-underline"></i></button>
+        <button class="tb" data-cmd="strikeThrough" onmousedown="mxDown(event,'strikeThrough')" title="شطب"><i class="ti ti-strikethrough"></i></button>
+        <div class="tsep"></div>
+        <div class="alg">
+          <button class="tb" data-cmd="justifyRight"  onmousedown="mxDown(event,'justifyRight')"  title="يمين"><i class="ti ti-align-right"></i></button>
+          <button class="tb" data-cmd="justifyCenter" onmousedown="mxDown(event,'justifyCenter')" title="توسيط"><i class="ti ti-align-center"></i></button>
+          <button class="tb" data-cmd="justifyLeft"   onmousedown="mxDown(event,'justifyLeft')"   title="يسار"><i class="ti ti-align-left"></i></button>
+        </div>
+        <div class="tsep"></div>
+        <button class="tb" onmousedown="mxDown(event,'removeFormat')" title="إزالة التنسيق"><i class="ti ti-clear-formatting"></i></button>
+      </div>
+      <input class="m-ti" id="mTi" placeholder="العنوان (اختياري)" readonly/>
+      <div class="m-ed" id="mTx" contenteditable="false"></div>
+      <div class="mft">
+        <span class="mft-meta" id="mDt"></span>
+        <div class="mft-acts">
+          <button class="fb dl" onclick="mDelete()"><i class="ti ti-trash"></i> حذف</button>
+          <button class="fb ua-btn" id="mUnarch" onclick="mUnarchive()" style="display:none"><i class="ti ti-archive-off"></i> إلغاء الأرشفة</button>
+          <button class="fb done-btn" id="mDone" onclick="mMarkDone()"><i class="ti ti-circle-check"></i> درستها</button>
+          <button class="fb sv" id="mSave" onclick="mSaveEdit()" style="display:none"><i class="ti ti-device-floppy"></i> حفظ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+const COLORS=['#534AB7','#E24B4A','#1D9E75','#185FA5','#BA7517','#993556','#0F6E56','#3C3489','#639922','#2C2C2A','#D85A30','#888780'];
+const SIZES=[8,9,10,11,12,13,14,16,18,20,22,24,28,32,36,42,48,56,64,72];
+let notes=JSON.parse(localStorage.getItem('malacadhati')||'[]');
+let page='home',openId=null,locked=true,drafts=[],draftId=0,mCurrentSize=13;
+let savedRange=null;
+
+function ev(e,fn){e.preventDefault();fn()}
+function saveSel(){const s=window.getSelection();if(s&&s.rangeCount>0)savedRange=s.getRangeAt(0).cloneRange()}
+function restoreSel(){if(!savedRange)return;const s=window.getSelection();s.removeAllRanges();s.addRange(savedRange)}
+function nowStr(){return new Date().toLocaleString('ar-SA',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})}
+const PM={home:{title:'الصفحة الرئيسية',icon:'ti-home'},library:{title:'مكتبة الملاحظات',icon:'ti-books'},unread:{title:'غير مدروسة',icon:'ti-book-off'},fav:{title:'المفضلة',icon:'ti-star'},archive:{title:'الأرشيف',icon:'ti-archive'}};
+
+function save(){localStorage.setItem('malacadhati',JSON.stringify(notes));bads()}
+function bads(){
+  const b=(id,v)=>{const e=document.getElementById(id);if(!e)return;e.textContent=v;e.style.display=v===0?'none':''};
+  b('bn',notes.filter(n=>!n.archived).length);b('bu',notes.filter(n=>!n.read&&!n.archived).length);
+  b('bf',notes.filter(n=>n.fav&&!n.archived).length);b('ba',notes.filter(n=>n.archived).length);
+}
+function toggleSb(){document.getElementById('sb').classList.toggle('col')}
+function goTo(p,btn){page=p;document.querySelectorAll('.ni').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.getElementById('pt').textContent=PM[p].title;document.getElementById('pi').className='ti '+PM[p].icon;document.getElementById('srchIn').value='';renderDrafts();render()}
+function newNote(){if(page!=='home')document.querySelector('[data-page="home"]').click();addDraft()}
+
+function applyPx(px,edEl){
+  edEl.focus();document.execCommand('fontSize',false,'7');
+  edEl.querySelectorAll('font[size="7"]').forEach(f=>{const sp=document.createElement('span');sp.style.fontSize=px+'px';sp.innerHTML=f.innerHTML;f.replaceWith(sp)});
+}
+function nextSz(cur,d){const i=SIZES.indexOf(+cur);const ni=d>0?(i<SIZES.length-1?i+1:i):(i>0?i-1:i);return SIZES[ni]||cur}
+function changeMSize(d){setMSize(nextSz(mCurrentSize,d))}
+function setMSize(px){px=Math.min(72,Math.max(8,px));mCurrentSize=px;document.getElementById('mFsv').value=px;applyPx(px,document.getElementById('mTx'))}
+function changeDSize(id,d){const el=document.getElementById('fsv-'+id);if(!el)return;const s=nextSz(parseInt(el.value)||13,d);el.value=s;applyPx(s,document.getElementById('ed-'+id))}
+function setDSize(id,px){px=Math.min(72,Math.max(8,parseInt(px)||13));document.getElementById('fsv-'+id).value=px;applyPx(px,document.getElementById('ed-'+id))}
+
+const ALL_CMDS=['bold','italic','underline','strikeThrough','justifyRight','justifyCenter','justifyLeft'];
+function syncTbar(tbar){if(!tbar)return;ALL_CMDS.forEach(cmd=>{const b=tbar.querySelector('[data-cmd="'+cmd+'"]');if(b)b.classList.toggle('on',document.queryCommandState(cmd))})}
+document.addEventListener('selectionchange',()=>{
+  const mx=document.getElementById('mTx');
+  if(mx&&(document.activeElement===mx||mx.contains(document.activeElement))){saveSel();syncTbar(document.getElementById('mtbar'));return}
+  drafts.forEach(id=>{const ed=document.getElementById('ed-'+id);if(ed&&(document.activeElement===ed||ed.contains(document.activeElement))){saveSel();syncTbar(document.getElementById('tb-'+id))}});
+});
+
+function mxDown(e,cmd){e.preventDefault();const tx=document.getElementById('mTx');tx.focus();document.execCommand(cmd,false,null);syncTbar(document.getElementById('mtbar'))}
+function dfmtDown(e,id,cmd){e.preventDefault();const ed=document.getElementById('ed-'+id);if(!ed)return;ed.focus();document.execCommand(cmd,false,null);syncTbar(document.getElementById('tb-'+id))}
+
+function buildPal(pid,bid,tgt){
+  const el=document.getElementById(pid);if(!el)return;
+  el.innerHTML=COLORS.map(c=>'<div class="sw" style="background:'+c+'" onmousedown="applyC(event,\''+c+'\',\''+pid+'\',\''+bid+'\',\''+tgt+'\')"></div>').join('');
+}
+function saveSelAndTogglePal(e,palId,btnId){
+  e.preventDefault();saveSel();
+  const isOpen=document.getElementById(palId)?.classList.contains('open');
+  document.querySelectorAll('.pal').forEach(p=>p.classList.remove('open'));
+  document.querySelectorAll('.ccbtn').forEach(b=>b.classList.remove('pal-open'));
+  if(!isOpen){document.getElementById(palId)?.classList.add('open');document.getElementById(btnId)?.classList.add('pal-open')}
+}
+function saveSelDraftAndTogglePal(e,id){
+  e.preventDefault();saveSel();
+  const palId='p-'+id,btnId='ccb-'+id;
+  const isOpen=document.getElementById(palId)?.classList.contains('open');
+  document.querySelectorAll('.pal').forEach(p=>p.classList.remove('open'));
+  document.querySelectorAll('.ccbtn').forEach(b=>b.classList.remove('pal-open'));
+  if(!isOpen){document.getElementById(palId)?.classList.add('open');document.getElementById(btnId)?.classList.add('pal-open')}
+}
+function applyC(e,c,pid,bid,tgt){
+  e.preventDefault();
+  document.getElementById(bid).style.background=c;
+  const ed=tgt==='m'?document.getElementById('mTx'):document.getElementById('ed-'+tgt);
+  if(ed){restoreSel();document.execCommand('foreColor',false,c)}
+  document.getElementById(pid)?.classList.remove('open');
+  document.querySelectorAll('.ccbtn').forEach(b=>b.classList.remove('pal-open'));
+}
+document.addEventListener('mousedown',e=>{
+  if(!e.target.closest('.cw')){document.querySelectorAll('.pal').forEach(p=>p.classList.remove('open'));document.querySelectorAll('.ccbtn').forEach(b=>b.classList.remove('pal-open'))}
+});
+
+function tbarHtml(id){return'<div class="tbar" id="tb-'+id+'">'
+  +'<div class="fsg">'
+  +'<button class="fsb" onmousedown="ev(event,()=>changeDSize(\''+id+'\',-1))">−</button>'
+  +'<input class="fsv" id="fsv-'+id+'" value="13" type="number" min="8" max="72" onchange="setDSize(\''+id+'\',+this.value)" onfocus="this.select()"/>'
+  +'<button class="fsb" onmousedown="ev(event,()=>changeDSize(\''+id+'\',1))">+</button>'
+  +'</div><div class="tsep"></div>'
+  +'<div class="cw"><button class="ccbtn" id="ccb-'+id+'" onmousedown="saveSelDraftAndTogglePal(event,\''+id+'\')" title="لون الخط"><i class="ti ti-letter-a"></i><div class="cbar" id="b-'+id+'" style="background:#534AB7"></div></button><div class="pal" id="p-'+id+'"></div></div>'
+  +'<div class="tsep"></div>'
+  +'<button class="tb" data-cmd="bold" onmousedown="dfmtDown(event,\''+id+'\',\'bold\')" title="تفخيم"><i class="ti ti-bold"></i></button>'
+  +'<button class="tb" data-cmd="italic" onmousedown="dfmtDown(event,\''+id+'\',\'italic\')" title="مائل"><i class="ti ti-italic"></i></button>'
+  +'<button class="tb" data-cmd="underline" onmousedown="dfmtDown(event,\''+id+'\',\'underline\')" title="تسطير"><i class="ti ti-underline"></i></button>'
+  +'<button class="tb" data-cmd="strikeThrough" onmousedown="dfmtDown(event,\''+id+'\',\'strikeThrough\')" title="شطب"><i class="ti ti-strikethrough"></i></button>'
+  +'<div class="tsep"></div>'
+  +'<div class="alg">'
+  +'<button class="tb" data-cmd="justifyRight" onmousedown="dfmtDown(event,\''+id+'\',\'justifyRight\')" title="يمين"><i class="ti ti-align-right"></i></button>'
+  +'<button class="tb" data-cmd="justifyCenter" onmousedown="dfmtDown(event,\''+id+'\',\'justifyCenter\')" title="توسيط"><i class="ti ti-align-center"></i></button>'
+  +'<button class="tb" data-cmd="justifyLeft" onmousedown="dfmtDown(event,\''+id+'\',\'justifyLeft\')" title="يسار"><i class="ti ti-align-left"></i></button>'
+  +'</div><div class="tsep"></div>'
+  +'<button class="tb" onmousedown="dfmtDown(event,\''+id+'\',\'removeFormat\')" title="إزالة التنسيق"><i class="ti ti-clear-formatting"></i></button>'
+  +'</div>'}
+
+function addDraft(){const id='d'+(++draftId);drafts.push(id);renderDrafts();setTimeout(()=>{buildPal('p-'+id,'b-'+id,id);const ed=document.getElementById('ed-'+id);if(ed)ed.focus()},60)}
+function removeDraft(id){drafts=drafts.filter(d=>d!==id);renderDrafts()}
+function submitDraft(id){
+  const ti=document.getElementById('ti-'+id),ed=document.getElementById('ed-'+id);if(!ed)return;
+  const html=ed.innerHTML.trim(),text=ed.innerText.trim();if(!text)return;
+  notes.unshift({id:Date.now(),title:ti?ti.value.trim():'',html,text,fav:false,read:false,archived:false,date:nowStr()});
+  save();render();drafts=drafts.filter(d=>d!==id);addDraft();showToast('تمت إضافة الملاحظة');
+}
+function onDI(id){
+  const ed=document.getElementById('ed-'+id),cc=document.getElementById('cc-'+id),ab=document.getElementById('ab-'+id);
+  if(cc)cc.textContent=Math.min(ed.innerText.length,500);if(ab)ab.disabled=ed.innerText.trim().length===0;
+}
+function renderDrafts(){
+  const zone=document.getElementById('dz');
+  if(page!=='home'||drafts.length===0){zone.innerHTML='';return}
+  zone.innerHTML=drafts.map((id,i)=>
+    '<div class="dp">'
+    +'<div class="dp-hd"><span class="dp-lbl"><i class="ti ti-pencil"></i> مسودة'+(drafts.length>1?' '+(i+1):'')+'</span>'+(drafts.length>1?'<button class="dp-x" onclick="removeDraft(\''+id+'\')"><i class="ti ti-x"></i></button>':'')+'</div>'
+    +tbarHtml(id)
+    +'<input class="dp-ti" id="ti-'+id+'" placeholder="عنوان (اختياري)" maxlength="80"/>'
+    +'<div class="dp-ed" id="ed-'+id+'" contenteditable="true" data-ph="اكتب ملاحظتك هنا..." oninput="onDI(\''+id+'\')"></div>'
+    +'<div class="dp-ft"><span class="dp-ch"><span id="cc-'+id+'">0</span>/500</span><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button></div>'
+    +'</div>'
+  ).join('');
+  drafts.forEach(id=>{
+    buildPal('p-'+id,'b-'+id,id);
+    const ed=document.getElementById('ed-'+id);
+    if(ed)ed.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();submitDraft(id)}});
+  });
+}
+
+function openNote(id){
+  const n=notes.find(n=>n.id===id);if(!n)return;openId=id;locked=true;mCurrentSize=13;
+  document.getElementById('mTi').value=n.title||'';document.getElementById('mTx').innerHTML=n.html||esc(n.text);
+  document.getElementById('mDt').textContent=n.date;document.getElementById('mFsv').value=13;
+  setLockUI(true);updateMeta(n);buildPal('mpal','mbar','m');document.getElementById('ov').classList.add('open');
+}
+function updateMeta(n){
+  const fi=document.getElementById('mFavIc'),fb=document.getElementById('mFav');
+  fi.className='ti '+(n.fav?'ti-star-filled':'ti-star');fb.className='act '+(n.fav?'fav-on':'fav-off');
+  const ap=document.getElementById('archPill');ap.style.display=n.archived?'flex':'none';
+  document.getElementById('mUnarch').style.display=n.archived?'flex':'none';
+  document.getElementById('mDone').style.display=n.archived?'none':'flex';
+}
+function setLockUI(lk){
+  locked=lk;const btn=document.getElementById('lkBtn'),ic=document.getElementById('lkIc'),lbl=document.getElementById('lkLbl');
+  const sv=document.getElementById('mSave'),ti=document.getElementById('mTi'),tx=document.getElementById('mTx'),tb=document.getElementById('mtbar');
+  if(lk){btn.className='lkb locked';ic.className='ti ti-lock';lbl.textContent='مقفل';ti.readOnly=true;tx.contentEditable='false';sv.style.display='none';tb.style.opacity='.35';tb.style.pointerEvents='none'}
+  else{btn.className='lkb';ic.className='ti ti-lock-open';lbl.textContent='قيد التعديل';ti.readOnly=false;tx.contentEditable='true';sv.style.display='flex';tb.style.opacity='1';tb.style.pointerEvents='';setTimeout(()=>tx.focus(),40)}
+}
+function toggleLock(){setLockUI(!locked)}
+function mSaveEdit(){const n=notes.find(n=>n.id===openId);if(!n)return;const tx=document.getElementById('mTx'),txt=tx.innerText.trim();if(!txt){showToast('النص لا يمكن أن يكون فارغاً');return}n.title=document.getElementById('mTi').value.trim();n.html=tx.innerHTML;n.text=txt;save();render();setLockUI(true);showToast('تم حفظ التعديل')}
+function mToggleFav(){const n=notes.find(n=>n.id===openId);if(!n)return;n.fav=!n.fav;save();render();updateMeta(n);showToast(n.fav?'أُضيفت للمفضلة ★':'أُزيلت من المفضلة')}
+function mMarkDone(){const n=notes.find(n=>n.id===openId);if(!n)return;n.read=true;n.archived=true;save();render();updateMeta(n);setLockUI(true);showToast('تم تعليمها كمدروسة ونقلها للأرشيف ✓')}
+function mUnarchive(){const n=notes.find(n=>n.id===openId);if(!n)return;n.archived=false;n.read=false;save();render();updateMeta(n);showToast('أُعيدت للملاحظات النشطة')}
+function mDelete(){notes=notes.filter(n=>n.id!==openId);save();render();closeModal();showToast('تم الحذف')}
+function closeModal(){document.getElementById('ov').classList.remove('open');openId=null}
+function ovClick(e){if(e.target===document.getElementById('ov'))closeModal()}
+function togDone(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=true;n.archived=true;save();render();showToast('تم تعليمها كمدروسة ونقلها للأرشيف ✓')}
+function togFav(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.fav=!n.fav;save();render();showToast(n.fav?'أُضيفت للمفضلة':'أُزيلت من المفضلة')}
+function togUnarch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=false;n.read=false;save();render();showToast('أُعيدت للملاحظات النشطة')}
+function togDel(e,id){e.stopPropagation();notes=notes.filter(n=>n.id!==id);save();render();showToast('تم الحذف')}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function q(){return document.getElementById('srchIn')?.value.toLowerCase()||''}
+function ncHtml(n){
+  const acts=n.archived
+    ?'<button class="act arch-off" onclick="togUnarch(event,'+n.id+')"><i class="ti ti-archive-off"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>'
+    :'<button class="act done" onclick="togDone(event,'+n.id+')"><i class="ti ti-circle-check"></i></button><button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>';
+  return'<div class="nc '+(n.fav?'fav':'')+'" onclick="openNote('+n.id+')">'
+    +'<div class="nc-body"><div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p></div>'
+    +'<div class="nc-side"><span class="nc-date">'+n.date+'</span><div class="nc-acts">'+acts+'</div></div></div></div>';
+}
+function renderNotes(list){
+  const f=q()?list.filter(n=>(n.title+n.text).toLowerCase().includes(q())):list;
+  if(!f.length)return'<div class="empty"><i class="ti ti-mood-empty"></i>'+(q()?'لا نتائج':'لا توجد ملاحظات هنا')+'</div>';
+  return'<div class="nlist">'+f.map(ncHtml).join('')+'</div>';
+}
+function render(){
+  const mb=document.getElementById('mb');
+  const active=notes.filter(n=>!n.archived),unread=active.filter(n=>!n.read),fav=active.filter(n=>n.fav),archived=notes.filter(n=>n.archived),last5=active.slice(0,5);
+  if(page==='home')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-clock-hour-4"></i> آخر الملاحظات</div><button class="see-all" onclick="goToLib()">عرض الكل</button></div>'+renderNotes(last5)+'<div class="sec sec-gap"><div class="sec-l"><i class="ti ti-star"></i> المفضلة</div><button class="see-all" onclick="goToFav()">عرض الكل</button></div>'+renderNotes(fav);
+  else if(page==='library')mb.innerHTML='<div class="stats"><div class="sc"><div class="sn" style="color:var(--ac)">'+active.length+'</div><div class="sl">ملاحظات نشطة</div></div><div class="sc"><div class="sn" style="color:#185FA5">'+unread.length+'</div><div class="sl">غير مدروسة</div></div><div class="sc"><div class="sn" style="color:#BA7517">'+fav.length+'</div><div class="sl">المفضلة</div></div></div><div class="sec"><div class="sec-l"><i class="ti ti-books"></i> جميع الملاحظات</div></div>'+renderNotes(active);
+  else if(page==='unread')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-book-off"></i> غير مدروسة</div></div>'+renderNotes(unread);
+  else if(page==='fav')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-star"></i> المفضلة</div></div>'+renderNotes(fav);
+  else mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-archive"></i> الأرشيف</div></div>'+renderNotes(archived);
+}
+function goToLib(){document.querySelector('[data-page="library"]').click()}
+function goToFav(){document.querySelector('[data-page="fav"]').click()}
+function goToUnread(){document.querySelector('[data-page="unread"]').click()}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
+
+addDraft();save();render();
+</script>
+</body>
+</html>
