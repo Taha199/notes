@@ -504,6 +504,7 @@ function renderDrafts(){
     buildPal('p-'+id,'b-'+id,id);
     const ed=document.getElementById('ed-'+id);
     if(ed)ed.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();submitDraft(id)}});
+    showDraftCloud(id,false);
   });
 }
 
