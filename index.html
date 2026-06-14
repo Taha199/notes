@@ -207,8 +207,15 @@
     @keyframes cloudFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
     .cloud-saving{animation:cloudFloat .7s ease-in-out infinite;color:#534AB7 !important}
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+    .lang-wrap{position:relative}
     .lang-btn{display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:500;padding:7px 12px;border-radius:9px;border:1px solid var(--color-border-secondary);background:var(--color-background-secondary);cursor:pointer;color:var(--color-text-secondary);font-family:var(--font-sans);transition:all .15s;white-space:nowrap}
-    .lang-btn:hover{background:var(--color-background-primary);border-color:var(--acm);color:var(--ac)}
+    .lang-btn:hover,.lang-btn.open{background:var(--color-background-primary);border-color:var(--acm);color:var(--ac)}
+    .lang-dd{display:none;position:fixed;background:var(--color-background-primary);border:1px solid var(--color-border-secondary);border-radius:10px;padding:5px;z-index:9999;box-shadow:0 6px 20px rgba(0,0,0,.14);min-width:140px}
+    .lang-dd.open{display:block}
+    .lang-opt{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--color-text-primary);font-family:var(--font-sans);transition:background .1s;white-space:nowrap}
+    .lang-opt:hover{background:var(--color-background-secondary)}
+    .lang-opt.active{background:var(--acl);color:var(--ac);font-weight:500}
+    .lang-flag{font-size:16px}
     html[dir="ltr"] #app{direction:ltr}
     html[dir="ltr"] #sb{border-left:none;border-right:1px solid var(--color-border-tertiary)}
     html[dir="ltr"] .ni{text-align:left}
@@ -253,7 +260,14 @@
       <div class="mh-l"><i id="pi" class="ti ti-home"></i><h2 id="pt">الصفحة الرئيسية</h2></div>
       <div class="mh-r">
         <div class="srch"><i class="ti ti-search"></i><input type="text" id="srchIn" placeholder="بحث..." oninput="render()"/></div>
-        <button class="lang-btn" id="langBtn" onclick="cycleLang()"><i class="ti ti-language"></i> <span id="langLbl">AR</span></button>
+        <div class="lang-wrap">
+          <button class="lang-btn" id="langBtn" onclick="toggleLangDD(event)"><i class="ti ti-language"></i> <span id="langLbl">AR</span> <i class="ti ti-chevron-down" style="font-size:11px"></i></button>
+          <div class="lang-dd" id="langDD">
+            <div class="lang-opt" onclick="setLang('ar')"><span class="lang-flag">🇸🇦</span> العربية</div>
+            <div class="lang-opt" onclick="setLang('en')"><span class="lang-flag">🇬🇧</span> English</div>
+            <div class="lang-opt" onclick="setLang('sv')"><span class="lang-flag">🇸🇪</span> Svenska</div>
+          </div>
+        </div>
         <button class="new-btn" id="newNoteBtn" onclick="newNote()"><i class="ti ti-plus"></i> <span id="newNoteTx">ملاحظة جديدة</span></button>
       </div>
     </div>
@@ -372,7 +386,10 @@ const LANGS={
 };
 let currentLang=localStorage.getItem('appLang')||'ar';
 function t(k){return LANGS[currentLang][k]||k}
-function cycleLang(){const keys=Object.keys(LANGS);currentLang=keys[(keys.indexOf(currentLang)+1)%keys.length];localStorage.setItem('appLang',currentLang);applyLang()}
+function toggleLangDD(e){e.stopPropagation();const dd=document.getElementById('langDD'),btn=document.getElementById('langBtn');const open=dd.classList.contains('open');dd.classList.toggle('open',!open);btn.classList.toggle('open',!open);if(!open){const r=btn.getBoundingClientRect();dd.style.top=(r.bottom+6)+'px';dd.style.left=r.left+'px';updateLangOpts()}}
+function updateLangOpts(){document.querySelectorAll('.lang-opt').forEach(o=>{const l=o.getAttribute('onclick').match(/'(\w+)'/)[1];o.classList.toggle('active',l===currentLang)})}
+function setLang(lang){currentLang=lang;localStorage.setItem('appLang',lang);document.getElementById('langDD').classList.remove('open');document.getElementById('langBtn').classList.remove('open');applyLang()}
+document.addEventListener('click',()=>{document.getElementById('langDD')?.classList.remove('open');document.getElementById('langBtn')?.classList.remove('open')});
 function applyLang(){
   const L=LANGS[currentLang];
   document.documentElement.lang=L.htmlLang;
