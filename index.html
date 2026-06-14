@@ -126,8 +126,9 @@
     .dp-ed:empty::before{content:attr(data-ph);color:var(--color-text-tertiary);pointer-events:none}
     .dp-ed ul,.m-ed ul{padding-right:20px;list-style:disc}
     .dp-ed ol,.m-ed ol{padding-right:20px;list-style:decimal}
-    .dp-ft{display:flex;align-items:center;justify-content:space-between;padding:8px 15px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
-    .dp-ch{font-size:12px;color:var(--color-text-tertiary)}
+    .dp-ft{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 15px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+    .dp-del{display:flex;align-items:center;gap:5px;font-size:13px;font-weight:500;padding:7px 14px;border-radius:8px;background:transparent;color:#A32D2D;border:1px solid #F09595;cursor:pointer;transition:all .15s}
+    .dp-del:hover{background:#FCEBEB}
     .dp-save{display:flex;align-items:center;gap:5px;font-size:13px;font-weight:500;padding:7px 18px;border-radius:8px;background:var(--ac);color:#fff;border:none;cursor:pointer;transition:opacity .15s}
     .dp-save:hover{opacity:.88}
     .dp-save:disabled{opacity:.3;cursor:not-allowed}
@@ -407,7 +408,7 @@ function renderDrafts(){
     +tbarHtml(id)
     +'<input class="dp-ti" id="ti-'+id+'" placeholder="عنوان (اختياري)" maxlength="80"/>'
     +'<div class="dp-ed" id="ed-'+id+'" contenteditable="true" data-ph="اكتب ملاحظتك هنا..." oninput="onDI(\''+id+'\')"></div>'
-    +'<div class="dp-ft"><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button></div>'
+    +'<div class="dp-ft"><button class="dp-del" onclick="removeDraft(\''+id+'\')"><i class="ti ti-trash"></i> حذف المسودة</button><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button></div>'
     +'</div>'
   ).join('');
   drafts.forEach(id=>{
