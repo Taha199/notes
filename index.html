@@ -232,7 +232,7 @@
       </div>
     </div>
     <div id="dz"></div>
-    <div id="dz-add" style="display:none;padding:0 16px 16px;background:#f4f4f8">
+    <div id="dz-add" style="padding:0 16px 16px;background:#f4f4f8">
       <button onclick="newNote()" style="width:100%;padding:14px;border:2px dashed #c5c5d0;border-radius:16px;background:transparent;cursor:pointer;font-size:22px;color:#8888aa;transition:all .15s" onmouseover="this.style.borderColor='#534AB7';this.style.color='#534AB7'" onmouseout="this.style.borderColor='#c5c5d0';this.style.color='#8888aa'">+</button>
     </div>
     <div class="mb" id="mb"></div>
@@ -404,8 +404,8 @@ function onDI(id){
 }
 function renderDrafts(){
   const zone=document.getElementById('dz'),addBtn=document.getElementById('dz-add');
-  if(page!=='home'||drafts.length===0){zone.innerHTML='';if(addBtn)addBtn.style.display='none';return}
-  if(addBtn)addBtn.style.display='block';
+  if(addBtn)addBtn.style.display=page==='home'?'block':'none';
+  if(page!=='home'||drafts.length===0){zone.innerHTML='';return}
   zone.innerHTML=drafts.map((id,i)=>
     '<div class="dp">'
     +'<div class="dp-hd"><span class="dp-lbl"><i class="ti ti-pencil"></i> مسودة'+(drafts.length>1?' '+(i+1):'')+'</span><button class="dp-x" onclick="removeDraft(\''+id+'\')"><i class="ti ti-x"></i></button></div>'
