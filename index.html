@@ -122,7 +122,7 @@
 
     .dp-ti{width:100%;border:none;outline:none;font-family:var(--font-sans);font-size:14px;font-weight:500;color:var(--color-text-primary);background:transparent;padding:9px 15px;border-bottom:1px solid var(--color-border-tertiary);direction:rtl}
     .dp-ti::placeholder{color:var(--color-text-tertiary);font-weight:400}
-    .dp-ed{outline:none;font-family:var(--font-sans);font-size:14px;color:var(--color-text-primary);line-height:1.7;padding:9px 15px;direction:rtl;overflow-y:auto;min-height:70px;max-height:110px}
+    .dp-ed{outline:none;font-family:var(--font-sans);font-size:14px;color:var(--color-text-primary);line-height:1.7;padding:9px 15px;direction:rtl;overflow-y:auto;min-height:140px;max-height:340px}
     .dp-ed:empty::before{content:attr(data-ph);color:var(--color-text-tertiary);pointer-events:none}
     .dp-ed ul,.m-ed ul{padding-right:20px;list-style:disc}
     .dp-ed ol,.m-ed ol{padding-right:20px;list-style:decimal}
@@ -395,8 +395,8 @@ function submitDraft(id){
   save();render();drafts=drafts.filter(d=>d!==id);addDraft();showToast('تمت إضافة الملاحظة');
 }
 function onDI(id){
-  const ed=document.getElementById('ed-'+id),cc=document.getElementById('cc-'+id),ab=document.getElementById('ab-'+id);
-  if(cc)cc.textContent=Math.min(ed.innerText.length,500);if(ab)ab.disabled=ed.innerText.trim().length===0;
+  const ed=document.getElementById('ed-'+id),ab=document.getElementById('ab-'+id);
+  if(ab)ab.disabled=ed.innerText.trim().length===0;
 }
 function renderDrafts(){
   const zone=document.getElementById('dz');
@@ -407,7 +407,7 @@ function renderDrafts(){
     +tbarHtml(id)
     +'<input class="dp-ti" id="ti-'+id+'" placeholder="عنوان (اختياري)" maxlength="80"/>'
     +'<div class="dp-ed" id="ed-'+id+'" contenteditable="true" data-ph="اكتب ملاحظتك هنا..." oninput="onDI(\''+id+'\')"></div>'
-    +'<div class="dp-ft"><span class="dp-ch"><span id="cc-'+id+'">0</span>/500</span><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button></div>'
+    +'<div class="dp-ft"><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button></div>'
     +'</div>'
   ).join('');
   drafts.forEach(id=>{
