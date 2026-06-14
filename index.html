@@ -147,6 +147,7 @@
     .nlist{display:flex;flex-direction:column;gap:0;background:#f4f4f8;padding:16px}
     .nc{width:calc(100% - 32px);background:#ffffff;border:none;border-radius:20px;cursor:pointer;transition:box-shadow .15s;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.10);margin:0 16px 16px}
     .nc:hover{box-shadow:0 8px 28px rgba(0,0,0,.15)}
+    .note-card{background:#ffffff !important;border-radius:16px !important;box-shadow:0 2px 12px rgba(0,0,0,.12) !important;margin:16px 0 !important;padding:16px !important;border:1px solid #e0e0e0 !important;overflow:hidden !important;width:100% !important}
     .nc.fav{border-color:#FAC775;background:#FFFBF0}
     .nc-body{padding:14px 17px;display:flex;align-items:center;gap:14px}
     .nc-content{flex:1;min-width:0}
@@ -456,7 +457,7 @@ function ncHtml(n){
      +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')" title="'+(n.fav?'إزالة من المفضلة':'إضافة للمفضلة')+'"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button>'
      +'<button class="act del" onclick="togDel(event,'+n.id+')" title="حذف"><i class="ti ti-trash"></i></button>'
     :'<button class="act done" onclick="togDone(event,'+n.id+')" title="درستها"><i class="ti ti-circle-check"></i></button><button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>';
-  return'<div class="nc '+(n.fav?'fav':'')+'" onclick="openNote('+n.id+')">'
+  return'<div class="nc note-card '+(n.fav?'fav':'')+'" onclick="openNote('+n.id+')">'
     +'<div class="nc-body"><div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p></div>'
     +'<div class="nc-side"><span class="nc-date">'+n.date+'</span><div class="nc-acts">'+acts+'</div></div></div></div>';
 }
