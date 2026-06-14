@@ -469,7 +469,7 @@ function renderNotes(list){
 function render(){
   const mb=document.getElementById('mb');
   const active=notes.filter(n=>!n.archived),unread=active.filter(n=>!n.read),fav=active.filter(n=>n.fav),favArch=notes.filter(n=>n.fav&&n.archived),archived=notes.filter(n=>n.archived),last5=active.slice(0,5);
-  if(page==='home')mb.innerHTML='';
+  if(page==='home'){mb.innerHTML='';mb.style.padding='0';}else{mb.style.padding=''}
   else if(page==='library')mb.innerHTML='<div class="stats"><div class="sc"><div class="sn" style="color:var(--ac)">'+active.length+'</div><div class="sl">ملاحظات نشطة</div></div><div class="sc"><div class="sn" style="color:#185FA5">'+unread.length+'</div><div class="sl">غير مدروسة</div></div><div class="sc"><div class="sn" style="color:#BA7517">'+fav.length+'</div><div class="sl">المفضلة</div></div></div><div class="sec"><div class="sec-l"><i class="ti ti-books"></i> جميع الملاحظات</div></div>'+renderNotes(active);
   else if(page==='unread')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-book-off"></i> غير مدروسة</div></div>'+renderNotes(unread);
   else if(page==='fav'){
