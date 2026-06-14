@@ -488,7 +488,7 @@ function renderDrafts(){
     +tbarHtml(id)
     +'<input class="dp-ti" id="ti-'+id+'" placeholder="عنوان (اختياري)" maxlength="80"/>'
     +'<div class="dp-ed" id="ed-'+id+'" contenteditable="true" data-ph="اكتب ملاحظتك هنا..." oninput="onDI(\''+id+'\')"></div>'
-    +'<div class="dp-ft"><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button><div id="cs-'+id+'" style="display:flex;align-items:center;gap:5px;font-size:12px;color:#aaa;margin:0 auto"></div><button class="dp-del" onclick="removeDraft(\''+id+'\')"><i class="ti ti-trash"></i></button></div>'
+    +'<div class="dp-ft"><div style="display:flex;align-items:center;gap:8px"><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button><div id="cs-'+id+'" style="display:flex;align-items:center;gap:4px;font-size:12px"></div></div><button class="dp-del" onclick="removeDraft(\''+id+'\')"><i class="ti ti-trash"></i></button></div>'
     +'</div>'
   ).join('');
   drafts.forEach(id=>{
