@@ -151,7 +151,13 @@
     .nc{width:calc(100% - 32px);background:#ffffff;border:none;border-radius:20px;cursor:pointer;transition:box-shadow .15s;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.10);margin:0 16px 16px}
     .nc:hover{box-shadow:0 8px 28px rgba(0,0,0,.15)}
     .note-card{background:#ffffff !important;border-radius:16px !important;box-shadow:0 2px 12px rgba(0,0,0,.12) !important;margin:16px 0 !important;padding:16px !important;border:1px solid #e0e0e0 !important;overflow:hidden !important;width:100% !important}
-    .nc.fav{border-color:#FAC775;background:#FFFBF0}
+    .nc.fav{border-color:#FAC775;background:#FFFBF0;box-shadow:0 2px 12px rgba(186,117,23,.15)}
+    .nc-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+    .ntag{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:500;white-space:nowrap}
+    .ntag.read{background:#E1F5EE;color:#0F6E56}
+    .ntag.unread{background:#E6F1FB;color:#185FA5}
+    .ntag.fav{background:#FAEEDA;color:#854F0B}
+    .ntag.arch{background:var(--color-border-tertiary);color:var(--color-text-secondary)}
     .nc-body{padding:14px 17px;display:flex;align-items:center;gap:14px}
     .nc-content{flex:1;min-width:0}
     .nc-title{font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -553,7 +559,11 @@ function ncHtml(n){
       :'<button class="act done" onclick="togDone(event,'+n.id+')" title="درستها"><i class="ti ti-circle-check"></i></button>')
       +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act arch-off" onclick="togArch(event,'+n.id+')" title="أرشفة"><i class="ti ti-archive"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>';
   return'<div class="nc note-card '+(n.fav?'fav':'')+'" onclick="openNote('+n.id+')">'
-    +'<div class="nc-body"><div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p></div>'
+    +'<div class="nc-body"><div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p>'
+    +'<div class="nc-tags">'
+    +(n.fav?'<span class="ntag fav">⭐ مفضلة</span>':'')
+    +(n.archived?'<span class="ntag arch">🗄 مؤرشفة</span>':n.read?'<span class="ntag read">✓ مدروسة</span>':'<span class="ntag unread">📖 غير مدروسة</span>')
+    +'</div></div>'
     +'<div class="nc-side"><span class="nc-date">'+n.date+'</span><div class="nc-acts">'+acts+'</div></div></div></div>';
 }
 function renderNotes(list){
