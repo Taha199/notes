@@ -296,10 +296,28 @@
 </div>
 
 <script>
+const FB_URL='https://noteclaude-a5b3b-default-rtdb.europe-west1.firebasedatabase.app';
+let fbSaveTimer=null;
+function fbSave(data){
+  clearTimeout(fbSaveTimer);
+  fbSaveTimer=setTimeout(()=>{
+    fetch(FB_URL+'/data.json',{method:'PUT',body:JSON.stringify(data),headers:{'Content-Type':'application/json'}}).catch(()=>{});
+  },800);
+}
+async function fbLoad(){
+  try{
+    const r=await fetch(FB_URL+'/data.json');
+    const d=await r.json();
+    return d;
+  }catch(e){return null;}
+}
+</script>
+<script>
 const COLORS=['#534AB7','#E24B4A','#1D9E75','#185FA5','#BA7517','#993556','#0F6E56','#3C3489','#639922','#2C2C2A','#D85A30','#888780'];
 const SIZES=[8,9,10,11,12,13,14,16,18,20,22,24,28,32,36,42,48,56,64,72];
 let notes=JSON.parse(localStorage.getItem('malacadhati')||'[]');
 let page='home',openId=null,locked=true,drafts=[],draftId=0,mCurrentSize=13;
+let draftContents={};
 let savedRange=null;
 
 function ev(e,fn){e.preventDefault();fn()}
@@ -308,7 +326,20 @@ function restoreSel(){if(!savedRange)return;const s=window.getSelection();s.remo
 function nowStr(){return new Date().toLocaleString('ar-SA',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})}
 const PM={home:{title:'الصفحة الرئيسية',icon:'ti-home'},library:{title:'مكتبة الملاحظات',icon:'ti-books'},unread:{title:'غير مدروسة',icon:'ti-book-off'},fav:{title:'المفضلة',icon:'ti-star'},archive:{title:'الأرشيف',icon:'ti-archive'}};
 
-function save(){localStorage.setItem('malacadhati',JSON.stringify(notes));bads()}
+function getCloudData(){
+  const dc={};
+  drafts.forEach(id=>{
+    const ti=document.getElementById('ti-'+id);
+    const ed=document.getElementById('ed-'+id);
+    dc[id]={title:ti?ti.value:'',html:ed?ed.innerHTML:''};
+  });
+  return{notes,drafts,draftId,draftContents:dc};
+}
+function save(){
+  localStorage.setItem('malacadhati',JSON.stringify(notes));
+  fbSave(getCloudData());
+  bads();
+}
 function bads(){
   const b=(id,v)=>{const e=document.getElementById(id);if(!e)return;e.textContent=v;e.style.display=v===0?'none':''};
   b('bn',notes.filter(n=>!n.archived).length);b('bu',notes.filter(n=>!n.read&&!n.archived).length);
@@ -402,6 +433,7 @@ function submitDraft(id){
 function onDI(id){
   const ed=document.getElementById('ed-'+id),ab=document.getElementById('ab-'+id);
   if(ab)ab.disabled=ed.innerText.trim().length===0;
+  fbSave(getCloudData());
 }
 function renderDrafts(){
   const zone=document.getElementById('dz'),addBtn=document.getElementById('dz-add');
@@ -492,7 +524,32 @@ function goToFav(){document.querySelector('[data-page="fav"]').click()}
 function goToUnread(){document.querySelector('[data-page="unread"]').click()}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
 
-addDraft();save();render();
+(async()=>{
+  const cloud=await fbLoad();
+  if(cloud&&cloud.notes&&cloud.notes.length>=notes.length){
+    notes=cloud.notes;
+    localStorage.setItem('malacadhati',JSON.stringify(notes));
+    if(cloud.draftId)draftId=cloud.draftId;
+    if(cloud.drafts&&cloud.drafts.length){
+      drafts=cloud.drafts;
+      renderDrafts();
+      // restore draft content after DOM is ready
+      setTimeout(()=>{
+        drafts.forEach(id=>{
+          const dc=cloud.draftContents&&cloud.draftContents[id];
+          if(!dc)return;
+          const ti=document.getElementById('ti-'+id);
+          const ed=document.getElementById('ed-'+id);
+          const ab=document.getElementById('ab-'+id);
+          if(ti)ti.value=dc.title||'';
+          if(ed)ed.innerHTML=dc.html||'';
+          if(ab)ab.disabled=!ed||ed.innerText.trim().length===0;
+        });
+      },100);
+    }else{addDraft();}
+  }else{addDraft();}
+  bads();render();
+})();
 </script>
 </body>
 </html>
