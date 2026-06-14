@@ -466,8 +466,6 @@ function showDraftCloud(id,saving){
     el.innerHTML='<i class="ti ti-cloud-upload cloud-saving" style="color:#534AB7;font-size:14px"></i><span style="color:#534AB7">جاري الحفظ...</span>';
   }else{
     el.innerHTML='<i class="ti ti-cloud-check" style="color:#1D9E75;font-size:14px"></i><span style="color:#1D9E75">تم الحفظ</span>';
-    clearTimeout(draftCloudTimers[id]);
-    draftCloudTimers[id]=setTimeout(()=>{el.innerHTML=''},2000);
   }
 }
 function onDI(id){
