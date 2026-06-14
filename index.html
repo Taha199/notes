@@ -207,6 +207,17 @@
     @keyframes cloudFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
     .cloud-saving{animation:cloudFloat .7s ease-in-out infinite;color:#534AB7 !important}
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+    .lang-btn{display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:500;padding:7px 12px;border-radius:9px;border:1px solid var(--color-border-secondary);background:var(--color-background-secondary);cursor:pointer;color:var(--color-text-secondary);font-family:var(--font-sans);transition:all .15s;white-space:nowrap}
+    .lang-btn:hover{background:var(--color-background-primary);border-color:var(--acm);color:var(--ac)}
+    html[dir="ltr"] #app{direction:ltr}
+    html[dir="ltr"] #sb{border-left:none;border-right:1px solid var(--color-border-tertiary)}
+    html[dir="ltr"] .ni{text-align:left}
+    html[dir="ltr"] .nb{margin-right:0;margin-left:auto}
+    html[dir="ltr"] .srch input{direction:ltr}
+    html[dir="ltr"] .dp-ti,html[dir="ltr"] .dp-ed,html[dir="ltr"] .m-ti,html[dir="ltr"] .m-ed{direction:ltr}
+    html[dir="ltr"] .ni[data-tip]:hover::after{right:auto;left:58px}
+    html[dir="ltr"] .nc-side{align-items:flex-start}
+    html[dir="ltr"] .mft-acts{justify-content:flex-start}
   </style>
 </head>
 <body>
@@ -215,24 +226,24 @@
     <div class="sb-top">
       <div class="sb-logo">
         <div class="logo-ic"><i class="ti ti-notes"></i></div>
-        <span class="logo-tx">ملاحظاتي</span>
+        <span class="logo-tx" id="logoTx">ملاحظاتي</span>
       </div>
       <button class="sb-tgl" onclick="toggleSb()"><i class="ti ti-layout-sidebar-right-collapse"></i></button>
     </div>
     <nav>
-      <button class="ni active" data-page="home" data-tip="الرئيسية" onclick="goTo('home',this)"><i class="ti ti-home"></i><span class="nl">الصفحة الرئيسية</span></button>
-      <button class="ni" data-page="fav" data-tip="المفضلة" onclick="goTo('fav',this)"><i class="ti ti-star"></i><span class="nl">المفضلة</span><span class="nb amber" id="bf">0</span></button>
-      <button class="ni" data-page="unread" data-tip="غير مدروسة" onclick="goTo('unread',this)"><i class="ti ti-book-off"></i><span class="nl">غير مدروسة</span><span class="nb blue" id="bu">0</span></button>
-      <button class="ni" data-page="read" data-tip="مدروسة" onclick="goTo('read',this)"><i class="ti ti-book"></i><span class="nl">مدروسة</span><span class="nb green" id="brd">0</span></button>
-      <button class="ni" data-page="library" data-tip="المكتبة" onclick="goTo('library',this)"><i class="ti ti-books"></i><span class="nl">مكتبة الملاحظات</span><span class="nb blue" id="bn">0</span></button>
+      <button class="ni active" data-page="home" data-tip="الرئيسية" onclick="goTo('home',this)"><i class="ti ti-home"></i><span class="nl" id="nl-home">الصفحة الرئيسية</span></button>
+      <button class="ni" data-page="fav" data-tip="المفضلة" onclick="goTo('fav',this)"><i class="ti ti-star"></i><span class="nl" id="nl-fav">المفضلة</span><span class="nb amber" id="bf">0</span></button>
+      <button class="ni" data-page="unread" data-tip="غير مدروسة" onclick="goTo('unread',this)"><i class="ti ti-book-off"></i><span class="nl" id="nl-unread">غير مدروسة</span><span class="nb blue" id="bu">0</span></button>
+      <button class="ni" data-page="read" data-tip="مدروسة" onclick="goTo('read',this)"><i class="ti ti-book"></i><span class="nl" id="nl-read">مدروسة</span><span class="nb green" id="brd">0</span></button>
+      <button class="ni" data-page="library" data-tip="المكتبة" onclick="goTo('library',this)"><i class="ti ti-books"></i><span class="nl" id="nl-library">مكتبة الملاحظات</span><span class="nb blue" id="bn">0</span></button>
       <div class="sb-div"></div>
-      <button class="ni" data-page="archive" data-tip="الأرشيف" onclick="goTo('archive',this)"><i class="ti ti-archive"></i><span class="nl">الأرشيف</span><span class="nb gray" id="ba">0</span></button>
-      <button class="ni" data-page="trash" data-tip="السلة" onclick="goTo('trash',this)"><i class="ti ti-trash"></i><span class="nl">سلة المهملات</span><span class="nb red" id="btr">0</span></button>
+      <button class="ni" data-page="archive" data-tip="الأرشيف" onclick="goTo('archive',this)"><i class="ti ti-archive"></i><span class="nl" id="nl-archive">الأرشيف</span><span class="nb gray" id="ba">0</span></button>
+      <button class="ni" data-page="trash" data-tip="السلة" onclick="goTo('trash',this)"><i class="ti ti-trash"></i><span class="nl" id="nl-trash">سلة المهملات</span><span class="nb red" id="btr">0</span></button>
     </nav>
     <div class="sb-footer">
       <div class="sb-user">
-        <div class="av">م</div>
-        <div class="ui"><div class="un">مستخدم</div><div class="us">ملاحظاتي الشخصية</div></div>
+        <div class="av" id="avLetter">م</div>
+        <div class="ui"><div class="un" id="userName">مستخدم</div><div class="us" id="userSub">ملاحظاتي الشخصية</div></div>
       </div>
     </div>
   </div>
@@ -242,7 +253,8 @@
       <div class="mh-l"><i id="pi" class="ti ti-home"></i><h2 id="pt">الصفحة الرئيسية</h2></div>
       <div class="mh-r">
         <div class="srch"><i class="ti ti-search"></i><input type="text" id="srchIn" placeholder="بحث..." oninput="render()"/></div>
-        <button class="new-btn" onclick="newNote()"><i class="ti ti-plus"></i> ملاحظة جديدة</button>
+        <button class="lang-btn" id="langBtn" onclick="cycleLang()"><i class="ti ti-language"></i> <span id="langLbl">AR</span></button>
+        <button class="new-btn" id="newNoteBtn" onclick="newNote()"><i class="ti ti-plus"></i> <span id="newNoteTx">ملاحظة جديدة</span></button>
       </div>
     </div>
     <div id="dz"></div>
@@ -257,7 +269,7 @@
       <div class="mhd">
         <div class="mhd-l">
           <button class="lkb locked" id="lkBtn" onclick="toggleLock()"><i class="ti ti-lock" id="lkIc"></i><span id="lkLbl">مقفل</span></button>
-          <span class="apill" id="archPill"><i class="ti ti-check"></i> مدروسة ومؤرشفة</span>
+          <span class="apill" id="archPill"><i class="ti ti-check"></i> <span id="archPill-tx">مدروسة ومؤرشفة</span></span>
         </div>
         <div class="mhd-r">
           <button class="act fav-off" id="mFav" onclick="mToggleFav()"><i class="ti ti-star" id="mFavIc"></i></button>
@@ -297,10 +309,10 @@
       <div class="mft">
         <span class="mft-meta" id="mDt"></span>
         <div class="mft-acts">
-          <button class="fb dl" onclick="mDelete()"><i class="ti ti-trash"></i> حذف</button>
-          <button class="fb ua-btn" id="mUnarch" onclick="mUnarchive()" style="display:none"><i class="ti ti-archive-off"></i> إلغاء الأرشفة</button>
-          <button class="fb done-btn" id="mDone" onclick="mMarkDone()"><i class="ti ti-circle-check"></i> درستها</button>
-          <button class="fb sv" id="mSave" onclick="mSaveEdit()" style="display:none"><i class="ti ti-device-floppy"></i> حفظ</button>
+          <button class="fb dl" onclick="mDelete()"><i class="ti ti-trash"></i> <span id="mDelTx">حذف</span></button>
+          <button class="fb ua-btn" id="mUnarch" onclick="mUnarchive()" style="display:none"><i class="ti ti-archive-off"></i> <span id="mUnarchTx">إلغاء الأرشفة</span></button>
+          <button class="fb done-btn" id="mDone" onclick="mMarkDone()"><i class="ti ti-circle-check"></i> <span id="mDoneTx">درستها</span></button>
+          <button class="fb sv" id="mSave" onclick="mSaveEdit()" style="display:none"><i class="ti ti-device-floppy"></i> <span id="mSaveTx">حفظ</span></button>
         </div>
       </div>
     </div>
@@ -325,12 +337,12 @@ function showCloudStatus(saving){
   if(saving){
     ic.className='ti ti-cloud-upload cloud-saving';
     ic.style.color='#534AB7';
-    tx.textContent='جاري الحفظ...';
+    tx.textContent=t('cloudSaving');
     tx.style.color='#534AB7';
   }else{
     ic.className='ti ti-cloud-check';
     ic.style.color='#1D9E75';
-    tx.textContent='تم الحفظ سحابياً';
+    tx.textContent=t('cloudSavedMain');
     tx.style.color='#1D9E75';
     fbHideTimer=setTimeout(()=>{el.style.opacity='0'},2500);
   }
@@ -353,6 +365,40 @@ async function fbLoad(){
 }
 </script>
 <script>
+const LANGS={
+  ar:{dir:'rtl',htmlLang:'ar',label:'AR',logoTx:'ملاحظاتي',navHome:'الصفحة الرئيسية',navFav:'المفضلة',navUnread:'غير مدروسة',navRead:'مدروسة',navLibrary:'مكتبة الملاحظات',navArchive:'الأرشيف',navTrash:'سلة المهملات',navTipHome:'الرئيسية',navTipFav:'المفضلة',navTipUnread:'غير مدروسة',navTipRead:'مدروسة',navTipLib:'المكتبة',navTipArch:'الأرشيف',navTipTrash:'السلة',searchPh:'بحث...',newNote:'ملاحظة جديدة',locked:'مقفل',editing:'قيد التعديل',mDel:'حذف',mUnarch:'إلغاء الأرشفة',mDone:'درستها',mSave:'حفظ',mTiPh:'العنوان (اختياري)',archPill:'مدروسة ومؤرشفة',userName:'مستخدم',userSub:'ملاحظاتي الشخصية',avLetter:'م',draft:'مسودة',draftTiPh:'عنوان (اختياري)',draftEdPh:'اكتب ملاحظتك هنا...',saveDraft:'حفظ الملاحظة',cloudSaving:'جاري الحفظ...',cloudSaved:'تم الحفظ',cloudSavedMain:'تم الحفظ سحابياً',pageHome:'الصفحة الرئيسية',pageLib:'مكتبة الملاحظات',pageUnread:'غير مدروسة',pageRead:'مدروسة',pageFav:'المفضلة',pageArch:'الأرشيف',pageTrash:'سلة المهملات',statActive:'ملاحظات نشطة',statUnread:'غير مدروسة',statFav:'المفضلة',secAll:'جميع الملاحظات',secUnread:'غير مدروسة',secFav:'المفضلة',secFavArch:'مفضلة مؤرشفة',secRead:'مدروسة',secArch:'الأرشيف',tagFav:'⭐ مفضلة',tagRead:'✓ مدروسة',tagUnread:'📖 غير مدروسة',tagArch:'🗄 مؤرشفة',emptyNotes:'لا توجد ملاحظات هنا',emptySearch:'لا نتائج',emptyTrash:'السلة فارغة',selDel:'☑ تحديد للحذف',cancelSel:'✕ إلغاء التحديد',emptyTrashBtn:'إفراغ السلة',delSelected:'حذف المحدد',titleBold:'تفخيم',titleItalic:'مائل',titleUnline:'تسطير',titleStrike:'شطب',titleRight:'يمين',titleCenter:'توسيط',titleLeft:'يسار',titleClr:'إزالة التنسيق',titleColor:'لون الخط',titleUnarch:'إلغاء الأرشفة',titleDone:'درستها',titleUnread:'إعادة لغير مدروسة',titleArch:'أرشفة',titleDel:'حذف',titleRestore:'استعادة',titlePermDel:'حذف نهائي',titleFavAdd:'إضافة للمفضلة',titleFavRem:'إزالة من المفضلة',tAddNote:'تمت إضافة الملاحظة',tMoved:'نُقلت للسلة',tArched:'تم نقلها للأرشيف',tRestored:'أُعيدت للملاحظات النشطة',tFavAdd:'أُضيفت للمفضلة ★',tFavRem:'أُزيلت من المفضلة',tRead:'تم تعليمها كمدروسة ✓',tUnread:'أُعيدت لغير مدروسة',tSaved:'تم حفظ التعديل',tTrashEmpty:'تم إفراغ السلة',tDelSel:'تم الحذف',tRestored2:'تمت الاستعادة',tPermDel:'تم الحذف النهائي',tCantEmpty:'النص لا يمكن أن يكون فارغاً',tStudied:'تم تعليمها كمدروسة ونقلها للأرشيف ✓',tUnarch:'أُعيدت للملاحظات النشطة',cEmptyTrash:'حذف كل الملاحظات في السلة نهائياً؟',cDelSel:'حذف الملاحظات المحددة نهائياً؟',cPermDel:'حذف نهائي لا يمكن التراجع عنه؟',dateLocale:'ar-SA'},
+  en:{dir:'ltr',htmlLang:'en',label:'EN',logoTx:'My Notes',navHome:'Home',navFav:'Favourites',navUnread:'Unread',navRead:'Read',navLibrary:'Notes Library',navArchive:'Archive',navTrash:'Trash',navTipHome:'Home',navTipFav:'Favourites',navTipUnread:'Unread',navTipRead:'Read',navTipLib:'Library',navTipArch:'Archive',navTipTrash:'Trash',searchPh:'Search...',newNote:'New Note',locked:'Locked',editing:'Editing',mDel:'Delete',mUnarch:'Unarchive',mDone:'Mark as Read',mSave:'Save',mTiPh:'Title (optional)',archPill:'Read & Archived',userName:'User',userSub:'My Personal Notes',avLetter:'U',draft:'Draft',draftTiPh:'Title (optional)',draftEdPh:'Write your note here...',saveDraft:'Save Note',cloudSaving:'Saving...',cloudSaved:'Saved',cloudSavedMain:'Saved to cloud',pageHome:'Home',pageLib:'Notes Library',pageUnread:'Unread',pageRead:'Read',pageFav:'Favourites',pageArch:'Archive',pageTrash:'Trash',statActive:'Active Notes',statUnread:'Unread',statFav:'Favourites',secAll:'All Notes',secUnread:'Unread',secFav:'Favourites',secFavArch:'Archived Favourites',secRead:'Read',secArch:'Archive',tagFav:'⭐ Favourite',tagRead:'✓ Read',tagUnread:'📖 Unread',tagArch:'🗄 Archived',emptyNotes:'No notes here',emptySearch:'No results',emptyTrash:'Trash is empty',selDel:'☑ Select to Delete',cancelSel:'✕ Cancel',emptyTrashBtn:'Empty Trash',delSelected:'Delete Selected',titleBold:'Bold',titleItalic:'Italic',titleUnline:'Underline',titleStrike:'Strikethrough',titleRight:'Align Right',titleCenter:'Center',titleLeft:'Align Left',titleClr:'Clear Formatting',titleColor:'Text Color',titleUnarch:'Unarchive',titleDone:'Mark as Read',titleUnread:'Move to Unread',titleArch:'Archive',titleDel:'Delete',titleRestore:'Restore',titlePermDel:'Delete Permanently',titleFavAdd:'Add to Favourites',titleFavRem:'Remove from Favourites',tAddNote:'Note added',tMoved:'Moved to trash',tArched:'Moved to archive',tRestored:'Restored to active',tFavAdd:'Added to favourites ★',tFavRem:'Removed from favourites',tRead:'Marked as read ✓',tUnread:'Moved back to unread',tSaved:'Changes saved',tTrashEmpty:'Trash emptied',tDelSel:'Deleted',tRestored2:'Restored',tPermDel:'Permanently deleted',tCantEmpty:'Text cannot be empty',tStudied:'Marked as read & archived ✓',tUnarch:'Restored to active notes',cEmptyTrash:'Permanently delete all notes in trash?',cDelSel:'Permanently delete selected notes?',cPermDel:'Permanently delete? This cannot be undone.',dateLocale:'en-GB'},
+  sv:{dir:'ltr',htmlLang:'sv',label:'SV',logoTx:'Mina Anteckningar',navHome:'Hem',navFav:'Favoriter',navUnread:'Olästa',navRead:'Lästa',navLibrary:'Anteckningsbibliotek',navArchive:'Arkiv',navTrash:'Papperskorg',navTipHome:'Hem',navTipFav:'Favoriter',navTipUnread:'Olästa',navTipRead:'Lästa',navTipLib:'Bibliotek',navTipArch:'Arkiv',navTipTrash:'Papperskorg',searchPh:'Sök...',newNote:'Ny Anteckning',locked:'Låst',editing:'Redigerar',mDel:'Radera',mUnarch:'Avarkivera',mDone:'Markera som Läst',mSave:'Spara',mTiPh:'Titel (valfri)',archPill:'Läst & Arkiverad',userName:'Användare',userSub:'Mina Personliga Anteckningar',avLetter:'A',draft:'Utkast',draftTiPh:'Titel (valfri)',draftEdPh:'Skriv din anteckning här...',saveDraft:'Spara Anteckning',cloudSaving:'Sparar...',cloudSaved:'Sparat',cloudSavedMain:'Sparat i molnet',pageHome:'Hem',pageLib:'Anteckningsbibliotek',pageUnread:'Olästa',pageRead:'Lästa',pageFav:'Favoriter',pageArch:'Arkiv',pageTrash:'Papperskorg',statActive:'Aktiva Anteckningar',statUnread:'Olästa',statFav:'Favoriter',secAll:'Alla Anteckningar',secUnread:'Olästa',secFav:'Favoriter',secFavArch:'Arkiverade Favoriter',secRead:'Lästa',secArch:'Arkiv',tagFav:'⭐ Favorit',tagRead:'✓ Läst',tagUnread:'📖 Oläst',tagArch:'🗄 Arkiverad',emptyNotes:'Inga anteckningar här',emptySearch:'Inga resultat',emptyTrash:'Papperskorgen är tom',selDel:'☑ Välj för Radering',cancelSel:'✕ Avbryt',emptyTrashBtn:'Töm Papperskorgen',delSelected:'Radera Valda',titleBold:'Fet',titleItalic:'Kursiv',titleUnline:'Understruken',titleStrike:'Genomstruken',titleRight:'Höger',titleCenter:'Centrera',titleLeft:'Vänster',titleClr:'Ta bort formatering',titleColor:'Textfärg',titleUnarch:'Avarkivera',titleDone:'Markera som Läst',titleUnread:'Flytta till Olästa',titleArch:'Arkivera',titleDel:'Radera',titleRestore:'Återställ',titlePermDel:'Radera Permanent',titleFavAdd:'Lägg till Favoriter',titleFavRem:'Ta bort från Favoriter',tAddNote:'Anteckning tillagd',tMoved:'Flyttad till papperskorg',tArched:'Flyttad till arkiv',tRestored:'Återställd till aktiva',tFavAdd:'Tillagd i favoriter ★',tFavRem:'Borttagen från favoriter',tRead:'Markerad som läst ✓',tUnread:'Tillbaka till olästa',tSaved:'Ändringar sparade',tTrashEmpty:'Papperskorgen tömd',tDelSel:'Raderade',tRestored2:'Återställd',tPermDel:'Permanent raderad',tCantEmpty:'Text kan inte vara tom',tStudied:'Markerad som läst och arkiverad ✓',tUnarch:'Återställd till aktiva anteckningar',cEmptyTrash:'Ta bort alla anteckningar permanent?',cDelSel:'Ta bort valda anteckningar permanent?',cPermDel:'Ta bort permanent? Detta kan inte ångras.',dateLocale:'sv-SE'}
+};
+let currentLang=localStorage.getItem('appLang')||'ar';
+function t(k){return LANGS[currentLang][k]||k}
+function cycleLang(){const keys=Object.keys(LANGS);currentLang=keys[(keys.indexOf(currentLang)+1)%keys.length];localStorage.setItem('appLang',currentLang);applyLang()}
+function applyLang(){
+  const L=LANGS[currentLang];
+  document.documentElement.lang=L.htmlLang;
+  document.documentElement.dir=L.dir;
+  const s=(id,tx)=>{const e=document.getElementById(id);if(e)e.textContent=tx};
+  const a=(id,attr,val)=>{const e=document.getElementById(id);if(e)e[attr]=val};
+  s('logoTx',L.logoTx);s('langLbl',L.label);s('newNoteTx',L.newNote);
+  s('nl-home',L.navHome);s('nl-fav',L.navFav);s('nl-unread',L.navUnread);s('nl-read',L.navRead);s('nl-library',L.navLibrary);s('nl-archive',L.navArchive);s('nl-trash',L.navTrash);
+  document.querySelectorAll('[data-page="home"]').forEach(b=>b.dataset.tip=L.navTipHome);
+  document.querySelectorAll('[data-page="fav"]').forEach(b=>b.dataset.tip=L.navTipFav);
+  document.querySelectorAll('[data-page="unread"]').forEach(b=>b.dataset.tip=L.navTipUnread);
+  document.querySelectorAll('[data-page="read"]').forEach(b=>b.dataset.tip=L.navTipRead);
+  document.querySelectorAll('[data-page="library"]').forEach(b=>b.dataset.tip=L.navTipLib);
+  document.querySelectorAll('[data-page="archive"]').forEach(b=>b.dataset.tip=L.navTipArch);
+  document.querySelectorAll('[data-page="trash"]').forEach(b=>b.dataset.tip=L.navTipTrash);
+  a('srchIn','placeholder',L.searchPh);
+  s('lkLbl',locked?L.locked:L.editing);
+  s('archPill-tx',L.archPill);
+  s('mDelTx',L.mDel);s('mUnarchTx',L.mUnarch);s('mDoneTx',L.mDone);s('mSaveTx',L.mSave);
+  a('mTi','placeholder',L.mTiPh);
+  s('cloud-text',L.cloudSavedMain);
+  s('userName',L.userName);s('userSub',L.userSub);s('avLetter',L.avLetter);
+  const pt=document.getElementById('pt');if(pt)pt.textContent=L['page'+page.charAt(0).toUpperCase()+page.slice(1)]||pt.textContent;
+  renderDrafts();render();
+}
+
 const COLORS=['#534AB7','#E24B4A','#1D9E75','#185FA5','#BA7517','#993556','#0F6E56','#3C3489','#639922','#2C2C2A','#D85A30','#888780'];
 const SIZES=[8,9,10,11,12,13,14,16,18,20,22,24,28,32,36,42,48,56,64,72];
 let notes=JSON.parse(localStorage.getItem('malacadhati')||'[]');
@@ -363,8 +409,9 @@ let savedRange=null;
 function ev(e,fn){e.preventDefault();fn()}
 function saveSel(){const s=window.getSelection();if(s&&s.rangeCount>0)savedRange=s.getRangeAt(0).cloneRange()}
 function restoreSel(){if(!savedRange)return;const s=window.getSelection();s.removeAllRanges();s.addRange(savedRange)}
-function nowStr(){return new Date().toLocaleString('ar-SA',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})}
-const PM={home:{title:'الصفحة الرئيسية',icon:'ti-home'},library:{title:'مكتبة الملاحظات',icon:'ti-books'},unread:{title:'غير مدروسة',icon:'ti-book-off'},read:{title:'مدروسة',icon:'ti-book'},fav:{title:'المفضلة',icon:'ti-star'},archive:{title:'الأرشيف',icon:'ti-archive'},trash:{title:'سلة المهملات',icon:'ti-trash'}};
+function nowStr(){return new Date().toLocaleString(t('dateLocale'),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})}
+const PM_ICONS={home:'ti-home',library:'ti-books',unread:'ti-book-off',read:'ti-book',fav:'ti-star',archive:'ti-archive',trash:'ti-trash'};
+function getPM(p){return{title:t('page'+p.charAt(0).toUpperCase()+p.slice(1))||p,icon:PM_ICONS[p]}}
 let selectMode=false,selected=new Set();
 
 function getCloudData(){
@@ -389,7 +436,7 @@ function bads(){
   b('btr',notes.filter(n=>n.trashed).length);
 }
 function toggleSb(){document.getElementById('sb').classList.toggle('col')}
-function goTo(p,btn){page=p;document.querySelectorAll('.ni').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.getElementById('pt').textContent=PM[p].title;document.getElementById('pi').className='ti '+PM[p].icon;document.getElementById('srchIn').value='';renderDrafts();render()}
+function goTo(p,btn){page=p;document.querySelectorAll('.ni').forEach(b=>b.classList.remove('active'));btn.classList.add('active');const pm=getPM(p);document.getElementById('pt').textContent=pm.title;document.getElementById('pi').className='ti '+pm.icon;document.getElementById('srchIn').value='';renderDrafts();render()}
 function newNote(){if(page!=='home')document.querySelector('[data-page="home"]').click();addDraft()}
 
 function applyPx(px,edEl){
@@ -457,19 +504,19 @@ function tbarHtml(id){return'<div class="tbar" id="tb-'+id+'">'
   +'<input class="fsv" id="fsv-'+id+'" value="13" type="number" min="8" max="72" onchange="setDSize(\''+id+'\',+this.value)" onfocus="this.select()"/>'
   +'<button class="fsb" onmousedown="ev(event,()=>changeDSize(\''+id+'\',1))">+</button>'
   +'</div><div class="tsep"></div>'
-  +'<div class="cw"><button class="ccbtn" id="ccb-'+id+'" onmousedown="saveSelDraftAndTogglePal(event,\''+id+'\')" title="لون الخط"><i class="ti ti-letter-a"></i><div class="cbar" id="b-'+id+'" style="background:#534AB7"></div></button><div class="pal" id="p-'+id+'"></div></div>'
+  +'<div class="cw"><button class="ccbtn" id="ccb-'+id+'" onmousedown="saveSelDraftAndTogglePal(event,\''+id+'\')" title="'+t('titleColor')+'"><i class="ti ti-letter-a"></i><div class="cbar" id="b-'+id+'" style="background:#534AB7"></div></button><div class="pal" id="p-'+id+'"></div></div>'
   +'<div class="tsep"></div>'
-  +'<button class="tb" data-cmd="bold" onmousedown="dfmtDown(event,\''+id+'\',\'bold\')" title="تفخيم"><i class="ti ti-bold"></i></button>'
-  +'<button class="tb" data-cmd="italic" onmousedown="dfmtDown(event,\''+id+'\',\'italic\')" title="مائل"><i class="ti ti-italic"></i></button>'
-  +'<button class="tb" data-cmd="underline" onmousedown="dfmtDown(event,\''+id+'\',\'underline\')" title="تسطير"><i class="ti ti-underline"></i></button>'
-  +'<button class="tb" data-cmd="strikeThrough" onmousedown="dfmtDown(event,\''+id+'\',\'strikeThrough\')" title="شطب"><i class="ti ti-strikethrough"></i></button>'
+  +'<button class="tb" data-cmd="bold" onmousedown="dfmtDown(event,\''+id+'\',\'bold\')" title="'+t('titleBold')+'"><i class="ti ti-bold"></i></button>'
+  +'<button class="tb" data-cmd="italic" onmousedown="dfmtDown(event,\''+id+'\',\'italic\')" title="'+t('titleItalic')+'"><i class="ti ti-italic"></i></button>'
+  +'<button class="tb" data-cmd="underline" onmousedown="dfmtDown(event,\''+id+'\',\'underline\')" title="'+t('titleUnline')+'"><i class="ti ti-underline"></i></button>'
+  +'<button class="tb" data-cmd="strikeThrough" onmousedown="dfmtDown(event,\''+id+'\',\'strikeThrough\')" title="'+t('titleStrike')+'"><i class="ti ti-strikethrough"></i></button>'
   +'<div class="tsep"></div>'
   +'<div class="alg">'
-  +'<button class="tb" data-cmd="justifyRight" onmousedown="dfmtDown(event,\''+id+'\',\'justifyRight\')" title="يمين"><i class="ti ti-align-right"></i></button>'
-  +'<button class="tb" data-cmd="justifyCenter" onmousedown="dfmtDown(event,\''+id+'\',\'justifyCenter\')" title="توسيط"><i class="ti ti-align-center"></i></button>'
-  +'<button class="tb" data-cmd="justifyLeft" onmousedown="dfmtDown(event,\''+id+'\',\'justifyLeft\')" title="يسار"><i class="ti ti-align-left"></i></button>'
+  +'<button class="tb" data-cmd="justifyRight" onmousedown="dfmtDown(event,\''+id+'\',\'justifyRight\')" title="'+t('titleRight')+'"><i class="ti ti-align-right"></i></button>'
+  +'<button class="tb" data-cmd="justifyCenter" onmousedown="dfmtDown(event,\''+id+'\',\'justifyCenter\')" title="'+t('titleCenter')+'"><i class="ti ti-align-center"></i></button>'
+  +'<button class="tb" data-cmd="justifyLeft" onmousedown="dfmtDown(event,\''+id+'\',\'justifyLeft\')" title="'+t('titleLeft')+'"><i class="ti ti-align-left"></i></button>'
   +'</div><div class="tsep"></div>'
-  +'<button class="tb" onmousedown="dfmtDown(event,\''+id+'\',\'removeFormat\')" title="إزالة التنسيق"><i class="ti ti-clear-formatting"></i></button>'
+  +'<button class="tb" onmousedown="dfmtDown(event,\''+id+'\',\'removeFormat\')" title="'+t('titleClr')+'"><i class="ti ti-clear-formatting"></i></button>'
   +'</div>'}
 
 function addDraft(){const id='d'+(++draftId);drafts.push(id);renderDrafts();setTimeout(()=>{buildPal('p-'+id,'b-'+id,id);const ed=document.getElementById('ed-'+id);if(ed)ed.focus()},60)}
@@ -478,16 +525,16 @@ function submitDraft(id){
   const ti=document.getElementById('ti-'+id),ed=document.getElementById('ed-'+id);if(!ed)return;
   const html=ed.innerHTML.trim(),text=ed.innerText.trim();if(!text)return;
   notes.unshift({id:Date.now(),title:ti?ti.value.trim():'',html,text,fav:false,read:false,archived:false,date:nowStr()});
-  save();render();drafts=drafts.filter(d=>d!==id);addDraft();showToast('تمت إضافة الملاحظة');
+  save();render();drafts=drafts.filter(d=>d!==id);addDraft();showToast(t('tAddNote'));
   setTimeout(()=>drafts.forEach(did=>showDraftCloud(did,false)),150);
 }
 let draftCloudTimers={};
 function showDraftCloud(id,saving){
   const el=document.getElementById('cs-'+id);if(!el)return;
   if(saving){
-    el.innerHTML='<i class="ti ti-cloud-upload cloud-saving" style="color:#534AB7;font-size:14px"></i><span style="color:#534AB7">جاري الحفظ...</span>';
+    el.innerHTML='<i class="ti ti-cloud-upload cloud-saving" style="color:#534AB7;font-size:14px"></i><span style="color:#534AB7">'+t('cloudSaving')+'</span>';
   }else{
-    el.innerHTML='<i class="ti ti-cloud-check" style="color:#1D9E75;font-size:14px"></i><span style="color:#1D9E75">تم الحفظ</span>';
+    el.innerHTML='<i class="ti ti-cloud-check" style="color:#1D9E75;font-size:14px"></i><span style="color:#1D9E75">'+t('cloudSaved')+'</span>';
   }
 }
 function onDI(id){
@@ -506,11 +553,11 @@ function renderDrafts(){
   if(page!=='home'||drafts.length===0){zone.innerHTML='';return}
   zone.innerHTML=drafts.map((id,i)=>
     '<div class="dp">'
-    +'<div class="dp-hd"><span class="dp-lbl"><i class="ti ti-pencil"></i> مسودة'+(drafts.length>1?' '+(i+1):'')+'</span><button class="dp-x" onclick="removeDraft(\''+id+'\')"><i class="ti ti-x"></i></button></div>'
+    +'<div class="dp-hd"><span class="dp-lbl"><i class="ti ti-pencil"></i> '+t('draft')+(drafts.length>1?' '+(i+1):'')+'</span><button class="dp-x" onclick="removeDraft(\''+id+'\')"><i class="ti ti-x"></i></button></div>'
     +tbarHtml(id)
-    +'<input class="dp-ti" id="ti-'+id+'" placeholder="عنوان (اختياري)" maxlength="80"/>'
-    +'<div class="dp-ed" id="ed-'+id+'" contenteditable="true" data-ph="اكتب ملاحظتك هنا..." oninput="onDI(\''+id+'\')"></div>'
-    +'<div class="dp-ft"><div style="display:flex;align-items:center;gap:8px"><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button><div id="cs-'+id+'" style="display:flex;align-items:center;gap:4px;font-size:12px"></div></div><button class="dp-del" onclick="removeDraft(\''+id+'\')"><i class="ti ti-trash"></i></button></div>'
+    +'<input class="dp-ti" id="ti-'+id+'" placeholder="'+t('draftTiPh')+'" maxlength="80"/>'
+    +'<div class="dp-ed" id="ed-'+id+'" contenteditable="true" data-ph="'+t('draftEdPh')+'" oninput="onDI(\''+id+'\')"></div>'
+    +'<div class="dp-ft"><div style="display:flex;align-items:center;gap:8px"><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> '+t('saveDraft')+'</button><div id="cs-'+id+'" style="display:flex;align-items:center;gap:4px;font-size:12px"></div></div><button class="dp-del" onclick="removeDraft(\''+id+'\')"><i class="ti ti-trash"></i></button></div>'
     +'</div>'
   ).join('');
   drafts.forEach(id=>{
@@ -537,45 +584,45 @@ function updateMeta(n){
 function setLockUI(lk){
   locked=lk;const btn=document.getElementById('lkBtn'),ic=document.getElementById('lkIc'),lbl=document.getElementById('lkLbl');
   const sv=document.getElementById('mSave'),ti=document.getElementById('mTi'),tx=document.getElementById('mTx'),tb=document.getElementById('mtbar');
-  if(lk){btn.className='lkb locked';ic.className='ti ti-lock';lbl.textContent='مقفل';ti.readOnly=true;tx.contentEditable='false';sv.style.display='none';tb.style.opacity='.35';tb.style.pointerEvents='none'}
-  else{btn.className='lkb';ic.className='ti ti-lock-open';lbl.textContent='قيد التعديل';ti.readOnly=false;tx.contentEditable='true';sv.style.display='flex';tb.style.opacity='1';tb.style.pointerEvents='';setTimeout(()=>tx.focus(),40)}
+  if(lk){btn.className='lkb locked';ic.className='ti ti-lock';lbl.textContent=t('locked');ti.readOnly=true;tx.contentEditable='false';sv.style.display='none';tb.style.opacity='.35';tb.style.pointerEvents='none'}
+  else{btn.className='lkb';ic.className='ti ti-lock-open';lbl.textContent=t('editing');ti.readOnly=false;tx.contentEditable='true';sv.style.display='flex';tb.style.opacity='1';tb.style.pointerEvents='';setTimeout(()=>tx.focus(),40)}
 }
 function toggleLock(){setLockUI(!locked)}
-function mSaveEdit(){const n=notes.find(n=>n.id===openId);if(!n)return;const tx=document.getElementById('mTx'),txt=tx.innerText.trim();if(!txt){showToast('النص لا يمكن أن يكون فارغاً');return}n.title=document.getElementById('mTi').value.trim();n.html=tx.innerHTML;n.text=txt;save();render();setLockUI(true);showToast('تم حفظ التعديل')}
-function mToggleFav(){const n=notes.find(n=>n.id===openId);if(!n)return;n.fav=!n.fav;save();render();updateMeta(n);showToast(n.fav?'أُضيفت للمفضلة ★':'أُزيلت من المفضلة')}
-function mMarkDone(){const n=notes.find(n=>n.id===openId);if(!n)return;n.read=true;n.archived=true;save();render();updateMeta(n);setLockUI(true);showToast('تم تعليمها كمدروسة ونقلها للأرشيف ✓')}
-function mUnarchive(){const n=notes.find(n=>n.id===openId);if(!n)return;n.archived=false;n.read=false;save();render();updateMeta(n);showToast('أُعيدت للملاحظات النشطة')}
-function mDelete(){const n=notes.find(n=>n.id===openId);if(n){n.trashed=true;}save();render();closeModal();showToast('نُقلت للسلة')}
+function mSaveEdit(){const n=notes.find(n=>n.id===openId);if(!n)return;const tx=document.getElementById('mTx'),txt=tx.innerText.trim();if(!txt){showToast(t('tCantEmpty'));return}n.title=document.getElementById('mTi').value.trim();n.html=tx.innerHTML;n.text=txt;save();render();setLockUI(true);showToast(t('tSaved'))}
+function mToggleFav(){const n=notes.find(n=>n.id===openId);if(!n)return;n.fav=!n.fav;save();render();updateMeta(n);showToast(n.fav?t('tFavAdd'):t('tFavRem'))}
+function mMarkDone(){const n=notes.find(n=>n.id===openId);if(!n)return;n.read=true;n.archived=true;save();render();updateMeta(n);setLockUI(true);showToast(t('tStudied'))}
+function mUnarchive(){const n=notes.find(n=>n.id===openId);if(!n)return;n.archived=false;n.read=false;save();render();updateMeta(n);showToast(t('tUnarch'))}
+function mDelete(){const n=notes.find(n=>n.id===openId);if(n){n.trashed=true;}save();render();closeModal();showToast(t('tMoved'))}
 function closeModal(){document.getElementById('ov').classList.remove('open');openId=null}
 function ovClick(e){if(e.target===document.getElementById('ov'))closeModal()}
-function togDone(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=true;save();render();showToast('تم تعليمها كمدروسة ✓')}
-function togUnread(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=false;save();render();showToast('أُعيدت لغير مدروسة')}
-function togFav(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.fav=!n.fav;save();render();showToast(n.fav?'أُضيفت للمفضلة':'أُزيلت من المفضلة')}
-function togUnarch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=false;n.read=false;save();render();showToast('أُعيدت للملاحظات النشطة')}
-function togArch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=true;save();render();showToast('تم نقلها للأرشيف')}
-function togDel(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.trashed=true;save();render();showToast('نُقلت للسلة')}
+function togDone(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=true;save();render();showToast(t('tRead'))}
+function togUnread(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=false;save();render();showToast(t('tUnread'))}
+function togFav(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.fav=!n.fav;save();render();showToast(n.fav?t('tFavAdd'):t('tFavRem'))}
+function togUnarch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=false;n.read=false;save();render();showToast(t('tRestored'))}
+function togArch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=true;save();render();showToast(t('tArched'))}
+function togDel(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.trashed=true;save();render();showToast(t('tMoved'))}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function q(){return document.getElementById('srchIn')?.value.toLowerCase()||''}
 function ncHtml(n){
   const acts=n.archived
-    ?'<button class="act arch-off" onclick="togUnarch(event,'+n.id+')" title="إلغاء الأرشفة"><i class="ti ti-archive-off"></i></button>'
-     +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')" title="'+(n.fav?'إزالة من المفضلة':'إضافة للمفضلة')+'"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button>'
-     +'<button class="act del" onclick="togDel(event,'+n.id+')" title="حذف"><i class="ti ti-trash"></i></button>'
+    ?'<button class="act arch-off" onclick="togUnarch(event,'+n.id+')" title="'+t('titleUnarch')+'"><i class="ti ti-archive-off"></i></button>'
+     +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')" title="'+(n.fav?t('titleFavRem'):t('titleFavAdd'))+'"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button>'
+     +'<button class="act del" onclick="togDel(event,'+n.id+')" title="'+t('titleDel')+'"><i class="ti ti-trash"></i></button>'
     :(n.read
-      ?'<button class="act done" style="background:#E1F5EE;border-color:#5DCAA5;color:#0F6E56" onclick="togUnread(event,'+n.id+')" title="إعادة لغير مدروسة"><i class="ti ti-book-off"></i></button>'
-      :'<button class="act done" onclick="togDone(event,'+n.id+')" title="درستها"><i class="ti ti-circle-check"></i></button>')
-      +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act arch-off" onclick="togArch(event,'+n.id+')" title="أرشفة"><i class="ti ti-archive"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>';
+      ?'<button class="act done" style="background:#E1F5EE;border-color:#5DCAA5;color:#0F6E56" onclick="togUnread(event,'+n.id+')" title="'+t('titleUnread')+'"><i class="ti ti-book-off"></i></button>'
+      :'<button class="act done" onclick="togDone(event,'+n.id+')" title="'+t('titleDone')+'"><i class="ti ti-circle-check"></i></button>')
+      +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act arch-off" onclick="togArch(event,'+n.id+')" title="'+t('titleArch')+'"><i class="ti ti-archive"></i></button><button class="act del" onclick="togDel(event,'+n.id+')" title="'+t('titleDel')+'"><i class="ti ti-trash"></i></button>';
   return'<div class="nc note-card '+(n.fav?'fav':'')+'" onclick="openNote('+n.id+')">'
     +'<div class="nc-body"><div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p>'
     +'<div class="nc-tags">'
-    +(n.fav?'<span class="ntag fav">⭐ مفضلة</span>':'')
-    +(n.archived?'<span class="ntag arch">🗄 مؤرشفة</span>':n.read?'<span class="ntag read">✓ مدروسة</span>':'<span class="ntag unread">📖 غير مدروسة</span>')
+    +(n.fav?'<span class="ntag fav">'+t('tagFav')+'</span>':'')
+    +(n.archived?'<span class="ntag arch">'+t('tagArch')+'</span>':n.read?'<span class="ntag read">'+t('tagRead')+'</span>':'<span class="ntag unread">'+t('tagUnread')+'</span>')
     +'</div></div>'
     +'<div class="nc-side"><span class="nc-date">'+n.date+'</span><div class="nc-acts">'+acts+'</div></div></div></div>';
 }
 function renderNotes(list){
   const f=q()?list.filter(n=>(n.title+n.text).toLowerCase().includes(q())):list;
-  if(!f.length)return'<div class="empty"><i class="ti ti-mood-empty"></i>'+(q()?'لا نتائج':'لا توجد ملاحظات هنا')+'</div>';
+  if(!f.length)return'<div class="empty"><i class="ti ti-mood-empty"></i>'+(q()?t('emptySearch'):t('emptyNotes'))+'</div>';
   return'<div class="nlist">'+f.map(ncHtml).join('')+'</div>';
 }
 function render(){
@@ -584,35 +631,35 @@ function render(){
   if(page==='home'){mb.innerHTML='';mb.style.display='none';}
   else{
     mb.style.display='';
-    if(page==='library')mb.innerHTML='<div class="stats"><div class="sc"><div class="sn" style="color:var(--ac)">'+active.length+'</div><div class="sl">ملاحظات نشطة</div></div><div class="sc"><div class="sn" style="color:#185FA5">'+unread.length+'</div><div class="sl">غير مدروسة</div></div><div class="sc"><div class="sn" style="color:#BA7517">'+fav.length+'</div><div class="sl">المفضلة</div></div></div><div class="sec"><div class="sec-l"><i class="ti ti-books"></i> جميع الملاحظات</div></div>'+renderNotes(active);
-    else if(page==='unread')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-book-off"></i> غير مدروسة</div></div>'+renderNotes(unread);
+    if(page==='library')mb.innerHTML='<div class="stats"><div class="sc"><div class="sn" style="color:var(--ac)">'+active.length+'</div><div class="sl">'+t('statActive')+'</div></div><div class="sc"><div class="sn" style="color:#185FA5">'+unread.length+'</div><div class="sl">'+t('statUnread')+'</div></div><div class="sc"><div class="sn" style="color:#BA7517">'+fav.length+'</div><div class="sl">'+t('statFav')+'</div></div></div><div class="sec"><div class="sec-l"><i class="ti ti-books"></i> '+t('secAll')+'</div></div>'+renderNotes(active);
+    else if(page==='unread')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-book-off"></i> '+t('secUnread')+'</div></div>'+renderNotes(unread);
     else if(page==='fav'){
-      let html='<div class="sec"><div class="sec-l"><i class="ti ti-star"></i> المفضلة</div></div>'+renderNotes(fav);
-      if(favArch.length)html+='<div class="sec sec-gap"><div class="sec-l"><i class="ti ti-archive"></i> مفضلة مؤرشفة</div></div>'+renderNotes(favArch);
+      let html='<div class="sec"><div class="sec-l"><i class="ti ti-star"></i> '+t('secFav')+'</div></div>'+renderNotes(fav);
+      if(favArch.length)html+='<div class="sec sec-gap"><div class="sec-l"><i class="ti ti-archive"></i> '+t('secFavArch')+'</div></div>'+renderNotes(favArch);
       mb.innerHTML=html;
     }
-    else if(page==='read')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-book"></i> مدروسة</div></div>'+renderNotes(notes.filter(n=>n.read&&!n.archived&&!n.trashed),true);
+    else if(page==='read')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-book"></i> '+t('secRead')+'</div></div>'+renderNotes(notes.filter(n=>n.read&&!n.archived&&!n.trashed),true);
     else if(page==='trash')mb.innerHTML=renderTrash(trashed);
-    else mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-archive"></i> الأرشيف</div></div>'+renderNotes(archived);
+    else mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-archive"></i> '+t('secArch')+'</div></div>'+renderNotes(archived);
   }
 }
 function renderTrash(list){
-  const selBtn='<button onclick="toggleSelectMode()" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--color-border-secondary);background:var(--color-background-secondary);cursor:pointer;color:var(--color-text-primary);font-family:var(--font-sans)">'+(selectMode?'✕ إلغاء التحديد':'☑ تحديد للحذف')+'</button>';
-  const emptyBtn=list.length?'<button onclick="emptyTrash()" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid #F09595;background:#FCEBEB;cursor:pointer;color:#A32D2D;font-family:var(--font-sans)"><i class="ti ti-trash-x"></i> إفراغ السلة</button>':'';
-  const delSelBtn=(selectMode&&selected.size)?'<button onclick="deleteSelected()" style="font-size:13px;padding:6px 14px;border-radius:8px;background:#A32D2D;color:#fff;border:none;cursor:pointer;font-family:var(--font-sans)"><i class="ti ti-trash"></i> حذف المحدد ('+selected.size+')</button>':'';
+  const selBtn='<button onclick="toggleSelectMode()" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--color-border-secondary);background:var(--color-background-secondary);cursor:pointer;color:var(--color-text-primary);font-family:var(--font-sans)">'+(selectMode?t('cancelSel'):t('selDel'))+'</button>';
+  const emptyBtn=list.length?'<button onclick="emptyTrash()" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid #F09595;background:#FCEBEB;cursor:pointer;color:#A32D2D;font-family:var(--font-sans)"><i class="ti ti-trash-x"></i> '+t('emptyTrashBtn')+'</button>':'';
+  const delSelBtn=(selectMode&&selected.size)?'<button onclick="deleteSelected()" style="font-size:13px;padding:6px 14px;border-radius:8px;background:#A32D2D;color:#fff;border:none;cursor:pointer;font-family:var(--font-sans)"><i class="ti ti-trash"></i> '+t('delSelected')+' ('+selected.size+')</button>':'';
   const bar='<div class="sel-bar">'+selBtn+'<div style="display:flex;gap:8px">'+delSelBtn+emptyBtn+'</div></div>';
-  if(!list.length)return bar+'<div class="empty"><i class="ti ti-trash"></i>السلة فارغة</div>';
+  if(!list.length)return bar+'<div class="empty"><i class="ti ti-trash"></i>'+t('emptyTrash')+'</div>';
   return bar+'<div class="nlist">'+list.map(n=>{
     const cb=selectMode?'<input type="checkbox" class="nc-cb" '+(selected.has(n.id)?'checked':'')+'onclick="event.stopPropagation();toggleSelect('+n.id+')" />':'';
-    return'<div class="nc note-card'+(selected.has(n.id)?' selected':'')+'" onclick="'+(selectMode?'toggleSelect('+n.id+')':'')+'"><div class="nc-body"><div style="display:flex;align-items:center;gap:10px">'+cb+'<div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p></div></div><div class="nc-side"><span class="nc-date">'+n.date+'</span><div class="nc-acts"><button class="act" onclick="restoreNote(event,'+n.id+')" title="استعادة"><i class="ti ti-arrow-back-up"></i></button><button class="act del" onclick="permDel(event,'+n.id+')" title="حذف نهائي"><i class="ti ti-trash-x"></i></button></div></div></div></div>';
+    return'<div class="nc note-card'+(selected.has(n.id)?' selected':'')+'" onclick="'+(selectMode?'toggleSelect('+n.id+')':'')+'"><div class="nc-body"><div style="display:flex;align-items:center;gap:10px">'+cb+'<div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p></div></div><div class="nc-side"><span class="nc-date">'+n.date+'</span><div class="nc-acts"><button class="act" onclick="restoreNote(event,'+n.id+')" title="'+t('titleRestore')+'"><i class="ti ti-arrow-back-up"></i></button><button class="act del" onclick="permDel(event,'+n.id+')" title="'+t('titlePermDel')+'"><i class="ti ti-trash-x"></i></button></div></div></div></div>';
   }).join('')+'</div>';
 }
 function toggleSelectMode(){selectMode=!selectMode;selected.clear();render();}
 function toggleSelect(id){if(selected.has(id))selected.delete(id);else selected.add(id);render();}
-function emptyTrash(){if(!confirm('حذف كل الملاحظات في السلة نهائياً؟'))return;notes=notes.filter(n=>!n.trashed);save();render();showToast('تم إفراغ السلة');}
-function deleteSelected(){if(!confirm('حذف الملاحظات المحددة نهائياً؟'))return;notes=notes.filter(n=>!selected.has(n.id));selected.clear();selectMode=false;save();render();showToast('تم الحذف');}
-function restoreNote(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(n){n.trashed=false;}save();render();showToast('تمت الاستعادة');}
-function permDel(e,id){e.stopPropagation();if(!confirm('حذف نهائي لا يمكن التراجع عنه؟'))return;notes=notes.filter(n=>n.id!==id);save();render();showToast('تم الحذف النهائي');}
+function emptyTrash(){if(!confirm(t('cEmptyTrash')))return;notes=notes.filter(n=>!n.trashed);save();render();showToast(t('tTrashEmpty'));}
+function deleteSelected(){if(!confirm(t('cDelSel')))return;notes=notes.filter(n=>!selected.has(n.id));selected.clear();selectMode=false;save();render();showToast(t('tDelSel'));}
+function restoreNote(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(n){n.trashed=false;}save();render();showToast(t('tRestored2'));}
+function permDel(e,id){e.stopPropagation();if(!confirm(t('cPermDel')))return;notes=notes.filter(n=>n.id!==id);save();render();showToast(t('tPermDel'));}
 function goToLib(){document.querySelector('[data-page="library"]').click()}
 function goToFav(){document.querySelector('[data-page="fav"]').click()}
 function goToUnread(){document.querySelector('[data-page="unread"]').click()}
@@ -643,6 +690,7 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
       },100);
     }else{addDraft();}
   }else{addDraft();}
+  applyLang();
   bads();render();
 })();
 </script>
