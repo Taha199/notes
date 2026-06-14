@@ -528,6 +528,7 @@ function ovClick(e){if(e.target===document.getElementById('ov'))closeModal()}
 function togDone(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=true;n.archived=true;save();render();showToast('تم تعليمها كمدروسة ونقلها للأرشيف ✓')}
 function togFav(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.fav=!n.fav;save();render();showToast(n.fav?'أُضيفت للمفضلة':'أُزيلت من المفضلة')}
 function togUnarch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=false;n.read=false;save();render();showToast('أُعيدت للملاحظات النشطة')}
+function togArch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=true;save();render();showToast('تم نقلها للأرشيف')}
 function togDel(e,id){e.stopPropagation();if(!confirm('هل تريد حذف هذه الملاحظة نهائياً؟'))return;notes=notes.filter(n=>n.id!==id);save();render();showToast('تم الحذف')}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function q(){return document.getElementById('srchIn')?.value.toLowerCase()||''}
@@ -536,7 +537,7 @@ function ncHtml(n){
     ?'<button class="act arch-off" onclick="togUnarch(event,'+n.id+')" title="إلغاء الأرشفة"><i class="ti ti-archive-off"></i></button>'
      +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')" title="'+(n.fav?'إزالة من المفضلة':'إضافة للمفضلة')+'"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button>'
      +'<button class="act del" onclick="togDel(event,'+n.id+')" title="حذف"><i class="ti ti-trash"></i></button>'
-    :'<button class="act done" onclick="togDone(event,'+n.id+')" title="درستها"><i class="ti ti-circle-check"></i></button><button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>';
+    :'<button class="act done" onclick="togDone(event,'+n.id+')" title="درستها"><i class="ti ti-circle-check"></i></button><button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act arch-off" onclick="togArch(event,'+n.id+')" title="أرشفة"><i class="ti ti-archive"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>';
   return'<div class="nc note-card '+(n.fav?'fav':'')+'" onclick="openNote('+n.id+')">'
     +'<div class="nc-body"><div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p></div>'
     +'<div class="nc-side"><span class="nc-date">'+n.date+'</span><div class="nc-acts">'+acts+'</div></div></div></div>';
