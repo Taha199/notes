@@ -408,10 +408,11 @@ function renderDrafts(){
   if(addBtn)addBtn.style.display='block';
   zone.innerHTML=drafts.map((id,i)=>
     '<div class="dp">'
-    +'<div class="dp-hd"><span class="dp-lbl"><i class="ti ti-pencil"></i> مسودة'+(drafts.length>1?' '+(i+1):'')+'</span><div style="display:flex;align-items:center;gap:6px"><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button><button class="dp-x" onclick="removeDraft(\''+id+'\')"><i class="ti ti-x"></i></button></div></div>'
+    +'<div class="dp-hd"><span class="dp-lbl"><i class="ti ti-pencil"></i> مسودة'+(drafts.length>1?' '+(i+1):'')+'</span><button class="dp-x" onclick="removeDraft(\''+id+'\')"><i class="ti ti-x"></i></button></div>'
     +tbarHtml(id)
     +'<input class="dp-ti" id="ti-'+id+'" placeholder="عنوان (اختياري)" maxlength="80"/>'
     +'<div class="dp-ed" id="ed-'+id+'" contenteditable="true" data-ph="اكتب ملاحظتك هنا..." oninput="onDI(\''+id+'\')"></div>'
+    +'<div class="dp-ft"><button class="dp-del" onclick="removeDraft(\''+id+'\')"><i class="ti ti-trash"></i> حذف</button><button class="dp-save" id="ab-'+id+'" disabled onclick="submitDraft(\''+id+'\')"><i class="ti ti-check"></i> حفظ الملاحظة</button></div>'
     +'</div>'
   ).join('');
   drafts.forEach(id=>{
