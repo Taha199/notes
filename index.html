@@ -587,6 +587,7 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
           if(ti)ti.value=dc.title||'';
           if(ed)ed.innerHTML=dc.html||'';
           if(ab)ab.disabled=!ed||ed.innerText.trim().length===0;
+          showDraftCloud(id,false);
         });
       },100);
     }else{addDraft();}
