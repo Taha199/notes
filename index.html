@@ -55,7 +55,7 @@
     .nl{overflow:hidden;white-space:nowrap}
     #sb.col .nl{opacity:0;width:0}
     .nb{margin-right:auto;font-size:11px;padding:2px 8px;border-radius:20px;flex-shrink:0;font-weight:500}
-    .nb.blue{background:#E6F1FB;color:#185FA5}.nb.amber{background:#FAEEDA;color:#854F0B}.nb.gray{background:var(--color-border-tertiary);color:var(--color-text-secondary)}.nb.red{background:#FCEBEB;color:#A32D2D}
+    .nb.blue{background:#E6F1FB;color:#185FA5}.nb.amber{background:#FAEEDA;color:#854F0B}.nb.gray{background:var(--color-border-tertiary);color:var(--color-text-secondary)}.nb.red{background:#FCEBEB;color:#A32D2D}.nb.green{background:#E1F5EE;color:#0F6E56}
     .sel-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#fff;border-bottom:1px solid var(--color-border-tertiary);gap:10px;flex-shrink:0}
     .nc-cb{width:18px;height:18px;cursor:pointer;accent-color:var(--ac);flex-shrink:0}
     .nc.selected{border-color:var(--ac);box-shadow:0 0 0 2px var(--acl)}
@@ -217,6 +217,7 @@
       <button class="ni active" data-page="home" data-tip="الرئيسية" onclick="goTo('home',this)"><i class="ti ti-home"></i><span class="nl">الصفحة الرئيسية</span></button>
       <button class="ni" data-page="library" data-tip="المكتبة" onclick="goTo('library',this)"><i class="ti ti-books"></i><span class="nl">مكتبة الملاحظات</span><span class="nb blue" id="bn">0</span></button>
       <button class="ni" data-page="unread" data-tip="غير مدروسة" onclick="goTo('unread',this)"><i class="ti ti-book-off"></i><span class="nl">غير مدروسة</span><span class="nb blue" id="bu">0</span></button>
+      <button class="ni" data-page="read" data-tip="مدروسة" onclick="goTo('read',this)"><i class="ti ti-book"></i><span class="nl">مدروسة</span><span class="nb green" id="brd">0</span></button>
       <button class="ni" data-page="fav" data-tip="المفضلة" onclick="goTo('fav',this)"><i class="ti ti-star"></i><span class="nl">المفضلة</span><span class="nb amber" id="bf">0</span></button>
       <div class="sb-div"></div>
       <button class="ni" data-page="archive" data-tip="الأرشيف" onclick="goTo('archive',this)"><i class="ti ti-archive"></i><span class="nl">الأرشيف</span><span class="nb gray" id="ba">0</span></button>
@@ -357,7 +358,7 @@ function ev(e,fn){e.preventDefault();fn()}
 function saveSel(){const s=window.getSelection();if(s&&s.rangeCount>0)savedRange=s.getRangeAt(0).cloneRange()}
 function restoreSel(){if(!savedRange)return;const s=window.getSelection();s.removeAllRanges();s.addRange(savedRange)}
 function nowStr(){return new Date().toLocaleString('ar-SA',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})}
-const PM={home:{title:'الصفحة الرئيسية',icon:'ti-home'},library:{title:'مكتبة الملاحظات',icon:'ti-books'},unread:{title:'غير مدروسة',icon:'ti-book-off'},fav:{title:'المفضلة',icon:'ti-star'},archive:{title:'الأرشيف',icon:'ti-archive'},trash:{title:'سلة المهملات',icon:'ti-trash'}};
+const PM={home:{title:'الصفحة الرئيسية',icon:'ti-home'},library:{title:'مكتبة الملاحظات',icon:'ti-books'},unread:{title:'غير مدروسة',icon:'ti-book-off'},read:{title:'مدروسة',icon:'ti-book'},fav:{title:'المفضلة',icon:'ti-star'},archive:{title:'الأرشيف',icon:'ti-archive'},trash:{title:'سلة المهملات',icon:'ti-trash'}};
 let selectMode=false,selected=new Set();
 
 function getCloudData(){
@@ -377,6 +378,7 @@ function save(){
 function bads(){
   const b=(id,v)=>{const e=document.getElementById(id);if(!e)return;e.textContent=v;e.style.display=v===0?'none':''};
   b('bn',notes.filter(n=>!n.archived&&!n.trashed).length);b('bu',notes.filter(n=>!n.read&&!n.archived&&!n.trashed).length);
+  b('brd',notes.filter(n=>n.read&&!n.archived&&!n.trashed).length);
   b('bf',notes.filter(n=>n.fav&&!n.trashed).length);b('ba',notes.filter(n=>n.archived&&!n.trashed).length);
   b('btr',notes.filter(n=>n.trashed).length);
 }
@@ -531,7 +533,8 @@ function mUnarchive(){const n=notes.find(n=>n.id===openId);if(!n)return;n.archiv
 function mDelete(){const n=notes.find(n=>n.id===openId);if(n){n.trashed=true;}save();render();closeModal();showToast('نُقلت للسلة')}
 function closeModal(){document.getElementById('ov').classList.remove('open');openId=null}
 function ovClick(e){if(e.target===document.getElementById('ov'))closeModal()}
-function togDone(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=true;n.archived=true;save();render();showToast('تم تعليمها كمدروسة ونقلها للأرشيف ✓')}
+function togDone(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=true;save();render();showToast('تم تعليمها كمدروسة ✓')}
+function togUnread(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.read=false;save();render();showToast('أُعيدت لغير مدروسة')}
 function togFav(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.fav=!n.fav;save();render();showToast(n.fav?'أُضيفت للمفضلة':'أُزيلت من المفضلة')}
 function togUnarch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=false;n.read=false;save();render();showToast('أُعيدت للملاحظات النشطة')}
 function togArch(e,id){e.stopPropagation();const n=notes.find(n=>n.id===id);if(!n)return;n.archived=true;save();render();showToast('تم نقلها للأرشيف')}
@@ -543,7 +546,10 @@ function ncHtml(n){
     ?'<button class="act arch-off" onclick="togUnarch(event,'+n.id+')" title="إلغاء الأرشفة"><i class="ti ti-archive-off"></i></button>'
      +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')" title="'+(n.fav?'إزالة من المفضلة':'إضافة للمفضلة')+'"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button>'
      +'<button class="act del" onclick="togDel(event,'+n.id+')" title="حذف"><i class="ti ti-trash"></i></button>'
-    :'<button class="act done" onclick="togDone(event,'+n.id+')" title="درستها"><i class="ti ti-circle-check"></i></button><button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act arch-off" onclick="togArch(event,'+n.id+')" title="أرشفة"><i class="ti ti-archive"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>';
+    :(n.read
+      ?'<button class="act done" style="background:#E1F5EE;border-color:#5DCAA5;color:#0F6E56" onclick="togUnread(event,'+n.id+')" title="إعادة لغير مدروسة"><i class="ti ti-book-off"></i></button>'
+      :'<button class="act done" onclick="togDone(event,'+n.id+')" title="درستها"><i class="ti ti-circle-check"></i></button>')
+      +'<button class="act '+(n.fav?'fav-on':'fav-off')+'" onclick="togFav(event,'+n.id+')"><i class="ti '+(n.fav?'ti-star-filled':'ti-star')+'"></i></button><button class="act arch-off" onclick="togArch(event,'+n.id+')" title="أرشفة"><i class="ti ti-archive"></i></button><button class="act del" onclick="togDel(event,'+n.id+')"><i class="ti ti-trash"></i></button>';
   return'<div class="nc note-card '+(n.fav?'fav':'')+'" onclick="openNote('+n.id+')">'
     +'<div class="nc-body"><div class="nc-content">'+(n.title?'<p class="nc-title">'+esc(n.title)+'</p>':'')+'<p class="nc-text">'+esc(n.text?n.text.slice(0,200):'')+'</p></div>'
     +'<div class="nc-side"><span class="nc-date">'+n.date+'</span><div class="nc-acts">'+acts+'</div></div></div></div>';
@@ -566,6 +572,7 @@ function render(){
       if(favArch.length)html+='<div class="sec sec-gap"><div class="sec-l"><i class="ti ti-archive"></i> مفضلة مؤرشفة</div></div>'+renderNotes(favArch);
       mb.innerHTML=html;
     }
+    else if(page==='read')mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-book"></i> مدروسة</div></div>'+renderNotes(notes.filter(n=>n.read&&!n.archived&&!n.trashed),true);
     else if(page==='trash')mb.innerHTML=renderTrash(trashed);
     else mb.innerHTML='<div class="sec"><div class="sec-l"><i class="ti ti-archive"></i> الأرشيف</div></div>'+renderNotes(archived);
   }
