@@ -466,6 +466,7 @@ function submitDraft(id){
   const html=ed.innerHTML.trim(),text=ed.innerText.trim();if(!text)return;
   notes.unshift({id:Date.now(),title:ti?ti.value.trim():'',html,text,fav:false,read:false,archived:false,date:nowStr()});
   save();render();drafts=drafts.filter(d=>d!==id);addDraft();showToast('تمت إضافة الملاحظة');
+  setTimeout(()=>drafts.forEach(did=>showDraftCloud(did,false)),150);
 }
 let draftCloudTimers={};
 function showDraftCloud(id,saving){
