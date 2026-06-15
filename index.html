@@ -213,10 +213,10 @@
 
     /* ═══ AUTH SCREEN ═══ */
     #auth-screen{position:fixed;inset:0;background:linear-gradient(135deg,#f0effe 0%,#e8e6fc 50%,#dbd8f9 100%);z-index:300;display:flex;align-items:center;justify-content:center;font-family:var(--font-sans)}
-    .auth-lang{display:flex;justify-content:flex-end;margin-bottom:12px}
+    .auth-lang{position:absolute;top:14px;left:14px}
     .auth-lang .lang-btn{font-size:13px;padding:5px 10px}
     #auth-screen.hidden{display:none}
-    .auth-card{background:#fff;border-radius:24px;padding:40px 36px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(83,74,183,.15);border:1px solid rgba(83,74,183,.08);direction:rtl}
+    .auth-card{background:#fff;border-radius:24px;padding:40px 36px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(83,74,183,.15);border:1px solid rgba(83,74,183,.08);direction:rtl;position:relative}
     .auth-logo-row{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px}
     .auth-logo-name{font-size:20px;font-weight:700;color:#1c1c1e}
     .auth-heading{font-size:22px;font-weight:700;color:#1c1c1e;text-align:center;margin-bottom:4px}
@@ -581,7 +581,7 @@ function t(k){return LANGS[currentLang][k]||k}
 function toggleLangDD(e){e.stopPropagation();const dd=document.getElementById('langDD'),btn=document.getElementById('langBtn');const open=dd.classList.contains('open');dd.classList.toggle('open',!open);btn.classList.toggle('open',!open);if(!open){const r=btn.getBoundingClientRect();dd.style.top=(r.bottom+6)+'px';dd.style.left=r.left+'px';updateLangOpts()}}
 function toggleAuthLangDD(e){e.stopPropagation();const dd=document.getElementById('authLangDD'),btn=document.getElementById('authLangBtn');const open=dd.classList.contains('open');dd.classList.toggle('open',!open);btn.classList.toggle('open',!open);if(!open){const r=btn.getBoundingClientRect();dd.style.top=(r.bottom+6)+'px';dd.style.left=r.left+'px';updateLangOpts()}}
 function updateLangOpts(){document.querySelectorAll('.lang-opt').forEach(o=>{const l=o.getAttribute('onclick').match(/'(\w+)'/)[1];o.classList.toggle('active',l===currentLang)})}
-function setLang(lang){currentLang=lang;localStorage.setItem('appLang',lang);document.getElementById('langDD').classList.remove('open');document.getElementById('langBtn').classList.remove('open');applyLang()}
+function setLang(lang){currentLang=lang;localStorage.setItem('appLang',lang);['langDD','langBtn','authLangDD','authLangBtn'].forEach(id=>{document.getElementById(id)?.classList.remove('open')});applyLang()}
 document.addEventListener('click',()=>{document.getElementById('langDD')?.classList.remove('open');document.getElementById('langBtn')?.classList.remove('open');document.getElementById('authLangDD')?.classList.remove('open');document.getElementById('authLangBtn')?.classList.remove('open')});
 function applyLang(){
   const L=LANGS[currentLang];
@@ -607,7 +607,7 @@ function applyLang(){
   s('signOutLbl',L.signOut||'تسجيل الخروج');
   s('userName',L.userName);s('userSub',L.userSub);s('avLetter',L.avLetter);
   const pt=document.getElementById('pt');if(pt)pt.textContent=L['page'+page.charAt(0).toUpperCase()+page.slice(1)]||pt.textContent;
-  renderDrafts();render();
+  if(currentUser){renderDrafts();render();}
 }
 
 const COLORS=['#534AB7','#E24B4A','#1D9E75','#185FA5','#BA7517','#993556','#0F6E56','#3C3489','#639922','#2C2C2A','#D85A30','#888780'];
