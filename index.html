@@ -213,8 +213,8 @@
 
     /* ═══ AUTH SCREEN ═══ */
     #auth-screen{position:fixed;inset:0;background:linear-gradient(135deg,#f0effe 0%,#e8e6fc 50%,#dbd8f9 100%);z-index:300;display:flex;align-items:center;justify-content:center;font-family:var(--font-sans)}
-    .auth-lang{position:absolute;top:18px;right:18px}
-    .auth-lang .lang-btn{font-size:13px;padding:6px 12px}
+    .auth-lang{display:flex;justify-content:flex-end;margin-bottom:12px}
+    .auth-lang .lang-btn{font-size:13px;padding:5px 10px}
     #auth-screen.hidden{display:none}
     .auth-card{background:#fff;border-radius:24px;padding:40px 36px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(83,74,183,.15);border:1px solid rgba(83,74,183,.08);direction:rtl}
     .auth-logo-row{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px}
@@ -378,15 +378,15 @@
 
   <!-- AUTH SCREEN -->
   <div id="auth-screen">
-    <div class="auth-lang lang-wrap">
-      <button class="lang-btn" id="authLangBtn" onclick="toggleAuthLangDD(event)"><i class="ti ti-language"></i> <span id="authLangLbl">AR</span> <i class="ti ti-chevron-down" style="font-size:11px"></i></button>
-      <div class="lang-dd" id="authLangDD">
-        <div class="lang-opt" onclick="setLang('ar')"><span class="lang-flag">🇸🇦</span> العربية</div>
-        <div class="lang-opt" onclick="setLang('en')"><span class="lang-flag">🇬🇧</span> English</div>
-        <div class="lang-opt" onclick="setLang('sv')"><span class="lang-flag">🇸🇪</span> Svenska</div>
-      </div>
-    </div>
     <div class="auth-card">
+      <div class="auth-lang lang-wrap">
+        <button class="lang-btn" id="authLangBtn" onclick="toggleAuthLangDD(event)"><i class="ti ti-language"></i> <span id="authLangLbl">AR</span> <i class="ti ti-chevron-down" style="font-size:11px"></i></button>
+        <div class="lang-dd" id="authLangDD">
+          <div class="lang-opt" onclick="setLang('ar')"><span class="lang-flag">🇸🇦</span> العربية</div>
+          <div class="lang-opt" onclick="setLang('en')"><span class="lang-flag">🇬🇧</span> English</div>
+          <div class="lang-opt" onclick="setLang('sv')"><span class="lang-flag">🇸🇪</span> Svenska</div>
+        </div>
+      </div>
       <div class="auth-logo-row">
         <svg width="36" height="36" viewBox="0 0 56 56" fill="none"><rect width="56" height="56" rx="14" fill="#534AB7"/><path d="M14 12h18l8 8v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2z" fill="white" opacity=".15"/><path d="M32 12v8h8" fill="none" stroke="white" stroke-width="1.5" stroke-opacity=".5" stroke-linejoin="round"/><path d="M14 12h18l8 8v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2z" fill="none" stroke="white" stroke-width="1.5" stroke-opacity=".6" stroke-linejoin="round"/><rect x="18" y="24" width="14" height="2" rx="1" fill="white"/><rect x="18" y="29" width="10" height="2" rx="1" fill="white" opacity=".7"/><rect x="18" y="34" width="12" height="2" rx="1" fill="white" opacity=".5"/></svg>
         <span class="auth-logo-name">ملاحظاتي</span>
