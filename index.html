@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ملاحظاتي</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56 56'%3E%3Crect width='56' height='56' rx='14' fill='%23534AB7'/%3E%3Cpath d='M14 12h18l8 8v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2z' fill='white' opacity='.15'/%3E%3Cpath d='M32 12v8h8' fill='none' stroke='white' stroke-width='1.5' stroke-opacity='.5' stroke-linejoin='round'/%3E%3Cpath d='M14 12h18l8 8v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2z' fill='none' stroke='white' stroke-width='1.5' stroke-opacity='.6' stroke-linejoin='round'/%3E%3Crect x='18' y='24' width='14' height='2' rx='1' fill='white'/%3E%3Crect x='18' y='29' width='10' height='2' rx='1' fill='white' opacity='.7'/%3E%3Crect x='18' y='34' width='12' height='2' rx='1' fill='white' opacity='.5'/%3E%3C/svg%3E"/>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css"/>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dubai:wght@300;400;500;700&display=swap"/>
   <style>
@@ -208,6 +210,33 @@
     @keyframes cloudFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
     .cloud-saving{animation:cloudFloat .7s ease-in-out infinite;color:#534AB7 !important}
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+    /* ═══ AUTH SCREEN ═══ */
+    #auth-screen{position:fixed;inset:0;background:linear-gradient(135deg,#f0effe 0%,#e8e6fc 50%,#dbd8f9 100%);z-index:300;display:flex;align-items:center;justify-content:center;font-family:var(--font-sans)}
+    #auth-screen.hidden{display:none}
+    .auth-card{background:#fff;border-radius:24px;padding:40px 36px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(83,74,183,.15);border:1px solid rgba(83,74,183,.08);direction:rtl}
+    .auth-logo-row{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px}
+    .auth-logo-name{font-size:20px;font-weight:700;color:#1c1c1e}
+    .auth-heading{font-size:22px;font-weight:700;color:#1c1c1e;text-align:center;margin-bottom:4px}
+    .auth-sub{font-size:13.5px;color:#6b6b6b;text-align:center;margin-bottom:24px}
+    .auth-tabs{display:flex;background:#f5f5f4;border-radius:10px;padding:3px;margin-bottom:22px;gap:3px}
+    .auth-tab{flex:1;padding:8px;border:none;border-radius:8px;font-size:13.5px;font-weight:500;cursor:pointer;background:transparent;color:#6b6b6b;font-family:var(--font-sans);transition:all .15s}
+    .auth-tab.active{background:#fff;color:#534AB7;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+    .auth-inp{width:100%;padding:11px 14px;border:1.5px solid #e0e0e0;border-radius:10px;font-size:14px;font-family:var(--font-sans);color:#1c1c1e;background:#fafafa;outline:none;box-sizing:border-box;transition:border-color .15s;direction:ltr;text-align:right;margin-bottom:10px;display:block}
+    .auth-inp:focus{border-color:#534AB7;background:#fff}
+    .auth-inp::placeholder{color:#b0b0b0;direction:rtl}
+    .auth-submit{width:100%;padding:12px;background:#534AB7;color:#fff;border:none;border-radius:10px;font-size:14.5px;font-weight:600;cursor:pointer;font-family:var(--font-sans);transition:opacity .15s;margin-top:4px}
+    .auth-submit:hover{opacity:.88}
+    .auth-submit:disabled{opacity:.5;cursor:not-allowed}
+    .auth-or{display:flex;align-items:center;gap:10px;margin:18px 0;color:#c0c0c0;font-size:13px}
+    .auth-or::before,.auth-or::after{content:'';flex:1;height:1px;background:#ebebeb}
+    .auth-google{width:100%;padding:11px;background:#fff;color:#1c1c1e;border:1.5px solid #e0e0e0;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer;font-family:var(--font-sans);display:flex;align-items:center;justify-content:center;gap:10px;transition:all .15s}
+    .auth-google:hover{border-color:#534AB7;background:#f8f8ff}
+    .auth-error{background:#FCEBEB;color:#A32D2D;border:1px solid #F09595;border-radius:8px;padding:9px 12px;font-size:13px;margin-bottom:14px;text-align:center}
+    .auth-forgot{font-size:12.5px;color:#534AB7;cursor:pointer;text-align:center;margin-top:10px;background:none;border:none;font-family:var(--font-sans);width:100%}
+    .auth-forgot:hover{text-decoration:underline}
+    .sb-signout{display:flex;align-items:center;gap:8px;padding:8px 11px;border-radius:10px;cursor:pointer;border:none;background:transparent;color:#A32D2D;font-size:13px;font-family:var(--font-sans);width:100%;transition:background .12s}
+    .sb-signout:hover{background:#FCEBEB}
     .lang-wrap{position:relative}
     .lang-btn{display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:500;padding:7px 12px;border-radius:9px;border:1px solid var(--color-border-secondary);background:var(--color-background-secondary);cursor:pointer;color:var(--color-text-secondary);font-family:var(--font-sans);transition:all .15s;white-space:nowrap}
     .lang-btn:hover,.lang-btn.open{background:var(--color-background-primary);border-color:var(--acm);color:var(--ac)}
@@ -263,6 +292,7 @@
         <div class="av" id="avLetter">م</div>
         <div class="ui"><div class="un" id="userName">مستخدم</div><div class="us" id="userSub">ملاحظاتي الشخصية</div></div>
       </div>
+      <button class="sb-signout" onclick="authSignOut()"><i class="ti ti-logout" style="font-size:16px"></i><span class="nl" id="signOutLbl">تسجيل الخروج</span></button>
     </div>
   </div>
 
@@ -343,12 +373,152 @@
     </div>
   </div>
   <div class="toast" id="toast"></div>
+
+  <!-- AUTH SCREEN -->
+  <div id="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo-row">
+        <svg width="36" height="36" viewBox="0 0 56 56" fill="none"><rect width="56" height="56" rx="14" fill="#534AB7"/><path d="M14 12h18l8 8v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2z" fill="white" opacity=".15"/><path d="M32 12v8h8" fill="none" stroke="white" stroke-width="1.5" stroke-opacity=".5" stroke-linejoin="round"/><path d="M14 12h18l8 8v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2z" fill="none" stroke="white" stroke-width="1.5" stroke-opacity=".6" stroke-linejoin="round"/><rect x="18" y="24" width="14" height="2" rx="1" fill="white"/><rect x="18" y="29" width="10" height="2" rx="1" fill="white" opacity=".7"/><rect x="18" y="34" width="12" height="2" rx="1" fill="white" opacity=".5"/></svg>
+        <span class="auth-logo-name">ملاحظاتي</span>
+      </div>
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" onclick="authTab('login')">تسجيل الدخول</button>
+        <button class="auth-tab" id="tab-signup" onclick="authTab('signup')">إنشاء حساب</button>
+      </div>
+      <div class="auth-error" id="auth-error" style="display:none"></div>
+      <input class="auth-inp" id="auth-email" type="email" placeholder="البريد الإلكتروني" autocomplete="email"/>
+      <input class="auth-inp" id="auth-pass" type="password" placeholder="كلمة المرور" autocomplete="current-password"/>
+      <input class="auth-inp" id="auth-pass2" type="password" placeholder="تأكيد كلمة المرور" autocomplete="new-password" style="display:none"/>
+      <button class="auth-submit" id="auth-submit-btn" onclick="authSubmit()">دخول</button>
+      <button class="auth-forgot" id="auth-forgot-btn" onclick="authForgot()">نسيت كلمة المرور؟</button>
+      <div class="auth-or"><span>أو</span></div>
+      <button class="auth-google" onclick="authGoogle()">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+        المتابعة عبر Google
+      </button>
+    </div>
+  </div>
   <div id="cloud-status" style="position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;font-size:12.5px;color:#888;background:rgba(255,255,255,0.92);backdrop-filter:blur(8px);padding:6px 14px;border-radius:20px;border:1px solid #e0e0e0;box-shadow:0 2px 10px rgba(0,0,0,.08);transition:opacity .4s;opacity:0;pointer-events:none;font-family:var(--font-sans)">
     <i id="cloud-icon" class="ti ti-cloud" style="font-size:15px"></i>
     <span id="cloud-text">تم الحفظ سحابياً</span>
   </div>
 </div>
 
+<script>
+/* ══ FIREBASE AUTH SETUP ══
+   احصل على apiKey من:
+   console.firebase.google.com → noteclaude-a5b3b → Project Settings → Your apps → SDK setup
+*/
+const firebaseConfig = {
+  apiKey: "PASTE_YOUR_API_KEY_HERE",
+  authDomain: "noteclaude-a5b3b.firebaseapp.com",
+  databaseURL: "https://noteclaude-a5b3b-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "noteclaude-a5b3b",
+  storageBucket: "noteclaude-a5b3b.firebasestorage.app",
+  messagingSenderId: "",
+  appId: ""
+};
+firebase.initializeApp(firebaseConfig);
+const fbAuth = firebase.auth();
+
+let currentUser = null;
+
+firebase.auth().onAuthStateChanged(user => {
+  if(user){
+    currentUser = user;
+    document.getElementById('auth-screen').classList.add('hidden');
+    const name = user.displayName || user.email?.split('@')[0] || 'مستخدم';
+    const letter = name.charAt(0).toUpperCase();
+    document.getElementById('avLetter').textContent = letter;
+    document.getElementById('userName').textContent = name;
+    document.getElementById('userSub').textContent = user.email || '';
+    initApp();
+  } else {
+    currentUser = null;
+    document.getElementById('auth-screen').classList.remove('hidden');
+  }
+});
+
+let authMode = 'login';
+function authTab(mode){
+  authMode = mode;
+  document.getElementById('tab-login').classList.toggle('active', mode==='login');
+  document.getElementById('tab-signup').classList.toggle('active', mode==='signup');
+  document.getElementById('auth-submit-btn').textContent = mode==='login' ? 'دخول' : 'إنشاء حساب';
+  document.getElementById('auth-pass2').style.display = mode==='signup' ? 'block' : 'none';
+  document.getElementById('auth-forgot-btn').style.display = mode==='login' ? 'block' : 'none';
+  document.getElementById('auth-error').style.display='none';
+}
+function authErr(msg){ const e=document.getElementById('auth-error'); e.textContent=msg; e.style.display='block'; }
+function authClearErr(){ document.getElementById('auth-error').style.display='none'; }
+
+async function authSubmit(){
+  const email = document.getElementById('auth-email').value.trim();
+  const pass  = document.getElementById('auth-pass').value;
+  const pass2 = document.getElementById('auth-pass2').value;
+  authClearErr();
+  if(!email || !pass){ authErr('يرجى إدخال البريد الإلكتروني وكلمة المرور'); return; }
+  const btn = document.getElementById('auth-submit-btn');
+  btn.disabled = true;
+  try {
+    if(authMode === 'signup'){
+      if(pass !== pass2){ authErr('كلمتا المرور غير متطابقتين'); btn.disabled=false; return; }
+      if(pass.length < 6){ authErr('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); btn.disabled=false; return; }
+      await fbAuth.createUserWithEmailAndPassword(email, pass);
+    } else {
+      await fbAuth.signInWithEmailAndPassword(email, pass);
+    }
+  } catch(e){
+    const msgs = {
+      'auth/user-not-found':'البريد الإلكتروني غير مسجل',
+      'auth/wrong-password':'كلمة المرور غير صحيحة',
+      'auth/email-already-in-use':'البريد الإلكتروني مستخدم مسبقاً',
+      'auth/invalid-email':'صيغة البريد الإلكتروني غير صحيحة',
+      'auth/too-many-requests':'محاولات كثيرة، حاول لاحقاً',
+      'auth/invalid-credential':'البريد أو كلمة المرور غير صحيحة'
+    };
+    authErr(msgs[e.code] || e.message);
+    btn.disabled = false;
+  }
+}
+
+async function authGoogle(){
+  authClearErr();
+  const provider = new firebase.auth.GoogleAuthProvider();
+  try {
+    await fbAuth.signInWithPopup(provider);
+  } catch(e){
+    if(e.code !== 'auth/popup-closed-by-user') authErr('حدث خطأ أثناء تسجيل الدخول عبر Google');
+  }
+}
+
+async function authForgot(){
+  const email = document.getElementById('auth-email').value.trim();
+  if(!email){ authErr('أدخل بريدك الإلكتروني أولاً'); return; }
+  try {
+    await fbAuth.sendPasswordResetEmail(email);
+    authErr('✓ تم إرسال رابط إعادة تعيين كلمة المرور');
+    document.getElementById('auth-error').style.background='#E1F5EE';
+    document.getElementById('auth-error').style.color='#0F6E56';
+    document.getElementById('auth-error').style.borderColor='#5DCAA5';
+  } catch(e){ authErr('تعذر إرسال البريد، تحقق من العنوان'); }
+}
+
+async function authSignOut(){
+  await fbAuth.signOut();
+  notes=[]; drafts=[]; draftId=0;
+  localStorage.removeItem('malacadhati');
+  document.getElementById('mb').innerHTML='';
+  document.getElementById('dz').innerHTML='';
+  bads();
+}
+
+document.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !document.getElementById('auth-screen').classList.contains('hidden')){
+    authSubmit();
+  }
+});
+</script>
 <script>
 const FB_URL='https://noteclaude-a5b3b-default-rtdb.europe-west1.firebasedatabase.app';
 let fbSaveTimer=null,fbHideTimer=null;
@@ -372,18 +542,19 @@ function showCloudStatus(saving){
     fbHideTimer=setTimeout(()=>{el.style.opacity='0'},2500);
   }
 }
+function userPath(){ return currentUser ? '/users/'+currentUser.uid : '/data'; }
 function fbSave(data){
   clearTimeout(fbSaveTimer);
   showCloudStatus(true);
   fbSaveTimer=setTimeout(()=>{
-    fetch(FB_URL+'/data.json',{method:'PUT',body:JSON.stringify(data),headers:{'Content-Type':'application/json'}})
+    fetch(FB_URL+userPath()+'.json',{method:'PUT',body:JSON.stringify(data),headers:{'Content-Type':'application/json'}})
       .then(()=>showCloudStatus(false))
       .catch(()=>showCloudStatus(false));
   },800);
 }
 async function fbLoad(){
   try{
-    const r=await fetch(FB_URL+'/data.json');
+    const r=await fetch(FB_URL+userPath()+'.json');
     const d=await r.json();
     return d;
   }catch(e){return null;}
@@ -422,6 +593,7 @@ function applyLang(){
   s('mDelTx',L.mDel);s('mUnarchTx',L.mUnarch);s('mDoneTx',L.mDone);s('mSaveTx',L.mSave);
   a('mTi','placeholder',L.mTiPh);
   s('cloud-text',L.cloudSavedMain);
+  s('signOutLbl',L.signOut||'تسجيل الخروج');
   s('userName',L.userName);s('userSub',L.userSub);s('avLetter',L.avLetter);
   const pt=document.getElementById('pt');if(pt)pt.textContent=L['page'+page.charAt(0).toUpperCase()+page.slice(1)]||pt.textContent;
   renderDrafts();render();
@@ -693,7 +865,7 @@ function goToFav(){document.querySelector('[data-page="fav"]').click()}
 function goToUnread(){document.querySelector('[data-page="unread"]').click()}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
 
-(async()=>{
+async function initApp(){
   const cloud=await fbLoad();
   if(cloud&&cloud.notes&&cloud.notes.length>=notes.length){
     notes=cloud.notes;
@@ -702,7 +874,6 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
     if(cloud.drafts&&cloud.drafts.length){
       drafts=cloud.drafts;
       renderDrafts();
-      // restore draft content after DOM is ready
       setTimeout(()=>{
         drafts.forEach(id=>{
           const dc=cloud.draftContents&&cloud.draftContents[id];
@@ -720,7 +891,7 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
   }else{addDraft();}
   applyLang();
   bads();render();
-})();
+}
 </script>
 </body>
 </html>
