@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { Logo } from '../common/Logo';
 
 export function Sidebar({ page, setPage, onOpenSetPassword }: { page: Page; setPage: (p: Page) => void; onOpenSetPassword: () => void }) {
   const { t } = useLanguage();
@@ -56,9 +57,7 @@ export function Sidebar({ page, setPage, onOpenSetPassword }: { page: Page; setP
       <div className="flex min-h-[62px] items-center justify-between border-b border-app-border px-3.5 dark:border-white/10">
         {!collapsed && (
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary-dark text-white shadow-md shadow-primary/30">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" /></svg>
-            </div>
+            <Logo size={30} />
             <span className="text-[15px] font-bold tracking-tight text-app-text dark:text-gray-100">{t.appName}</span>
           </div>
         )}

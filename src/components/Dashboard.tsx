@@ -32,7 +32,7 @@ function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMod
   const filtered = search ? notes.filter((n) => (n.title + n.text).toLowerCase().includes(search.toLowerCase())) : notes;
   if (!filtered.length) return <EmptyState text={search ? emptySearchText : emptyText} />;
   return (
-    <div className="flex flex-col gap-2.5 px-5 pb-6">
+    <div className="grid grid-cols-1 gap-3.5 px-5 pb-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {filtered.map((n) => (
         <NoteCard key={n.id} note={n} onOpen={onOpen} selectMode={selectMode} selected={selected?.has(n.id)} onToggleSelect={onToggleSelect} />
       ))}
@@ -81,13 +81,13 @@ export function Dashboard() {
 
         <div className="flex-1 overflow-y-auto">
           {page === 'home' && (
-            <div className="flex flex-col gap-3.5 border-b border-app-border bg-app-bg p-5 dark:border-white/10 dark:bg-white/5">
+            <div className="grid grid-cols-1 gap-3.5 border-b border-app-border bg-app-bg p-5 dark:border-white/10 dark:bg-white/5 lg:grid-cols-2 xl:grid-cols-3">
               {drafts.map((d, i) => (
                 <DraftEditor key={d.id} draft={d} index={i} total={drafts.length} />
               ))}
               <button
                 onClick={addDraft}
-                className="rounded-2xl border-2 border-dashed border-app-border py-3.5 text-xl text-app-text-secondary/60 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10"
+                className="min-h-[120px] rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/60 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10"
               >
                 +
               </button>

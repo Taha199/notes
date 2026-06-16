@@ -148,7 +148,7 @@ export interface Translation {
 export const LANGS: Record<Lang, Translation> = {
   ar: {
     dir: 'rtl', htmlLang: 'ar', label: 'AR',
-    appName: 'ملاحظاتي', appSubtitle: 'اكتب، نظّم، وزامن ملاحظاتك في كل مكان.',
+    appName: 'Taha Note', appSubtitle: 'اكتب، نظّم، وزامن ملاحظاتك في كل مكان.',
     navHome: 'الصفحة الرئيسية', navFav: 'المفضلة', navUnread: 'غير مدروسة', navRead: 'مدروسة',
     navLibrary: 'مكتبة الملاحظات', navArchive: 'الأرشيف', navTrash: 'سلة المهملات',
     searchPh: 'بحث...', newNote: 'ملاحظة جديدة', locked: 'مقفل', editing: 'قيد التعديل',
@@ -199,7 +199,7 @@ export const LANGS: Record<Lang, Translation> = {
   },
   en: {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
-    appName: 'My Notes', appSubtitle: 'Write, organize, and sync your notes everywhere.',
+    appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
     navHome: 'Home', navFav: 'Favourites', navUnread: 'Unread', navRead: 'Read',
     navLibrary: 'Notes Library', navArchive: 'Archive', navTrash: 'Trash',
     searchPh: 'Search...', newNote: 'New Note', locked: 'Locked', editing: 'Editing',
@@ -250,7 +250,7 @@ export const LANGS: Record<Lang, Translation> = {
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
-    appName: 'Mina Anteckningar', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
+    appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
     navHome: 'Hem', navFav: 'Favoriter', navUnread: 'Olästa', navRead: 'Lästa',
     navLibrary: 'Anteckningsbibliotek', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     searchPh: 'Sök...', newNote: 'Ny Anteckning', locked: 'Låst', editing: 'Redigerar',

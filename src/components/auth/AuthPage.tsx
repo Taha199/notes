@@ -6,6 +6,7 @@ import { AuthCard } from './AuthCard';
 import { FeatureCards } from './FeatureCards';
 import { GoogleIcon } from './GoogleIcon';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
+import { Logo } from '../common/Logo';
 
 type Mode = 'login' | 'signup';
 
@@ -101,14 +102,8 @@ export function AuthPage() {
 
       <AuthCard>
         <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#8A82FF] shadow-lg shadow-primary/30">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 3v4a1 1 0 0 0 1 1h4" />
-              <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" />
-              <path d="M9 9h1" />
-              <path d="M9 13h6" />
-              <path d="M9 17h6" />
-            </svg>
+          <div className="rounded-2xl shadow-lg shadow-primary/30">
+            <Logo size={56} rounded={16} />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-app-text dark:text-white">{t.appName}</h1>
           <p className="max-w-[300px] text-sm text-app-text-secondary dark:text-gray-400">{t.appSubtitle}</p>

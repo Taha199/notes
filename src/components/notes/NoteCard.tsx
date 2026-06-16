@@ -20,7 +20,7 @@ function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: 
       }}
       title={title}
       className={
-        'inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-app-border bg-white text-sm text-app-text-secondary transition-all hover:scale-110 dark:border-white/10 dark:bg-gray-800 dark:text-gray-400 ' +
+        'inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-app-border bg-white text-[13px] text-app-text-secondary transition-all hover:scale-110 dark:border-white/10 dark:bg-gray-800 dark:text-gray-400 ' +
         className
       }
     >
@@ -45,21 +45,21 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
     <div
       onClick={handleClick}
       className={
-        'animate-slide-up cursor-pointer overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg dark:bg-gray-800/60 ' +
+        'animate-slide-up flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg dark:bg-gray-800/60 ' +
         (note.fav && !isTrash
           ? 'border-amber-300 bg-gradient-to-br from-amber-50 to-white dark:border-amber-500/40 dark:from-amber-500/10'
           : 'border-app-border dark:border-white/10') +
         (selected ? ' ring-2 ring-primary border-primary' : '')
       }
     >
-      <div className="flex items-start gap-3.5 p-4">
+      <div className="flex flex-1 items-start gap-2.5 p-4 pb-2">
         {selectMode && (
           <input
             type="checkbox"
             checked={!!selected}
             onClick={(e) => e.stopPropagation()}
             onChange={() => onToggleSelect?.(note.id)}
-            className="mt-1 h-4 w-4 accent-primary"
+            className="mt-1 h-4 w-4 flex-shrink-0 accent-primary"
           />
         )}
         <div className="min-w-0 flex-1">
@@ -68,11 +68,11 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
               {note.title}
             </p>
           )}
-          <p className={'mt-0.5 line-clamp-2 text-[13px] leading-relaxed ' + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
-            {note.text?.slice(0, 200)}
+          <p className={'mt-0.5 line-clamp-3 text-[13px] leading-relaxed ' + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
+            {note.text?.slice(0, 220)}
           </p>
           {!isTrash && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
               {note.fav && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{t.tagFav}</span>}
               {note.archived ? (
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500 dark:bg-white/10 dark:text-gray-400">{t.tagArch}</span>
@@ -84,123 +84,124 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
             </div>
           )}
         </div>
-        <div className="flex flex-shrink-0 flex-col items-end gap-2">
-          <span className="text-[11px] font-medium text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
-          <div className="flex items-center gap-1">
-            {isTrash ? (
-              <>
+      </div>
+
+      <div className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-app-border/70 px-4 py-2.5 dark:border-white/10">
+        <span className="text-[11px] font-medium text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
+        <div className="flex items-center gap-1">
+          {isTrash ? (
+            <>
+              <ActionBtn
+                title={t.titleRestore}
+                onClick={() => {
+                  restore(note.id);
+                  show(t.tRestored2);
+                }}
+              >
+                ↩
+              </ActionBtn>
+              <ActionBtn
+                title={t.titlePermDel}
+                className="hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                onClick={() => {
+                  if (confirm(t.cPermDel)) {
+                    permDelete(note.id);
+                    show(t.tPermDel);
+                  }
+                }}
+              >
+                ✕
+              </ActionBtn>
+            </>
+          ) : note.archived ? (
+            <>
+              <ActionBtn
+                title={t.titleUnarch}
+                className="hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                onClick={() => {
+                  unarchive(note.id);
+                  show(t.tRestored);
+                }}
+              >
+                ⤴
+              </ActionBtn>
+              <ActionBtn
+                title={note.fav ? t.titleFavRem : t.titleFavAdd}
+                className={note.fav ? 'border-amber-300 bg-amber-50 text-amber-600' : 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600'}
+                onClick={() => {
+                  toggleFav(note.id);
+                  show(note.fav ? t.tFavRem : t.tFavAdd);
+                }}
+              >
+                ★
+              </ActionBtn>
+              <ActionBtn
+                title={t.titleDel}
+                className="hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                onClick={() => {
+                  trash(note.id);
+                  show(t.tMoved);
+                }}
+              >
+                ✕
+              </ActionBtn>
+            </>
+          ) : (
+            <>
+              {note.read ? (
                 <ActionBtn
-                  title={t.titleRestore}
+                  title={t.titleUnread}
+                  className="border-emerald-300 bg-emerald-50 text-emerald-600"
                   onClick={() => {
-                    restore(note.id);
-                    show(t.tRestored2);
+                    toggleUnread(note.id);
+                    show(t.tUnread);
                   }}
                 >
-                  ↩
+                  ↺
                 </ActionBtn>
+              ) : (
                 <ActionBtn
-                  title={t.titlePermDel}
-                  className="hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                  title={t.titleDone}
                   onClick={() => {
-                    if (confirm(t.cPermDel)) {
-                      permDelete(note.id);
-                      show(t.tPermDel);
-                    }
+                    toggleRead(note.id);
+                    show(t.tRead);
                   }}
                 >
-                  ✕
+                  ✓
                 </ActionBtn>
-              </>
-            ) : note.archived ? (
-              <>
-                <ActionBtn
-                  title={t.titleUnarch}
-                  className="hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
-                  onClick={() => {
-                    unarchive(note.id);
-                    show(t.tRestored);
-                  }}
-                >
-                  ⤴
-                </ActionBtn>
-                <ActionBtn
-                  title={note.fav ? t.titleFavRem : t.titleFavAdd}
-                  className={note.fav ? 'border-amber-300 bg-amber-50 text-amber-600' : 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600'}
-                  onClick={() => {
-                    toggleFav(note.id);
-                    show(note.fav ? t.tFavRem : t.tFavAdd);
-                  }}
-                >
-                  ★
-                </ActionBtn>
-                <ActionBtn
-                  title={t.titleDel}
-                  className="hover:border-red-300 hover:bg-red-50 hover:text-red-600"
-                  onClick={() => {
-                    trash(note.id);
-                    show(t.tMoved);
-                  }}
-                >
-                  ✕
-                </ActionBtn>
-              </>
-            ) : (
-              <>
-                {note.read ? (
-                  <ActionBtn
-                    title={t.titleUnread}
-                    className="border-emerald-300 bg-emerald-50 text-emerald-600"
-                    onClick={() => {
-                      toggleUnread(note.id);
-                      show(t.tUnread);
-                    }}
-                  >
-                    ↺
-                  </ActionBtn>
-                ) : (
-                  <ActionBtn
-                    title={t.titleDone}
-                    onClick={() => {
-                      toggleRead(note.id);
-                      show(t.tRead);
-                    }}
-                  >
-                    ✓
-                  </ActionBtn>
-                )}
-                <ActionBtn
-                  title={note.fav ? t.titleFavRem : t.titleFavAdd}
-                  className={note.fav ? 'border-amber-300 bg-amber-50 text-amber-600' : 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600'}
-                  onClick={() => {
-                    toggleFav(note.id);
-                    show(note.fav ? t.tFavRem : t.tFavAdd);
-                  }}
-                >
-                  ★
-                </ActionBtn>
-                <ActionBtn
-                  title={t.titleArch}
-                  className="hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
-                  onClick={() => {
-                    archive(note.id);
-                    show(t.tArched);
-                  }}
-                >
-                  🗄
-                </ActionBtn>
-                <ActionBtn
-                  title={t.titleDel}
-                  className="hover:border-red-300 hover:bg-red-50 hover:text-red-600"
-                  onClick={() => {
-                    trash(note.id);
-                    show(t.tMoved);
-                  }}
-                >
-                  ✕
-                </ActionBtn>
-              </>
-            )}
-          </div>
+              )}
+              <ActionBtn
+                title={note.fav ? t.titleFavRem : t.titleFavAdd}
+                className={note.fav ? 'border-amber-300 bg-amber-50 text-amber-600' : 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600'}
+                onClick={() => {
+                  toggleFav(note.id);
+                  show(note.fav ? t.tFavRem : t.tFavAdd);
+                }}
+              >
+                ★
+              </ActionBtn>
+              <ActionBtn
+                title={t.titleArch}
+                className="hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                onClick={() => {
+                  archive(note.id);
+                  show(t.tArched);
+                }}
+              >
+                🗄
+              </ActionBtn>
+              <ActionBtn
+                title={t.titleDel}
+                className="hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+                onClick={() => {
+                  trash(note.id);
+                  show(t.tMoved);
+                }}
+              >
+                ✕
+              </ActionBtn>
+            </>
+          )}
         </div>
       </div>
     </div>
