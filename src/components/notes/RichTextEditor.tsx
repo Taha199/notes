@@ -22,6 +22,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ top: 0, left: 0 });
   const [barColor, setBarColor] = useState('#534AB7');
+  const [typingColor, setTypingColor] = useState<string | null>(null);
   const colorBtnRef = useRef<HTMLButtonElement>(null);
 
   // Set initial HTML once (avoid overwriting cursor on each keystroke)
@@ -119,12 +120,29 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   const applyColor = (c: string) => {
+    const ed = editorRef.current;
+    if (!ed) return;
     setBarColor(c);
-    focusEditor();
+    setTypingColor(c);
+    ed.focus();
     restoreSel();
-    document.execCommand('foreColor', false, c);
+    const s = window.getSelection();
+    if (s && s.rangeCount > 0 && ed.contains(s.anchorNode) && !s.getRangeAt(0).collapsed) {
+      const range = s.getRangeAt(0);
+      const span = document.createElement('span');
+      span.style.color = c;
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      range.selectNodeContents(span);
+      range.collapse(false);
+      s.removeAllRanges();
+      s.addRange(range);
+      savedRange.current = range.cloneRange();
+    } else {
+      document.execCommand('foreColor', false, c);
+    }
     setPalOpen(false);
-    onChange(editorRef.current?.innerHTML ?? '');
+    onChange(ed.innerHTML);
   };
 
   useEffect(() => {
@@ -199,10 +217,14 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         ref={editorRef}
         contentEditable={editable}
         data-placeholder={placeholder}
-        onInput={() => onChange(editorRef.current?.innerHTML ?? '')}
+        dir="auto"
+        onInput={() => {
+          if (typingColor) document.execCommand('foreColor', false, typingColor);
+          onChange(editorRef.current?.innerHTML ?? '');
+        }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 text-sm leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
-        style={{ minHeight, maxHeight, cursor: editable ? 'text' : 'default' }}
+        style={{ minHeight, maxHeight, cursor: editable ? 'text' : 'default', unicodeBidi: 'plaintext' }}
       />
     </div>
   );
