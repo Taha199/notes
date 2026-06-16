@@ -106,13 +106,13 @@ export function Dashboard() {
           )}
 
           {page === 'home' && !hasSearch && (
-            <div className="grid grid-cols-1 gap-3.5 border-b border-app-border bg-app-bg p-5 dark:border-white/10 dark:bg-white/5 lg:grid-cols-2 xl:grid-cols-3">
+            <div className="flex flex-col gap-3.5 border-b border-app-border bg-app-bg p-5 dark:border-white/10 dark:bg-white/5">
               {drafts.map((d, i) => (
                 <DraftEditor key={d.id} draft={d} index={i} total={drafts.length} />
               ))}
               <button
                 onClick={addDraft}
-                className="min-h-[120px] rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/60 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10"
+                className="min-h-[82px] rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/60 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10"
               >
                 +
               </button>
