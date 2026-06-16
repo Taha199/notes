@@ -105,9 +105,9 @@ export function AuthPage() {
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-14 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
           {/* Marketing column — desktop only */}
           <div className="hidden w-full max-w-[480px] flex-col lg:order-2 lg:flex">
-            <div className="animate-fade-in mb-9 flex items-center gap-3">
-              <Logo size={38} rounded={11} />
-              <span className="text-lg font-bold tracking-tight text-app-text dark:text-white">{t.appName}</span>
+            <div className="animate-fade-in mb-9 flex items-center gap-4">
+              <Logo size={56} rounded={16} />
+              <span className="text-xl font-bold tracking-tight text-app-text dark:text-white">{t.appName}</span>
             </div>
             <h1 dir={t.dir} className="animate-fade-in text-[2.65rem] font-extrabold leading-[1.12] tracking-tight text-app-text dark:text-white" style={{ animationDelay: '0.05s' }}>
               {t.marketingTitle}
@@ -123,9 +123,9 @@ export function AuthPage() {
           {/* Auth card column */}
           <div className="flex w-full flex-col items-center lg:order-1 lg:w-auto">
             <AuthCard>
-              <div className="flex flex-col items-center gap-3 text-center">
+              <div className="flex flex-col items-center gap-4 text-center">
                 <div className="rounded-2xl shadow-lg shadow-primary/30">
-                  <Logo size={64} rounded={18} />
+                  <Logo size={190} rounded={32} />
                 </div>
                 <h1 className="text-2xl font-bold tracking-tight text-app-text dark:text-white">{t.appName}</h1>
                 <p className="max-w-[300px] text-sm text-app-text-secondary dark:text-gray-400">{t.appSubtitle}</p>
