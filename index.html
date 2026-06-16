@@ -253,6 +253,10 @@
     #auth-screen::before{content:'';position:absolute;width:500px;height:500px;background:radial-gradient(circle,rgba(83,74,183,.15) 0%,transparent 70%);top:-120px;right:-120px;border-radius:50%;pointer-events:none}
     #auth-screen::after{content:'';position:absolute;width:400px;height:400px;background:radial-gradient(circle,rgba(120,80,220,.12) 0%,transparent 70%);bottom:-100px;left:-80px;border-radius:50%;pointer-events:none}
     #auth-screen.hidden{display:none}
+    #boot-loader{position:fixed;inset:0;background:var(--bg);z-index:400;display:flex;align-items:center;justify-content:center;transition:opacity .25s ease}
+    #boot-loader.hidden{opacity:0;pointer-events:none}
+    .boot-spin{width:34px;height:34px;border-radius:50%;border:3px solid var(--border1);border-top-color:var(--ac);animation:bootspin .7s linear infinite}
+    @keyframes bootspin{to{transform:rotate(360deg)}}
     .auth-lang{position:absolute;top:16px;left:16px;z-index:1}
     .auth-lang .lang-btn{font-size:13px;padding:6px 12px;background:rgba(255,255,255,.7);backdrop-filter:blur(8px);border-color:rgba(83,74,183,.2)}
     .auth-card{background:rgba(255,255,255,.96);backdrop-filter:blur(20px);border-radius:28px;padding:44px 40px;width:100%;max-width:420px;box-shadow:0 24px 80px rgba(83,74,183,.18),0 4px 20px rgba(83,74,183,.08);border:1px solid rgba(255,255,255,.9);direction:rtl;position:relative;animation:scaleIn .35s cubic-bezier(.34,1.26,.64,1)}
@@ -436,8 +440,13 @@
   </div>
   <div class="toast" id="toast"></div>
 
+  <!-- BOOT LOADER -->
+  <div id="boot-loader">
+    <div class="boot-spin"></div>
+  </div>
+
   <!-- AUTH SCREEN -->
-  <div id="auth-screen">
+  <div id="auth-screen" class="hidden">
     <div class="auth-card">
       <div class="auth-lang lang-wrap">
         <button class="lang-btn" id="authLangBtn" onclick="toggleAuthLangDD(event)"><i class="ti ti-language"></i> <span id="authLangLbl">AR</span> <i class="ti ti-chevron-down" style="font-size:11px"></i></button>
@@ -494,6 +503,7 @@ const fbAuth = firebase.auth();
 let currentUser = null;
 
 firebase.auth().onAuthStateChanged(user => {
+  document.getElementById('boot-loader').classList.add('hidden');
   if(user){
     currentUser = user;
     document.getElementById('auth-screen').classList.add('hidden');
