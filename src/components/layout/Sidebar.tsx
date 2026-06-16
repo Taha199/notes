@@ -61,8 +61,15 @@ export function Sidebar({ page, setPage, onOpenSetPassword }: { page: Page; setP
             <span className="brand-wordmark brand-wordmark-sidebar">{t.appName}</span>
           </div>
         )}
-        <button onClick={() => setCollapsed((c) => !c)} className="flex flex-shrink-0 rounded-lg p-1.5 text-app-text-secondary hover:bg-white dark:hover:bg-white/10">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          title={collapsed ? 'Show menu' : 'Hide menu'}
+          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-app-border bg-white text-app-text-secondary shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:text-primary hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-300" style={{ transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+            <path d="M15 6l-6 6 6 6" />
+            <path d="M20 4v16" />
+          </svg>
         </button>
       </div>
 
