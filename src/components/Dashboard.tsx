@@ -19,6 +19,22 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
+function normalizeSearch(value: string) {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function noteMatchesSearch(note: Note, search: string) {
+  const query = normalizeSearch(search);
+  if (!query) return true;
+  const plainHtml = note.html.replace(/<[^>]*>/g, ' ');
+  const haystack = normalizeSearch([note.title, note.text, plainHtml, note.date].join(' '));
+  return haystack.includes(query);
+}
+
 function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMode, selected, onToggleSelect }: {
   notes: Note[];
   search: string;
@@ -29,8 +45,9 @@ function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMod
   selected?: Set<number>;
   onToggleSelect?: (id: number) => void;
 }) {
-  const filtered = search ? notes.filter((n) => (n.title + n.text).toLowerCase().includes(search.toLowerCase())) : notes;
-  if (!filtered.length) return <EmptyState text={search ? emptySearchText : emptyText} />;
+  const hasSearch = normalizeSearch(search).length > 0;
+  const filtered = hasSearch ? notes.filter((n) => noteMatchesSearch(n, search)) : notes;
+  if (!filtered.length) return <EmptyState text={hasSearch ? emptySearchText : emptyText} />;
   return (
     <div className="grid grid-cols-1 gap-3.5 px-5 pb-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {filtered.map((n) => (
@@ -50,6 +67,7 @@ export function Dashboard() {
   const [showSetPassword, setShowSetPassword] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const hasSearch = normalizeSearch(search).length > 0;
 
   const active = useMemo(() => notes.filter((n) => !n.archived && !n.trashed), [notes]);
   const unread = useMemo(() => active.filter((n) => !n.read), [active]);
@@ -80,7 +98,14 @@ export function Dashboard() {
         <Header page={page} search={search} setSearch={setSearch} onNewNote={handleNewNote} />
 
         <div className="flex-1 overflow-y-auto">
-          {page === 'home' && (
+          {page === 'home' && hasSearch && (
+            <div className="px-5 py-5">
+              <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🔎 {t.secAll}</div>
+              <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
+            </div>
+          )}
+
+          {page === 'home' && !hasSearch && (
             <div className="grid grid-cols-1 gap-3.5 border-b border-app-border bg-app-bg p-5 dark:border-white/10 dark:bg-white/5 lg:grid-cols-2 xl:grid-cols-3">
               {drafts.map((d, i) => (
                 <DraftEditor key={d.id} draft={d} index={i} total={drafts.length} />
@@ -193,7 +218,7 @@ export function Dashboard() {
               <div className="px-5 py-5">
                 <NoteList
                   notes={trashed}
-                  search=""
+                  search={search}
                   emptySearchText={t.emptySearch}
                   emptyText={t.emptyTrash}
                   onOpen={() => {}}
