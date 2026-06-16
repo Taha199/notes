@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --color-primary: #6C63FF;
+  --color-primary-dark: #5A52E0;
+  --color-app-bg: #F6F4FF;
+  --color-app-text: #1F2937;
+  --color-app-text-secondary: #6B7280;
+  --color-app-border: #E5E7EB;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-sans);
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dark body {
+  background: #0F0F17;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-20px) translateX(10px); }
+}
+@keyframes floatSlower {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(16px) translateX(-14px); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in { animation: fadeIn .4s ease both; }
+.animate-slide-up { animation: slideUp .5s cubic-bezier(.22,1,.36,1) both; }
+.animate-float-slow { animation: floatSlow 9s ease-in-out infinite; }
+.animate-float-slower { animation: floatSlower 12s ease-in-out infinite; }
+
+[contenteditable]:empty:before {
+  content: attr(data-placeholder);
+  color: #A8A8C0;
+  pointer-events: none;
+}
