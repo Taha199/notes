@@ -22,7 +22,8 @@ export function LanguageSwitcher({ className = '' }: { className?: string }) {
   }, []);
 
   return (
-    <div ref={ref} className={'relative ' + className}>
+    <div className={className}>
+      <div ref={ref} className="relative inline-block">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 rounded-xl border border-app-border/70 bg-white/70 px-3 py-1.5 text-xs font-semibold text-app-text-secondary backdrop-blur-md transition-all hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-300"
@@ -56,6 +57,7 @@ export function LanguageSwitcher({ className = '' }: { className?: string }) {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }

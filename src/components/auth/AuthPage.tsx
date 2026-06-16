@@ -104,7 +104,7 @@ export function AuthPage() {
       <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-16 lg:px-10">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-14 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
           {/* Marketing column — desktop only */}
-          <div className="hidden w-full max-w-[480px] flex-col lg:flex">
+          <div className="hidden w-full max-w-[480px] flex-col lg:order-2 lg:flex">
             <div className="animate-fade-in mb-9 flex items-center gap-3">
               <Logo size={38} rounded={11} />
               <span className="text-lg font-bold tracking-tight text-app-text dark:text-white">{t.appName}</span>
@@ -121,7 +121,7 @@ export function AuthPage() {
           </div>
 
           {/* Auth card column */}
-          <div className="flex w-full flex-col items-center lg:w-auto">
+          <div className="flex w-full flex-col items-center lg:order-1 lg:w-auto">
             <AuthCard>
               <div className="flex flex-col items-center gap-3 text-center">
                 <div className="rounded-2xl shadow-lg shadow-primary/30">
