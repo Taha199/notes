@@ -4,9 +4,6 @@ export function FooterCredit() {
       <span className="text-[11px] font-medium tracking-wide text-app-text-secondary/50 dark:text-gray-500/60">
         ✦ Designad av Dr. Abdullah Taha ✦
       </span>
-      <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-500/40" dir="rtl">
-        تصميم الدكتور عبدالله طه
-      </span>
     </div>
   );
 }

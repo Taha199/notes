@@ -3,7 +3,6 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import type { Lang } from '../../types';
 
 const OPTIONS: { code: Lang; flag: string; label: string }[] = [
-  { code: 'ar', flag: '🇸🇦', label: 'العربية' },
   { code: 'en', flag: '🇬🇧', label: 'English' },
   { code: 'sv', flag: '🇸🇪', label: 'Svenska' },
 ];

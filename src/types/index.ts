@@ -1,4 +1,4 @@
-export type Lang = 'ar' | 'en' | 'sv';
+export type Lang = 'en' | 'sv';
 
 export interface Note {
   id: number;

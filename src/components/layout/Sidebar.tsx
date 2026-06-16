@@ -58,7 +58,7 @@ export function Sidebar({ page, setPage, onOpenSetPassword }: { page: Page; setP
         {!collapsed && (
           <div className="flex items-center gap-2.5">
             <Logo size={38} />
-            <span className="text-[15px] font-bold tracking-tight text-app-text dark:text-gray-100">{t.appName}</span>
+            <span className="brand-wordmark brand-wordmark-sidebar">{t.appName}</span>
           </div>
         )}
         <button onClick={() => setCollapsed((c) => !c)} className="flex flex-shrink-0 rounded-lg p-1.5 text-app-text-secondary hover:bg-white dark:hover:bg-white/10">
