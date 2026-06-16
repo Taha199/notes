@@ -496,7 +496,7 @@
       </div>
       <div class="auth-logo-row">
         <svg width="36" height="36" viewBox="0 0 56 56" fill="none"><rect width="56" height="56" rx="14" fill="#534AB7"/><path d="M14 12h18l8 8v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2z" fill="white" opacity=".15"/><path d="M32 12v8h8" fill="none" stroke="white" stroke-width="1.5" stroke-opacity=".5" stroke-linejoin="round"/><path d="M14 12h18l8 8v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V14a2 2 0 0 1 2-2z" fill="none" stroke="white" stroke-width="1.5" stroke-opacity=".6" stroke-linejoin="round"/><rect x="18" y="24" width="14" height="2" rx="1" fill="white"/><rect x="18" y="29" width="10" height="2" rx="1" fill="white" opacity=".7"/><rect x="18" y="34" width="12" height="2" rx="1" fill="white" opacity=".5"/></svg>
-        <span class="auth-logo-name">ملاحظاتي</span>
+        <span class="auth-logo-name" id="authLogoName">ملاحظاتي</span>
       </div>
       <div class="auth-tabs">
         <button class="auth-tab active" id="tab-login" onclick="authTab('login')">تسجيل الدخول</button>
@@ -816,7 +816,7 @@ function applyLang(){
   const ap=document.getElementById('auth-pass');if(ap)ap.placeholder=L.authPassPh||'كلمة المرور';
   const ap2=document.getElementById('auth-pass2');if(ap2)ap2.placeholder=L.authPass2Ph||'تأكيد كلمة المرور';
   const ag=document.querySelector('.auth-google');if(ag){const sv=ag.querySelector('svg');ag.textContent='';if(sv)ag.appendChild(sv);ag.append(' '+(L.authGoogle||'المتابعة عبر Google'));}
-  const aln=document.querySelector('.auth-logo-name');if(aln)aln.textContent=L.logoTx;
+  s('authLogoName',L.logoTx);
   document.querySelector('.auth-card')&&(document.querySelector('.auth-card').dir=L.dir==='rtl'?'rtl':'ltr');
   s('userName',L.userName);s('userSub',L.userSub);s('avLetter',L.avLetter);
   const pt=document.getElementById('pt');if(pt)pt.textContent=L['page'+page.charAt(0).toUpperCase()+page.slice(1)]||pt.textContent;
