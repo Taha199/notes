@@ -143,6 +143,8 @@ export interface Translation {
   featCloudSub: string;
   featSecureTitle: string;
   featSecureSub: string;
+  marketingTitle: string;
+  marketingDesc: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -195,7 +197,7 @@ export const LANGS: Record<Lang, Translation> = {
     authErrSendFail: 'تعذر إرسال البريد، تحقق من العنوان',
     featNotesTitle: '📝 ملاحظات سريعة', featNotesSub: 'احفظ أفكارك في ثوانٍ',
     featCloudTitle: '☁️ مزامنة سحابية', featCloudSub: 'الوصول لملاحظاتك من كل مكان',
-    featSecureTitle: '🔒 تخزين آمن', featSecureSub: 'بياناتك محمية ومحفوظة',
+    featSecureTitle: '🔒 تخزين آمن', featSecureSub: 'بياناتك محمية ومحفوظة', marketingTitle: 'ملاحظاتك، في كل مكان.', marketingDesc: 'مساحة عصرية للكتابة وتنظيم ومزامنة كل ما تحتاجه.',
   },
   en: {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
@@ -246,7 +248,7 @@ export const LANGS: Record<Lang, Translation> = {
     authErrSendFail: 'Could not send email, check the address',
     featNotesTitle: '📝 Quick Notes', featNotesSub: 'Save ideas in seconds',
     featCloudTitle: '☁️ Cloud Sync', featCloudSub: 'Access your notes everywhere',
-    featSecureTitle: '🔒 Secure Storage', featSecureSub: 'Your data is protected and backed up',
+    featSecureTitle: '🔒 Secure Storage', featSecureSub: 'Your data is protected and backed up', marketingTitle: 'Your notes, everywhere.', marketingDesc: 'A modern place to write, organize, and sync everything you need.',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -297,6 +299,6 @@ export const LANGS: Record<Lang, Translation> = {
     authErrSendFail: 'Kunde inte skicka e-post, kontrollera adressen',
     featNotesTitle: '📝 Snabba anteckningar', featNotesSub: 'Spara idéer på några sekunder',
     featCloudTitle: '☁️ Molnsynkronisering', featCloudSub: 'Kom åt dina anteckningar överallt',
-    featSecureTitle: '🔒 Säker lagring', featSecureSub: 'Dina data skyddas och säkerhetskopieras',
+    featSecureTitle: '🔒 Säker lagring', featSecureSub: 'Dina data skyddas och säkerhetskopieras', marketingTitle: 'Dina anteckningar, överallt.', marketingDesc: 'En modern plats för att skriva, organisera och synkronisera allt du behöver.',
   },
 };

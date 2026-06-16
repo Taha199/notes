@@ -53,11 +53,16 @@ body {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.8); }
+  50% { opacity: 0.9; transform: scale(1.15); }
+}
 
 .animate-fade-in { animation: fadeIn .4s ease both; }
 .animate-slide-up { animation: slideUp .5s cubic-bezier(.22,1,.36,1) both; }
 .animate-float-slow { animation: floatSlow 9s ease-in-out infinite; }
 .animate-float-slower { animation: floatSlower 12s ease-in-out infinite; }
+.animate-twinkle { animation: twinkle 3.5s ease-in-out infinite; }
 
 [contenteditable]:empty:before {
   content: attr(data-placeholder);
