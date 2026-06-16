@@ -54,10 +54,10 @@ export function Sidebar({ page, setPage, onOpenSetPassword }: { page: Page; setP
 
   return (
     <aside className={'flex flex-col border-l border-app-border bg-app-bg/60 backdrop-blur-md transition-all duration-300 dark:border-white/10 dark:bg-white/5 ' + (collapsed ? 'w-[64px] min-w-[64px]' : 'w-[256px] min-w-[256px]')}>
-      <div className="flex min-h-[76px] items-center justify-between border-b border-app-border px-3.5 dark:border-white/10">
+      <div className="flex min-h-[68px] items-center justify-between border-b border-app-border px-3.5 dark:border-white/10">
         {!collapsed && (
           <div className="flex items-center gap-2.5">
-            <Logo size={44} />
+            <Logo size={38} />
             <span className="text-[15px] font-bold tracking-tight text-app-text dark:text-gray-100">{t.appName}</span>
           </div>
         )}

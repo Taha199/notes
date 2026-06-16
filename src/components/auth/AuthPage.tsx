@@ -123,10 +123,8 @@ export function AuthPage() {
           {/* Auth card column */}
           <div className="flex w-full flex-col items-center lg:order-1 lg:w-auto">
             <AuthCard>
-              <div className="flex flex-col items-center gap-4 text-center">
-                <div className="rounded-2xl shadow-lg shadow-primary/30">
-                  <Logo size={190} rounded={32} />
-                </div>
+              <div className="flex flex-col items-center gap-3.5 text-center">
+                <Logo size={150} rounded={28} />
                 <h1 className="text-2xl font-bold tracking-tight text-app-text dark:text-white">{t.appName}</h1>
                 <p className="max-w-[300px] text-sm text-app-text-secondary dark:text-gray-400">{t.appSubtitle}</p>
               </div>
