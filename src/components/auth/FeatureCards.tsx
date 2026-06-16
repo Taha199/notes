@@ -24,7 +24,7 @@ export function FeatureCards({ align = 'center' }: { align?: 'center' | 'start' 
           >
             {i > 0 && <span className="absolute left-5 right-5 top-0 h-px bg-gradient-to-r from-transparent via-primary/12 to-transparent dark:via-white/10" />}
             <span className="absolute inset-y-5 left-0 w-1 rounded-r-full bg-gradient-to-b from-primary via-[#8a82ff] to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-            <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/16 via-white/60 to-primary/6 text-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_12px_30px_-22px_rgba(108,99,255,0.9)] dark:from-primary/25 dark:via-white/5 dark:to-primary/10 dark:shadow-none">
+            <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center text-2xl">
               {icon}
             </span>
             <div dir={t.dir} className="min-w-0">
