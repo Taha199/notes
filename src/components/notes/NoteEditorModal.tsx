@@ -42,10 +42,10 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   };
 
   return (
-    <div onClick={(e) => e.target === e.currentTarget && onClose()} className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" style={{ animation: 'slideUp .22s cubic-bezier(.34,1.56,.64,1)' }}>
-        <div className="flex items-center justify-between border-b border-app-border bg-app-bg px-4 py-3 dark:border-white/10 dark:bg-white/5">
-          <div className="flex items-center gap-2">
+    <div onClick={(e) => e.target === e.currentTarget && onClose()} className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-2 backdrop-blur-sm sm:p-4">
+      <div className="flex max-h-[96dvh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900 sm:max-h-[92vh] sm:rounded-3xl" style={{ animation: 'slideUp .22s cubic-bezier(.34,1.56,.64,1)' }}>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <button
               onClick={() => setLocked((l) => !l)}
               className={
@@ -82,14 +82,14 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
           readOnly={locked}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t.mTiPh}
-          className="border-b border-app-border px-4 py-3.5 text-lg font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100"
+          className="border-b border-app-border px-3 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100 sm:px-4 sm:py-3.5 sm:text-lg"
         />
 
         <div className="flex-1 overflow-y-auto">
           <RichTextEditor html={html} onChange={setHtml} placeholder="" editable={!locked} minHeight="150px" />
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-4 py-3 dark:border-white/10 dark:bg-white/5">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
           <span className="text-[11px] text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
           <div className="flex flex-wrap gap-1.5">
             <button

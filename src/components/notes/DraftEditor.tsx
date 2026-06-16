@@ -36,12 +36,12 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
         className="border-b border-app-border bg-transparent px-4 py-2.5 text-sm font-semibold text-app-text outline-none placeholder:font-normal placeholder:text-gray-400 dark:border-white/10 dark:text-gray-100"
       />
       <RichTextEditor html={draft.html} onChange={onHtmlChange} placeholder={t.draftEdPh} maxHeight="320px" />
-      <div className="flex items-center justify-between border-t border-app-border px-4 py-2.5 dark:border-white/10">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border px-3 py-2.5 dark:border-white/10 sm:px-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             disabled={!plainText}
             onClick={() => submitDraft(draft.id)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-primary/30 transition-all hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-35"
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-primary/30 transition-all hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-35 sm:px-4"
           >
             ✓ {t.saveDraft}
           </button>

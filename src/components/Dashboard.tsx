@@ -49,7 +49,7 @@ function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMod
   const filtered = hasSearch ? notes.filter((n) => noteMatchesSearch(n, search)) : notes;
   if (!filtered.length) return <EmptyState text={hasSearch ? emptySearchText : emptyText} />;
   return (
-    <div className="grid grid-cols-1 gap-3.5 px-5 pb-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-3.5 px-3 pb-6 sm:grid-cols-2 sm:px-5 lg:grid-cols-3 xl:grid-cols-4">
       {filtered.map((n) => (
         <NoteCard key={n.id} note={n} onOpen={onOpen} selectMode={selectMode} selected={selected?.has(n.id)} onToggleSelect={onToggleSelect} />
       ))}
@@ -67,6 +67,7 @@ export function Dashboard() {
   const [showSetPassword, setShowSetPassword] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const hasSearch = normalizeSearch(search).length > 0;
 
   const active = useMemo(() => notes.filter((n) => !n.archived && !n.trashed), [notes]);
@@ -91,22 +92,23 @@ export function Dashboard() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-white dark:bg-gray-950">
-      <Sidebar page={page} setPage={setPage} onOpenSetPassword={() => setShowSetPassword(true)} />
+    <div className="flex h-[100dvh] overflow-hidden bg-white dark:bg-gray-950">
+      {mobileMenuOpen && <button aria-label="Close menu" onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 z-30 bg-gray-950/35 backdrop-blur-sm md:hidden" />}
+      <Sidebar page={page} setPage={setPage} onOpenSetPassword={() => setShowSetPassword(true)} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header page={page} search={search} setSearch={setSearch} onNewNote={handleNewNote} />
+        <Header page={page} search={search} setSearch={setSearch} onNewNote={handleNewNote} onOpenMenu={() => setMobileMenuOpen(true)} />
 
         <div className="flex-1 overflow-y-auto">
           {page === 'home' && hasSearch && (
-            <div className="px-5 py-5">
+            <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🔎 {t.secAll}</div>
               <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
             </div>
           )}
 
           {page === 'home' && !hasSearch && (
-            <div className="flex flex-col gap-3.5 border-b border-app-border bg-app-bg p-5 dark:border-white/10 dark:bg-white/5">
+            <div className="flex flex-col gap-3.5 border-b border-app-border bg-app-bg p-3 dark:border-white/10 dark:bg-white/5 sm:p-5">
               {drafts.map((d, i) => (
                 <DraftEditor key={d.id} draft={d} index={i} total={drafts.length} />
               ))}
@@ -120,8 +122,8 @@ export function Dashboard() {
           )}
 
           {page === 'library' && (
-            <div className="px-5 py-5">
-              <div className="mb-4 grid grid-cols-3 gap-3">
+            <div className="px-3 py-4 sm:px-5 sm:py-5">
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {[
                   { n: active.length, l: t.statActive, c: 'text-primary' },
                   { n: unread.length, l: t.statUnread, c: 'text-blue-600' },
@@ -139,28 +141,28 @@ export function Dashboard() {
           )}
 
           {page === 'unread' && (
-            <div className="px-5 py-5">
+            <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">📖 {t.secUnread}</div>
               <NoteList notes={unread} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
             </div>
           )}
 
           {page === 'read' && (
-            <div className="px-5 py-5">
+            <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">✓ {t.secRead}</div>
               <NoteList notes={read} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
             </div>
           )}
 
           {page === 'archive' && (
-            <div className="px-5 py-5">
+            <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🗄 {t.secArch}</div>
               <NoteList notes={archived} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
             </div>
           )}
 
           {page === 'fav' && (
-            <div className="px-5 py-5">
+            <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">★ {t.secFav}</div>
               <NoteList notes={fav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
               {favArch.length > 0 && (
@@ -174,7 +176,7 @@ export function Dashboard() {
 
           {page === 'trash' && (
             <>
-              <div className="flex items-center justify-between gap-2 border-b border-app-border bg-white px-5 py-3 dark:border-white/10 dark:bg-gray-900">
+              <div className="flex flex-col items-stretch justify-between gap-2 border-b border-app-border bg-white px-3 py-3 dark:border-white/10 dark:bg-gray-900 sm:flex-row sm:items-center sm:px-5">
                 <button
                   onClick={() => {
                     setSelectMode((s) => !s);
@@ -184,7 +186,7 @@ export function Dashboard() {
                 >
                   {selectMode ? t.cancelSel : t.selDel}
                 </button>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {selectMode && selected.size > 0 && (
                     <button
                       onClick={() => {
@@ -215,7 +217,7 @@ export function Dashboard() {
                   )}
                 </div>
               </div>
-              <div className="px-5 py-5">
+              <div className="px-3 py-4 sm:px-5 sm:py-5">
                 <NoteList
                   notes={trashed}
                   search={search}
