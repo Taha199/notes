@@ -97,9 +97,9 @@ export function AuthPage() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div dir="ltr" className="relative min-h-screen overflow-hidden">
       <AuthBackground />
-      <LanguageSwitcher className="fixed top-5 right-5 z-20" />
+      <LanguageSwitcher className="fixed top-5 left-5 z-20" />
 
       <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-16 lg:px-10">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-14 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
@@ -109,10 +109,10 @@ export function AuthPage() {
               <Logo size={38} rounded={11} />
               <span className="text-lg font-bold tracking-tight text-app-text dark:text-white">{t.appName}</span>
             </div>
-            <h1 className="animate-fade-in text-[2.65rem] font-extrabold leading-[1.12] tracking-tight text-app-text dark:text-white" style={{ animationDelay: '0.05s' }}>
+            <h1 dir={t.dir} className="animate-fade-in text-[2.65rem] font-extrabold leading-[1.12] tracking-tight text-app-text dark:text-white" style={{ animationDelay: '0.05s' }}>
               {t.marketingTitle}
             </h1>
-            <p className="animate-fade-in mt-5 max-w-[420px] text-[15px] leading-relaxed text-app-text-secondary dark:text-gray-400" style={{ animationDelay: '0.1s' }}>
+            <p dir={t.dir} className="animate-fade-in mt-5 max-w-[420px] text-[15px] leading-relaxed text-app-text-secondary dark:text-gray-400" style={{ animationDelay: '0.1s' }}>
               {t.marketingDesc}
             </p>
             <div className="mt-10">
