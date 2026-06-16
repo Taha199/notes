@@ -37,7 +37,7 @@ export function LanguageSwitcher({ className = '' }: { className?: string }) {
         </svg>
       </button>
       {open && (
-        <div className="absolute top-full mt-2 right-0 z-50 min-w-[150px] rounded-xl border border-app-border bg-white p-1.5 shadow-xl animate-fade-in dark:border-white/10 dark:bg-gray-800">
+        <div className="absolute top-full left-0 z-50 mt-2 min-w-[150px] rounded-xl border border-app-border bg-white p-1.5 shadow-xl animate-fade-in dark:border-white/10 dark:bg-gray-800">
           {OPTIONS.map((o) => (
             <button
               key={o.code}
