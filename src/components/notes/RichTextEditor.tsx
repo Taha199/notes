@@ -20,10 +20,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [fontSize, setFontSize] = useState(13);
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
-  const [palPos, setPalPos] = useState({ top: 0, left: 0 });
   const [barColor, setBarColor] = useState('#534AB7');
   const [typingColor, setTypingColor] = useState<string | null>(null);
-  const colorBtnRef = useRef<HTMLButtonElement>(null);
+  const colorWrapRef = useRef<HTMLDivElement>(null);
 
   // Set initial HTML once (avoid overwriting cursor on each keystroke)
   useEffect(() => {
@@ -111,11 +110,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   const togglePalette = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     saveSel();
-    if (!palOpen && colorBtnRef.current) {
-      const r = colorBtnRef.current.getBoundingClientRect();
-      setPalPos({ top: r.bottom + 6, left: Math.max(8, r.right - 180) });
-    }
     setPalOpen((o) => !o);
   };
 
@@ -147,7 +143,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   useEffect(() => {
     if (!palOpen) return;
-    const close = () => setPalOpen(false);
+    const close = (e: MouseEvent) => {
+      if (!colorWrapRef.current?.contains(e.target as Node)) setPalOpen(false);
+    };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [palOpen]);
@@ -177,15 +175,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           </button>
         </div>
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
-        <div className="relative">
-          <button ref={colorBtnRef} type="button" onMouseDown={togglePalette} title={t.titleColor} className="flex h-7 w-7 flex-col items-center justify-center gap-0.5 rounded-md hover:bg-white dark:hover:bg-white/10">
+        <div ref={colorWrapRef} className="relative">
+          <button type="button" onMouseDown={togglePalette} title={t.titleColor} className="flex h-7 w-7 flex-col items-center justify-center gap-0.5 rounded-md hover:bg-white dark:hover:bg-white/10">
             <span className="text-xs font-bold leading-none">A</span>
             <span className="h-[3px] w-4 rounded-sm" style={{ background: barColor }} />
           </button>
           {palOpen && (
             <div
-              className="fixed z-[9999] grid grid-cols-6 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
-              style={{ top: palPos.top, left: palPos.left }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              className="absolute left-0 top-full z-[9999] mt-2 grid w-[184px] grid-cols-6 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
             >
               {COLORS.map((c) => (
                 <div
