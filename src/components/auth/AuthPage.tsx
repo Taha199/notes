@@ -105,17 +105,19 @@ export function AuthPage() {
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-14 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
           {/* Marketing column — desktop only */}
           <div className="hidden w-full max-w-[520px] flex-col lg:order-2 lg:flex">
-            <div className="animate-fade-in mb-8 inline-flex w-fit items-center gap-4 rounded-[24px] border border-white/70 bg-white/45 px-4 py-3 shadow-[0_18px_55px_-32px_rgba(108,99,255,0.75)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-              <Logo size={60} rounded={16} />
+            <div className="animate-fade-in mb-7 inline-flex w-fit items-center gap-4 rounded-[28px] border border-white/80 bg-white/35 px-3.5 py-2.5 shadow-[0_22px_80px_-44px_rgba(108,99,255,0.95),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/5">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/50 shadow-inner shadow-white/80 dark:bg-white/5 dark:shadow-none">
+                <Logo size={46} rounded={14} />
+              </span>
               <span className="brand-wordmark brand-wordmark-marketing">{t.appName}</span>
             </div>
-            <h1 dir={t.dir} className="animate-fade-in max-w-[500px] text-[3.15rem] font-extrabold leading-[1.03] tracking-tight text-app-text dark:text-white" style={{ animationDelay: '0.05s' }}>
+            <h1 dir={t.dir} className="animate-fade-in max-w-[510px] text-[3.2rem] font-extrabold leading-[1.02] tracking-tight text-app-text dark:text-white" style={{ animationDelay: '0.05s' }}>
               {t.marketingTitle}
             </h1>
-            <p dir={t.dir} className="animate-fade-in mt-6 max-w-[455px] text-[16px] leading-8 text-app-text-secondary dark:text-gray-400" style={{ animationDelay: '0.1s' }}>
+            <p dir={t.dir} className="animate-fade-in mt-6 max-w-[465px] text-[16px] leading-8 text-app-text-secondary dark:text-gray-400" style={{ animationDelay: '0.1s' }}>
               {t.marketingDesc}
             </p>
-            <div className="mt-12">
+            <div className="mt-11">
               <FeatureCards align="start" />
             </div>
           </div>
