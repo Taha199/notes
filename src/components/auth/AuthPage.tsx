@@ -104,18 +104,18 @@ export function AuthPage() {
       <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-16 lg:px-10">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-14 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
           {/* Marketing column — desktop only */}
-          <div className="hidden w-full max-w-[480px] flex-col lg:order-2 lg:flex">
-            <div className="animate-fade-in mb-9 flex items-center gap-4">
-              <Logo size={56} rounded={16} />
+          <div className="hidden w-full max-w-[520px] flex-col lg:order-2 lg:flex">
+            <div className="animate-fade-in mb-8 inline-flex w-fit items-center gap-4 rounded-[24px] border border-white/70 bg-white/45 px-4 py-3 shadow-[0_18px_55px_-32px_rgba(108,99,255,0.75)] backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+              <Logo size={60} rounded={16} />
               <span className="brand-wordmark brand-wordmark-marketing">{t.appName}</span>
             </div>
-            <h1 dir={t.dir} className="animate-fade-in text-[2.65rem] font-extrabold leading-[1.12] tracking-tight text-app-text dark:text-white" style={{ animationDelay: '0.05s' }}>
+            <h1 dir={t.dir} className="animate-fade-in max-w-[500px] text-[3.15rem] font-extrabold leading-[1.03] tracking-tight text-app-text dark:text-white" style={{ animationDelay: '0.05s' }}>
               {t.marketingTitle}
             </h1>
-            <p dir={t.dir} className="animate-fade-in mt-5 max-w-[420px] text-[15px] leading-relaxed text-app-text-secondary dark:text-gray-400" style={{ animationDelay: '0.1s' }}>
+            <p dir={t.dir} className="animate-fade-in mt-6 max-w-[455px] text-[16px] leading-8 text-app-text-secondary dark:text-gray-400" style={{ animationDelay: '0.1s' }}>
               {t.marketingDesc}
             </p>
-            <div className="mt-10">
+            <div className="mt-12">
               <FeatureCards align="start" />
             </div>
           </div>
