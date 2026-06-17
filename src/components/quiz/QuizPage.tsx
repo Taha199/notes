@@ -3,12 +3,6 @@ import { useNotes } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 
-function speak(text: string) {
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'sv-SE';
-  window.speechSynthesis.speak(u);
-}
 
 export function QuizPage() {
   const { quizzes, deleteQuiz, updateQuiz } = useNotes();
