@@ -4,7 +4,6 @@ import {
   GoogleAuthProvider,
   EmailAuthProvider,
 } from 'firebase/auth';
-import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDvmhfrgIWtgdSCnvwPgt5u0P4-unx0HL4',
@@ -18,7 +17,6 @@ const firebaseConfig = {
 
 export const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
-export const storage = getStorage(firebaseApp);
 export const googleProvider = new GoogleAuthProvider();
 export { EmailAuthProvider };
 

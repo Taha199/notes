@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { FB_DB_URL, storage } from '../../lib/firebase';
+import { FB_DB_URL } from '../../lib/firebase';
 
 interface StoredFile {
   id: string;
   name: string;
   type: string;
   size: number;
-  url: string;
-  path: string;
+  dataUrl: string;
   addedAt: string;
 }
 
@@ -20,8 +18,22 @@ function formatSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function safeFileName(name: string) {
-  return name.replace(/[^\w.\-]+/g, '_');
+function readFile(file: File): Promise<StoredFile> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      resolve({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: file.name,
+        type: file.type || 'application/octet-stream',
+        size: file.size,
+        dataUrl: String(reader.result),
+        addedAt: new Date().toLocaleString(),
+      });
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 export function FilesPage({ search }: { search: string }) {
@@ -76,24 +88,7 @@ export function FilesPage({ search }: { search: string }) {
     if (!list?.length || !user) return;
     setUploading(true);
     try {
-      const uploaded = await Promise.all(
-        Array.from(list).map(async (file) => {
-          const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          const path = `users/${user.uid}/files/${id}-${safeFileName(file.name)}`;
-          const storageRef = ref(storage, path);
-          await uploadBytes(storageRef, file, { contentType: file.type || 'application/octet-stream' });
-          const url = await getDownloadURL(storageRef);
-          return {
-            id,
-            name: file.name,
-            type: file.type || 'application/octet-stream',
-            size: file.size,
-            url,
-            path,
-            addedAt: new Date().toLocaleString(),
-          };
-        })
-      );
+      const uploaded = await Promise.all(Array.from(list).map(readFile));
       await saveFiles([...uploaded, ...files]);
       if (inputRef.current) inputRef.current.value = '';
     } finally {
@@ -102,11 +97,6 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const removeFile = async (file: StoredFile) => {
-    try {
-      await deleteObject(ref(storage, file.path));
-    } catch {
-      /* If the object is already gone, still remove the saved record. */
-    }
     await saveFiles(files.filter((item) => item.id !== file.id));
   };
 
@@ -147,7 +137,7 @@ export function FilesPage({ search }: { search: string }) {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <a href={file.url} target="_blank" rel="noreferrer" className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">
+                <a href={file.dataUrl} download={file.name} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">
                   {t.filesOpen}
                 </a>
                 <button onClick={() => removeFile(file)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
