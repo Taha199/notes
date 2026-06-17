@@ -12,6 +12,7 @@ function speak(text: string) {
 export function QuizPage() {
   const { quizzes, deleteQuiz, updateQuiz } = useNotes();
   const [favs, setFavs] = useState<Set<number>>(new Set());
+  const [speakingId, setSpeakingId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editQ, setEditQ] = useState('');
   const [editA, setEditA] = useState('');
@@ -105,7 +106,23 @@ export function QuizPage() {
                 {/* Actions */}
                 <div className="flex flex-shrink-0 flex-col items-center justify-between gap-2 px-3 py-3">
                   <button onClick={() => toggleFav(q.id)} className={'text-base transition-colors ' + (favs.has(q.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
-                  <button onClick={() => speak(q.question.replace(/<[^>]*>/g, '') + '. ' + q.answer.replace(/<[^>]*>/g, ''))} className="text-app-text-secondary/40 transition-colors hover:text-primary" title="Läs upp">
+                  <button
+                    onClick={() => {
+                      if (speakingId === q.id) {
+                        window.speechSynthesis.cancel();
+                        setSpeakingId(null);
+                      } else {
+                        window.speechSynthesis.cancel();
+                        setSpeakingId(q.id);
+                        const u = new SpeechSynthesisUtterance(q.question.replace(/<[^>]*>/g, '') + '. ' + q.answer.replace(/<[^>]*>/g, ''));
+                        u.lang = 'sv-SE';
+                        u.onend = () => setSpeakingId(null);
+                        window.speechSynthesis.speak(u);
+                      }
+                    }}
+                    className={'transition-colors ' + (speakingId === q.id ? 'text-primary' : 'text-app-text-secondary/40 hover:text-primary')}
+                    title={speakingId === q.id ? 'Stoppa' : 'Läs upp'}
+                  >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
                     </svg>
