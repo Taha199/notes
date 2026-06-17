@@ -62,7 +62,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
       setQuizItems(results);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
-      setQuizError(msg === 'INSUFFICIENT_CONTENT' ? 'المحتوى غير كافٍ لإنشاء أسئلة واضحة.' : msg || 'Failed to generate quiz.');
+      setQuizError(msg === 'INSUFFICIENT_CONTENT' ? 'Not enough content to generate questions.' : msg || 'Failed to generate quiz.');
     } finally {
       setQuizLoading(false);
     }
@@ -125,7 +125,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
 
             {quizLoading && (
               <div className="flex items-center gap-2 text-[13px] text-violet-600 dark:text-violet-400">
-                <span className="animate-spin">⏳</span> جاري توليد الأسئلة...
+                <span className="animate-spin">⏳</span> Generating questions...
               </div>
             )}
             {quizError && <p className="text-[13px] text-red-600">{quizError}</p>}
