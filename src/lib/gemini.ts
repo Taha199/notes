@@ -15,15 +15,15 @@ export async function generateQuiz(noteText: string): Promise<QuizResult> {
         {
           parts: [
             {
-              text: `Based on the following note content, generate ONE quiz question and its answer.
+              text: `Baserat på följande anteckningsinnehåll, generera EN fråga och dess svar på svenska.
 
-If the content is too short, unclear, or not meaningful enough to create a good quiz question, respond with exactly: INSUFFICIENT_CONTENT
+Om innehållet är för kort, oklart eller inte meningsfullt nog för att skapa en bra fråga, svara exakt med: INSUFFICIENT_CONTENT
 
-Otherwise respond in this exact format:
-QUESTION: <the question>
-ANSWER: <the answer>
+Annars svara i exakt detta format:
+QUESTION: <frågan på svenska>
+ANSWER: <svaret på svenska>
 
-Note content:
+Anteckningsinnehåll:
 ${noteText.slice(0, 3000)}`,
             },
           ],
