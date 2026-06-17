@@ -3,6 +3,8 @@ import { useLanguage } from '../../contexts/LanguageContext';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48, 56, 64, 72];
+const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'];
+const STATE_COMMANDS = [...TOGGLE_COMMANDS, 'justifyRight', 'justifyCenter', 'justifyLeft'];
 
 interface Props {
   html: string;
@@ -43,11 +45,35 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       savedRange.current = s.getRangeAt(0).cloneRange();
     }
   };
+
+  const selectEditorEnd = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const range = document.createRange();
+    range.selectNodeContents(ed);
+    range.collapse(false);
+    savedRange.current = range.cloneRange();
+  };
+
   const restoreSel = () => {
+    if (!savedRange.current) selectEditorEnd();
     if (!savedRange.current) return;
     const s = window.getSelection();
     s?.removeAllRanges();
     s?.addRange(savedRange.current);
+  };
+
+  const readCommandState = () => {
+    const active = new Set<string>();
+    STATE_COMMANDS.forEach((c) => {
+      try {
+        if (document.queryCommandState(c)) active.add(c);
+      } catch {
+        /* noop */
+      }
+    });
+    setActiveCmds(active);
+    return active;
   };
 
   useEffect(() => {
@@ -55,27 +81,28 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       const ed = editorRef.current;
       if (ed && (document.activeElement === ed || ed.contains(document.activeElement))) {
         saveSel();
-        const cmds = ['bold', 'italic', 'underline', 'strikeThrough', 'justifyRight', 'justifyCenter', 'justifyLeft'];
-        const active = new Set<string>();
-        cmds.forEach((c) => {
-          try {
-            if (document.queryCommandState(c)) active.add(c);
-          } catch {
-            /* noop */
-          }
-        });
-        setActiveCmds(active);
+        readCommandState();
       }
     };
     document.addEventListener('selectionchange', handler);
     return () => document.removeEventListener('selectionchange', handler);
   }, []);
 
-  const focusEditor = () => editorRef.current?.focus();
+  const focusEditor = () => {
+    editorRef.current?.focus({ preventScroll: true });
+    restoreSel();
+  };
 
   const exec = (cmd: string, value?: string) => {
     focusEditor();
+    const wasActive = activeCmds.has(cmd);
     document.execCommand(cmd, false, value);
+    saveSel();
+    const next = readCommandState();
+    if (TOGGLE_COMMANDS.includes(cmd)) {
+      next[wasActive ? 'delete' : 'add'](cmd);
+      setActiveCmds(new Set(next));
+    }
     onChange(editorRef.current?.innerHTML ?? '');
   };
 
