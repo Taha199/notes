@@ -51,7 +51,7 @@ export function QuizPage() {
             <div className="w-px flex-shrink-0 bg-app-border dark:bg-white/10" />
 
             {/* Right — Answer */}
-            <div className="flex w-[38%] flex-shrink-0 items-center px-4 py-4 pl-3">
+            <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4 pl-3">
               <span className="text-[14px] font-semibold text-app-text dark:text-gray-100 leading-snug">
                 {q.answer}
               </span>
