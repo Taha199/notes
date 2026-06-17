@@ -9,6 +9,7 @@ import { NoteCard } from './notes/NoteCard';
 import { DraftEditor } from './notes/DraftEditor';
 import { NoteEditorModal } from './notes/NoteEditorModal';
 import { SetPasswordModal } from './auth/SetPasswordModal';
+import { FilesPage } from './files/FilesPage';
 
 function EmptyState({ text }: { text: string }) {
   return (
@@ -139,6 +140,8 @@ export function Dashboard() {
               <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
             </div>
           )}
+
+          {page === 'files' && <FilesPage search={search} />}
 
           {page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">

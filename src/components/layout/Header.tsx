@@ -3,7 +3,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
 
 const ICONS: Record<Page, string> = {
-  home: '🏠', fav: '★', unread: '📖', read: '✓', library: '📚', archive: '🗄', trash: '🗑',
+  home: '🏠', fav: '★', unread: '📖', read: '✓', library: '📚', files: '📎', archive: '🗄', trash: '🗑',
 };
 
 export function Header({
@@ -21,7 +21,7 @@ export function Header({
 }) {
   const { t } = useLanguage();
   const titles: Record<Page, string> = {
-    home: t.pageHome, fav: t.pageFav, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, archive: t.pageArch, trash: t.pageTrash,
+    home: t.pageHome, fav: t.pageFav, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, files: t.pageFiles, archive: t.pageArch, trash: t.pageTrash,
   };
 
   return (

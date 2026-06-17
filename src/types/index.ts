@@ -17,4 +17,4 @@ export interface DraftContent {
   html: string;
 }
 
-export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'archive' | 'trash';
+export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash';

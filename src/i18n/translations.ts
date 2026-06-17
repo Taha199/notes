@@ -11,6 +11,7 @@ export interface Translation {
   navUnread: string;
   navRead: string;
   navLibrary: string;
+  navFiles: string;
   navArchive: string;
   navTrash: string;
   searchPh: string;
@@ -38,6 +39,7 @@ export interface Translation {
   pageRead: string;
   pageFav: string;
   pageArch: string;
+  pageFiles: string;
   pageTrash: string;
   statActive: string;
   statUnread: string;
@@ -55,6 +57,13 @@ export interface Translation {
   emptyNotes: string;
   emptySearch: string;
   emptyTrash: string;
+  filesTitle: string;
+  filesSub: string;
+  filesUpload: string;
+  filesEmpty: string;
+  filesOpen: string;
+  filesDelete: string;
+  filesStored: string;
   selDel: string;
   cancelSel: string;
   emptyTrashBtn: string;
@@ -152,19 +161,21 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
     appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
     navHome: 'Home', navFav: 'Favourites', navUnread: 'Unread', navRead: 'Read',
-    navLibrary: 'Notes Library', navArchive: 'Archive', navTrash: 'Trash',
+    navLibrary: 'Notes Library', navFiles: 'File Uploads', navArchive: 'Archive', navTrash: 'Trash',
     searchPh: 'Search...', newNote: 'New Note', locked: 'Locked', editing: 'Editing',
     mDel: 'Delete', mUnarch: 'Unarchive', mDone: 'Mark as Read', mSave: 'Save', mTiPh: 'Title (optional)',
     archPill: 'Read & Archived', userName: 'User', userSub: 'My Personal Notes',
     draft: 'Draft', draftTiPh: 'Title (optional)', draftEdPh: 'Write your note here...', saveDraft: 'Save Note',
     cloudSaving: 'Saving...', cloudSaved: 'Saved', cloudSavedMain: 'Saved to cloud',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Unread', pageRead: 'Read',
-    pageFav: 'Favourites', pageArch: 'Archive', pageTrash: 'Trash',
+    pageFav: 'Favourites', pageArch: 'Archive', pageFiles: 'File Uploads', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
     tagFav: '⭐ Favourite', tagRead: '✓ Read', tagUnread: '📖 Unread', tagArch: '🗄 Archived',
     emptyNotes: 'No notes here', emptySearch: 'No results', emptyTrash: 'Trash is empty',
+    filesTitle: 'Upload files', filesSub: 'Files are saved locally in this browser.', filesUpload: 'Choose files',
+    filesEmpty: 'No files uploaded yet', filesOpen: 'Download', filesDelete: 'Delete', filesStored: 'Saved locally',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough',
     titleRight: 'Align Right', titleCenter: 'Center', titleLeft: 'Align Left', titleClr: 'Clear Formatting', titleColor: 'Text Color',
@@ -203,19 +214,21 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
     appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
     navHome: 'Hem', navFav: 'Favoriter', navUnread: 'Olästa', navRead: 'Lästa',
-    navLibrary: 'Anteckningsbibliotek', navArchive: 'Arkiv', navTrash: 'Papperskorg',
+    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     searchPh: 'Sök...', newNote: 'Ny Anteckning', locked: 'Låst', editing: 'Redigerar',
     mDel: 'Radera', mUnarch: 'Avarkivera', mDone: 'Markera som Läst', mSave: 'Spara', mTiPh: 'Titel (valfri)',
     archPill: 'Läst & Arkiverad', userName: 'Användare', userSub: 'Mina Personliga Anteckningar',
     draft: 'Utkast', draftTiPh: 'Titel (valfri)', draftEdPh: 'Skriv din anteckning här...', saveDraft: 'Spara Anteckning',
     cloudSaving: 'Sparar...', cloudSaved: 'Sparat', cloudSavedMain: 'Sparat i molnet',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Olästa', pageRead: 'Lästa',
-    pageFav: 'Favoriter', pageArch: 'Arkiv', pageTrash: 'Papperskorg',
+    pageFav: 'Favoriter', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
     tagFav: '⭐ Favorit', tagRead: '✓ Läst', tagUnread: '📖 Oläst', tagArch: '🗄 Arkiverad',
     emptyNotes: 'Inga anteckningar här', emptySearch: 'Inga resultat', emptyTrash: 'Papperskorgen är tom',
+    filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas lokalt i den här webbläsaren.', filesUpload: 'Välj filer',
+    filesEmpty: 'Inga filer uppladdade ännu', filesOpen: 'Ladda ner', filesDelete: 'Radera', filesStored: 'Sparad lokalt',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken',
     titleRight: 'Höger', titleCenter: 'Centrera', titleLeft: 'Vänster', titleClr: 'Ta bort formatering', titleColor: 'Textfärg',
