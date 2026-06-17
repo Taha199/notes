@@ -104,16 +104,22 @@ export function FilesPage({ search }: { search: string }) {
     <div className="px-3 py-4 sm:px-5 sm:py-5">
       <div className="mb-5 rounded-3xl border border-app-border bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-app-text dark:text-gray-100">{t.filesTitle}</h3>
-            <p className="mt-1 text-sm text-app-text-secondary dark:text-gray-400">{t.filesSub}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-2xl shadow-sm shadow-primary/10 dark:bg-primary/20">
+              ☁️
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-app-text dark:text-gray-100">{t.filesTitle}</h3>
+              <p className="mt-1 text-sm text-app-text-secondary dark:text-gray-400">{t.filesSub}</p>
+            </div>
           </div>
           <button
             onClick={() => inputRef.current?.click()}
             disabled={uploading}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {uploading ? t.cloudSaving : `📎 ${t.filesUpload}`}
+            <span className="text-base">{uploading ? '☁️' : '☁️➕'}</span>
+            <span>{uploading ? t.cloudSaving : t.filesUpload}</span>
           </button>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
         </div>
