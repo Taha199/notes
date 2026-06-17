@@ -3,8 +3,9 @@ import { useLanguage } from '../../contexts/LanguageContext';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48, 56, 64, 72];
-const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'];
+const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const STATE_COMMANDS = [...TOGGLE_COMMANDS, 'justifyRight', 'justifyCenter', 'justifyLeft'];
+type ToggleCommand = typeof TOGGLE_COMMANDS[number];
 
 interface Props {
   html: string;
@@ -19,6 +20,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const { t } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
+  const pendingMarks = useRef<Partial<Record<ToggleCommand, boolean>>>({});
   const [fontSize, setFontSize] = useState(13);
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
@@ -77,6 +79,26 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return active;
   };
 
+  const isToggleCommand = (cmd: string): cmd is ToggleCommand => TOGGLE_COMMANDS.includes(cmd as ToggleCommand);
+
+  const readToggleState = (cmd: ToggleCommand) => {
+    try {
+      return document.queryCommandState(cmd);
+    } catch {
+      return activeCmds.has(cmd);
+    }
+  };
+
+  const setButtonState = (cmd: ToggleCommand, enabled: boolean) => {
+    setActiveCmds((prev) => {
+      const next = new Set(prev);
+      next[enabled ? 'add' : 'delete'](cmd);
+      return next;
+    });
+  };
+
+  const hasPendingMarks = () => Object.keys(pendingMarks.current).length > 0;
+
   useEffect(() => {
     const handler = () => {
       const ed = editorRef.current;
@@ -96,15 +118,44 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   const exec = (cmd: string, value?: string) => {
     focusEditor();
-    const wasActive = activeCmds.has(cmd);
+    const toggleCmd = isToggleCommand(cmd) ? cmd : null;
+    const wasActive = toggleCmd ? readToggleState(toggleCmd) : activeCmds.has(cmd);
     document.execCommand(cmd, false, value);
     saveSel();
-    const next = readCommandState();
-    if (TOGGLE_COMMANDS.includes(cmd)) {
-      next[wasActive ? 'delete' : 'add'](cmd);
-      setActiveCmds(new Set(next));
+    readCommandState();
+    if (toggleCmd) {
+      const shouldEnable = !wasActive;
+      pendingMarks.current[toggleCmd] = shouldEnable;
+      setButtonState(toggleCmd, shouldEnable);
     }
     onChange(editorRef.current?.innerHTML ?? '');
+  };
+
+  const insertPendingText = (text: string) => {
+    const ed = editorRef.current;
+    if (!ed) return false;
+    const active = readCommandState();
+    const underline = pendingMarks.current.underline ?? active.has('underline');
+    const strike = pendingMarks.current.strikeThrough ?? active.has('strikeThrough');
+    const decoration = [underline ? 'underline' : '', strike ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
+    const style = [
+      `font-weight: ${(pendingMarks.current.bold ?? active.has('bold')) ? '700' : '400'}`,
+      `font-style: ${(pendingMarks.current.italic ?? active.has('italic')) ? 'italic' : 'normal'}`,
+      `text-decoration-line: ${decoration}`,
+      `color: ${barColor}`,
+    ].filter(Boolean).join('; ');
+
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/\n/g, '<br>');
+
+    document.execCommand('insertHTML', false, `<span style="${style}">${escaped}</span>`);
+    saveSel();
+    onChange(ed.innerHTML);
+    return true;
   };
 
   const applyPx = (px: number) => {
@@ -242,6 +293,13 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
+        onBeforeInput={(e) => {
+          const native = e.nativeEvent as InputEvent;
+          if (native.inputType === 'insertText' && native.data && hasPendingMarks()) {
+            e.preventDefault();
+            insertPendingText(native.data);
+          }
+        }}
         onInput={() => onChange(editorRef.current?.innerHTML ?? '')}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 text-sm leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
