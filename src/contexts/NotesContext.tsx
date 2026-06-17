@@ -20,6 +20,7 @@ interface NotesCtx {
   loaded: boolean;
   addQuiz: (item: Omit<QuizItem, 'id'>) => void;
   deleteQuiz: (id: number) => void;
+  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => void;
   addDraft: () => void;
   removeDraft: (id: string) => void;
   updateDraft: (id: string, patch: Partial<Draft>) => void;
@@ -236,6 +237,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => {
+    setQuizzes((prev) => {
+      const next = prev.map((q) => (q.id === id ? { ...q, ...patch } : q));
+      persist(notes, undefined, next);
+      return next;
+    });
+  };
+
   const toggleRead = (id: number) => updateNote(id, { read: true });
   const toggleUnread = (id: number) => updateNote(id, { read: false });
   const toggleFav = (id: number) =>
@@ -261,6 +270,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         loaded,
         addQuiz,
         deleteQuiz,
+        updateQuiz,
         addDraft,
         removeDraft,
         updateDraft,

@@ -9,8 +9,11 @@ function speak(text: string) {
 }
 
 export function QuizPage() {
-  const { quizzes, deleteQuiz } = useNotes();
+  const { quizzes, deleteQuiz, updateQuiz } = useNotes();
   const [favs, setFavs] = useState<Set<number>>(new Set());
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editQ, setEditQ] = useState('');
+  const [editA, setEditA] = useState('');
 
   const toggleFav = (id: number) => {
     setFavs((prev) => {
@@ -18,6 +21,18 @@ export function QuizPage() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const startEdit = (id: number, question: string, answer: string) => {
+    setEditingId(id);
+    setEditQ(question);
+    setEditA(answer);
+  };
+
+  const saveEdit = () => {
+    if (editingId === null) return;
+    updateQuiz(editingId, { question: editQ.trim(), answer: editA.trim() });
+    setEditingId(null);
   };
 
   if (!quizzes.length) {
@@ -36,53 +51,62 @@ export function QuizPage() {
       </div>
       <div className="flex flex-col gap-2">
         {quizzes.map((q) => (
-          <div
-            key={q.id}
-            className="group flex items-stretch overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]"
-          >
-            {/* Left — Question */}
-            <div className="flex flex-1 items-center px-4 py-4">
-              <span className="text-[13px] text-app-text-secondary dark:text-gray-300 leading-snug">
-                {q.question}
-              </span>
-            </div>
+          <div key={q.id} className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
+            {editingId === q.id ? (
+              /* Edit mode */
+              <div className="flex flex-col gap-2 p-4">
+                <textarea
+                  value={editQ}
+                  onChange={(e) => setEditQ(e.target.value)}
+                  rows={2}
+                  className="w-full resize-none rounded-xl border border-app-border bg-app-bg px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
+                  placeholder="Fråga..."
+                />
+                <textarea
+                  value={editA}
+                  onChange={(e) => setEditA(e.target.value)}
+                  rows={2}
+                  className="w-full resize-none rounded-xl border border-app-border bg-app-bg px-3 py-2 text-[13px] font-semibold text-app-text outline-none focus:border-primary/50 dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
+                  placeholder="Svar..."
+                />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setEditingId(null)} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">
+                    Avbryt
+                  </button>
+                  <button onClick={saveEdit} disabled={!editQ.trim() || !editA.trim()} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-40">
+                    Spara
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* View mode */
+              <div className="flex items-stretch">
+                {/* Left — Question */}
+                <div className="flex flex-1 items-center px-4 py-4">
+                  <span className="text-[13px] text-app-text-secondary dark:text-gray-300 leading-snug">{q.question}</span>
+                </div>
 
-            {/* Divider */}
-            <div className="w-px flex-shrink-0 bg-app-border dark:bg-white/10" />
+                {/* Divider */}
+                <div className="w-px flex-shrink-0 bg-app-border dark:bg-white/10" />
 
-            {/* Right — Answer */}
-            <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4 pl-3">
-              <span className="text-[14px] font-semibold text-app-text dark:text-gray-100 leading-snug">
-                {q.answer}
-              </span>
-            </div>
+                {/* Right — Answer */}
+                <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4">
+                  <span className="text-[14px] font-semibold text-app-text dark:text-gray-100 leading-snug">{q.answer}</span>
+                </div>
 
-            {/* Actions */}
-            <div className="flex flex-shrink-0 flex-col items-center justify-between gap-2 px-3 py-3">
-              <button
-                onClick={() => toggleFav(q.id)}
-                className={'text-base transition-colors ' + (favs.has(q.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')}
-                title="Favorit"
-              >
-                ★
-              </button>
-              <button
-                onClick={() => speak(q.question + '. ' + q.answer)}
-                className="text-app-text-secondary/40 transition-colors hover:text-primary"
-                title="Läs upp"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-                </svg>
-              </button>
-              <button
-                onClick={() => deleteQuiz(q.id)}
-                className="text-[11px] text-app-text-secondary/30 transition-colors hover:text-red-500"
-                title="Ta bort"
-              >
-                ✕
-              </button>
-            </div>
+                {/* Actions */}
+                <div className="flex flex-shrink-0 flex-col items-center justify-between gap-2 px-3 py-3">
+                  <button onClick={() => toggleFav(q.id)} className={'text-base transition-colors ' + (favs.has(q.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
+                  <button onClick={() => speak(q.question + '. ' + q.answer)} className="text-app-text-secondary/40 transition-colors hover:text-primary" title="Läs upp">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                    </svg>
+                  </button>
+                  <button onClick={() => startEdit(q.id, q.question, q.answer)} className="text-[11px] text-app-text-secondary/40 transition-colors hover:text-primary" title="Redigera">✏️</button>
+                  <button onClick={() => deleteQuiz(q.id)} className="text-[11px] text-app-text-secondary/30 transition-colors hover:text-red-500" title="Ta bort">✕</button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
