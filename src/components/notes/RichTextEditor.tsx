@@ -75,6 +75,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         /* noop */
       }
     });
+    TOGGLE_COMMANDS.forEach((cmd) => {
+      const pending = pendingMarks.current[cmd];
+      if (pending === true) active.add(cmd);
+      if (pending === false) active.delete(cmd);
+    });
     setActiveCmds(active);
     return active;
   };
