@@ -119,15 +119,22 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const exec = (cmd: string, value?: string) => {
     focusEditor();
     const toggleCmd = isToggleCommand(cmd) ? cmd : null;
-    const wasActive = toggleCmd ? readToggleState(toggleCmd) : activeCmds.has(cmd);
+    const selection = window.getSelection();
+    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    const hasSelection = !!range && !range.collapsed;
+
+    if (toggleCmd && !hasSelection) {
+      const current = pendingMarks.current[toggleCmd] ?? readToggleState(toggleCmd);
+      const shouldEnable = !current;
+      pendingMarks.current[toggleCmd] = shouldEnable;
+      setButtonState(toggleCmd, shouldEnable);
+      saveSel();
+      return;
+    }
+
     document.execCommand(cmd, false, value);
     saveSel();
     readCommandState();
-    if (toggleCmd) {
-      const shouldEnable = !wasActive;
-      pendingMarks.current[toggleCmd] = shouldEnable;
-      setButtonState(toggleCmd, shouldEnable);
-    }
     onChange(editorRef.current?.innerHTML ?? '');
   };
 
