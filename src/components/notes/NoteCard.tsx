@@ -87,7 +87,12 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
       </div>
 
       <div className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-app-border/70 px-4 py-2.5 dark:border-white/10">
-        <span className="text-[11px] font-medium text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] font-medium text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
+          {note.lastEdited && (
+            <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">Edited: {note.lastEdited}</span>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           {isTrash ? (
             <>

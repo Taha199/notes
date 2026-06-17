@@ -10,6 +10,7 @@ export interface Note {
   archived: boolean;
   trashed?: boolean;
   date: string;
+  lastEdited?: string;
 }
 
 export interface DraftContent {

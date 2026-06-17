@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { RichTextEditor } from './RichTextEditor';
 
 export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: () => void }) {
-  const { notes, updateNote, toggleFav, trash, unarchive } = useNotes();
+  const { notes, updateNote, toggleFav, trash, unarchive, nowStr } = useNotes();
   const { t } = useLanguage();
   const { show } = useToast();
   const note = notes.find((n) => n.id === noteId);
@@ -30,7 +30,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
       show(t.tCantEmpty);
       return;
     }
-    updateNote(note.id, { title: title.trim(), html, text: plainText });
+    updateNote(note.id, { title: title.trim(), html, text: plainText, lastEdited: nowStr() });
     setLocked(true);
     show(t.tSaved);
   };
@@ -90,7 +90,12 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
-          <span className="text-[11px] text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[11px] text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
+            {note.lastEdited && (
+              <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">Edited: {note.lastEdited}</span>
+            )}
+          </div>
           <div className="flex flex-wrap gap-1.5">
             <button
               onClick={() => {
