@@ -5,6 +5,16 @@ import { useToast } from '../../contexts/ToastContext';
 import { RichTextEditor } from './RichTextEditor';
 import { generateQuiz, type QuizResult } from '../../lib/gemini';
 
+function mdToHtml(content: string): string {
+  // Only convert if content looks like markdown (not already HTML)
+  if (/<[a-z][\s\S]*>/i.test(content)) return content;
+  return content
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+}
+
 export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: () => void }) {
   const { notes, updateNote, toggleFav, trash, unarchive, nowStr, addQuiz } = useNotes();
   const { t } = useLanguage();
@@ -12,7 +22,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   const note = notes.find((n) => n.id === noteId);
   const [locked, setLocked] = useState(true);
   const [title, setTitle] = useState(note?.title ?? '');
-  const [html, setHtml] = useState(note?.html ?? '');
+  const [html, setHtml] = useState(() => mdToHtml(note?.html ?? ''));
 
   // Quiz state
   const [quizOpen, setQuizOpen] = useState(false);
@@ -26,7 +36,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   useEffect(() => {
     if (note) {
       setTitle(note.title);
-      setHtml(note.html);
+      setHtml(mdToHtml(note.html));
       setLocked(true);
     }
   }, [note?.id]); // eslint-disable-line react-hooks/exhaustive-deps
