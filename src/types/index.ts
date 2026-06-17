@@ -20,10 +20,18 @@ export interface DraftContent {
 
 export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz' | 'chat';
 
+export interface ChatAttachment {
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+  base64: string;
+}
+
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   timestamp: string;
+  attachment?: ChatAttachment;
 }
 
 export interface ChatConversation {

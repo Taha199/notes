@@ -68,14 +68,24 @@ export interface ChatTurn {
 
 const STREAM_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${API_KEY}`;
 
+export interface FilePart {
+  mimeType: string;
+  base64: string;
+}
+
 export async function sendChatMessageStream(
   history: ChatTurn[],
   userMessage: string,
   onChunk: (chunk: string) => void,
+  attachment?: FilePart,
 ): Promise<void> {
+  const userParts: object[] = [];
+  if (attachment) userParts.push({ inlineData: { mimeType: attachment.mimeType, data: attachment.base64 } });
+  if (userMessage) userParts.push({ text: userMessage });
+
   const contents = [
     ...history.map((h) => ({ role: h.role, parts: [{ text: h.text }] })),
-    { role: 'user', parts: [{ text: userMessage }] },
+    { role: 'user', parts: userParts },
   ];
   const res = await fetch(STREAM_ENDPOINT, {
     method: 'POST',
