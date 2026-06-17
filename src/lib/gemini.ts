@@ -15,11 +15,13 @@ export async function generateQuiz(noteText: string): Promise<QuizResult[]> {
         {
           parts: [
             {
-              text: `Baserat på följande anteckningsinnehåll, generera frågor och svar på svenska som täcker ALLA delar och stycken i anteckningen. Varje viktig del ska ha minst en fråga.
+              text: `Du är en medicinsk/vetenskaplig assistent. Analysera följande anteckningsinnehåll:
 
-Om innehållet är för kort eller oklart, svara exakt med: INSUFFICIENT_CONTENT
+- Om innehållet redan innehåller en fråga (utan svar): besvara frågan på svenska och returnera den som ett Q&A-par.
+- Om innehållet är en längre text: generera frågor och svar på svenska som täcker ALLA delar.
+- Om innehållet är helt obegripligt eller tomt: svara exakt med: INSUFFICIENT_CONTENT
 
-Annars svara i exakt detta format (repetera för varje fråga):
+Svara i exakt detta format (repetera för varje fråga):
 Q: <frågan på svenska>
 A: <svaret på svenska>
 ---
