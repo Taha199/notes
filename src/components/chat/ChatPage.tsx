@@ -43,7 +43,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold shadow-sm ${isUser ? 'bg-primary text-white' : 'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300'}`}>
         {isUser ? '👤' : '🤖'}
       </div>
-      <div className={`group relative max-w-[75%] rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed shadow-sm ${isUser ? 'rounded-tr-sm bg-primary text-white' : 'rounded-tl-sm border border-app-border bg-white text-app-text dark:border-white/10 dark:bg-white/8 dark:text-gray-100'}`}>
+      <div dir="auto" className={`group relative max-w-[75%] rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed shadow-sm ${isUser ? 'rounded-tr-sm bg-primary text-white' : 'rounded-tl-sm border border-app-border bg-white text-app-text dark:border-white/10 dark:bg-white/8 dark:text-gray-100'}`}>
         {msg.attachment && (
           <div className="mb-2">
             {isImage(msg.attachment.mimeType) ? (
