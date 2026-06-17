@@ -18,4 +18,13 @@ export interface DraftContent {
   html: string;
 }
 
-export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash';
+export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz';
+
+export interface QuizItem {
+  id: number;
+  noteId: number;
+  noteTitle: string;
+  question: string;
+  answer: string;
+  date: string;
+}

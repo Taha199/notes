@@ -10,6 +10,7 @@ import { DraftEditor } from './notes/DraftEditor';
 import { NoteEditorModal } from './notes/NoteEditorModal';
 import { SetPasswordModal } from './auth/SetPasswordModal';
 import { FilesPage } from './files/FilesPage';
+import { QuizPage } from './quiz/QuizPage';
 
 function EmptyState({ text }: { text: string }) {
   return (
@@ -142,6 +143,7 @@ export function Dashboard() {
           )}
 
           {page === 'files' && <FilesPage search={search} />}
+          {page === 'quiz' && <QuizPage />}
 
           {page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
@@ -237,7 +239,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)} />}
+      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)} onGoQuiz={() => { setOpenNoteId(null); setPage('quiz'); }} />}
       {showSetPassword && <SetPasswordModal onClose={() => setShowSetPassword(false)} />}
     </div>
   );

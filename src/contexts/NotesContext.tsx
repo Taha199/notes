@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Note } from '../types';
+import type { Note, QuizItem } from '../types';
 import { FB_DB_URL } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
@@ -15,8 +15,11 @@ type CloudStatus = 'idle' | 'saving' | 'saved';
 interface NotesCtx {
   notes: Note[];
   drafts: Draft[];
+  quizzes: QuizItem[];
   cloudStatus: CloudStatus;
   loaded: boolean;
+  addQuiz: (item: Omit<QuizItem, 'id'>) => void;
+  deleteQuiz: (id: number) => void;
   addDraft: () => void;
   removeDraft: (id: string) => void;
   updateDraft: (id: string, patch: Partial<Draft>) => void;
@@ -52,6 +55,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   });
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [quizzes, setQuizzes] = useState<QuizItem[]>(() => {
+    try { return JSON.parse(localStorage.getItem('malacadhati_quiz') || '[]'); } catch { return []; }
+  });
   const draftCounter = useRef(0);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
   const [loaded, setLoaded] = useState(false);
@@ -85,6 +91,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (cloud && cloud.notes) {
           setNotes(cloud.notes);
           localStorage.setItem('malacadhati', JSON.stringify(cloud.notes));
+          if (cloud.quizzes) {
+            setQuizzes(cloud.quizzes);
+            localStorage.setItem('malacadhati_quiz', JSON.stringify(cloud.quizzes));
+          }
           if (cloud.drafts && cloud.drafts.length) {
             const dc = cloud.draftContents || {};
             setDrafts(
@@ -115,8 +125,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
-  const persist = (nextNotes: Note[], nextDrafts?: Draft[]) => {
+  const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[]) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+    const qList = nextQuizzes ?? quizzes;
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(qList));
     if (!user) return;
     setCloudStatus('saving');
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -134,6 +146,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           drafts: dList.map((d) => d.id),
           draftId: draftCounter.current,
           draftContents,
+          quizzes: qList,
         }),
         headers: { 'Content-Type': 'application/json' },
       })
@@ -207,6 +220,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateNote = (id: number, patch: Partial<Note>) =>
     mutateNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)));
 
+  const addQuiz = (item: Omit<QuizItem, 'id'>) => {
+    setQuizzes((prev) => {
+      const next = [{ ...item, id: Date.now() }, ...prev];
+      persist(notes, undefined, next);
+      return next;
+    });
+  };
+
+  const deleteQuiz = (id: number) => {
+    setQuizzes((prev) => {
+      const next = prev.filter((q) => q.id !== id);
+      persist(notes, undefined, next);
+      return next;
+    });
+  };
+
   const toggleRead = (id: number) => updateNote(id, { read: true });
   const toggleUnread = (id: number) => updateNote(id, { read: false });
   const toggleFav = (id: number) =>
@@ -227,8 +256,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       value={{
         notes,
         drafts,
+        quizzes,
         cloudStatus,
         loaded,
+        addQuiz,
+        deleteQuiz,
         addDraft,
         removeDraft,
         updateDraft,

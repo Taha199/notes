@@ -3,15 +3,23 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { RichTextEditor } from './RichTextEditor';
+import { generateQuizQuestion } from '../../lib/gemini';
 
-export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: () => void }) {
-  const { notes, updateNote, toggleFav, trash, unarchive, nowStr } = useNotes();
+export function NoteEditorModal({ noteId, onClose, onGoQuiz }: { noteId: number; onClose: () => void; onGoQuiz?: () => void }) {
+  const { notes, updateNote, toggleFav, trash, unarchive, nowStr, addQuiz } = useNotes();
   const { t } = useLanguage();
   const { show } = useToast();
   const note = notes.find((n) => n.id === noteId);
   const [locked, setLocked] = useState(true);
   const [title, setTitle] = useState(note?.title ?? '');
   const [html, setHtml] = useState(note?.html ?? '');
+
+  // Quiz state
+  const [quizOpen, setQuizOpen] = useState(false);
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [quizQuestion, setQuizQuestion] = useState('');
+  const [quizAnswer, setQuizAnswer] = useState('');
+  const [quizError, setQuizError] = useState('');
 
   useEffect(() => {
     if (note) {
@@ -39,6 +47,37 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
     updateNote(note.id, { read: true, archived: true });
     setLocked(true);
     show(t.tStudied);
+  };
+
+  const handleGenerateQuiz = async () => {
+    setQuizOpen(true);
+    setQuizQuestion('');
+    setQuizAnswer('');
+    setQuizError('');
+    setQuizLoading(true);
+    try {
+      const q = await generateQuizQuestion(note.text || plainText);
+      setQuizQuestion(q);
+    } catch {
+      setQuizError('Failed to generate question. Please check your API key.');
+    } finally {
+      setQuizLoading(false);
+    }
+  };
+
+  const handleSubmitQuiz = () => {
+    if (!quizAnswer.trim()) return;
+    addQuiz({
+      noteId: note.id,
+      noteTitle: note.title || note.text.slice(0, 50),
+      question: quizQuestion,
+      answer: quizAnswer.trim(),
+      date: nowStr(),
+    });
+    show('Quiz saved! 🧠');
+    setQuizOpen(false);
+    setQuizQuestion('');
+    setQuizAnswer('');
   };
 
   return (
@@ -89,6 +128,43 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
           <RichTextEditor html={html} onChange={setHtml} placeholder="" editable={!locked} minHeight="150px" />
         </div>
 
+        {/* Quiz panel */}
+        {quizOpen && (
+          <div className="border-t border-violet-200 bg-violet-50 px-4 py-4 dark:border-violet-500/20 dark:bg-violet-500/10">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-[13px] font-bold text-violet-700 dark:text-violet-300">🧠 Quiz Question</span>
+              <button onClick={() => setQuizOpen(false)} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Close</button>
+            </div>
+            {quizLoading && (
+              <div className="flex items-center gap-2 text-[13px] text-violet-600 dark:text-violet-400">
+                <span className="animate-spin">⏳</span> Generating question...
+              </div>
+            )}
+            {quizError && <p className="text-[13px] text-red-600">{quizError}</p>}
+            {quizQuestion && !quizLoading && (
+              <>
+                <p className="mb-3 text-[14px] font-semibold text-app-text dark:text-gray-100">{quizQuestion}</p>
+                <textarea
+                  value={quizAnswer}
+                  onChange={(e) => setQuizAnswer(e.target.value)}
+                  placeholder="Write your answer..."
+                  rows={3}
+                  className="w-full resize-none rounded-xl border border-violet-200 bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-violet-400 dark:border-violet-500/30 dark:bg-gray-800 dark:text-gray-100"
+                />
+                <div className="mt-2 flex justify-end">
+                  <button
+                    onClick={handleSubmitQuiz}
+                    disabled={!quizAnswer.trim()}
+                    className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-40"
+                  >
+                    Submit Answer →
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
           <div className="flex flex-col gap-0.5">
             <span className="text-[11px] text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
@@ -97,6 +173,12 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
             )}
           </div>
           <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={handleGenerateQuiz}
+              className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+            >
+              🧠 Generate Quiz
+            </button>
             <button
               onClick={() => {
                 trash(note.id);
