@@ -100,3 +100,30 @@ body {
   color: #A8A8C0;
   pointer-events: none;
 }
+
+.note-content table tr,
+[contenteditable] table tr {
+  display: flex;
+  flex-direction: row-reverse;
+}
+
+.note-content table td,
+.note-content table th,
+[contenteditable] table td,
+[contenteditable] table th {
+  min-width: 0;
+}
+
+.note-content table td:first-child,
+.note-content table th:first-child,
+[contenteditable] table td:first-child,
+[contenteditable] table th:first-child {
+  flex: 1.55 1 0;
+}
+
+.note-content table td:last-child,
+.note-content table th:last-child,
+[contenteditable] table td:last-child,
+[contenteditable] table th:last-child {
+  flex: 1 1 0;
+}
