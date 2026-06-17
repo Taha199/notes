@@ -61,6 +61,34 @@ ${noteText.slice(0, 6000)}`,
   return verified;
 }
 
+export interface ChatTurn {
+  role: 'user' | 'model';
+  text: string;
+}
+
+export async function sendChatMessage(history: ChatTurn[], userMessage: string): Promise<string> {
+  const contents = [
+    ...history.map((h) => ({
+      role: h.role,
+      parts: [{ text: h.text }],
+    })),
+    { role: 'user', parts: [{ text: userMessage }] },
+  ];
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || 'API error');
+  }
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!text) throw new Error('No response returned');
+  return text;
+}
+
 export async function answerQuestion(question: string): Promise<string> {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
