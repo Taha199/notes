@@ -17,7 +17,10 @@ export async function generateQuizQuestion(noteText: string): Promise<string> {
       ],
     }),
   });
-  if (!res.ok) throw new Error('Gemini API error: ' + res.status);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || 'Gemini API error: ' + res.status);
+  }
   const data = await res.json();
   const question = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!question) throw new Error('No question returned');

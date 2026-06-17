@@ -58,8 +58,8 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
     try {
       const q = await generateQuizQuestion(note.text || plainText);
       setQuizQuestion(q);
-    } catch {
-      setQuizError('Failed to generate question. Please check your API key.');
+    } catch (e) {
+      setQuizError(e instanceof Error ? e.message : 'Failed to generate question.');
     } finally {
       setQuizLoading(false);
     }
