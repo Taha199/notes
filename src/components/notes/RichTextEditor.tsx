@@ -21,7 +21,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
   const [barColor, setBarColor] = useState('#534AB7');
-  const [typingColor, setTypingColor] = useState<string | null>(null);
   const colorWrapRef = useRef<HTMLDivElement>(null);
 
   // Set initial HTML once (avoid overwriting cursor on each keystroke)
@@ -119,7 +118,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     setBarColor(c);
-    setTypingColor(c);
     ed.focus();
     restoreSel();
     const s = window.getSelection();
@@ -219,13 +217,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onInput={() => {
-          if (typingColor) document.execCommand('foreColor', false, typingColor);
-          onChange(editorRef.current?.innerHTML ?? '');
-        }}
+        onInput={() => onChange(editorRef.current?.innerHTML ?? '')}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 text-sm leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
-        style={{ minHeight, maxHeight, cursor: editable ? 'text' : 'default', unicodeBidi: 'plaintext' }}
+        style={{ minHeight, maxHeight, cursor: editable ? 'text' : 'default' }}
       />
     </div>
   );
