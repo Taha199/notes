@@ -6,7 +6,7 @@ export interface QuizResult {
   answer: string;
 }
 
-export async function generateQuiz(noteText: string): Promise<QuizResult> {
+export async function generateQuiz(noteText: string): Promise<QuizResult[]> {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -15,16 +15,17 @@ export async function generateQuiz(noteText: string): Promise<QuizResult> {
         {
           parts: [
             {
-              text: `Baserat på följande anteckningsinnehåll, generera EN fråga och dess svar på svenska.
+              text: `Baserat på följande anteckningsinnehåll, generera frågor och svar på svenska som täcker ALLA delar och stycken i anteckningen. Varje viktig del ska ha minst en fråga.
 
-Om innehållet är för kort, oklart eller inte meningsfullt nog för att skapa en bra fråga, svara exakt med: INSUFFICIENT_CONTENT
+Om innehållet är för kort eller oklart, svara exakt med: INSUFFICIENT_CONTENT
 
-Annars svara i exakt detta format:
-QUESTION: <frågan på svenska>
-ANSWER: <svaret på svenska>
+Annars svara i exakt detta format (repetera för varje fråga):
+Q: <frågan på svenska>
+A: <svaret på svenska>
+---
 
 Anteckningsinnehåll:
-${noteText.slice(0, 3000)}`,
+${noteText.slice(0, 6000)}`,
             },
           ],
         },
@@ -39,8 +40,16 @@ ${noteText.slice(0, 3000)}`,
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!text) throw new Error('No response returned');
   if (text.includes('INSUFFICIENT_CONTENT')) throw new Error('INSUFFICIENT_CONTENT');
-  const qMatch = text.match(/QUESTION:\s*(.+?)(?=\nANSWER:|$)/s);
-  const aMatch = text.match(/ANSWER:\s*(.+)/s);
-  if (!qMatch || !aMatch) throw new Error('Could not parse response');
-  return { question: qMatch[1].trim(), answer: aMatch[1].trim() };
+
+  const blocks = text.split('---').map((b: string) => b.trim()).filter(Boolean);
+  const results: QuizResult[] = [];
+  for (const block of blocks) {
+    const qMatch = block.match(/Q:\s*(.+?)(?=\nA:|$)/s);
+    const aMatch = block.match(/A:\s*(.+)/s);
+    if (qMatch && aMatch) {
+      results.push({ question: qMatch[1].trim(), answer: aMatch[1].trim() });
+    }
+  }
+  if (!results.length) throw new Error('Could not parse response');
+  return results;
 }
