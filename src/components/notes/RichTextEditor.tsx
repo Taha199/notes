@@ -295,12 +295,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('underline'); }} title={t.titleUnline} className={btnCls(activeCmds.has('underline'))}><u>U</u></button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('strikeThrough'); }} title={t.titleStrike} className={btnCls(activeCmds.has('strikeThrough'))}><s>S</s></button>
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
-        <div className="flex items-center overflow-hidden rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900">
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyLeft'); }} title={t.titleLeft} className={btnCls(activeCmds.has('justifyLeft')) + ' !rounded-none'}>☰</button>
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyCenter'); }} title={t.titleCenter} className={btnCls(activeCmds.has('justifyCenter')) + ' !rounded-none border-x border-app-border dark:border-white/10'}>≣</button>
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyRight'); }} title={t.titleRight} className={btnCls(activeCmds.has('justifyRight')) + ' !rounded-none'}>☷</button>
-        </div>
-        <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('removeFormat'); }} title={t.titleClr} className={btnCls(false)}>⌫</button>
       </div>
 
