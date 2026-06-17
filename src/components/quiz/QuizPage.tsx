@@ -40,20 +40,20 @@ export function QuizPage() {
             key={q.id}
             className="group flex items-stretch overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]"
           >
-            {/* Left — Answer */}
-            <div className="flex w-[38%] flex-shrink-0 items-center px-4 py-4 pr-3">
-              <span className="text-[14px] font-semibold text-app-text dark:text-gray-100 leading-snug">
-                {q.answer}
+            {/* Left — Question */}
+            <div className="flex flex-1 items-center px-4 py-4">
+              <span className="text-[13px] text-app-text-secondary dark:text-gray-300 leading-snug">
+                {q.question}
               </span>
             </div>
 
             {/* Divider */}
             <div className="w-px flex-shrink-0 bg-app-border dark:bg-white/10" />
 
-            {/* Right — Question */}
-            <div className="flex flex-1 items-center px-4 py-4">
-              <span className="text-[13px] text-app-text-secondary dark:text-gray-300 leading-snug">
-                {q.question}
+            {/* Right — Answer */}
+            <div className="flex w-[38%] flex-shrink-0 items-center px-4 py-4 pl-3">
+              <span className="text-[14px] font-semibold text-app-text dark:text-gray-100 leading-snug">
+                {q.answer}
               </span>
             </div>
 
