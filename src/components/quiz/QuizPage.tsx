@@ -86,7 +86,7 @@ export function QuizPage() {
                 {/* Left — Question */}
                 <div className="flex flex-1 items-center px-4 py-4">
                   <span
-                    className="text-[13px] text-app-text-secondary dark:text-gray-300 leading-snug"
+                    className="text-[13px] font-semibold text-app-text dark:text-gray-100 leading-snug"
                     dangerouslySetInnerHTML={{ __html: q.question }}
                   />
                 </div>
@@ -97,7 +97,7 @@ export function QuizPage() {
                 {/* Right — Answer */}
                 <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4">
                   <span
-                    className="text-[14px] font-semibold text-app-text dark:text-gray-100 leading-snug"
+                    className="text-[13px] text-app-text-secondary dark:text-gray-400 leading-snug"
                     dangerouslySetInnerHTML={{ __html: q.answer }}
                   />
                 </div>
