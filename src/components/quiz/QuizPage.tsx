@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNotes } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
+import { answerQuestion } from '../../lib/gemini';
 
 function speak(text: string) {
   window.speechSynthesis.cancel();
@@ -16,6 +17,7 @@ export function QuizPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editQ, setEditQ] = useState('');
   const [editA, setEditA] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
   const toggleFav = (id: number) => {
     setFavs((prev) => {
@@ -61,7 +63,26 @@ export function QuizPage() {
               /* Edit mode */
               <div className="flex flex-col gap-3 p-4">
                 <div>
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Fråga</p>
+                  <div className="mb-1 flex items-center justify-between">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Fråga</p>
+                    <button
+                      onClick={async () => {
+                        const plain = editQ.replace(/<[^>]*>/g, '').trim();
+                        if (!plain) return;
+                        setAiLoading(true);
+                        try {
+                          const ans = await answerQuestion(plain);
+                          setEditA(ans);
+                        } finally {
+                          setAiLoading(false);
+                        }
+                      }}
+                      disabled={aiLoading || !editQ.replace(/<[^>]*>/g, '').trim()}
+                      className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                    >
+                      {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
+                    </button>
+                  </div>
                   <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
                     <RichTextEditor html={editQ} onChange={setEditQ} placeholder="Fråga..." minHeight="60px" />
                   </div>

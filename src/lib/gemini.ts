@@ -61,6 +61,28 @@ ${noteText.slice(0, 6000)}`,
   return verified;
 }
 
+export async function answerQuestion(question: string): Promise<string> {
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{
+          text: `Besvara följande fråga på samma språk som frågan är skriven på. Ge ett tydligt och korrekt svar. Returnera ENDAST svaret, utan förklaringar eller extra text.\n\nFråga: ${question.replace(/<[^>]*>/g, '').trim()}`,
+        }],
+      }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || 'API error');
+  }
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!text) throw new Error('No answer returned');
+  return text;
+}
+
 async function verifyAnswers(noteText: string, items: QuizResult[]): Promise<QuizResult[]> {
   const qa = items.map((item, i) => `${i + 1}. F: ${item.question}\n   S: ${item.answer}`).join('\n');
   const res = await fetch(ENDPOINT, {
