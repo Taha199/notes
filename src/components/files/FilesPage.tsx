@@ -43,6 +43,7 @@ export function FilesPage({ search }: { search: string }) {
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -71,11 +72,15 @@ export function FilesPage({ search }: { search: string }) {
   const saveFiles = async (next: StoredFile[]) => {
     if (!user) return;
     setFiles(next);
-    await fetch(`${FB_DB_URL}/users/${user.uid}/files.json`, {
+    const res = await fetch(`${FB_DB_URL}/users/${user.uid}/files.json`, {
       method: 'PUT',
       body: JSON.stringify(next),
       headers: { 'Content-Type': 'application/json' },
     });
+    if (!res.ok) {
+      setFiles(files); // revert
+      setError('Failed to save files. The file may be too large for cloud storage.');
+    }
   };
 
   const filtered = useMemo(() => {
@@ -84,8 +89,16 @@ export function FilesPage({ search }: { search: string }) {
     return files.filter((file) => file.name.toLowerCase().includes(q) || file.type.toLowerCase().includes(q));
   }, [files, search]);
 
+  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB per file
+
   const handleFiles = async (list: FileList | null) => {
     if (!list?.length || !user) return;
+    setError('');
+    const oversized = Array.from(list).filter((f) => f.size > MAX_FILE_SIZE);
+    if (oversized.length) {
+      setError(`File too large: ${oversized.map((f) => f.name).join(', ')} (max 5MB per file)`);
+      return;
+    }
     setUploading(true);
     try {
       const uploaded = await Promise.all(Array.from(list).map(readFile));
@@ -124,6 +137,12 @@ export function FilesPage({ search }: { search: string }) {
           <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
+          ⚠️ {error}
+        </div>
+      )}
 
       {loading || !filtered.length ? (
         <div className="animate-fade-in flex flex-col items-center py-20 text-center text-app-text-secondary/70 dark:text-gray-500">
