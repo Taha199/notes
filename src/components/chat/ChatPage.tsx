@@ -51,7 +51,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       <div className={`group relative max-w-[75%] rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed shadow-sm ${isUser ? 'rounded-tr-sm bg-primary text-white' : 'rounded-tl-sm bg-white text-app-text dark:bg-white/8 dark:text-gray-100 border border-app-border dark:border-white/10'}`}>
         {isUser
           ? <p className="whitespace-pre-wrap">{msg.text}</p>
-          : <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />
+          : <div dir="auto" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />
         }
         <div className={`mt-1 text-[10px] ${isUser ? 'text-white/60' : 'text-app-text-secondary/50 dark:text-gray-600'}`}>{msg.timestamp}</div>
       </div>
