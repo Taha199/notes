@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNotes } from '../../contexts/NotesContext';
+import { RichTextEditor } from '../notes/RichTextEditor';
 
 function speak(text: string) {
   window.speechSynthesis.cancel();
@@ -31,7 +32,10 @@ export function QuizPage() {
 
   const saveEdit = () => {
     if (editingId === null) return;
-    updateQuiz(editingId, { question: editQ.trim(), answer: editA.trim() });
+    const plainQ = editQ.replace(/<[^>]*>/g, '').trim();
+    const plainA = editA.replace(/<[^>]*>/g, '').trim();
+    if (!plainQ || !plainA) return;
+    updateQuiz(editingId, { question: editQ, answer: editA });
     setEditingId(null);
   };
 
@@ -54,26 +58,24 @@ export function QuizPage() {
           <div key={q.id} className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
             {editingId === q.id ? (
               /* Edit mode */
-              <div className="flex flex-col gap-2 p-4">
-                <textarea
-                  value={editQ}
-                  onChange={(e) => setEditQ(e.target.value)}
-                  rows={2}
-                  className="w-full resize-none rounded-xl border border-app-border bg-app-bg px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
-                  placeholder="Fråga..."
-                />
-                <textarea
-                  value={editA}
-                  onChange={(e) => setEditA(e.target.value)}
-                  rows={2}
-                  className="w-full resize-none rounded-xl border border-app-border bg-app-bg px-3 py-2 text-[13px] font-semibold text-app-text outline-none focus:border-primary/50 dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
-                  placeholder="Svar..."
-                />
+              <div className="flex flex-col gap-3 p-4">
+                <div>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Fråga</p>
+                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                    <RichTextEditor html={editQ} onChange={setEditQ} placeholder="Fråga..." minHeight="60px" />
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Svar</p>
+                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                    <RichTextEditor html={editA} onChange={setEditA} placeholder="Svar..." minHeight="60px" />
+                  </div>
+                </div>
                 <div className="flex justify-end gap-2">
                   <button onClick={() => setEditingId(null)} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">
                     Avbryt
                   </button>
-                  <button onClick={saveEdit} disabled={!editQ.trim() || !editA.trim()} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-40">
+                  <button onClick={saveEdit} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">
                     Spara
                   </button>
                 </div>
@@ -83,7 +85,10 @@ export function QuizPage() {
               <div className="flex items-stretch">
                 {/* Left — Question */}
                 <div className="flex flex-1 items-center px-4 py-4">
-                  <span className="text-[13px] text-app-text-secondary dark:text-gray-300 leading-snug">{q.question}</span>
+                  <span
+                    className="text-[13px] text-app-text-secondary dark:text-gray-300 leading-snug"
+                    dangerouslySetInnerHTML={{ __html: q.question }}
+                  />
                 </div>
 
                 {/* Divider */}
@@ -91,13 +96,16 @@ export function QuizPage() {
 
                 {/* Right — Answer */}
                 <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4">
-                  <span className="text-[14px] font-semibold text-app-text dark:text-gray-100 leading-snug">{q.answer}</span>
+                  <span
+                    className="text-[14px] font-semibold text-app-text dark:text-gray-100 leading-snug"
+                    dangerouslySetInnerHTML={{ __html: q.answer }}
+                  />
                 </div>
 
                 {/* Actions */}
                 <div className="flex flex-shrink-0 flex-col items-center justify-between gap-2 px-3 py-3">
                   <button onClick={() => toggleFav(q.id)} className={'text-base transition-colors ' + (favs.has(q.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
-                  <button onClick={() => speak(q.question + '. ' + q.answer)} className="text-app-text-secondary/40 transition-colors hover:text-primary" title="Läs upp">
+                  <button onClick={() => speak(q.question.replace(/<[^>]*>/g, '') + '. ' + q.answer.replace(/<[^>]*>/g, ''))} className="text-app-text-secondary/40 transition-colors hover:text-primary" title="Läs upp">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
                     </svg>
