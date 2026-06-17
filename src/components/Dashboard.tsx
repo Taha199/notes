@@ -239,7 +239,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)} onGoQuiz={() => { setOpenNoteId(null); setPage('quiz'); }} />}
+      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)}  />}
       {showSetPassword && <SetPasswordModal onClose={() => setShowSetPassword(false)} />}
     </div>
   );

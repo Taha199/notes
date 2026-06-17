@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { RichTextEditor } from './RichTextEditor';
 import { generateQuizQuestion } from '../../lib/gemini';
 
-export function NoteEditorModal({ noteId, onClose, onGoQuiz }: { noteId: number; onClose: () => void; onGoQuiz?: () => void }) {
+export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: () => void }) {
   const { notes, updateNote, toggleFav, trash, unarchive, nowStr, addQuiz } = useNotes();
   const { t } = useLanguage();
   const { show } = useToast();
