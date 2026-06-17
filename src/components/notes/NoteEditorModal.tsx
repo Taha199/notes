@@ -62,7 +62,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
       setQuizItems(results);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
-      setQuizError(msg === 'INSUFFICIENT_CONTENT' ? 'Not enough content to generate questions.' : msg || 'Failed to generate quiz.');
+      setQuizError(msg === 'INSUFFICIENT_CONTENT' ? 'Innehållet är inte tillräckligt för att generera frågor.' : 'Det gick inte att generera frågor. Försök igen.');
     } finally {
       setQuizLoading(false);
     }
@@ -80,7 +80,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
       setQuizIndex((i) => i + 1);
       setShowAnswer(false);
     } else {
-      show(`${savedCount + (showAnswer ? 1 : 0)} أسئلة محفوظة في Quiz 🧠`);
+      show(`${savedCount + (showAnswer ? 1 : 0)} frågor sparade i Quiz 🧠`);
       setQuizOpen(false);
     }
   };
@@ -120,12 +120,12 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                 🧠 Quiz
                 {quizItems.length > 0 && <span className="ml-2 text-[11px] font-normal opacity-70">{quizIndex + 1} / {quizItems.length}</span>}
               </span>
-              <button onClick={() => setQuizOpen(false)} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Close</button>
+              <button onClick={() => setQuizOpen(false)} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Stäng</button>
             </div>
 
             {quizLoading && (
               <div className="flex items-center gap-2 text-[13px] text-violet-600 dark:text-violet-400">
-                <span className="animate-spin">⏳</span> Generating questions...
+                <span className="animate-spin">⏳</span> Genererar frågor...
               </div>
             )}
             {quizError && <p className="text-[13px] text-red-600">{quizError}</p>}
@@ -135,20 +135,20 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                 <p className="mb-3 text-[14px] font-semibold text-app-text dark:text-gray-100">{current.question}</p>
                 {!showAnswer ? (
                   <button onClick={() => setShowAnswer(true)} className="rounded-lg border border-violet-300 bg-white px-4 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300">
-                    👁 Show Answer
+                    👁 Visa svar
                   </button>
                 ) : (
                   <>
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/20 dark:bg-emerald-500/10">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Answer</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Svar</span>
                       <p className="mt-0.5 text-[13px] text-app-text dark:text-gray-200">{current.answer}</p>
                     </div>
                     <div className="mt-2.5 flex gap-2 justify-end">
                       <button onClick={goNext} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
-                        {quizIndex + 1 < quizItems.length ? 'Skip →' : 'Finish'}
+                        {quizIndex + 1 < quizItems.length ? 'Hoppa över →' : 'Avsluta'}
                       </button>
                       <button onClick={handleSaveCurrent} className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700">
-                        💾 Save & Next {quizIndex + 1 < quizItems.length ? `(${quizIndex + 1}/${quizItems.length})` : ''}
+                        💾 Spara & Nästa {quizIndex + 1 < quizItems.length ? `(${quizIndex + 1}/${quizItems.length})` : ''}
                       </button>
                     </div>
                   </>
