@@ -142,7 +142,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
 
             {current && !quizLoading && (
               <>
-                <p className="mb-3 text-[14px] font-semibold text-app-text dark:text-gray-100">{current.question}</p>
+                <p className="mb-3 text-[14px] font-semibold text-app-text dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
                 {!showAnswer ? (
                   <button onClick={() => setShowAnswer(true)} className="rounded-lg border border-violet-300 bg-white px-4 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300">
                     👁 Visa svar
@@ -151,7 +151,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                   <>
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/20 dark:bg-emerald-500/10">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Svar</span>
-                      <p className="mt-0.5 text-[13px] text-app-text dark:text-gray-200">{current.answer}</p>
+                      <p className="mt-0.5 text-[13px] text-app-text dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
                     </div>
                     <div className="mt-2.5 flex gap-2 justify-end">
                       <button onClick={goNext} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">

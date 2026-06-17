@@ -3,6 +3,15 @@ import { useNotes } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 
+function mdToHtml(content: string): string {
+  if (/<[a-z][\s\S]*>/i.test(content)) return content;
+  return content
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+}
+
 
 export function QuizPage() {
   const { quizzes, deleteQuiz, updateQuiz } = useNotes();
@@ -103,7 +112,7 @@ export function QuizPage() {
                 <div className="flex flex-1 items-center px-4 py-4">
                   <span
                     className="text-[13px] font-semibold text-app-text dark:text-gray-100 leading-snug"
-                    dangerouslySetInnerHTML={{ __html: q.question }}
+                    dangerouslySetInnerHTML={{ __html: mdToHtml(q.question) }}
                   />
                 </div>
 
@@ -114,7 +123,7 @@ export function QuizPage() {
                 <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4">
                   <span
                     className="text-[13px] text-app-text-secondary dark:text-gray-400 leading-snug"
-                    dangerouslySetInnerHTML={{ __html: q.answer }}
+                    dangerouslySetInnerHTML={{ __html: mdToHtml(q.answer) }}
                   />
                 </div>
 
