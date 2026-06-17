@@ -15,7 +15,9 @@ export async function generateQuiz(noteText: string): Promise<QuizResult[]> {
         {
           parts: [
             {
-              text: `Du är en medicinsk/vetenskaplig assistent. Analysera följande anteckningsinnehåll:
+              text: `Du är en medicinsk/vetenskaplig assistent. VIKTIGT: Svara ALLTID på svenska oavsett vilket språk anteckningsinnehållet är skrivet på.
+
+Analysera följande anteckningsinnehåll:
 
 - Om innehållet redan innehåller en fråga (utan svar): besvara frågan på svenska och returnera den som ett Q&A-par.
 - Om innehållet är en längre text: generera frågor och svar på svenska som täcker ALLA delar.
@@ -67,7 +69,7 @@ async function verifyAnswers(noteText: string, items: QuizResult[]): Promise<Qui
     body: JSON.stringify({
       contents: [{
         parts: [{
-          text: `Du är en medicinsk/vetenskaplig granskare. Nedan finns anteckningsinnehåll och automatiskt genererade frågor (F) och svar (S) på svenska.
+          text: `Du är en medicinsk/vetenskaplig granskare. VIKTIGT: Svara ALLTID på svenska oavsett vilket språk innehållet är på. Nedan finns anteckningsinnehåll och automatiskt genererade frågor (F) och svar (S) på svenska.
 
 Granska varje svar och kontrollera att det stämmer med anteckningsinnehållet. Rätta eventuella fel. Svara i exakt samma format:
 
