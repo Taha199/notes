@@ -3,7 +3,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { RichTextEditor } from './RichTextEditor';
-import { generateQuizQuestion } from '../../lib/gemini';
+import { generateQuiz } from '../../lib/gemini';
 
 export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: () => void }) {
   const { notes, updateNote, toggleFav, trash, unarchive, nowStr, addQuiz } = useNotes();
@@ -19,6 +19,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   const [quizLoading, setQuizLoading] = useState(false);
   const [quizQuestion, setQuizQuestion] = useState('');
   const [quizAnswer, setQuizAnswer] = useState('');
+  const [showAnswer, setShowAnswer] = useState(false);
   const [quizError, setQuizError] = useState('');
 
   useEffect(() => {
@@ -54,30 +55,37 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
     setQuizQuestion('');
     setQuizAnswer('');
     setQuizError('');
+    setShowAnswer(false);
     setQuizLoading(true);
     try {
-      const q = await generateQuizQuestion(note.text || plainText);
-      setQuizQuestion(q);
+      const result = await generateQuiz(note.text || plainText);
+      setQuizQuestion(result.question);
+      setQuizAnswer(result.answer);
     } catch (e) {
-      setQuizError(e instanceof Error ? e.message : 'Failed to generate question.');
+      const msg = e instanceof Error ? e.message : '';
+      if (msg === 'INSUFFICIENT_CONTENT') {
+        setQuizError('المحتوى غير كافٍ لإنشاء سؤال واضح.');
+      } else {
+        setQuizError(msg || 'Failed to generate question.');
+      }
     } finally {
       setQuizLoading(false);
     }
   };
 
-  const handleSubmitQuiz = () => {
-    if (!quizAnswer.trim()) return;
+  const handleSaveQuiz = () => {
     addQuiz({
       noteId: note.id,
       noteTitle: note.title || note.text.slice(0, 50),
       question: quizQuestion,
-      answer: quizAnswer.trim(),
+      answer: quizAnswer,
       date: nowStr(),
     });
     show('Quiz saved! 🧠');
     setQuizOpen(false);
     setQuizQuestion('');
     setQuizAnswer('');
+    setShowAnswer(false);
   };
 
   return (
@@ -144,22 +152,29 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
             {quizQuestion && !quizLoading && (
               <>
                 <p className="mb-3 text-[14px] font-semibold text-app-text dark:text-gray-100">{quizQuestion}</p>
-                <textarea
-                  value={quizAnswer}
-                  onChange={(e) => setQuizAnswer(e.target.value)}
-                  placeholder="Write your answer..."
-                  rows={3}
-                  className="w-full resize-none rounded-xl border border-violet-200 bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-violet-400 dark:border-violet-500/30 dark:bg-gray-800 dark:text-gray-100"
-                />
-                <div className="mt-2 flex justify-end">
+                {!showAnswer ? (
                   <button
-                    onClick={handleSubmitQuiz}
-                    disabled={!quizAnswer.trim()}
-                    className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-40"
+                    onClick={() => setShowAnswer(true)}
+                    className="rounded-lg border border-violet-300 bg-white px-4 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
                   >
-                    Submit Answer →
+                    👁 Show Answer
                   </button>
-                </div>
+                ) : (
+                  <>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Answer</span>
+                      <p className="mt-0.5 text-[13px] text-app-text dark:text-gray-200">{quizAnswer}</p>
+                    </div>
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        onClick={handleSaveQuiz}
+                        className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700"
+                      >
+                        💾 Save to Quiz
+                      </button>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

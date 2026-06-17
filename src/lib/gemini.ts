@@ -1,8 +1,13 @@
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string;
-const URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
+const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
 
-export async function generateQuizQuestion(noteText: string): Promise<string> {
-  const res = await fetch(URL, {
+export interface QuizResult {
+  question: string;
+  answer: string;
+}
+
+export async function generateQuiz(noteText: string): Promise<QuizResult> {
+  const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -10,7 +15,16 @@ export async function generateQuizQuestion(noteText: string): Promise<string> {
         {
           parts: [
             {
-              text: `Based on the following note content, generate ONE clear and concise quiz question to test understanding. Return ONLY the question, no explanations or extra text.\n\nNote content:\n${noteText.slice(0, 3000)}`,
+              text: `Based on the following note content, generate ONE quiz question and its answer.
+
+If the content is too short, unclear, or not meaningful enough to create a good quiz question, respond with exactly: INSUFFICIENT_CONTENT
+
+Otherwise respond in this exact format:
+QUESTION: <the question>
+ANSWER: <the answer>
+
+Note content:
+${noteText.slice(0, 3000)}`,
             },
           ],
         },
@@ -22,7 +36,11 @@ export async function generateQuizQuestion(noteText: string): Promise<string> {
     throw new Error(err?.error?.message || 'Gemini API error: ' + res.status);
   }
   const data = await res.json();
-  const question = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!question) throw new Error('No question returned');
-  return question;
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!text) throw new Error('No response returned');
+  if (text.includes('INSUFFICIENT_CONTENT')) throw new Error('INSUFFICIENT_CONTENT');
+  const qMatch = text.match(/QUESTION:\s*(.+?)(?=\nANSWER:|$)/s);
+  const aMatch = text.match(/ANSWER:\s*(.+)/s);
+  if (!qMatch || !aMatch) throw new Error('Could not parse response');
+  return { question: qMatch[1].trim(), answer: aMatch[1].trim() };
 }
