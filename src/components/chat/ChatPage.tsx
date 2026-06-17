@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatConversation, ChatMessage } from '../../types';
-import { sendChatMessage } from '../../lib/gemini';
+import { sendChatMessageStream } from '../../lib/gemini';
 
 const STORAGE_KEY = 'malacadhati_chats';
 
@@ -147,10 +147,28 @@ export function ChatPage() {
 
     try {
       const history = conv.messages.map((m) => ({ role: m.role, text: m.text }));
-      const reply = await sendChatMessage(history, text);
-      const aiMsg: ChatMessage = { role: 'model', text: reply, timestamp: nowStr() };
-      const finalConv: ChatConversation = { ...updatedConv, messages: [...updatedMessages, aiMsg] };
-      updateChats(allChats.map((c) => (c.id === finalConv.id ? finalConv : c)));
+      let accumulated = '';
+      const streamingMsg: ChatMessage = { role: 'model', text: '', timestamp: nowStr() };
+      const withStreaming = [...allChats];
+      const convIdx = withStreaming.findIndex((c) => c.id === updatedConv.id);
+
+      await sendChatMessageStream(history, text, (chunk) => {
+        accumulated += chunk;
+        const updatedStream: ChatConversation = {
+          ...updatedConv,
+          messages: [...updatedMessages, { ...streamingMsg, text: accumulated }],
+        };
+        withStreaming[convIdx] = updatedStream;
+        setChats([...withStreaming]);
+      });
+
+      // Final save to localStorage
+      const finalConv: ChatConversation = {
+        ...updatedConv,
+        messages: [...updatedMessages, { ...streamingMsg, text: accumulated }],
+      };
+      const finalChats = allChats.map((c) => (c.id === finalConv.id ? finalConv : c));
+      updateChats(finalChats);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {

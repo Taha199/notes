@@ -66,15 +66,18 @@ export interface ChatTurn {
   text: string;
 }
 
-export async function sendChatMessage(history: ChatTurn[], userMessage: string): Promise<string> {
+const STREAM_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${API_KEY}`;
+
+export async function sendChatMessageStream(
+  history: ChatTurn[],
+  userMessage: string,
+  onChunk: (chunk: string) => void,
+): Promise<void> {
   const contents = [
-    ...history.map((h) => ({
-      role: h.role,
-      parts: [{ text: h.text }],
-    })),
+    ...history.map((h) => ({ role: h.role, parts: [{ text: h.text }] })),
     { role: 'user', parts: [{ text: userMessage }] },
   ];
-  const res = await fetch(ENDPOINT, {
+  const res = await fetch(STREAM_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contents }),
@@ -83,10 +86,26 @@ export async function sendChatMessage(history: ChatTurn[], userMessage: string):
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || 'API error');
   }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!text) throw new Error('No response returned');
-  return text;
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const json = line.slice(6).trim();
+      if (!json || json === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(json);
+        const chunk = parsed?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        if (chunk) onChunk(chunk);
+      } catch { /* skip malformed */ }
+    }
+  }
 }
 
 export async function answerQuestion(question: string): Promise<string> {
