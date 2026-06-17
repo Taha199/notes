@@ -1,5 +1,5 @@
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string;
-const URL = `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${API_KEY}`;
+const URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
 
 export async function generateQuizQuestion(noteText: string): Promise<string> {
   const res = await fetch(URL, {
