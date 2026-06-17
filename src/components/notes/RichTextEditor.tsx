@@ -22,6 +22,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [fontSize, setFontSize] = useState(13);
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
+  const [palPos, setPalPos] = useState({ left: 0, top: 0 });
   const [barColor, setBarColor] = useState('#534AB7');
   const colorWrapRef = useRef<HTMLDivElement>(null);
 
@@ -138,6 +139,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     e.preventDefault();
     e.stopPropagation();
     saveSel();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPalPos({ left: rect.left, top: rect.bottom + 8 });
     setPalOpen((o) => !o);
   };
 
@@ -145,34 +148,28 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     setBarColor(c);
-    ed.focus();
-    restoreSel();
-    const s = window.getSelection();
-    if (s && s.rangeCount > 0 && ed.contains(s.anchorNode) && !s.getRangeAt(0).collapsed) {
-      const range = s.getRangeAt(0);
-      const span = document.createElement('span');
-      span.style.color = c;
-      span.appendChild(range.extractContents());
-      range.insertNode(span);
-      range.selectNodeContents(span);
-      range.collapse(false);
-      s.removeAllRanges();
-      s.addRange(range);
-      savedRange.current = range.cloneRange();
-    } else {
-      document.execCommand('foreColor', false, c);
-    }
+    focusEditor();
+    document.execCommand('styleWithCSS', false, 'true');
+    document.execCommand('foreColor', false, c);
+    saveSel();
     setPalOpen(false);
     onChange(ed.innerHTML);
   };
 
   useEffect(() => {
     if (!palOpen) return;
-    const close = (e: MouseEvent) => {
+    const closeOutside = (e: MouseEvent) => {
       if (!colorWrapRef.current?.contains(e.target as Node)) setPalOpen(false);
     };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    const closePalette = () => setPalOpen(false);
+    document.addEventListener('mousedown', closeOutside);
+    window.addEventListener('resize', closePalette);
+    window.addEventListener('scroll', closePalette, true);
+    return () => {
+      document.removeEventListener('mousedown', closeOutside);
+      window.removeEventListener('resize', closePalette);
+      window.removeEventListener('scroll', closePalette, true);
+    };
   }, [palOpen]);
 
   const btnCls = (active: boolean) =>
@@ -211,7 +208,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
                 e.preventDefault();
                 e.stopPropagation();
               }}
-              className="absolute left-0 top-full z-[9999] mt-2 grid w-[184px] grid-cols-6 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
+              className="fixed z-[9999] grid w-[184px] grid-cols-6 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
+              style={{ left: palPos.left, top: palPos.top }}
             >
               {COLORS.map((c) => (
                 <div
