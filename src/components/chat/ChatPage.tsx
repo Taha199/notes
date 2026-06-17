@@ -24,6 +24,21 @@ function deriveTitleFromMessage(text: string) {
   return plain.length > 40 ? plain.slice(0, 40) + '…' : plain || 'New Chat';
 }
 
+function renderMarkdown(text: string): string {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="rounded bg-black/10 px-1 py-0.5 font-mono text-[12px] dark:bg-white/10">$1</code>')
+    .replace(/^#{3}\s(.+)$/gm, '<p class="font-bold text-[14px] mt-3 mb-1">$1</p>')
+    .replace(/^#{2}\s(.+)$/gm, '<p class="font-bold text-[15px] mt-4 mb-1">$1</p>')
+    .replace(/^#{1}\s(.+)$/gm, '<p class="font-bold text-[16px] mt-4 mb-2">$1</p>')
+    .replace(/^[-*]\s(.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+    .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul class="my-1 space-y-0.5">${m}</ul>`)
+    .replace(/\n/g, '<br>');
+}
+
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user';
   return (
@@ -34,7 +49,10 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       </div>
       {/* Bubble */}
       <div className={`group relative max-w-[75%] rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed shadow-sm ${isUser ? 'rounded-tr-sm bg-primary text-white' : 'rounded-tl-sm bg-white text-app-text dark:bg-white/8 dark:text-gray-100 border border-app-border dark:border-white/10'}`}>
-        <pre className="whitespace-pre-wrap font-sans">{msg.text}</pre>
+        {isUser
+          ? <p className="whitespace-pre-wrap">{msg.text}</p>
+          : <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />
+        }
         <div className={`mt-1 text-[10px] ${isUser ? 'text-white/60' : 'text-app-text-secondary/50 dark:text-gray-600'}`}>{msg.timestamp}</div>
       </div>
     </div>
