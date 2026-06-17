@@ -193,14 +193,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       archived: false,
       date: nowStr(),
     };
-    const newId = 'd' + ++draftCounter.current;
     setNotes((prevNotes) => {
       const nextNotes = [newNote, ...prevNotes];
       setDrafts((prevDrafts) => {
-        const nextDrafts = [
-          ...prevDrafts.filter((d) => d.id !== id),
-          { id: newId, title: '', html: '' },
-        ];
+        const nextDrafts = prevDrafts.filter((d) => d.id !== id);
         persist(nextNotes, nextDrafts);
         return nextDrafts;
       });
