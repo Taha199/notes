@@ -32,6 +32,9 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   const [showAnswer, setShowAnswer] = useState(false);
   const [quizError, setQuizError] = useState('');
   const [savedCount, setSavedCount] = useState(0);
+  const [editingQuiz, setEditingQuiz] = useState(false);
+  const [editQ, setEditQ] = useState('');
+  const [editA, setEditA] = useState('');
 
   useEffect(() => {
     if (note) {
@@ -86,6 +89,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   };
 
   const goNext = () => {
+    setEditingQuiz(false);
     if (quizIndex + 1 < quizItems.length) {
       setQuizIndex((i) => i + 1);
       setShowAnswer(false);
@@ -142,25 +146,78 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
 
             {current && !quizLoading && (
               <>
-                <p className="mb-3 text-[14px] font-semibold text-app-text dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
-                {!showAnswer ? (
-                  <button onClick={() => setShowAnswer(true)} className="rounded-lg border border-violet-300 bg-white px-4 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300">
-                    👁 Visa svar
-                  </button>
+                {editingQuiz ? (
+                  /* ── Edit mode ── */
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Fråga</label>
+                      <textarea
+                        value={editQ}
+                        onChange={(e) => setEditQ(e.target.value)}
+                        rows={3}
+                        className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Svar</label>
+                      <textarea
+                        value={editA}
+                        onChange={(e) => setEditA(e.target.value)}
+                        rows={4}
+                        className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setEditingQuiz(false)} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
+                        Avbryt
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!editQ.trim()) return;
+                          const updated = quizItems.map((item, i) => i === quizIndex ? { question: editQ.trim(), answer: editA.trim() } : item);
+                          setQuizItems(updated);
+                          setEditingQuiz(false);
+                          setShowAnswer(true);
+                        }}
+                        className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+                      >
+                        ✓ Klar
+                      </button>
+                    </div>
+                  </div>
                 ) : (
+                  /* ── View mode ── */
                   <>
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/20 dark:bg-emerald-500/10">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Svar</span>
-                      <p className="mt-0.5 text-[13px] text-app-text dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
-                    </div>
-                    <div className="mt-2.5 flex gap-2 justify-end">
-                      <button onClick={goNext} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
-                        {quizIndex + 1 < quizItems.length ? 'Hoppa över →' : 'Avsluta'}
-                      </button>
-                      <button onClick={handleSaveCurrent} className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700">
-                        💾 Spara & Nästa {quizIndex + 1 < quizItems.length ? `(${quizIndex + 1}/${quizItems.length})` : ''}
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <p className="text-[14px] font-semibold text-app-text dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
+                      <button
+                        onClick={() => { setEditQ(current.question); setEditA(current.answer); setEditingQuiz(true); setShowAnswer(true); }}
+                        title="Redigera"
+                        className="flex-shrink-0 rounded-lg border border-app-border px-2 py-1 text-[11px] text-app-text-secondary hover:border-primary/40 hover:text-primary dark:border-white/10"
+                      >
+                        ✏️ Redigera
                       </button>
                     </div>
+                    {!showAnswer ? (
+                      <button onClick={() => setShowAnswer(true)} className="rounded-lg border border-violet-300 bg-white px-4 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300">
+                        👁 Visa svar
+                      </button>
+                    ) : (
+                      <>
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Svar</span>
+                          <p className="mt-0.5 text-[13px] text-app-text dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
+                        </div>
+                        <div className="mt-2.5 flex gap-2 justify-end">
+                          <button onClick={goNext} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
+                            {quizIndex + 1 < quizItems.length ? 'Hoppa över →' : 'Avsluta'}
+                          </button>
+                          <button onClick={handleSaveCurrent} className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700">
+                            💾 Spara & Nästa {quizIndex + 1 < quizItems.length ? `(${quizIndex + 1}/${quizItems.length})` : ''}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </>
