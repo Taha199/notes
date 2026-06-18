@@ -69,7 +69,7 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
             </p>
           )}
           <p className={'mt-0.5 line-clamp-3 text-[13px] leading-relaxed ' + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
-            {note.text?.slice(0, 220)}
+            {note.text?.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').slice(0, 220)}
           </p>
           {!isTrash && (
             <div className="mt-2.5 flex flex-wrap gap-1.5">
