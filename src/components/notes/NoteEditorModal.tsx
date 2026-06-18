@@ -41,7 +41,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
     if (note) {
       setTitle(note.title);
       setHtml(mdToHtml(note.html));
-      setLocked(true);
+      setLocked(!!note.read);
     }
   }, [note?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
