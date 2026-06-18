@@ -3,7 +3,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { RichTextEditor } from './RichTextEditor';
-import { generateQuiz, type QuizResult } from '../../lib/gemini';
+import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini';
 
 function mdToHtml(content: string): string {
   // Only convert if content looks like markdown (not already HTML)
@@ -35,6 +35,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   const [editingQuiz, setEditingQuiz] = useState(false);
   const [editQ, setEditQ] = useState('');
   const [editA, setEditA] = useState('');
+  const [aiAnswerLoading, setAiAnswerLoading] = useState(false);
 
   useEffect(() => {
     if (note) {
@@ -159,7 +160,21 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Svar</label>
+                      <div className="mb-1 flex items-center justify-between">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Svar</label>
+                        <button
+                          onClick={async () => {
+                            if (!editQ.trim()) return;
+                            setAiAnswerLoading(true);
+                            try { setEditA(await answerQuestion(editQ)); }
+                            finally { setAiAnswerLoading(false); }
+                          }}
+                          disabled={aiAnswerLoading || !editQ.trim()}
+                          className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                        >
+                          {aiAnswerLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
+                        </button>
+                      </div>
                       <textarea
                         value={editA}
                         onChange={(e) => setEditA(e.target.value)}
