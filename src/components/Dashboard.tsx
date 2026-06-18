@@ -237,8 +237,9 @@ export function Dashboard() {
       {confirmEmptyTrash && (
         <ConfirmDialog
           message={t.cEmptyTrash}
+          count={trashed.length}
           confirmLabel={t.emptyTrashBtn}
-          cancelLabel={t.cancelSel.replace('✕ ', '')}
+          cancelLabel="Cancel"
           onConfirm={() => { setConfirmEmptyTrash(false); emptyTrash(); show(t.tTrashEmpty); }}
           onCancel={() => setConfirmEmptyTrash(false)}
         />
@@ -246,8 +247,9 @@ export function Dashboard() {
       {confirmDelSel && (
         <ConfirmDialog
           message={t.cDelSel}
+          count={selected.size}
           confirmLabel={t.delSelected}
-          cancelLabel={t.cancelSel.replace('✕ ', '')}
+          cancelLabel="Cancel"
           onConfirm={() => { setConfirmDelSel(false); deleteMany([...selected]); setSelected(new Set()); setSelectMode(false); show(t.tDelSel); }}
           onCancel={() => setConfirmDelSel(false)}
         />

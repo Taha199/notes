@@ -210,6 +210,7 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
       {confirmPermDel && (
         <ConfirmDialog
           message={t.cPermDel}
+          count={1}
           confirmLabel={t.titlePermDel}
           cancelLabel="Avbryt"
           onConfirm={() => { setConfirmPermDel(false); permDelete(note.id); show(t.tPermDel); }}
