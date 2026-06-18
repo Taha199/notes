@@ -36,6 +36,10 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   const [editQ, setEditQ] = useState('');
   const [editA, setEditA] = useState('');
   const [aiAnswerLoading, setAiAnswerLoading] = useState(false);
+  const [manualQuiz, setManualQuiz] = useState(false);
+  const [manualQ, setManualQ] = useState('');
+  const [manualA, setManualA] = useState('');
+  const [manualAiLoading, setManualAiLoading] = useState(false);
 
   useEffect(() => {
     if (note) {
@@ -127,7 +131,71 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
           <RichTextEditor html={html} onChange={setHtml} placeholder="" editable={!locked} minHeight="150px" />
         </div>
 
-        {/* Quiz panel */}
+        {/* Manual quiz panel */}
+        {manualQuiz && (
+          <div className="border-t border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-[13px] font-bold text-emerald-700 dark:text-emerald-400">✏️ Skapa fråga manuellt</span>
+              <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); }} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Stäng</button>
+            </div>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-emerald-700/70 dark:text-emerald-400/70">Fråga</label>
+                <textarea
+                  value={manualQ}
+                  onChange={(e) => setManualQ(e.target.value)}
+                  rows={2}
+                  placeholder="Skriv din fråga..."
+                  className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70 dark:text-emerald-400/70">Svar</label>
+                  <button
+                    onClick={async () => {
+                      if (!manualQ.trim()) return;
+                      setManualAiLoading(true);
+                      try { setManualA(await answerQuestion(manualQ)); }
+                      finally { setManualAiLoading(false); }
+                    }}
+                    disabled={manualAiLoading || !manualQ.trim()}
+                    className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                  >
+                    {manualAiLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
+                  </button>
+                </div>
+                <textarea
+                  value={manualA}
+                  onChange={(e) => setManualA(e.target.value)}
+                  rows={3}
+                  placeholder="Skriv svaret..."
+                  className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
+                  Avbryt
+                </button>
+                <button
+                  onClick={() => {
+                    if (!manualQ.trim()) return;
+                    addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ.trim(), answer: manualA.trim(), date: nowStr() });
+                    show('Fråga sparad i Quiz 🧠');
+                    setManualQ('');
+                    setManualA('');
+                  }}
+                  disabled={!manualQ.trim()}
+                  className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                >
+                  💾 Spara fråga
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* AI Quiz panel */}
         {quizOpen && (
           <div className="border-t border-violet-200 bg-violet-50 px-4 py-4 dark:border-violet-500/20 dark:bg-violet-500/10">
             <div className="mb-3 flex items-center justify-between">
@@ -248,6 +316,9 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
           <div className="flex flex-wrap gap-1.5">
             <button onClick={handleGenerateQuiz} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300">
               🧠 Generate Quiz
+            </button>
+            <button onClick={() => { setManualQuiz((o) => !o); setQuizOpen(false); }} className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+              ✏️ Add Question
             </button>
             <button onClick={() => { trash(note.id); show(t.tMoved); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10">
               🗑 {t.mDel}
