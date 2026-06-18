@@ -153,7 +153,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                   onClick={() => setManualQ(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim())}
                   className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-all hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
                 >
-                  📋 لصق النوت هنا
+                  📋 Paste note
                 </button>
               </div>
               <div>
@@ -183,7 +183,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                   onClick={() => setManualA(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim())}
                   className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-all hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
                 >
-                  📋 لصق النوت هنا
+                  📋 Paste note
                 </button>
               </div>
               <div className="flex justify-end gap-2">
