@@ -288,7 +288,22 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                     ) : (
                       <>
                         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/20 dark:bg-emerald-500/10">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Svar</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Svar</span>
+                            <button
+                              onClick={async () => {
+                                setAiAnswerLoading(true);
+                                try {
+                                  const ans = await answerQuestion(current.question);
+                                  setQuizItems((prev) => prev.map((item, i) => i === quizIndex ? { ...item, answer: ans } : item));
+                                } finally { setAiAnswerLoading(false); }
+                              }}
+                              disabled={aiAnswerLoading}
+                              className="flex items-center gap-1 rounded-lg border border-violet-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
+                            >
+                              {aiAnswerLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
+                            </button>
+                          </div>
                           <p className="mt-0.5 text-[13px] text-app-text dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
                         </div>
                         <div className="mt-2.5 flex gap-2 justify-end">
