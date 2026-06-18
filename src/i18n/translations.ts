@@ -21,7 +21,11 @@ export interface Translation {
   mDel: string;
   mUnarch: string;
   mDone: string;
+  mArchive: string;
   mSave: string;
+  mCopy: string;
+  mGenQuiz: string;
+  mAddQ: string;
   mTiPh: string;
   archPill: string;
   userName: string;
@@ -163,7 +167,7 @@ export const LANGS: Record<Lang, Translation> = {
     navHome: 'Home', navFav: 'Favourites', navUnread: 'Notes to Study', navRead: 'Studied Notes',
     navLibrary: 'Notes Library', navFiles: 'File Uploads', navArchive: 'Archive', navTrash: 'Trash',
     searchPh: 'Search...', newNote: 'New Note', locked: 'Locked', editing: 'Editing',
-    mDel: 'Delete', mUnarch: 'Unarchive', mDone: 'Mark as Read', mSave: 'Save', mTiPh: 'Title (optional)',
+    mDel: 'Delete', mUnarch: 'Unarchive', mDone: 'Mark as Studied', mArchive: 'Archive', mSave: 'Save', mCopy: 'Copy', mGenQuiz: 'Generate Quiz', mAddQ: 'Add Question', mTiPh: 'Title (optional)',
     archPill: 'Read & Archived', userName: 'User', userSub: 'My Personal Notes',
     draft: 'Draft', draftTiPh: 'Title (optional)', draftEdPh: 'Write your note here...', saveDraft: 'Save Note',
     cloudSaving: 'Saving...', cloudSaved: 'Saved', cloudSavedMain: 'Saved to cloud',
@@ -216,7 +220,7 @@ export const LANGS: Record<Lang, Translation> = {
     navHome: 'Hem', navFav: 'Favoriter', navUnread: 'Att studera', navRead: 'Studerade',
     navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     searchPh: 'Sök...', newNote: 'Ny Anteckning', locked: 'Låst', editing: 'Redigerar',
-    mDel: 'Radera', mUnarch: 'Avarkivera', mDone: 'Markera som Läst', mSave: 'Spara', mTiPh: 'Titel (valfri)',
+    mDel: 'Radera', mUnarch: 'Avarkivera', mDone: 'Markera som Studerad', mArchive: 'Arkivera', mSave: 'Spara', mCopy: 'Kopiera', mGenQuiz: 'Generera Quiz', mAddQ: 'Lägg till fråga', mTiPh: 'Titel (valfri)',
     archPill: 'Läst & Arkiverad', userName: 'Användare', userSub: 'Mina Personliga Anteckningar',
     draft: 'Utkast', draftTiPh: 'Titel (valfri)', draftEdPh: 'Skriv din anteckning här...', saveDraft: 'Spara Anteckning',
     cloudSaving: 'Sparar...', cloudSaved: 'Sparat', cloudSavedMain: 'Sparat i molnet',

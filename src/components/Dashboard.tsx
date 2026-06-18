@@ -232,7 +232,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)} />}
+      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)} onNavigate={(p) => { setPage(p); setOpenNoteId(null); }} />}
       {showSetPassword && <SetPasswordModal onClose={() => setShowSetPassword(false)} />}
       {confirmEmptyTrash && (
         <ConfirmDialog

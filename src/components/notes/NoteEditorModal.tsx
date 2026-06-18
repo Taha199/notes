@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { RichTextEditor } from './RichTextEditor';
 import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini';
+import type { Page } from '../../types';
 
 function mdToHtml(content: string): string {
   // Only convert if content looks like markdown (not already HTML)
@@ -15,8 +16,8 @@ function mdToHtml(content: string): string {
     .replace(/\n/g, '<br>');
 }
 
-export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: () => void }) {
-  const { notes, updateNote, toggleFav, trash, unarchive, nowStr, addQuiz } = useNotes();
+export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: number; onClose: () => void; onNavigate?: (page: Page) => void }) {
+  const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz } = useNotes();
   const { t } = useLanguage();
   const { show } = useToast();
   const note = notes.find((n) => n.id === noteId);
@@ -64,8 +65,16 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
 
   const markDone = () => {
     updateNote(note.id, { read: true, archived: true });
-    setLocked(true);
     show(t.tStudied);
+    onNavigate?.('read');
+    onClose();
+  };
+
+  const handleArchive = () => {
+    archive(note.id);
+    show(t.tArched);
+    onNavigate?.('archive');
+    onClose();
   };
 
   const handleGenerateQuiz = async () => {
@@ -349,26 +358,30 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
               }}
               className={'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ' + (copied ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-app-border text-app-text-secondary hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:text-gray-400')}
             >
-              {copied ? '✓ Copied!' : '📋 Copy'}
+              {copied ? '✓ Copied!' : `📋 ${t.mCopy}`}
             </button>
             <button onClick={handleGenerateQuiz} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300">
-              🧠 Generate Quiz
+              🧠 {t.mGenQuiz}
             </button>
             <button onClick={() => { setManualQuiz((o) => !o); setQuizOpen(false); }} className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-              ✏️ Add Question
+              ✏️ {t.mAddQ}
             </button>
             <button onClick={() => { trash(note.id); show(t.tMoved); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10">
               🗑 {t.mDel}
             </button>
-            {note.archived && (
-              <button onClick={() => { unarchive(note.id); show(t.tUnarch); }} className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
+            {note.archived ? (
+              <button onClick={() => { unarchive(note.id); show(t.tUnarch); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
                 ↩ {t.mUnarch}
               </button>
-            )}
-            {!note.archived && (
-              <button onClick={markDone} className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-                ✓ {t.mDone}
-              </button>
+            ) : (
+              <>
+                <button onClick={handleArchive} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:text-gray-400">
+                  🗄 {t.mArchive}
+                </button>
+                <button onClick={markDone} className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                  ✓ {t.mDone}
+                </button>
+              </>
             )}
             {!locked && (
               <button onClick={save} className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-primary/30 hover:bg-primary-dark">
