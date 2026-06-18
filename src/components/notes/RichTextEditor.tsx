@@ -170,10 +170,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return true;
   };
 
-  const shouldFormatKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    return e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey && hasPendingMarks();
-  };
-
   const applyPx = (px: number) => {
     const ed = editorRef.current;
     if (!ed) return;
