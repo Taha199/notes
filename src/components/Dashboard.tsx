@@ -12,6 +12,7 @@ import { SetPasswordModal } from './auth/SetPasswordModal';
 import { FilesPage } from './files/FilesPage';
 import { QuizPage } from './quiz/QuizPage';
 import { ChatPage } from './chat/ChatPage';
+import { ConfirmDialog } from './common/ConfirmDialog';
 
 function EmptyState({ text }: { text: string }) {
   return (
@@ -71,6 +72,8 @@ export function Dashboard() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
+  const [confirmDelSel, setConfirmDelSel] = useState(false);
   const hasSearch = normalizeSearch(search).length > 0;
 
   const active = useMemo(() => notes.filter((n) => !n.archived && !n.trashed), [notes]);
@@ -196,14 +199,7 @@ export function Dashboard() {
                 <div className="flex flex-wrap gap-2">
                   {selectMode && selected.size > 0 && (
                     <button
-                      onClick={() => {
-                        if (confirm(t.cDelSel)) {
-                          deleteMany([...selected]);
-                          setSelected(new Set());
-                          setSelectMode(false);
-                          show(t.tDelSel);
-                        }
-                      }}
+                      onClick={() => setConfirmDelSel(true)}
                       className="rounded-lg bg-red-600 px-3.5 py-1.5 text-[13px] font-semibold text-white hover:bg-red-700"
                     >
                       🗑 {t.delSelected} ({selected.size})
@@ -211,12 +207,7 @@ export function Dashboard() {
                   )}
                   {trashed.length > 0 && (
                     <button
-                      onClick={() => {
-                        if (confirm(t.cEmptyTrash)) {
-                          emptyTrash();
-                          show(t.tTrashEmpty);
-                        }
-                      }}
+                      onClick={() => setConfirmEmptyTrash(true)}
                       className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-1.5 text-[13px] font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10"
                     >
                       🗑✕ {t.emptyTrashBtn}
@@ -241,8 +232,26 @@ export function Dashboard() {
         </div>
       </div>
 
-      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)}  />}
+      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)} />}
       {showSetPassword && <SetPasswordModal onClose={() => setShowSetPassword(false)} />}
+      {confirmEmptyTrash && (
+        <ConfirmDialog
+          message={t.cEmptyTrash}
+          confirmLabel={t.emptyTrashBtn}
+          cancelLabel={t.cancelSel.replace('✕ ', '')}
+          onConfirm={() => { setConfirmEmptyTrash(false); emptyTrash(); show(t.tTrashEmpty); }}
+          onCancel={() => setConfirmEmptyTrash(false)}
+        />
+      )}
+      {confirmDelSel && (
+        <ConfirmDialog
+          message={t.cDelSel}
+          confirmLabel={t.delSelected}
+          cancelLabel={t.cancelSel.replace('✕ ', '')}
+          onConfirm={() => { setConfirmDelSel(false); deleteMany([...selected]); setSelected(new Set()); setSelectMode(false); show(t.tDelSel); }}
+          onCancel={() => setConfirmDelSel(false)}
+        />
+      )}
     </div>
   );
 }

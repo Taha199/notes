@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import type { Note } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface Props {
   note: Note;
@@ -33,6 +35,7 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
   const { t } = useLanguage();
   const { toggleRead, toggleUnread, toggleFav, archive, unarchive, trash, restore, permDelete } = useNotes();
   const { show } = useToast();
+  const [confirmPermDel, setConfirmPermDel] = useState(false);
 
   const handleClick = () => {
     if (selectMode && onToggleSelect) onToggleSelect(note.id);
@@ -108,12 +111,7 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
               <ActionBtn
                 title={t.titlePermDel}
                 className="hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
-                onClick={() => {
-                  if (confirm(t.cPermDel)) {
-                    permDelete(note.id);
-                    show(t.tPermDel);
-                  }
-                }}
+                onClick={() => setConfirmPermDel(true)}
               >
                 ✕
               </ActionBtn>
@@ -209,6 +207,15 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
           )}
         </div>
       </div>
+      {confirmPermDel && (
+        <ConfirmDialog
+          message={t.cPermDel}
+          confirmLabel={t.titlePermDel}
+          cancelLabel="Avbryt"
+          onConfirm={() => { setConfirmPermDel(false); permDelete(note.id); show(t.tPermDel); }}
+          onCancel={() => setConfirmPermDel(false)}
+        />
+      )}
     </div>
   );
 }
