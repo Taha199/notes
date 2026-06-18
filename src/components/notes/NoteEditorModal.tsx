@@ -20,7 +20,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   const { t } = useLanguage();
   const { show } = useToast();
   const note = notes.find((n) => n.id === noteId);
-  const [locked, setLocked] = useState(true);
+  const [locked, setLocked] = useState(() => !!note?.read);
   const [title, setTitle] = useState(note?.title ?? '');
   const [html, setHtml] = useState(() => mdToHtml(note?.html ?? ''));
 
