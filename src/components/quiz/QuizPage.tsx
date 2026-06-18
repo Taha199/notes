@@ -139,7 +139,7 @@ export function QuizPage() {
                         window.speechSynthesis.cancel();
                         setSpeakingId(q.id);
                         const u = new SpeechSynthesisUtterance(q.question.replace(/<[^>]*>/g, '') + '. ' + q.answer.replace(/<[^>]*>/g, ''));
-                        u.lang = 'sv-SE';
+                        u.lang = navigator.language || 'sv-SE';
                         u.onend = () => setSpeakingId(null);
                         window.speechSynthesis.speak(u);
                       }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment, ChatConversation, ChatMessage } from '../../types';
 import { sendChatMessageStream } from '../../lib/gemini';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 const STORAGE_KEY = 'malacadhati_chats';
 
@@ -11,8 +12,8 @@ function saveChats(chats: ChatConversation[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
 }
 function newId() { return `c${Date.now()}-${Math.random().toString(36).slice(2, 6)}`; }
-function nowStr() {
-  return new Date().toLocaleString('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+function nowStr(locale: string) {
+  return new Date().toLocaleString(locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 function deriveTitleFromMessage(text: string) {
   const plain = text.replace(/<[^>]*>/g, '').trim();
@@ -97,6 +98,8 @@ function readFileAsBase64(file: File): Promise<{ dataUrl: string; base64: string
 }
 
 export function ChatPage() {
+  const { t } = useLanguage();
+  const locale = t.dateLocale;
   const [chats, setChats] = useState<ChatConversation[]>(loadChats);
   const [activeId, setActiveId] = useState<string | null>(() => loadChats()[0]?.id ?? null);
   const [input, setInput] = useState('');
@@ -122,7 +125,7 @@ export function ChatPage() {
   }, [input]);
 
   const createNewChat = () => {
-    const conv: ChatConversation = { id: newId(), title: 'New Chat', messages: [], createdAt: nowStr() };
+    const conv: ChatConversation = { id: newId(), title: 'New Chat', messages: [], createdAt: nowStr(locale) };
     const next = [conv, ...chats];
     setChats(next);
     saveChats(next);
@@ -163,14 +166,14 @@ export function ChatPage() {
     let conv = activeChat;
     let isNew = false;
     if (!conv) {
-      conv = { id: newId(), title: deriveTitleFromMessage(text || attachment?.name || 'File'), messages: [], createdAt: nowStr() };
+      conv = { id: newId(), title: deriveTitleFromMessage(text || attachment?.name || 'File'), messages: [], createdAt: nowStr(locale) };
       isNew = true;
     }
 
     const userMsg: ChatMessage = {
       role: 'user',
       text,
-      timestamp: nowStr(),
+      timestamp: nowStr(locale),
       ...(attachment ? { attachment } : {}),
     };
     const updatedMessages = [...conv.messages, userMsg];
@@ -192,7 +195,7 @@ export function ChatPage() {
     try {
       const history = conv.messages.map((m) => ({ role: m.role, text: m.text }));
       let accumulated = '';
-      const streamingMsg: ChatMessage = { role: 'model', text: '', timestamp: nowStr() };
+      const streamingMsg: ChatMessage = { role: 'model', text: '', timestamp: nowStr(locale) };
       const withStreaming = [...allChats];
       const convIdx = withStreaming.findIndex((c) => c.id === updatedConv.id);
 
