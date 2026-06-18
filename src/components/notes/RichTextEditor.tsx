@@ -303,12 +303,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onKeyDown={(e) => {
-          if (shouldFormatKey(e)) {
-            e.preventDefault();
-            insertPendingText(e.key);
-          }
-        }}
         onBeforeInput={(e) => {
           const native = e.nativeEvent as InputEvent;
           if (native.inputType === 'insertText' && native.data && hasPendingMarks()) {

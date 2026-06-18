@@ -49,3 +49,10 @@ export interface QuizItem {
   answer: string;
   date: string;
 }
+
+export interface QuizSet {
+  id: string;
+  name: string;
+  items: QuizItem[];
+  createdAt: string;
+}

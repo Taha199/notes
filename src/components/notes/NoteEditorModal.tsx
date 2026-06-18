@@ -40,6 +40,7 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
   const [manualQ, setManualQ] = useState('');
   const [manualA, setManualA] = useState('');
   const [manualAiLoading, setManualAiLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (note) {
@@ -148,6 +149,12 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                   placeholder="Skriv din fråga..."
                   className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
                 />
+                <button
+                  onClick={() => setManualQ(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim())}
+                  className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-all hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
+                >
+                  📋 لصق النوت هنا
+                </button>
               </div>
               <div>
                 <div className="mb-1 flex items-center justify-between">
@@ -172,6 +179,12 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
                   placeholder="Skriv svaret..."
                   className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
                 />
+                <button
+                  onClick={() => setManualA(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim())}
+                  className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-all hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
+                >
+                  📋 لصق النوت هنا
+                </button>
               </div>
               <div className="flex justify-end gap-2">
                 <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
@@ -329,6 +342,15 @@ export function NoteEditorModal({ noteId, onClose }: { noteId: number; onClose: 
             {note.lastEdited && <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">Edited: {note.lastEdited}</span>}
           </div>
           <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => {
+                const text = html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+                navigator.clipboard.writeText((title ? title + '\n\n' : '') + text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+              }}
+              className={'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ' + (copied ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-app-border text-app-text-secondary hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:text-gray-400')}
+            >
+              {copied ? '✓ Copied!' : '📋 Copy'}
+            </button>
             <button onClick={handleGenerateQuiz} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300">
               🧠 Generate Quiz
             </button>

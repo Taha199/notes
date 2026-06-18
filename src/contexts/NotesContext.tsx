@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Note, QuizItem } from '../types';
+import type { Note, QuizItem, QuizSet } from '../types';
 import { FB_DB_URL } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
@@ -16,11 +16,18 @@ interface NotesCtx {
   notes: Note[];
   drafts: Draft[];
   quizzes: QuizItem[];
+  quizSets: QuizSet[];
   cloudStatus: CloudStatus;
   loaded: boolean;
   addQuiz: (item: Omit<QuizItem, 'id'>) => void;
   deleteQuiz: (id: number) => void;
   updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => void;
+  addQuizSet: (name: string) => QuizSet;
+  deleteQuizSet: (id: string) => void;
+  renameQuizSet: (id: string, name: string) => void;
+  addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
+  removeItemFromSet: (setId: string, itemId: number) => void;
+  updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => void;
   addDraft: () => void;
   removeDraft: (id: string) => void;
   updateDraft: (id: string, patch: Partial<Draft>) => void;
@@ -58,6 +65,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>(() => {
     try { return JSON.parse(localStorage.getItem('malacadhati_quiz') || '[]'); } catch { return []; }
+  });
+  const [quizSets, setQuizSets] = useState<QuizSet[]>(() => {
+    try { return JSON.parse(localStorage.getItem('malacadhati_quiz_sets') || '[]'); } catch { return []; }
   });
   const draftCounter = useRef(0);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
@@ -125,6 +135,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [user]);
+
+  const persistSets = (nextSets: QuizSet[]) => {
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+  };
 
   const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[]) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
@@ -245,6 +259,57 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const addQuizSet = (name: string): QuizSet => {
+    const newSet: QuizSet = { id: Date.now().toString(), name, items: [], createdAt: nowStr() };
+    setQuizSets((prev) => {
+      const next = [...prev, newSet];
+      persistSets(next);
+      return next;
+    });
+    return newSet;
+  };
+
+  const deleteQuizSet = (id: string) => {
+    setQuizSets((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      persistSets(next);
+      return next;
+    });
+  };
+
+  const renameQuizSet = (id: string, name: string) => {
+    setQuizSets((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, name } : s));
+      persistSets(next);
+      return next;
+    });
+  };
+
+  const addItemToSet = (setId: string, item: Omit<QuizItem, 'id'>) => {
+    const newItem: QuizItem = { ...item, id: Date.now() };
+    setQuizSets((prev) => {
+      const next = prev.map((s) => s.id === setId ? { ...s, items: [...s.items, newItem] } : s);
+      persistSets(next);
+      return next;
+    });
+  };
+
+  const removeItemFromSet = (setId: string, itemId: number) => {
+    setQuizSets((prev) => {
+      const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.filter((i) => i.id !== itemId) } : s);
+      persistSets(next);
+      return next;
+    });
+  };
+
+  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => {
+    setQuizSets((prev) => {
+      const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.map((i) => i.id === itemId ? { ...i, ...patch } : i) } : s);
+      persistSets(next);
+      return next;
+    });
+  };
+
   const toggleRead = (id: number) => updateNote(id, { read: true });
   const toggleUnread = (id: number) => updateNote(id, { read: false });
   const toggleFav = (id: number) =>
@@ -266,11 +331,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         notes,
         drafts,
         quizzes,
+        quizSets,
         cloudStatus,
         loaded,
         addQuiz,
         deleteQuiz,
         updateQuiz,
+        addQuizSet,
+        deleteQuizSet,
+        renameQuizSet,
+        addItemToSet,
+        removeItemFromSet,
+        updateItemInSet,
         addDraft,
         removeDraft,
         updateDraft,
