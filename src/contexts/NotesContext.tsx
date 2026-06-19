@@ -359,7 +359,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const setQuizSetFolder = (id: string, folderId: string | undefined) => {
     setQuizSets((prev) => {
-      const next = prev.map((s) => (s.id === id ? { ...s, folderId } : s));
+      const set = prev.find((s) => s.id === id);
+      if (!set || set.folderId === folderId) return prev;
+      const next = [...prev.filter((s) => s.id !== id), { ...set, folderId }];
       persistSets(next);
       return next;
     });
