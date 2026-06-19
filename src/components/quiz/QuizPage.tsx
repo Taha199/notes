@@ -3,6 +3,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 import { StudyMode } from './StudyMode';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 import type { QuizItem, QuizSet } from '../../types';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
@@ -191,8 +192,19 @@ function ImportModal({ onImport, onClose }: { onImport: (pairs: { question: stri
   );
 }
 
+const SET_COLORS = [
+  { name: 'Default', value: '' },
+  { name: 'Lila', value: '#8b5cf6' },
+  { name: 'Blå', value: '#3b82f6' },
+  { name: 'Grön', value: '#10b981' },
+  { name: 'Gul', value: '#f59e0b' },
+  { name: 'Röd', value: '#ef4444' },
+  { name: 'Rosa', value: '#ec4899' },
+  { name: 'Cyan', value: '#06b6d4' },
+];
+
 export function QuizPage() {
-  const { quizzes, quizSets, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const { quizzes, quizSets, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, setQuizSetColor, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
 
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
   const [favs, setFavs] = useState<Set<number>>(new Set());
@@ -259,14 +271,17 @@ export function QuizPage() {
 
   // Context menu
   const [ctxMenu, setCtxMenu] = useState<{ setId: string; x: number; y: number } | null>(null);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [confirmDeleteSetId, setConfirmDeleteSetId] = useState<string | null>(null);
 
   const openCtxMenu = (e: React.MouseEvent, setId: string) => {
     e.preventDefault();
     e.stopPropagation();
     setCtxMenu({ setId, x: e.clientX, y: e.clientY });
+    setShowColorPicker(false);
   };
 
-  const closeCtxMenu = () => setCtxMenu(null);
+  const closeCtxMenu = () => { setCtxMenu(null); setShowColorPicker(false); };
 
   const handleImport = (pairs: { question: string; answer: string }[]) => {
     pairs.forEach((p) => {
@@ -349,8 +364,12 @@ export function QuizPage() {
                   >
                     <div className="flex w-full items-center">
                       <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 px-3 py-2 min-w-0">
-                        <span>📂</span>
-                        <span className="flex-1 truncate">{s.name}</span>
+                        {s.color ? (
+                          <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: s.color }} />
+                        ) : (
+                          <span>📂</span>
+                        )}
+                        <span className="flex-1 truncate" style={s.color ? { color: s.color } : undefined}>{s.name}</span>
                         <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items.length}</span>
                       </button>
                       <button
@@ -542,11 +561,36 @@ export function QuizPage() {
             >
               ✏️ Byt namn
             </button>
+            <button
+              onClick={() => setShowColorPicker((v) => !v)}
+              className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+            >
+              <span className="flex items-center gap-3">🎨 Färg</span>
+              <span className="text-app-text-secondary/50">{showColorPicker ? '▾' : '›'}</span>
+            </button>
+            {showColorPicker && (
+              <div className="flex flex-wrap gap-1.5 px-4 py-2">
+                {SET_COLORS.map((c) => {
+                  const active = (quizSets.find((x) => x.id === ctxMenu.setId)?.color ?? '') === c.value;
+                  return (
+                    <button
+                      key={c.name}
+                      title={c.name}
+                      onClick={() => { setQuizSetColor(ctxMenu.setId, c.value); closeCtxMenu(); }}
+                      className={'flex h-6 w-6 items-center justify-center rounded-full border transition-all ' +
+                        (active ? 'border-app-text ring-2 ring-primary/40 dark:border-white' : 'border-app-border dark:border-white/20')}
+                      style={c.value ? { backgroundColor: c.value } : undefined}
+                    >
+                      {!c.value && <span className="text-[10px] text-app-text-secondary">✕</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <div className="my-1 h-px bg-app-border dark:bg-white/10" />
             <button
               onClick={() => {
-                if (selectedSetId === ctxMenu.setId) setSelectedSetId(null);
-                deleteQuizSet(ctxMenu.setId);
+                setConfirmDeleteSetId(ctxMenu.setId);
                 closeCtxMenu();
               }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
@@ -556,6 +600,25 @@ export function QuizPage() {
           </div>
         </>
       )}
+
+      {/* Delete set confirmation */}
+      {confirmDeleteSetId && (() => {
+        const s = quizSets.find((x) => x.id === confirmDeleteSetId);
+        return (
+          <ConfirmDialog
+            title="Ta bort set"
+            message={`Är du säker på att du vill ta bort "${s?.name ?? ''}"? Alla ${s?.items.length ?? 0} frågor i detta set raderas.`}
+            confirmLabel="Ta bort"
+            cancelLabel="Avbryt"
+            onConfirm={() => {
+              if (selectedSetId === confirmDeleteSetId) setSelectedSetId(null);
+              deleteQuizSet(confirmDeleteSetId);
+              setConfirmDeleteSetId(null);
+            }}
+            onCancel={() => setConfirmDeleteSetId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

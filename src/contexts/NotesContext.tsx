@@ -27,6 +27,7 @@ interface NotesCtx {
   addQuizSet: (name: string) => QuizSet;
   deleteQuizSet: (id: string) => void;
   renameQuizSet: (id: string, name: string) => void;
+  setQuizSetColor: (id: string, color: string) => void;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => void;
@@ -302,6 +303,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const setQuizSetColor = (id: string, color: string) => {
+    setQuizSets((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, color } : s));
+      persistSets(next);
+      return next;
+    });
+  };
+
   const addItemToSet = (setId: string, item: Omit<QuizItem, 'id'>) => {
     const newItem: QuizItem = { ...item, id: Date.now() };
     setQuizSets((prev) => {
@@ -357,6 +366,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         addQuizSet,
         deleteQuizSet,
         renameQuizSet,
+        setQuizSetColor,
         addItemToSet,
         removeItemFromSet,
         updateItemInSet,

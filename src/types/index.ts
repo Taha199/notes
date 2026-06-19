@@ -55,4 +55,5 @@ export interface QuizSet {
   name: string;
   items: QuizItem[];
   createdAt: string;
+  color?: string;
 }
