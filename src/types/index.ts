@@ -60,6 +60,7 @@ export interface QuizSet {
   items: QuizItem[];
   createdAt: string;
   color?: string;
+  colorInitialized?: boolean;
   // OneNote-style notebook this set belongs to (unset = ungrouped).
   folderId?: string;
 }
@@ -69,5 +70,6 @@ export interface QuizFolder {
   id: string;
   name: string;
   color?: string;
+  colorInitialized?: boolean;
   createdAt: string;
 }
