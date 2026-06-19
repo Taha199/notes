@@ -58,6 +58,37 @@ interface NotesCtx {
 
 const NotesContext = createContext<NotesCtx | null>(null);
 
+const AUTO_QUIZ_COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#10b981', '#ec4899', '#06b6d4', '#f97316'];
+
+function colorDistance(a: string, b: string) {
+  const channels = (value: string) => [1, 3, 5].map((index) => Number.parseInt(value.slice(index, index + 2), 16));
+  const [ar, ag, ab] = channels(a);
+  const [br, bg, bb] = channels(b);
+  return Math.hypot(ar - br, ag - bg, ab - bb);
+}
+
+function pickSpacedColor(usedColors: string[]) {
+  const used = usedColors.filter((color) => /^#[0-9a-f]{6}$/i.test(color));
+  const counts = new Map(AUTO_QUIZ_COLORS.map((color) => [color, used.filter((usedColor) => usedColor.toLowerCase() === color).length]));
+  const lowestUse = Math.min(...counts.values());
+  const leastUsed = AUTO_QUIZ_COLORS.filter((color) => counts.get(color) === lowestUse);
+  if (used.length === 0) return leastUsed[Math.floor(Math.random() * leastUsed.length)];
+  const scored = leastUsed.map((color) => ({ color, score: Math.min(...used.map((usedColor) => colorDistance(color, usedColor))) }));
+  const bestScore = Math.max(...scored.map(({ score }) => score));
+  const best = scored.filter(({ score }) => score === bestScore);
+  return best[Math.floor(Math.random() * best.length)].color;
+}
+
+function initializeQuizColors<T extends { color?: string; colorInitialized?: boolean }>(items: T[], initialColors: string[] = []) {
+  const used = [...initialColors, ...items.map((item) => item.color).filter((color): color is string => !!color)];
+  return items.map((item) => {
+    if (item.colorInitialized || item.color) return item;
+    const color = pickSpacedColor(used);
+    used.push(color);
+    return { ...item, color, colorInitialized: true };
+  });
+}
+
 function nextId() {
   return Date.now();
 }
@@ -126,18 +157,35 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             setChats(cloud.chats);
             localStorage.setItem('malacadhati_chats', JSON.stringify(cloud.chats));
           }
+          const normalizedFolders: QuizFolder[] = cloud.quizFolders
+            ? initializeQuizColors(cloud.quizFolders.filter(Boolean))
+            : [];
           if (cloud.quizSets) {
             // Firebase strips empty arrays, so items can be missing — normalize.
-            const normalizedSets: QuizSet[] = cloud.quizSets
+            const rawSets: QuizSet[] = cloud.quizSets
               .filter(Boolean)
               .map((s: QuizSet) => ({ ...s, items: s.items ?? [] }));
+            const normalizedSets = initializeQuizColors(rawSets, normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color));
             setQuizSets(normalizedSets);
             localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+            if (normalizedSets.some((set, index) => set !== rawSets[index])) {
+              void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
+                method: 'PUT',
+                body: JSON.stringify(normalizedSets),
+                headers: { 'Content-Type': 'application/json' },
+              });
+            }
           }
           if (cloud.quizFolders) {
-            const normalizedFolders: QuizFolder[] = cloud.quizFolders.filter(Boolean);
             setQuizFolders(normalizedFolders);
             localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+            if (normalizedFolders.some((folder, index) => folder !== cloud.quizFolders.filter(Boolean)[index])) {
+              void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
+                method: 'PUT',
+                body: JSON.stringify(normalizedFolders),
+                headers: { 'Content-Type': 'application/json' },
+              });
+            }
           }
           if (cloud.drafts && cloud.drafts.length) {
             const dc = cloud.draftContents || {};
@@ -311,7 +359,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const addQuizSet = (name: string): QuizSet => {
-    const newSet: QuizSet = { id: Date.now().toString(), name, items: [], createdAt: nowStr() };
+    const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value));
+    const newSet: QuizSet = { id: Date.now().toString(), name, items: [], createdAt: nowStr(), color, colorInitialized: true };
     setQuizSets((prev) => {
       const next = [...prev, newSet];
       persistSets(next);
@@ -351,7 +400,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const setQuizSetColor = (id: string, color: string) => {
     setQuizSets((prev) => {
-      const next = prev.map((s) => (s.id === id ? { ...s, color } : s));
+      const next = prev.map((s) => (s.id === id ? { ...s, color, colorInitialized: true } : s));
       persistSets(next);
       return next;
     });
@@ -368,7 +417,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const addQuizFolder = (name: string): QuizFolder => {
-    const folder: QuizFolder = { id: 'f' + Date.now().toString(), name, createdAt: nowStr() };
+    const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value));
+    const folder: QuizFolder = { id: 'f' + Date.now().toString(), name, createdAt: nowStr(), color, colorInitialized: true };
     setQuizFolders((prev) => {
       const next = [...prev, folder];
       persistFolders(next);
@@ -387,7 +437,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const setQuizFolderColor = (id: string, color: string) => {
     setQuizFolders((prev) => {
-      const next = prev.map((f) => (f.id === id ? { ...f, color } : f));
+      const next = prev.map((f) => (f.id === id ? { ...f, color, colorInitialized: true } : f));
       persistFolders(next);
       return next;
     });
