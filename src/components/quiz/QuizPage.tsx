@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNotes } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
@@ -342,10 +342,12 @@ const SET_COLORS = [
 ];
 
 export function QuizPage() {
-  const { quizzes, quizSets, quizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const { quizzes, quizSets, quizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
 
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const dragSetId = useRef<string | null>(null);
+  const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
   const [favs, setFavs] = useState<Set<number>>(new Set());
   const [speakingId, setSpeakingId] = useState<number | null>(null);
   const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
@@ -502,7 +504,25 @@ export function QuizPage() {
   const renderSetRow = (s: QuizSet) => {
     const { known, total } = progressForSet(s.id);
     return (
-      <div key={s.id} className="group mb-0.5">
+      <div
+        key={s.id}
+        className="group mb-0.5"
+        draggable
+        onDragStart={() => { dragSetId.current = s.id; }}
+        onDragOver={(e) => { e.preventDefault(); setDragOverSetId(s.id); }}
+        onDragLeave={() => setDragOverSetId(null)}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (dragSetId.current && dragSetId.current !== s.id) {
+            reorderQuizSets(dragSetId.current, s.id);
+            if (setSort !== 'manual') changeSort('manual');
+          }
+          dragSetId.current = null;
+          setDragOverSetId(null);
+        }}
+        onDragEnd={() => { dragSetId.current = null; setDragOverSetId(null); }}
+        style={dragOverSetId === s.id ? { outline: '2px solid var(--color-primary)', outlineOffset: '-2px', borderRadius: '8px' } : undefined}
+      >
         {renamingSetId === s.id ? (
           <div className="flex items-center gap-1 rounded-xl bg-white px-2 py-1.5 dark:bg-white/5">
             <input
@@ -526,7 +546,8 @@ export function QuizPage() {
           >
             <span className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm" style={{ backgroundColor: s.color || '#9ca3af' }} />
             <div className="flex w-full items-center">
-              <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-3.5 pr-2 min-w-0">
+              <span className="flex-shrink-0 cursor-grab select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing">⠿</span>
+              <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
                 <span className={'flex-1 truncate ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>{s.name}</span>
                 <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items?.length ?? 0}</span>
               </button>

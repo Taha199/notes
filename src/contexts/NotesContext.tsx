@@ -28,6 +28,7 @@ interface NotesCtx {
   addQuizSet: (name: string) => QuizSet;
   deleteQuizSet: (id: string) => void;
   renameQuizSet: (id: string, name: string) => void;
+  reorderQuizSets: (dragId: string, targetId: string) => void;
   setQuizSetColor: (id: string, color: string) => void;
   setQuizSetFolder: (id: string, folderId: string | undefined) => void;
   addQuizFolder: (name: string) => QuizFolder;
@@ -327,6 +328,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const reorderQuizSets = (dragId: string, targetId: string) => {
+    setQuizSets((prev) => {
+      const next = [...prev];
+      const from = next.findIndex((s) => s.id === dragId);
+      const to = next.findIndex((s) => s.id === targetId);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      persistSets(next);
+      return next;
+    });
+  };
+
   const renameQuizSet = (id: string, name: string) => {
     setQuizSets((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, name } : s));
@@ -445,6 +459,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         deleteQuiz,
         updateQuiz,
         addQuizSet,
+        reorderQuizSets,
         deleteQuizSet,
         renameQuizSet,
         setQuizSetColor,
