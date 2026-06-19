@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
@@ -14,9 +14,10 @@ interface Props {
   editable?: boolean;
   minHeight?: string;
   maxHeight?: string;
+  toolbarEnd?: ReactNode;
 }
 
-export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight }: Props) {
+export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd }: Props) {
   const { t } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -326,6 +327,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         />
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('removeFormat'); }} title={t.titleClr} className={btnCls(false)}>⌫</button>
+        {toolbarEnd && <div className="ml-auto flex items-center pl-2">{toolbarEnd}</div>}
       </div>
 
       <div
