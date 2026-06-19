@@ -114,20 +114,26 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
       {/* Card area */}
       <div className="flex flex-1 flex-col items-center justify-center p-6 overflow-y-auto">
         {mode === 'flashcard' ? (
-          <div className="w-full max-w-2xl flex flex-col items-center">
-            {/* Flip card */}
-            <div className="w-full cursor-pointer" style={{ perspective: '1200px' }} onClick={() => setFlipped((f) => !f)}>
-              <div style={{ transformStyle: 'preserve-3d', transition: 'transform 0.5s cubic-bezier(.4,0,.2,1)', transform: flipped ? 'rotateY(180deg)' : 'none', position: 'relative', minHeight: '240px' }}>
+          <div className="w-full max-w-3xl flex flex-col items-center">
+            {/* Flip card — Quizlet-style polished card */}
+            <div className="w-full cursor-pointer select-none" style={{ perspective: '1600px' }} onClick={() => setFlipped((f) => !f)}>
+              <div style={{ transformStyle: 'preserve-3d', transition: 'transform 0.55s cubic-bezier(.4,0,.2,1)', transform: flipped ? 'rotateY(180deg)' : 'none', position: 'relative', minHeight: '380px' }}>
                 {/* Front */}
-                <div style={{ backfaceVisibility: 'hidden' }} className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl border border-app-border bg-white p-8 shadow-lg dark:border-white/10 dark:bg-gray-800">
-                  <p className="mb-4 text-[10px] font-bold uppercase tracking-widest text-app-text-secondary/50">Question</p>
-                  <div className="text-center text-lg font-semibold leading-relaxed text-app-text dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
-                  <p className="mt-6 text-[11px] text-app-text-secondary/40 dark:text-gray-600">Tap to reveal answer</p>
+                <div
+                  style={{ backfaceVisibility: 'hidden', background: 'linear-gradient(160deg,#26304f 0%,#1b2440 60%,#161d36 100%)' }}
+                  className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-10 shadow-2xl ring-1 ring-white/10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
+                >
+                  <p className="mb-6 text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-300/70">Fråga</p>
+                  <div className="text-center text-[22px] font-semibold leading-relaxed text-white" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
+                  <p className="mt-8 text-[12px] text-white/35">Tryck för att se svaret</p>
                 </div>
                 {/* Back */}
-                <div style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }} className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl border border-primary/30 bg-primary/5 p-8 shadow-lg dark:border-primary/20 dark:bg-primary/10">
-                  <p className="mb-4 text-[10px] font-bold uppercase tracking-widest text-primary/60">Answer</p>
-                  <div className="text-center text-lg leading-relaxed text-app-text dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
+                <div
+                  style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)', background: 'linear-gradient(160deg,#1f3a36 0%,#17312f 55%,#13262a 100%)' }}
+                  className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-10 shadow-2xl ring-1 ring-white/10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
+                >
+                  <p className="mb-6 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300/70">Svar</p>
+                  <div className="text-center text-[20px] leading-relaxed text-white" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
                 </div>
               </div>
             </div>
