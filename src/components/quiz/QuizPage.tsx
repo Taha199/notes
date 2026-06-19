@@ -65,21 +65,28 @@ interface QuizItemRowProps {
 function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap }: QuizItemRowProps) {
   const status = progressMap?.[item.id];
   return (
-    <div className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
-      <div className="flex items-stretch">
-        <div className="flex flex-1 items-center justify-center gap-2 px-4 py-4">
+    <div className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:border-primary/25 hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
+      <div className="grid min-h-[150px] grid-cols-1 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]">
+        <div className="relative flex min-w-0 items-center justify-center gap-2 px-5 py-8 sm:py-6">
+          <span className="absolute left-4 top-3 text-[9px] font-bold uppercase text-app-text-secondary/45">Fråga</span>
           {status && (
             <span className={`flex-shrink-0 text-[10px] font-bold ${status === 'known' ? 'text-emerald-500' : 'text-red-400'}`}>
               {status === 'known' ? '✓' : '✗'}
             </span>
           )}
-          <span dir="auto" className="block min-w-0 break-words [overflow-wrap:anywhere] text-center text-[13px] font-semibold text-app-text dark:text-gray-100 leading-relaxed" dangerouslySetInnerHTML={{ __html: mdToHtml(item.question) }} />
+          <span dir="auto" className="block min-w-0 break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(item.question) }} />
         </div>
-        <div className="w-px flex-shrink-0 bg-app-border dark:bg-white/10" />
-        <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4">
-          <span dir="auto" className="block min-w-0 break-words [overflow-wrap:anywhere] text-[13px] text-app-text dark:text-gray-100 leading-relaxed" dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }} />
+        <div className="relative flex min-w-0 items-start border-t border-app-border bg-app-bg/55 px-5 pb-5 pt-9 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6">
+          <span className="absolute left-5 top-3 flex items-center gap-1.5 text-[9px] font-bold uppercase text-primary/70">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/70" /> Svar
+          </span>
+          <span
+            dir="auto"
+            className="block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10"
+            dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
+          />
         </div>
-        <div className="flex flex-shrink-0 flex-col items-center justify-between gap-2 px-3 py-3">
+        <div className="flex items-center justify-end gap-4 border-t border-app-border px-4 py-2 dark:border-white/10 sm:flex-col sm:justify-between sm:gap-2 sm:border-l sm:border-t-0 sm:px-2 sm:py-3">
           <button onClick={() => onToggleFav(item.id)} className={'text-base transition-colors ' + (favs.has(item.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
           <button
             onClick={() => onSpeak(item.id)}
