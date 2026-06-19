@@ -32,7 +32,7 @@ function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: 
 }
 
 export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }: Props) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { toggleRead, toggleUnread, toggleFav, archive, unarchive, trash, restore, permDelete } = useNotes();
   const { show } = useToast();
   const [confirmPermDel, setConfirmPermDel] = useState(false);
@@ -91,7 +91,10 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
 
       <div className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-app-border/70 px-4 py-2.5 dark:border-white/10">
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] text-app-text-secondary/70 dark:text-gray-500">Created: {note.date}</span>
+          <span className="text-[10px] text-app-text-secondary/70 dark:text-gray-500">{lang === 'sv' ? 'Skapad' : 'Created'}: {note.date}</span>
+          {isTrash && note.deletedAt && (
+            <span className="text-[10px] text-app-text-secondary/70 dark:text-gray-500">{lang === 'sv' ? 'Raderad' : 'Deleted'}: {note.deletedAt}</span>
+          )}
           {note.lastEdited && (
             <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">Edited: {note.lastEdited}</span>
           )}
