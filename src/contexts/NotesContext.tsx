@@ -169,8 +169,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             localStorage.setItem('malacadhati_quiz', JSON.stringify(cloud.quizzes));
           }
           if (cloud.chats) {
-            setChats(cloud.chats);
-            localStorage.setItem('malacadhati_chats', JSON.stringify(cloud.chats));
+            // Firebase strips empty arrays — normalize messages on load.
+            const normalizedChats = cloud.chats.map((c: ChatConversation) => ({ ...c, messages: c.messages ?? [] }));
+            setChats(normalizedChats);
+            localStorage.setItem('malacadhati_chats', JSON.stringify(normalizedChats));
           }
           const rawFolders: QuizFolder[] = cloud.quizFolders?.filter(Boolean) ?? [];
           const normalizedFolders = ensureRestoredFolder(initializeQuizColors(rawFolders));

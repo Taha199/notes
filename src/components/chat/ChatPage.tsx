@@ -106,7 +106,8 @@ export function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const activeChat = displayChats.find((c) => c.id === activeId) ?? null;
+  const rawActiveChat = displayChats.find((c) => c.id === activeId) ?? null;
+  const activeChat = rawActiveChat ? { ...rawActiveChat, messages: rawActiveChat.messages ?? [] } : null;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
