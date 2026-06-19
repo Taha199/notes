@@ -60,4 +60,14 @@ export interface QuizSet {
   items: QuizItem[];
   createdAt: string;
   color?: string;
+  // OneNote-style notebook this set belongs to (unset = ungrouped).
+  folderId?: string;
+}
+
+// A OneNote-style notebook/folder that groups quiz sets.
+export interface QuizFolder {
+  id: string;
+  name: string;
+  color?: string;
+  createdAt: string;
 }

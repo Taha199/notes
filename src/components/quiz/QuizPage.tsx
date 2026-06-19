@@ -342,7 +342,7 @@ const SET_COLORS = [
 ];
 
 export function QuizPage() {
-  const { quizzes, quizSets, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, setQuizSetColor, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const { quizzes, quizSets, quizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
 
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
   const [favs, setFavs] = useState<Set<number>>(new Set());
@@ -365,6 +365,22 @@ export function QuizPage() {
   // Rename set
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
+
+  // Folders (OneNote-style notebooks)
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('malacadhati_quiz_folders_collapsed') || '[]')); } catch { return new Set(); }
+  });
+  const toggleFolder = (id: string) => setCollapsedFolders((prev) => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
+    localStorage.setItem('malacadhati_quiz_folders_collapsed', JSON.stringify([...n]));
+    return n;
+  });
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [folderRenameVal, setFolderRenameVal] = useState('');
+  const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number } | null>(null);
+  const [folderColorPicker, setFolderColorPicker] = useState(false);
+  const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
+  const [moveMenuForSet, setMoveMenuForSet] = useState<string | null>(null);
 
   // Import
   const [showImport, setShowImport] = useState(false);
@@ -441,9 +457,10 @@ export function QuizPage() {
     e.stopPropagation();
     setCtxMenu({ setId, x: e.clientX, y: e.clientY });
     setShowColorPicker(false);
+    setMoveMenuForSet(null);
   };
 
-  const closeCtxMenu = () => { setCtxMenu(null); setShowColorPicker(false); };
+  const closeCtxMenu = () => { setCtxMenu(null); setShowColorPicker(false); setMoveMenuForSet(null); };
 
   const handleImport = (pairs: { question: string; answer: string }[]) => {
     pairs.forEach((p) => {
@@ -479,6 +496,63 @@ export function QuizPage() {
     const items = setId ? (quizSets.find((s) => s.id === setId)?.items ?? []) : quizzes;
     const known = items.filter((i) => prog[i.id] === 'known').length;
     return { known, total: items.length };
+  };
+
+  // Group sorted sets by folder. A set whose folder was deleted falls back to ungrouped.
+  const folderIds = new Set(quizFolders.map((f) => f.id));
+  const ungroupedSets = sortedSets.filter((s) => !s.folderId || !folderIds.has(s.folderId));
+  const setsInFolder = (fid: string) => sortedSets.filter((s) => s.folderId === fid);
+
+  const renderSetRow = (s: QuizSet, indented = false) => {
+    const { known, total } = progressForSet(s.id);
+    return (
+      <div key={s.id} className="group mb-0.5">
+        {renamingSetId === s.id ? (
+          <div className="flex items-center gap-1 rounded-xl bg-white px-2 py-1.5 dark:bg-white/5">
+            <input
+              autoFocus
+              value={renameVal}
+              onChange={(e) => setRenameVal(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }
+                if (e.key === 'Escape') setRenamingSetId(null);
+              }}
+              onBlur={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }}
+              className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none dark:text-gray-200"
+            />
+            <button onClick={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }} className="text-[10px] text-primary">✓</button>
+          </div>
+        ) : (
+          <div
+            onContextMenu={(e) => openCtxMenu(e, s.id)}
+            className={'relative flex w-full flex-col overflow-hidden rounded-lg text-left text-[13px] font-medium transition-all ' +
+              (indented ? 'ml-3 ' : '') +
+              (selectedSetId === s.id ? 'bg-primary/10 dark:bg-primary/20' : 'hover:bg-white dark:hover:bg-white/5')}
+          >
+            <span className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm" style={{ backgroundColor: s.color || '#9ca3af' }} />
+            <div className="flex w-full items-center">
+              <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-3.5 pr-2 min-w-0">
+                <span className={'flex-1 truncate ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>{s.name}</span>
+                <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items?.length ?? 0}</span>
+              </button>
+              <button
+                onClick={(e) => openCtxMenu(e, s.id)}
+                className="mr-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover:opacity-100 dark:hover:bg-white/10"
+                title="Options"
+              >···</button>
+            </div>
+            {total > 0 && known > 0 && (
+              <div className="mb-1.5 flex items-center gap-2 pl-10 pr-3">
+                <div className="h-1 flex-1 rounded-full bg-app-border dark:bg-white/10">
+                  <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${(known / total) * 100}%` }} />
+                </div>
+                <span className="text-[9px] text-emerald-500 font-semibold">{known}/{total}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -556,69 +630,77 @@ export function QuizPage() {
           </div>
         )}
         <div className="flex-1 overflow-y-auto px-2">
-          {sortedSets.map((s) => {
-            const { known, total } = progressForSet(s.id);
+          {/* Folders (OneNote-style notebooks) */}
+          {quizFolders.map((f) => {
+            const fSets = setsInFolder(f.id);
+            const collapsed = collapsedFolders.has(f.id);
             return (
-              <div key={s.id} className="group mb-0.5">
-                {renamingSetId === s.id ? (
-                  <div className="flex items-center gap-1 rounded-xl bg-white px-2 py-1.5 dark:bg-white/5">
+              <div key={f.id} className="group/folder mb-1">
+                {renamingFolderId === f.id ? (
+                  <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1.5 dark:bg-white/5">
                     <input
                       autoFocus
-                      value={renameVal}
-                      onChange={(e) => setRenameVal(e.target.value)}
+                      value={folderRenameVal}
+                      onChange={(e) => setFolderRenameVal(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }
-                        if (e.key === 'Escape') setRenamingSetId(null);
+                        if (e.key === 'Enter') { renameQuizFolder(f.id, folderRenameVal.trim() || f.name); setRenamingFolderId(null); }
+                        if (e.key === 'Escape') setRenamingFolderId(null);
                       }}
-                      onBlur={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }}
-                      className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none dark:text-gray-200"
+                      onBlur={() => { renameQuizFolder(f.id, folderRenameVal.trim() || f.name); setRenamingFolderId(null); }}
+                      className="min-w-0 flex-1 bg-transparent text-[13px] font-semibold text-app-text outline-none dark:text-gray-100"
                     />
-                    <button onClick={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }} className="text-[10px] text-primary">✓</button>
+                    <button onClick={() => { renameQuizFolder(f.id, folderRenameVal.trim() || f.name); setRenamingFolderId(null); }} className="text-[11px] text-primary">✓</button>
                   </div>
                 ) : (
                   <div
-                    onContextMenu={(e) => openCtxMenu(e, s.id)}
-                    className={'relative flex w-full flex-col overflow-hidden rounded-lg text-left text-[13px] font-medium transition-all ' +
-                      (selectedSetId === s.id ? 'bg-primary/10 dark:bg-primary/20' : 'hover:bg-white dark:hover:bg-white/5')}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
+                    className="flex w-full items-center gap-1 rounded-lg px-1.5 py-1.5 hover:bg-white dark:hover:bg-white/5"
                   >
-                    {/* OneNote-style full-height section tab on the left edge */}
-                    <span
-                      className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm"
-                      style={{ backgroundColor: s.color || '#9ca3af' }}
-                    />
-                    <div className="flex w-full items-center">
-                      <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-3.5 pr-2 min-w-0">
-                        <span className={'flex-1 truncate ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>{s.name}</span>
-                        <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items?.length ?? 0}</span>
-                      </button>
-                      <button
-                        onClick={(e) => openCtxMenu(e, s.id)}
-                        className="mr-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover:opacity-100 dark:hover:bg-white/10"
-                        title="Options"
-                      >···</button>
-                    </div>
-                    {total > 0 && known > 0 && (
-                      <div className="mb-1.5 flex items-center gap-2 pl-10 pr-3">
-                        <div className="h-1 flex-1 rounded-full bg-app-border dark:bg-white/10">
-                          <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${(known / total) * 100}%` }} />
-                        </div>
-                        <span className="text-[9px] text-emerald-500 font-semibold">{known}/{total}</span>
-                      </div>
-                    )}
+                    <button onClick={() => toggleFolder(f.id)} className="flex flex-1 items-center gap-1.5 min-w-0">
+                      <span className="text-[10px] text-app-text-secondary/60 transition-transform" style={{ display: 'inline-block', transform: collapsed ? 'rotate(-90deg)' : 'none' }}>▾</span>
+                      <span className="text-[13px]" style={{ color: f.color || undefined }}>📒</span>
+                      <span className="flex-1 truncate text-[13px] font-bold text-app-text dark:text-gray-100">{f.name}</span>
+                      <span className="text-[10px] text-app-text-secondary/50">{fSets.length}</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
+                      className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover/folder:opacity-100 dark:hover:bg-white/10"
+                      title="Options"
+                    >···</button>
+                  </div>
+                )}
+                {!collapsed && (
+                  <div className="mt-0.5">
+                    {fSets.length === 0
+                      ? <p className="ml-3 px-2 py-1 text-[11px] italic text-app-text-secondary/40">Tomt</p>
+                      : fSets.map((s) => renderSetRow(s, true))}
                   </div>
                 )}
               </div>
             );
           })}
+
+          {/* Ungrouped sets */}
+          {quizFolders.length > 0 && ungroupedSets.length > 0 && (
+            <p className="mt-2 px-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-app-text-secondary/40">Lösa set</p>
+          )}
+          {ungroupedSets.map((s) => renderSetRow(s))}
         </div>
 
-        {/* New Set */}
-        <div className="border-t border-app-border p-2 dark:border-white/10">
+        {/* New Set / New Folder */}
+        <div className="flex border-t border-app-border dark:border-white/10">
           <button
             onClick={handleQuickCreateSet}
-            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12px] font-medium text-app-text-secondary transition-all hover:bg-white hover:text-primary dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-primary"
+            className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-[12px] font-medium text-app-text-secondary transition-all hover:bg-white hover:text-primary dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-primary"
           >
-            <span className="text-base leading-none">+</span> New Set
+            <span className="text-base leading-none">+</span> Set
+          </button>
+          <div className="w-px bg-app-border dark:bg-white/10" />
+          <button
+            onClick={() => { const fo = addQuizFolder('Ny mapp'); setRenamingFolderId(fo.id); setFolderRenameVal('Ny mapp'); }}
+            className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-[12px] font-medium text-app-text-secondary transition-all hover:bg-white hover:text-primary dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-primary"
+          >
+            📒 Mapp
           </button>
         </div>
       </div>
@@ -818,6 +900,32 @@ export function QuizPage() {
                 })}
               </div>
             )}
+            <button
+              onClick={() => setMoveMenuForSet((v) => (v === ctxMenu.setId ? null : ctxMenu.setId))}
+              className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+            >
+              <span className="flex items-center gap-3">📒 Flytta till mapp</span>
+              <span className="text-app-text-secondary/50">{moveMenuForSet === ctxMenu.setId ? '▾' : '›'}</span>
+            </button>
+            {moveMenuForSet === ctxMenu.setId && (
+              <div className="max-h-44 overflow-y-auto py-0.5">
+                <button
+                  onClick={() => { setQuizSetFolder(ctxMenu.setId, undefined); closeCtxMenu(); }}
+                  className="flex w-full items-center gap-2 px-6 py-1.5 text-[12px] text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/5"
+                >✕ Ingen mapp</button>
+                {quizFolders.map((f) => {
+                  const active = quizSets.find((x) => x.id === ctxMenu.setId)?.folderId === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => { setQuizSetFolder(ctxMenu.setId, f.id); closeCtxMenu(); }}
+                      className={'flex w-full items-center gap-2 px-6 py-1.5 text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' + (active ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')}
+                    >📒 {f.name}{active && ' ✓'}</button>
+                  );
+                })}
+                {quizFolders.length === 0 && <p className="px-6 py-1.5 text-[11px] italic text-app-text-secondary/50">Inga mappar än</p>}
+              </div>
+            )}
             <div className="my-1 h-px bg-app-border dark:bg-white/10" />
             <button
               onClick={() => {
@@ -831,6 +939,62 @@ export function QuizPage() {
           </div>
         </>
       )}
+
+      {/* Folder context menu */}
+      {folderCtxMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => { setFolderCtxMenu(null); setFolderColorPicker(false); }} onContextMenu={(e) => { e.preventDefault(); setFolderCtxMenu(null); }} />
+          <div className="fixed z-50 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800" style={{ top: folderCtxMenu.y, left: folderCtxMenu.x }}>
+            <button
+              onClick={() => { const f = quizFolders.find((x) => x.id === folderCtxMenu.folderId); if (f) { setRenamingFolderId(f.id); setFolderRenameVal(f.name); } setFolderCtxMenu(null); }}
+              className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+            >✏️ Byt namn</button>
+            <button
+              onClick={() => setFolderColorPicker((v) => !v)}
+              className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+            >
+              <span className="flex items-center gap-3">🎨 Färg</span>
+              <span className="text-app-text-secondary/50">{folderColorPicker ? '▾' : '›'}</span>
+            </button>
+            {folderColorPicker && (
+              <div className="flex flex-wrap gap-1.5 px-4 py-2">
+                {SET_COLORS.map((c) => {
+                  const active = (quizFolders.find((x) => x.id === folderCtxMenu.folderId)?.color ?? '') === c.value;
+                  return (
+                    <button
+                      key={c.name}
+                      title={c.name}
+                      onClick={() => { setQuizFolderColor(folderCtxMenu.folderId, c.value); setFolderCtxMenu(null); }}
+                      className={'flex h-6 w-6 items-center justify-center rounded-full border transition-all ' + (active ? 'border-app-text ring-2 ring-primary/40 dark:border-white' : 'border-app-border dark:border-white/20')}
+                      style={c.value ? { backgroundColor: c.value } : undefined}
+                    >{!c.value && <span className="text-[10px] text-app-text-secondary">✕</span>}</button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="my-1 h-px bg-app-border dark:bg-white/10" />
+            <button
+              onClick={() => { setConfirmDeleteFolderId(folderCtxMenu.folderId); setFolderCtxMenu(null); }}
+              className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+            >🗑 Ta bort mapp</button>
+          </div>
+        </>
+      )}
+
+      {/* Delete folder confirmation */}
+      {confirmDeleteFolderId && (() => {
+        const f = quizFolders.find((x) => x.id === confirmDeleteFolderId);
+        return (
+          <ConfirmDialog
+            title="Ta bort mapp"
+            message={`Ta bort mappen "${f?.name ?? ''}"? Seten flyttas ut men raderas inte.`}
+            confirmLabel="Ta bort"
+            cancelLabel="Avbryt"
+            onConfirm={() => { deleteQuizFolder(confirmDeleteFolderId); setConfirmDeleteFolderId(null); }}
+            onCancel={() => setConfirmDeleteFolderId(null)}
+          />
+        );
+      })()}
 
       {/* Delete set confirmation */}
       {confirmDeleteSetId && (() => {

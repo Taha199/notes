@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Note, QuizItem, QuizSet, ChatConversation } from '../types';
+import type { Note, QuizItem, QuizSet, QuizFolder, ChatConversation } from '../types';
 import { FB_DB_URL } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
@@ -17,6 +17,7 @@ interface NotesCtx {
   drafts: Draft[];
   quizzes: QuizItem[];
   quizSets: QuizSet[];
+  quizFolders: QuizFolder[];
   chats: ChatConversation[];
   saveChats: (chats: ChatConversation[]) => void;
   cloudStatus: CloudStatus;
@@ -28,6 +29,11 @@ interface NotesCtx {
   deleteQuizSet: (id: string) => void;
   renameQuizSet: (id: string, name: string) => void;
   setQuizSetColor: (id: string, color: string) => void;
+  setQuizSetFolder: (id: string, folderId: string | undefined) => void;
+  addQuizFolder: (name: string) => QuizFolder;
+  renameQuizFolder: (id: string, name: string) => void;
+  setQuizFolderColor: (id: string, color: string) => void;
+  deleteQuizFolder: (id: string) => void;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => void;
@@ -71,6 +77,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   });
   const [quizSets, setQuizSets] = useState<QuizSet[]>(() => {
     try { return JSON.parse(localStorage.getItem('malacadhati_quiz_sets') || '[]'); } catch { return []; }
+  });
+  const [quizFolders, setQuizFolders] = useState<QuizFolder[]>(() => {
+    try { return JSON.parse(localStorage.getItem('malacadhati_quiz_folders') || '[]'); } catch { return []; }
   });
   const [chats, setChats] = useState<ChatConversation[]>(() => {
     try { return JSON.parse(localStorage.getItem('malacadhati_chats') || '[]'); } catch { return []; }
@@ -124,6 +133,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             setQuizSets(normalizedSets);
             localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
           }
+          if (cloud.quizFolders) {
+            const normalizedFolders: QuizFolder[] = cloud.quizFolders.filter(Boolean);
+            setQuizFolders(normalizedFolders);
+            localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+          }
           if (cloud.drafts && cloud.drafts.length) {
             const dc = cloud.draftContents || {};
             setDrafts(
@@ -159,13 +173,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persist(notes, undefined, undefined, undefined, nextSets);
   };
 
+  const persistFolders = (nextFolders: QuizFolder[]) => {
+    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    persist(notes, undefined, undefined, undefined, undefined, nextFolders);
+  };
+
   const saveChats = (nextChats: ChatConversation[]) => {
     setChats(nextChats);
     localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
     persist(notes, undefined, undefined, nextChats);
   };
 
-  const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[], nextQuizSets?: QuizSet[]) => {
+  const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[], nextQuizSets?: QuizSet[], nextQuizFolders?: QuizFolder[]) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
     const qList = nextQuizzes ?? quizzes;
     localStorage.setItem('malacadhati_quiz', JSON.stringify(qList));
@@ -177,6 +196,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const dList = nextDrafts ?? drafts;
       const chatList = nextChats ?? chats;
       const qsList = nextQuizSets ?? quizSets;
+      const qfList = nextQuizFolders ?? quizFolders;
       const draftContents: Record<string, { title: string; html: string }> = {};
       dList.forEach((d) => {
         draftContents[d.id] = { title: d.title, html: d.html };
@@ -191,6 +211,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizzes: qList,
           chats: chatList,
           quizSets: qsList,
+          quizFolders: qfList,
         }),
         headers: { 'Content-Type': 'application/json' },
       })
@@ -322,6 +343,54 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const setQuizSetFolder = (id: string, folderId: string | undefined) => {
+    setQuizSets((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, folderId } : s));
+      persistSets(next);
+      return next;
+    });
+  };
+
+  const addQuizFolder = (name: string): QuizFolder => {
+    const folder: QuizFolder = { id: 'f' + Date.now().toString(), name, createdAt: nowStr() };
+    setQuizFolders((prev) => {
+      const next = [...prev, folder];
+      persistFolders(next);
+      return next;
+    });
+    return folder;
+  };
+
+  const renameQuizFolder = (id: string, name: string) => {
+    setQuizFolders((prev) => {
+      const next = prev.map((f) => (f.id === id ? { ...f, name } : f));
+      persistFolders(next);
+      return next;
+    });
+  };
+
+  const setQuizFolderColor = (id: string, color: string) => {
+    setQuizFolders((prev) => {
+      const next = prev.map((f) => (f.id === id ? { ...f, color } : f));
+      persistFolders(next);
+      return next;
+    });
+  };
+
+  const deleteQuizFolder = (id: string) => {
+    // Detach sets from the deleted folder (they become ungrouped, not deleted).
+    setQuizSets((prev) => {
+      const next = prev.map((s) => (s.folderId === id ? { ...s, folderId: undefined } : s));
+      persistSets(next);
+      return next;
+    });
+    setQuizFolders((prev) => {
+      const next = prev.filter((f) => f.id !== id);
+      persistFolders(next);
+      return next;
+    });
+  };
+
   const addItemToSet = (setId: string, item: Omit<QuizItem, 'id'>) => {
     const newItem: QuizItem = { ...item, id: Date.now() };
     setQuizSets((prev) => {
@@ -369,6 +438,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         drafts,
         quizzes,
         quizSets,
+        quizFolders,
         cloudStatus,
         loaded,
         addQuiz,
@@ -378,6 +448,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         deleteQuizSet,
         renameQuizSet,
         setQuizSetColor,
+        setQuizSetFolder,
+        addQuizFolder,
+        renameQuizFolder,
+        setQuizFolderColor,
+        deleteQuizFolder,
         addItemToSet,
         removeItemFromSet,
         updateItemInSet,
