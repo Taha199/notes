@@ -521,6 +521,17 @@ export function QuizPage() {
                 />
               )
             ))}
+
+            {/* Quick add button under the list */}
+            {displayItems.length > 0 && !addingQuestion && (
+              <button
+                onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+                className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/60 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10"
+                title="Lägg till fråga"
+              >
+                +
+              </button>
+            )}
           </div>
         </div>
       </div>
