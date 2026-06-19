@@ -364,12 +364,12 @@ export function QuizPage() {
                       (selectedSetId === s.id ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
                   >
                     <div className="flex w-full items-center">
-                      <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 px-3 py-2 min-w-0">
-                        {s.color ? (
-                          <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: s.color }} />
-                        ) : (
-                          <span>📂</span>
-                        )}
+                      {/* Colored section tab */}
+                      <span
+                        className="my-1.5 ml-0.5 h-6 w-2 flex-shrink-0 rounded-r-md"
+                        style={{ backgroundColor: s.color || '#9ca3af' }}
+                      />
+                      <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 px-2.5 py-2 min-w-0">
                         <span className="flex-1 truncate" style={s.color ? { color: s.color } : undefined}>{s.name}</span>
                         <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items.length}</span>
                       </button>
