@@ -689,7 +689,14 @@ export function QuizPage() {
                 ) : (
                   <button
                     onClick={() => setSelectedFolderId(f.id)}
-                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!f.system) {
+                        setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY });
+                        setFolderColorPicker(false);
+                      }
+                    }}
                     onDragOver={(e) => {
                       if (!dragSetId.current) return;
                       e.preventDefault();
@@ -721,14 +728,16 @@ export function QuizPage() {
                           : 'hover:bg-white dark:hover:bg-white/5')}
                   >
                     <span className="absolute inset-y-0 left-0 w-[3px]" style={{ backgroundColor: f.color || '#9ca3af' }} />
-                    <span className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
-                      {f.name}
+                    <span title={f.system ? (lang === 'sv' ? 'Återställda set' : 'Restored Sets') : f.name} className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
+                      {f.system ? `🔒 ${lang === 'sv' ? 'Återställda' : 'Restored'}` : f.name}
                     </span>
                     <span className="block text-[9px] text-app-text-secondary/50">{setsInFolder(f.id).length} set</span>
-                    <span
-                      onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
-                      className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded text-[10px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border group-hover/fl:opacity-100"
-                    >···</span>
+                    {!f.system && (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
+                        className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded text-[10px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border group-hover/fl:opacity-100"
+                      >···</span>
+                    )}
                   </button>
                 )}
               </div>
