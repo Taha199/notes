@@ -212,8 +212,6 @@ export function QuizPage() {
   const [newQ, setNewQ] = useState('');
   const [newA, setNewA] = useState('');
 
-  // Set creation (inline rename after instant create)
-  const [creatingSet, setCreatingSet] = useState(false);
   const [newSetName, setNewSetName] = useState('');
 
   // Rename set
@@ -252,14 +250,6 @@ export function QuizPage() {
     if (!newQ.replace(/<[^>]*>/g, '').trim() || !newA.replace(/<[^>]*>/g, '').trim()) return;
     addItemToSet(selectedSetId, { noteId: 0, noteTitle: '', question: newQ, answer: newA, date: new Date().toLocaleDateString() });
     setNewQ(''); setNewA(''); setAddingQuestion(false);
-  };
-
-  const handleCreateSet = () => {
-    const name = newSetName.trim();
-    if (!name) return;
-    const s = addQuizSet(name);
-    setSelectedSetId(s.id);
-    setNewSetName(''); setCreatingSet(false);
   };
 
   const handleQuickCreateSet = () => {
