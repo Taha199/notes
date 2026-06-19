@@ -138,7 +138,7 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
 
   return (
     <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
-      <div className="flex flex-col gap-3 p-4">
+      <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
         <div>
           <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.question}</p>
           <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
@@ -146,7 +146,7 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
               html={question}
               onChange={onChangeQ}
               placeholder={`${labels.question}...`}
-              minHeight="60px"
+              minHeight="90px"
             />
           </div>
         </div>
@@ -157,7 +157,7 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
               html={answer}
               onChange={onChangeA}
               placeholder={`${labels.answer}...`}
-              minHeight="60px"
+              minHeight="90px"
               toolbarEnd={(
                 <button
                   type="button"
@@ -184,7 +184,7 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
             </div>
           )}
         </div>
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 md:col-span-2">
           <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{labels.cancel}</button>
           <button onClick={onSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{labels.save}</button>
         </div>
