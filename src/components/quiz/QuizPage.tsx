@@ -584,14 +584,14 @@ export function QuizPage() {
           </button>
         </div>
 
-        {/* All Questions */}
+        {/* Questions from Notes */}
         <button
           onClick={() => setSelectedSetId(null)}
           className={'mx-2 mb-0.5 flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-all ' +
             (selectedSetId === null ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
         >
           <span>🧠</span>
-          <span className="flex-1 truncate">All Questions</span>
+          <span className="flex-1 truncate">Questions from Notes</span>
           <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{quizzes.length}</span>
         </button>
 
@@ -712,7 +712,7 @@ export function QuizPage() {
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
             <span className="flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
-              {selectedSet ? `📂 ${selectedSet.name}` : '🧠 All Questions'} — {displayItems.length} {displayItems.length === 1 ? 'fråga' : 'frågor'}
+              {selectedSet ? `📂 ${selectedSet.name}` : '🧠 Questions from Notes'} — {displayItems.length} {displayItems.length === 1 ? 'fråga' : 'frågor'}
               {knownCount > 0 && displayItems.length > 0 && (
                 <span className="ml-2 font-normal text-emerald-500">· {knownCount}/{displayItems.length} known</span>
               )}
@@ -839,7 +839,7 @@ export function QuizPage() {
       {/* Study mode overlay */}
       {studyMode && displayItems.length > 0 && (
         <StudyMode
-          title={selectedSet?.name ?? 'All Questions'}
+          title={selectedSet?.name ?? 'Questions from Notes'}
           items={displayItems}
           mode={studyMode}
           initialProgress={currentProgress}
