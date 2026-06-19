@@ -67,7 +67,7 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
   };
 
   const markDone = () => {
-    updateNote(note.id, { read: true, archived: true });
+    updateNote(note.id, { read: true });
     show(t.tStudied);
     onNavigate?.('read');
     onClose();
