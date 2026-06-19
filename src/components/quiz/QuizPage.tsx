@@ -212,8 +212,6 @@ export function QuizPage() {
   const [newQ, setNewQ] = useState('');
   const [newA, setNewA] = useState('');
 
-  const [newSetName, setNewSetName] = useState('');
-
   // Rename set
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
