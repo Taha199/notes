@@ -42,8 +42,10 @@ export function ImageLightbox() {
         src={src}
         alt=""
         onClick={(e) => e.stopPropagation()}
+        style={{ animation: 'lightboxZoom 0.22s cubic-bezier(.2,.8,.2,1)' }}
         className="max-h-[92vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
       />
+      <style>{`@keyframes lightboxZoom{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}`}</style>
       <button
         onClick={() => setSrc(null)}
         className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white hover:bg-white/25"
