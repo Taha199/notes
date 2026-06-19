@@ -7,6 +7,7 @@ import { ToastProvider } from './contexts/ToastContext';
 import { AuthPage } from './components/auth/AuthPage';
 import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
 import { BootLoader } from './components/common/BootLoader';
+import { ImageLightbox } from './components/common/ImageLightbox';
 import { Dashboard } from './components/Dashboard';
 
 function getResetCode(): string | null {
@@ -48,6 +49,7 @@ export default function App() {
         <ToastProvider>
           <AuthProvider>
             <Root />
+            <ImageLightbox />
           </AuthProvider>
         </ToastProvider>
       </LanguageProvider>
