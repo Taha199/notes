@@ -67,13 +67,13 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
   return (
     <div className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
       <div className="flex items-stretch">
-        <div className="flex flex-1 items-center gap-2 px-4 py-4">
+        <div className="flex flex-1 items-center justify-center gap-2 px-4 py-4">
           {status && (
             <span className={`flex-shrink-0 text-[10px] font-bold ${status === 'known' ? 'text-emerald-500' : 'text-red-400'}`}>
               {status === 'known' ? '✓' : '✗'}
             </span>
           )}
-          <span dir="auto" className="block min-w-0 break-words [overflow-wrap:anywhere] text-[13px] font-semibold text-app-text dark:text-gray-100 leading-relaxed" dangerouslySetInnerHTML={{ __html: mdToHtml(item.question) }} />
+          <span dir="auto" className="block min-w-0 break-words [overflow-wrap:anywhere] text-center text-[13px] font-semibold text-app-text dark:text-gray-100 leading-relaxed" dangerouslySetInnerHTML={{ __html: mdToHtml(item.question) }} />
         </div>
         <div className="w-px flex-shrink-0 bg-app-border dark:bg-white/10" />
         <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4">
