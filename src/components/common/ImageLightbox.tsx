@@ -29,6 +29,17 @@ export function ImageLightbox() {
     return () => document.removeEventListener('keydown', onKey);
   }, [src]);
 
+  const downloadImage = () => {
+    if (!src) return;
+    const mime = src.match(/^data:image\/([^;,]+)/)?.[1]?.replace('jpeg', 'jpg') ?? 'png';
+    const link = document.createElement('a');
+    link.href = src;
+    link.download = `taha-note-image-${Date.now()}.${mime}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
   if (!src) return null;
 
   return createPortal(
@@ -44,13 +55,26 @@ export function ImageLightbox() {
         className="max-h-[92vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
       />
       <style>{`@keyframes lightboxZoom{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}`}</style>
-      <button
-        onClick={() => setSrc(null)}
-        className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white hover:bg-white/25"
-        aria-label="Close"
-      >
-        ✕
-      </button>
+      <div className="absolute right-4 top-4 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); downloadImage(); }}
+          className="flex h-10 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-gray-900 shadow-lg transition-colors hover:bg-gray-100"
+          aria-label="Download image"
+          title="Download image"
+        >
+          <span className="text-lg leading-none">↓</span>
+          Download
+        </button>
+        <button
+          type="button"
+          onClick={() => setSrc(null)}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white hover:bg-white/25"
+          aria-label="Close"
+        >
+          ✕
+        </button>
+      </div>
     </div>,
     document.body,
   );
