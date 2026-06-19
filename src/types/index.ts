@@ -9,6 +9,7 @@ export interface Note {
   read: boolean;
   archived: boolean;
   trashed?: boolean;
+  deletedAt?: string;
   date: string;
   lastEdited?: string;
 }
@@ -76,4 +77,5 @@ export interface QuizFolder {
   trashed?: boolean;
   deletedAt?: string;
   createdAt: string;
+  system?: 'restored';
 }
