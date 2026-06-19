@@ -116,6 +116,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             setChats(cloud.chats);
             localStorage.setItem('malacadhati_chats', JSON.stringify(cloud.chats));
           }
+          if (cloud.quizSets) {
+            setQuizSets(cloud.quizSets);
+            localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(cloud.quizSets));
+          }
           if (cloud.drafts && cloud.drafts.length) {
             const dc = cloud.draftContents || {};
             setDrafts(
@@ -148,6 +152,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const persistSets = (nextSets: QuizSet[]) => {
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persist(notes, undefined, undefined, undefined, nextSets);
   };
 
   const saveChats = (nextChats: ChatConversation[]) => {
@@ -156,7 +161,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persist(notes, undefined, undefined, nextChats);
   };
 
-  const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[]) => {
+  const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[], nextQuizSets?: QuizSet[]) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
     const qList = nextQuizzes ?? quizzes;
     localStorage.setItem('malacadhati_quiz', JSON.stringify(qList));
@@ -167,6 +172,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     saveTimer.current = setTimeout(() => {
       const dList = nextDrafts ?? drafts;
       const chatList = nextChats ?? chats;
+      const qsList = nextQuizSets ?? quizSets;
       const draftContents: Record<string, { title: string; html: string }> = {};
       dList.forEach((d) => {
         draftContents[d.id] = { title: d.title, html: d.html };
@@ -180,6 +186,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           draftContents,
           quizzes: qList,
           chats: chatList,
+          quizSets: qsList,
         }),
         headers: { 'Content-Type': 'application/json' },
       })
