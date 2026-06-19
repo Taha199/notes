@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
+const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF'];
 const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48, 56, 64, 72];
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const STATE_COMMANDS = [...TOGGLE_COMMANDS, 'justifyRight', 'justifyCenter', 'justifyLeft'];
@@ -28,8 +29,12 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
   const [barColor, setBarColor] = useState('#534AB7');
+  const [hlPalOpen, setHlPalOpen] = useState(false);
+  const [hlPalPos, setHlPalPos] = useState({ left: 0, top: 0 });
+  const [hlColor, setHlColor] = useState('#FFEB3B');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const colorWrapRef = useRef<HTMLDivElement>(null);
+  const hlWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
 
   // Set initial HTML once (avoid overwriting cursor on each keystroke)
@@ -223,6 +228,27 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     onChange(ed.innerHTML);
   };
 
+  const toggleHlPalette = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    saveSel();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setHlPalPos({ left: rect.left, top: rect.bottom + 8 });
+    setHlPalOpen((o) => !o);
+  };
+
+  const applyHighlight = (c: string) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    setHlColor(c);
+    focusEditor();
+    document.execCommand('styleWithCSS', false, 'true');
+    document.execCommand('backColor', false, c);
+    saveSel();
+    setHlPalOpen(false);
+    onChange(ed.innerHTML);
+  };
+
   const insertImage = (file: File) => {
     const ed = editorRef.current;
     if (!ed || !file.type.startsWith('image/')) return;
@@ -252,6 +278,22 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       window.removeEventListener('scroll', closePalette, true);
     };
   }, [palOpen]);
+
+  useEffect(() => {
+    if (!hlPalOpen) return;
+    const closeOutside = (e: MouseEvent) => {
+      if (!hlWrapRef.current?.contains(e.target as Node)) setHlPalOpen(false);
+    };
+    const close = () => setHlPalOpen(false);
+    document.addEventListener('mousedown', closeOutside);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      document.removeEventListener('mousedown', closeOutside);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [hlPalOpen]);
 
   useEffect(() => {
     if (!previewImage) return;
@@ -309,6 +351,34 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
                   style={{ background: c }}
                 />
               ))}
+            </div>
+          )}
+        </div>
+        <div ref={hlWrapRef} className="relative">
+          <button type="button" onMouseDown={toggleHlPalette} title="تلوين الخط / Highlight" className="flex h-7 w-7 flex-col items-center justify-center gap-0.5 rounded-md hover:bg-white dark:hover:bg-white/10">
+            <span className="text-xs font-bold leading-none" style={{ WebkitTextStroke: '0.5px #555' }}>A</span>
+            <span className="h-[3px] w-4 rounded-sm" style={{ background: hlColor }} />
+          </button>
+          {hlPalOpen && (
+            <div
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              className="fixed z-[9999] grid w-[164px] grid-cols-5 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
+              style={{ left: hlPalPos.left, top: hlPalPos.top }}
+            >
+              {HIGHLIGHT_COLORS.map((c) => (
+                <div
+                  key={c}
+                  onMouseDown={(e) => { e.preventDefault(); applyHighlight(c); }}
+                  className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125"
+                  style={{ background: c }}
+                />
+              ))}
+              <div
+                onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }}
+                className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5"
+              >
+                ✕ إزالة التلوين
+              </div>
             </div>
           )}
         </div>
