@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Note, QuizItem, QuizSet } from '../types';
+import type { Note, QuizItem, QuizSet, ChatConversation } from '../types';
 import { FB_DB_URL } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
@@ -17,6 +17,8 @@ interface NotesCtx {
   drafts: Draft[];
   quizzes: QuizItem[];
   quizSets: QuizSet[];
+  chats: ChatConversation[];
+  saveChats: (chats: ChatConversation[]) => void;
   cloudStatus: CloudStatus;
   loaded: boolean;
   addQuiz: (item: Omit<QuizItem, 'id'>) => void;
@@ -69,6 +71,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [quizSets, setQuizSets] = useState<QuizSet[]>(() => {
     try { return JSON.parse(localStorage.getItem('malacadhati_quiz_sets') || '[]'); } catch { return []; }
   });
+  const [chats, setChats] = useState<ChatConversation[]>(() => {
+    try { return JSON.parse(localStorage.getItem('malacadhati_chats') || '[]'); } catch { return []; }
+  });
   const draftCounter = useRef(0);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
   const [loaded, setLoaded] = useState(false);
@@ -106,6 +111,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             setQuizzes(cloud.quizzes);
             localStorage.setItem('malacadhati_quiz', JSON.stringify(cloud.quizzes));
           }
+          if (cloud.chats) {
+            setChats(cloud.chats);
+            localStorage.setItem('malacadhati_chats', JSON.stringify(cloud.chats));
+          }
           if (cloud.drafts && cloud.drafts.length) {
             const dc = cloud.draftContents || {};
             setDrafts(
@@ -140,7 +149,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
   };
 
-  const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[]) => {
+  const saveChats = (nextChats: ChatConversation[]) => {
+    setChats(nextChats);
+    localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
+    persist(notes, undefined, undefined, nextChats);
+  };
+
+  const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[]) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
     const qList = nextQuizzes ?? quizzes;
     localStorage.setItem('malacadhati_quiz', JSON.stringify(qList));
@@ -150,6 +165,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     clearTimeout(hideTimer.current ?? undefined);
     saveTimer.current = setTimeout(() => {
       const dList = nextDrafts ?? drafts;
+      const chatList = nextChats ?? chats;
       const draftContents: Record<string, { title: string; html: string }> = {};
       dList.forEach((d) => {
         draftContents[d.id] = { title: d.title, html: d.html };
@@ -162,6 +178,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           draftId: draftCounter.current,
           draftContents,
           quizzes: qList,
+          chats: chatList,
         }),
         headers: { 'Content-Type': 'application/json' },
       })
@@ -359,6 +376,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         deleteMany,
         updateNote,
         nowStr,
+        chats,
+        saveChats,
       }}
     >
       {children}

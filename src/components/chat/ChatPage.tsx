@@ -2,15 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChatAttachment, ChatConversation, ChatMessage } from '../../types';
 import { sendChatMessageStream } from '../../lib/gemini';
 import { useLanguage } from '../../contexts/LanguageContext';
-
-const STORAGE_KEY = 'malacadhati_chats';
-
-function loadChats(): ChatConversation[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; }
-}
-function saveChats(chats: ChatConversation[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
-}
+import { useNotes } from '../../contexts/NotesContext';
 function newId() { return `c${Date.now()}-${Math.random().toString(36).slice(2, 6)}`; }
 function nowStr(locale: string) {
   return new Date().toLocaleString(locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -99,9 +91,12 @@ function readFileAsBase64(file: File): Promise<{ dataUrl: string; base64: string
 
 export function ChatPage() {
   const { t } = useLanguage();
+  const { chats, saveChats } = useNotes();
   const locale = t.dateLocale;
-  const [chats, setChats] = useState<ChatConversation[]>(loadChats);
-  const [activeId, setActiveId] = useState<string | null>(() => loadChats()[0]?.id ?? null);
+  const [displayChats, setDisplayChats] = useState<typeof chats>(chats);
+  const [activeId, setActiveId] = useState<string | null>(() => chats[0]?.id ?? null);
+
+  useEffect(() => { setDisplayChats(chats); }, [chats]);
   const [input, setInput] = useState('');
   const [attachment, setAttachment] = useState<ChatAttachment | null>(null);
   const [loading, setLoading] = useState(false);
@@ -111,7 +106,7 @@ export function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const activeChat = chats.find((c) => c.id === activeId) ?? null;
+  const activeChat = displayChats.find((c) => c.id === activeId) ?? null;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -127,7 +122,6 @@ export function ChatPage() {
   const createNewChat = () => {
     const conv: ChatConversation = { id: newId(), title: 'New Chat', messages: [], createdAt: nowStr(locale) };
     const next = [conv, ...chats];
-    setChats(next);
     saveChats(next);
     setActiveId(conv.id);
     setInput('');
@@ -138,12 +132,11 @@ export function ChatPage() {
 
   const deleteChat = (id: string) => {
     const next = chats.filter((c) => c.id !== id);
-    setChats(next);
     saveChats(next);
     if (activeId === id) setActiveId(next[0]?.id ?? null);
   };
 
-  const updateChats = (updated: ChatConversation[]) => { setChats(updated); saveChats(updated); };
+  const updateChats = (updated: ChatConversation[]) => { saveChats(updated); };
 
   const handleFileSelect = async (file: File) => {
     const MAX = 10 * 1024 * 1024;
@@ -205,7 +198,7 @@ export function ChatPage() {
         (chunk) => {
           accumulated += chunk;
           withStreaming[convIdx] = { ...updatedConv, messages: [...updatedMessages, { ...streamingMsg, text: accumulated }] };
-          setChats([...withStreaming]);
+          setDisplayChats([...withStreaming]);
         },
         sentAttachment ? { mimeType: sentAttachment.mimeType, base64: sentAttachment.base64 } : undefined,
       );
@@ -237,10 +230,10 @@ export function ChatPage() {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-3">
-          {chats.length === 0 ? (
+          {displayChats.length === 0 ? (
             <p className="mt-6 text-center text-[12px] text-app-text-secondary/50 dark:text-gray-600">No conversations yet</p>
           ) : (
-            chats.map((c) => (
+            displayChats.map((c) => (
               <div key={c.id} className="group relative mb-0.5">
                 <button
                   onClick={() => { setActiveId(c.id); setError(''); }}
