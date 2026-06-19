@@ -73,6 +73,12 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
     onClose();
   };
 
+  const markUndone = () => {
+    updateNote(note.id, { read: false });
+    show(t.tUnstudied);
+    onClose();
+  };
+
   const handleArchive = () => {
     archive(note.id);
     show(t.tArched);
@@ -444,9 +450,15 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
                 <button onClick={handleArchive} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:text-gray-400">
                   🗄 {t.mArchive}
                 </button>
-                <button onClick={markDone} className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-                  ✓ {t.mDone}
-                </button>
+                {note.read ? (
+                  <button onClick={markUndone} className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10">
+                    ↩ {t.mUndone}
+                  </button>
+                ) : (
+                  <button onClick={markDone} className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                    ✓ {t.mDone}
+                  </button>
+                )}
               </>
             )}
             {!locked && (

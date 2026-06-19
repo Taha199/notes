@@ -21,6 +21,8 @@ export interface Translation {
   mDel: string;
   mUnarch: string;
   mDone: string;
+  mUndone: string;
+  tUnstudied: string;
   mArchive: string;
   mSave: string;
   mCopy: string;
@@ -167,7 +169,7 @@ export const LANGS: Record<Lang, Translation> = {
     navHome: 'Home', navFav: 'Favourites', navUnread: 'Notes to Study', navRead: 'Studied Notes',
     navLibrary: 'Notes Library', navFiles: 'File Uploads', navArchive: 'Archive', navTrash: 'Trash',
     searchPh: 'Search...', newNote: 'New Note', locked: 'Locked', editing: 'Editing',
-    mDel: 'Delete', mUnarch: 'Unarchive', mDone: 'Mark as Studied', mArchive: 'Archive', mSave: 'Save', mCopy: 'Copy', mGenQuiz: 'Generate Quiz', mAddQ: 'Add Question', mTiPh: 'Title (optional)',
+    mDel: 'Delete', mUnarch: 'Unarchive', mDone: 'Mark as Studied', mUndone: 'Mark as Unstudied', mArchive: 'Archive', mSave: 'Save', mCopy: 'Copy', mGenQuiz: 'Generate Quiz', mAddQ: 'Add Question', mTiPh: 'Title (optional)',
     archPill: 'Read & Archived', userName: 'User', userSub: 'My Personal Notes',
     draft: 'Draft', draftTiPh: 'Title (optional)', draftEdPh: 'Write your note here...', saveDraft: 'Save Note',
     cloudSaving: 'Saving...', cloudSaved: 'Saved', cloudSavedMain: 'Saved to cloud',
@@ -188,7 +190,7 @@ export const LANGS: Record<Lang, Translation> = {
     tAddNote: 'Note added', tMoved: 'Moved to trash', tArched: 'Moved to archive', tRestored: 'Restored to active',
     tFavAdd: 'Added to favourites ★', tFavRem: 'Removed from favourites', tRead: 'Marked as read ✓', tUnread: 'Moved back to unread',
     tSaved: 'Changes saved', tTrashEmpty: 'Trash emptied', tDelSel: 'Deleted', tRestored2: 'Restored',
-    tPermDel: 'Permanently deleted', tCantEmpty: 'Text cannot be empty', tStudied: 'Marked as read & archived ✓',
+    tPermDel: 'Permanently deleted', tCantEmpty: 'Text cannot be empty', tStudied: 'Marked as read & archived ✓', tUnstudied: 'Marked as unstudied ↩',
     tUnarch: 'Restored to active notes',
     cEmptyTrash: 'Permanently delete all notes in trash?', cDelSel: 'Permanently delete selected notes?', cPermDel: 'Permanently delete? This cannot be undone.',
     dateLocale: 'en-GB', signOut: 'Sign Out',
@@ -220,7 +222,7 @@ export const LANGS: Record<Lang, Translation> = {
     navHome: 'Hem', navFav: 'Favoriter', navUnread: 'Att studera', navRead: 'Studerade',
     navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     searchPh: 'Sök...', newNote: 'Ny Anteckning', locked: 'Låst', editing: 'Redigerar',
-    mDel: 'Radera', mUnarch: 'Avarkivera', mDone: 'Markera som Studerad', mArchive: 'Arkivera', mSave: 'Spara', mCopy: 'Kopiera', mGenQuiz: 'Generera Quiz', mAddQ: 'Lägg till fråga', mTiPh: 'Titel (valfri)',
+    mDel: 'Radera', mUnarch: 'Avarkivera', mDone: 'Markera som Studerad', mUndone: 'Markera som Ostuderad', mArchive: 'Arkivera', mSave: 'Spara', mCopy: 'Kopiera', mGenQuiz: 'Generera Quiz', mAddQ: 'Lägg till fråga', mTiPh: 'Titel (valfri)',
     archPill: 'Läst & Arkiverad', userName: 'Användare', userSub: 'Mina Personliga Anteckningar',
     draft: 'Utkast', draftTiPh: 'Titel (valfri)', draftEdPh: 'Skriv din anteckning här...', saveDraft: 'Spara Anteckning',
     cloudSaving: 'Sparar...', cloudSaved: 'Sparat', cloudSavedMain: 'Sparat i molnet',
@@ -241,7 +243,7 @@ export const LANGS: Record<Lang, Translation> = {
     tAddNote: 'Anteckning tillagd', tMoved: 'Flyttad till papperskorg', tArched: 'Flyttad till arkiv', tRestored: 'Återställd till aktiva',
     tFavAdd: 'Tillagd i favoriter ★', tFavRem: 'Borttagen från favoriter', tRead: 'Markerad som läst ✓', tUnread: 'Tillbaka till olästa',
     tSaved: 'Ändringar sparade', tTrashEmpty: 'Papperskorgen tömd', tDelSel: 'Raderade', tRestored2: 'Återställd',
-    tPermDel: 'Permanent raderad', tCantEmpty: 'Text kan inte vara tom', tStudied: 'Markerad som läst och arkiverad ✓',
+    tPermDel: 'Permanent raderad', tCantEmpty: 'Text kan inte vara tom', tStudied: 'Markerad som läst och arkiverad ✓', tUnstudied: 'Markerad som ostuderad ↩',
     tUnarch: 'Återställd till aktiva anteckningar',
     cEmptyTrash: 'Ta bort alla anteckningar permanent?', cDelSel: 'Ta bort valda anteckningar permanent?', cPermDel: 'Ta bort permanent? Detta kan inte ångras.',
     dateLocale: 'sv-SE', signOut: 'Logga ut',
