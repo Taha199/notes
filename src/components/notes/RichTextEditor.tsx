@@ -26,6 +26,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
   const [barColor, setBarColor] = useState('#534AB7');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
 
@@ -250,6 +251,15 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     };
   }, [palOpen]);
 
+  useEffect(() => {
+    if (!previewImage) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewImage(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [previewImage]);
+
   const btnCls = (active: boolean) =>
     'flex h-7 w-7 items-center justify-center rounded-md text-[14px] transition-all ' +
     (active
@@ -331,10 +341,39 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           }
         }}
         onInput={() => onChange(editorRef.current?.innerHTML ?? '')}
+        onClick={(event) => {
+          const target = event.target;
+          if (target instanceof HTMLImageElement) setPreviewImage(target.currentSrc || target.src);
+        }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 text-sm leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
         style={{ minHeight, maxHeight, cursor: editable ? 'text' : 'default' }}
       />
+
+      {previewImage && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Image preview"
+          onClick={() => setPreviewImage(null)}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewImage(null)}
+            aria-label="Close image preview"
+            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white transition-colors hover:bg-white/25"
+          >
+            ✕
+          </button>
+          <img
+            src={previewImage}
+            alt="Expanded note attachment"
+            onClick={(event) => event.stopPropagation()}
+            className="max-h-[90dvh] max-w-full rounded-lg object-contain shadow-2xl"
+          />
+        </div>
+      )}
     </div>
   );
 }
