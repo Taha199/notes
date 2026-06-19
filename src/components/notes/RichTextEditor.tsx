@@ -15,9 +15,10 @@ interface Props {
   minHeight?: string;
   maxHeight?: string;
   toolbarEnd?: ReactNode;
+  onLockedTripleClick?: () => void;
 }
 
-export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd }: Props) {
+export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick }: Props) {
   const { t } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -268,7 +269,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       : 'text-app-text-secondary hover:bg-white dark:hover:bg-white/10');
 
   return (
-    <div className={editable ? '' : 'pointer-events-none opacity-40 [&_img]:pointer-events-auto [&_img]:cursor-zoom-in [&_img]:opacity-100'}>
+    <div className={editable ? '' : '[&_img]:cursor-zoom-in'}>
       {/* Toolbar */}
       <div className="flex items-center gap-0.5 overflow-x-auto border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5" style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}>
         <div className="flex items-center overflow-hidden rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900">
@@ -344,6 +345,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         }}
         onInput={() => onChange(editorRef.current?.innerHTML ?? '')}
         onClick={(event) => {
+          if (!editable && event.detail >= 3) {
+            event.preventDefault();
+            onLockedTripleClick?.();
+            return;
+          }
           const target = event.target;
           if (target instanceof HTMLImageElement) setPreviewImage(target.currentSrc || target.src);
         }}
