@@ -267,9 +267,18 @@ export function QuizPage() {
     const name = `Nameless ${num}`;
     const s = addQuizSet(name);
     setSelectedSetId(s.id);
-    setRenamingSetId(s.id);
-    setRenameVal(name);
   };
+
+  // Context menu
+  const [ctxMenu, setCtxMenu] = useState<{ setId: string; x: number; y: number } | null>(null);
+
+  const openCtxMenu = (e: React.MouseEvent, setId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ setId, x: e.clientX, y: e.clientY });
+  };
+
+  const closeCtxMenu = () => setCtxMenu(null);
 
   const handleImport = (pairs: { question: string; answer: string }[]) => {
     pairs.forEach((p) => {
@@ -345,29 +354,32 @@ export function QuizPage() {
                     <button onClick={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }} className="text-[10px] text-primary">✓</button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => setSelectedSetId(s.id)}
-                    className={'flex w-full flex-col rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-all ' +
+                  <div
+                    onContextMenu={(e) => openCtxMenu(e, s.id)}
+                    className={'flex w-full flex-col rounded-xl text-left text-[13px] font-medium transition-all ' +
                       (selectedSetId === s.id ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
                   >
-                    <div className="flex w-full items-center gap-2">
-                      <span>📂</span>
-                      <span className="flex-1 truncate">{s.name}</span>
-                      <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items.length}</span>
-                      <span className="hidden gap-0.5 group-hover:flex">
-                        <span onClick={(e) => { e.stopPropagation(); setRenamingSetId(s.id); setRenameVal(s.name); }} className="flex h-4 w-4 items-center justify-center rounded text-[9px] text-app-text-secondary/50 hover:bg-app-border hover:text-app-text">✏️</span>
-                        <span onClick={(e) => { e.stopPropagation(); if (selectedSetId === s.id) setSelectedSetId(null); deleteQuizSet(s.id); }} className="flex h-4 w-4 items-center justify-center rounded text-[9px] text-app-text-secondary/50 hover:bg-red-100 hover:text-red-500">✕</span>
-                      </span>
+                    <div className="flex w-full items-center">
+                      <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 px-3 py-2 min-w-0">
+                        <span>📂</span>
+                        <span className="flex-1 truncate">{s.name}</span>
+                        <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items.length}</span>
+                      </button>
+                      <button
+                        onClick={(e) => openCtxMenu(e, s.id)}
+                        className="mr-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover:opacity-100 dark:hover:bg-white/10"
+                        title="Options"
+                      >···</button>
                     </div>
                     {total > 0 && known > 0 && (
-                      <div className="mt-1.5 flex items-center gap-2 pl-6">
+                      <div className="mb-1.5 flex items-center gap-2 pl-10 pr-3">
                         <div className="h-1 flex-1 rounded-full bg-app-border dark:bg-white/10">
                           <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${(known / total) * 100}%` }} />
                         </div>
                         <span className="text-[9px] text-emerald-500 font-semibold">{known}/{total}</span>
                       </div>
                     )}
-                  </button>
+                  </div>
                 )}
               </div>
             );
@@ -522,6 +534,39 @@ export function QuizPage() {
           onImport={handleImport}
           onClose={() => setShowImport(false)}
         />
+      )}
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={closeCtxMenu} onContextMenu={(e) => { e.preventDefault(); closeCtxMenu(); }} />
+          <div
+            className="fixed z-50 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
+            style={{ top: ctxMenu.y, left: ctxMenu.x }}
+          >
+            <button
+              onClick={() => {
+                const s = quizSets.find((x) => x.id === ctxMenu.setId);
+                if (s) { setRenamingSetId(s.id); setRenameVal(s.name); setSelectedSetId(s.id); }
+                closeCtxMenu();
+              }}
+              className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+            >
+              ✏️ Byt namn
+            </button>
+            <div className="my-1 h-px bg-app-border dark:bg-white/10" />
+            <button
+              onClick={() => {
+                if (selectedSetId === ctxMenu.setId) setSelectedSetId(null);
+                deleteQuizSet(ctxMenu.setId);
+                closeCtxMenu();
+              }}
+              className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+            >
+              🗑 Ta bort set
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
