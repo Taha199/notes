@@ -4,6 +4,7 @@ import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { useLanguage } from '../../contexts/LanguageContext';
 import type { QuizItem, QuizSet } from '../../types';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
@@ -115,58 +116,72 @@ interface EditPanelProps {
 }
 
 function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
+  const { lang } = useLanguage();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const labels = lang === 'en'
+    ? { question: 'Question', answer: 'Answer', aiAnswer: 'AI Answer', aiSuggestion: 'AI suggestion', keep: 'Keep current', replace: 'Replace answer', cancel: 'Cancel', save: 'Save' }
+    : { question: 'Fråga', answer: 'Svar', aiAnswer: 'AI-svar', aiSuggestion: 'AI-förslag', keep: 'Behåll nuvarande', replace: 'Ersätt svaret', cancel: 'Avbryt', save: 'Spara' };
+
+  const handleAiAnswer = async () => {
+    const plain = question.replace(/<[^>]*>/g, '').trim();
+    if (!plain) return;
+    setAiLoading(true);
+    try {
+      const res = await answerQuestion(plain);
+      if (hasContent(answer)) setAiSuggestion(res);
+      else onChangeA(res);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   return (
     <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
       <div className="flex flex-col gap-3 p-4">
         <div>
-          <div className="mb-1 flex items-center justify-between">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Fråga</p>
-            <button
-              onClick={async () => {
-                const plain = question.replace(/<[^>]*>/g, '').trim();
-                if (!plain) return;
-                setAiLoading(true);
-                try {
-                  const res = await answerQuestion(plain);
-                  // If an answer already exists, show it as a suggestion instead of replacing.
-                  if (hasContent(answer)) setAiSuggestion(res);
-                  else onChangeA(res);
-                } finally { setAiLoading(false); }
-              }}
-              disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
-              className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
-            >
-              {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
-            </button>
-          </div>
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.question}</p>
           <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-            <RichTextEditor html={question} onChange={onChangeQ} placeholder="Fråga..." minHeight="60px" />
+            <RichTextEditor
+              html={question}
+              onChange={onChangeQ}
+              placeholder={`${labels.question}...`}
+              minHeight="60px"
+              toolbarEnd={(
+                <button
+                  type="button"
+                  onClick={handleAiAnswer}
+                  disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
+                  className="flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                >
+                  {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {labels.aiAnswer}
+                </button>
+              )}
+            />
           </div>
         </div>
         <div>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Svar</p>
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
           <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-            <RichTextEditor html={answer} onChange={onChangeA} placeholder="Svar..." minHeight="60px" />
+            <RichTextEditor html={answer} onChange={onChangeA} placeholder={`${labels.answer}...`} minHeight="60px" />
           </div>
           {aiSuggestion !== null && (
             <div className="mt-2 overflow-hidden rounded-xl border border-violet-300 bg-violet-50 dark:border-violet-500/30 dark:bg-violet-500/10">
               <div className="flex items-center justify-between border-b border-violet-200 px-3 py-1.5 dark:border-violet-500/20">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">🧠 AI-förslag</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">🧠 {labels.aiSuggestion}</span>
                 <button onClick={() => setAiSuggestion(null)} className="text-[12px] text-violet-500/70 hover:text-violet-700">✕</button>
               </div>
               <div dir="auto" className="px-3 py-2 text-[13px] leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(aiSuggestion) }} />
               <div className="flex justify-end gap-2 border-t border-violet-200 px-3 py-2 dark:border-violet-500/20">
-                <button onClick={() => setAiSuggestion(null)} className="rounded-lg border border-app-border px-3 py-1 text-[11px] text-app-text-secondary hover:bg-white/50 dark:border-white/10">Behåll nuvarande</button>
-                <button onClick={() => { onChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ Ersätt svaret</button>
+                <button onClick={() => setAiSuggestion(null)} className="rounded-lg border border-app-border px-3 py-1 text-[11px] text-app-text-secondary hover:bg-white/50 dark:border-white/10">{labels.keep}</button>
+                <button onClick={() => { onChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {labels.replace}</button>
               </div>
             </div>
           )}
         </div>
         <div className="flex justify-end gap-2">
-          <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">Avbryt</button>
-          <button onClick={onSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">Spara</button>
+          <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{labels.cancel}</button>
+          <button onClick={onSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{labels.save}</button>
         </div>
       </div>
     </div>
