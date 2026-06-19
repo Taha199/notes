@@ -16,6 +16,12 @@ function saveProgress(all: Record<string, Record<number, 'known' | 'learning'>>)
   localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
 }
 
+// Content is valid if it has visible text OR an embedded image.
+function hasContent(html: string): boolean {
+  if (/<img\b/i.test(html)) return true;
+  return html.replace(/<[^>]*>/g, '').trim().length > 0;
+}
+
 function mdToHtml(content: string): string {
   if (/<[a-z][\s\S]*>/i.test(content)) return content;
   return content
@@ -249,14 +255,14 @@ export function QuizPage() {
 
   const saveEdit = () => {
     if (editingId === null) return;
-    if (!editQ.replace(/<[^>]*>/g, '').trim() || !editA.replace(/<[^>]*>/g, '').trim()) return;
+    if (!hasContent(editQ) || !hasContent(editA)) return;
     if (selectedSetId) updateItemInSet(selectedSetId, editingId, { question: editQ, answer: editA });
     else updateQuiz(editingId, { question: editQ, answer: editA });
     setEditingId(null);
   };
 
   const saveNewQuestion = () => {
-    if (!newQ.replace(/<[^>]*>/g, '').trim() || !newA.replace(/<[^>]*>/g, '').trim()) return;
+    if (!hasContent(newQ) || !hasContent(newA)) return;
     const item = { noteId: 0, noteTitle: '', question: newQ, answer: newA, date: new Date().toLocaleDateString() };
     if (selectedSetId) addItemToSet(selectedSetId, item);
     else addQuiz(item);
