@@ -348,6 +348,7 @@ export function QuizPage() {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const dragSetId = useRef<string | null>(null);
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [favs, setFavs] = useState<Set<number>>(new Set());
   const [speakingId, setSpeakingId] = useState<number | null>(null);
   const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
@@ -508,7 +509,11 @@ export function QuizPage() {
         key={s.id}
         className="group mb-0.5"
         draggable
-        onDragStart={() => { dragSetId.current = s.id; }}
+        onDragStart={(e) => {
+          dragSetId.current = s.id;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', s.id);
+        }}
         onDragOver={(e) => { e.preventDefault(); setDragOverSetId(s.id); }}
         onDragLeave={() => setDragOverSetId(null)}
         onDrop={(e) => {
@@ -520,7 +525,7 @@ export function QuizPage() {
           dragSetId.current = null;
           setDragOverSetId(null);
         }}
-        onDragEnd={() => { dragSetId.current = null; setDragOverSetId(null); }}
+        onDragEnd={() => { dragSetId.current = null; setDragOverSetId(null); setDragOverFolderId(null); }}
         style={dragOverSetId === s.id ? { outline: '2px solid var(--color-primary)', outlineOffset: '-2px', borderRadius: '8px' } : undefined}
       >
         {renamingSetId === s.id ? (
@@ -638,8 +643,35 @@ export function QuizPage() {
                   <button
                     onClick={() => setSelectedFolderId(f.id)}
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
+                    onDragOver={(e) => {
+                      if (!dragSetId.current) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      e.dataTransfer.dropEffect = 'move';
+                      setDragOverFolderId(f.id);
+                    }}
+                    onDragLeave={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOverFolderId(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const setId = dragSetId.current || e.dataTransfer.getData('text/plain');
+                      if (setId) {
+                        setQuizSetFolder(setId, f.id);
+                        if (setSort !== 'manual') changeSort('manual');
+                        setSelectedFolderId(f.id);
+                      }
+                      dragSetId.current = null;
+                      setDragOverSetId(null);
+                      setDragOverFolderId(null);
+                    }}
                     className={'relative w-full py-2.5 pl-3 pr-1 text-left transition-all ' +
-                      (selectedFolderId === f.id ? 'bg-primary/10 dark:bg-primary/20' : 'hover:bg-white dark:hover:bg-white/5')}
+                      (dragOverFolderId === f.id
+                        ? 'bg-primary/20 ring-2 ring-inset ring-primary dark:bg-primary/30'
+                        : selectedFolderId === f.id
+                          ? 'bg-primary/10 dark:bg-primary/20'
+                          : 'hover:bg-white dark:hover:bg-white/5')}
                   >
                     <span className="absolute inset-y-0 left-0 w-[3px]" style={{ backgroundColor: f.color || '#9ca3af' }} />
                     <span className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
