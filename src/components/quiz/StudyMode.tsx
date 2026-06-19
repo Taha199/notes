@@ -124,7 +124,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                   className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-10 shadow-2xl ring-1 ring-white/10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
                 >
                   <p className="mb-6 text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-300/70">Fråga</p>
-                  <div className="text-center text-[22px] font-semibold leading-relaxed text-white" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
+                  <div dir="auto" className="mx-auto w-full max-w-xl px-4 text-center text-[22px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
                   <p className="mt-8 text-[12px] text-white/35">Tryck för att se svaret</p>
                 </div>
                 {/* Back */}
@@ -133,7 +133,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                   className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-10 shadow-2xl ring-1 ring-white/10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
                 >
                   <p className="mb-6 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300/70">Svar</p>
-                  <div className="text-center text-[20px] leading-relaxed text-white" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
+                  <div dir="auto" className="mx-auto w-full max-w-xl px-4 text-center text-[20px] leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
                 </div>
               </div>
             </div>
