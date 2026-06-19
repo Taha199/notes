@@ -358,14 +358,26 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           onClick={() => setPreviewImage(null)}
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
         >
-          <button
-            type="button"
-            onClick={() => setPreviewImage(null)}
-            aria-label="Close image preview"
-            className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white transition-colors hover:bg-white/25"
-          >
-            ✕
-          </button>
+          <div className="absolute right-4 top-4 flex items-center gap-2">
+            <a
+              href={previewImage}
+              download="taha-note-image"
+              onClick={(event) => event.stopPropagation()}
+              aria-label="Download image"
+              title="Download image"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl font-bold text-white transition-colors hover:bg-white/25"
+            >
+              ↓
+            </a>
+            <button
+              type="button"
+              onClick={() => setPreviewImage(null)}
+              aria-label="Close image preview"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white transition-colors hover:bg-white/25"
+            >
+              ✕
+            </button>
+          </div>
           <img
             src={previewImage}
             alt="Expanded note attachment"
