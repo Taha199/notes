@@ -446,7 +446,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             insertPendingText(native.data);
           }
         }}
-        onInput={() => onChange(editorRef.current?.innerHTML ?? '')}
+        onInput={() => {
+          // Ensure each child block gets dir="auto" so Arabic lines go RTL independently.
+          const ed = editorRef.current;
+          if (ed) {
+            ed.childNodes.forEach((node) => {
+              if (node instanceof HTMLElement && !node.hasAttribute('dir')) {
+                node.setAttribute('dir', 'auto');
+              }
+            });
+          }
+          onChange(ed?.innerHTML ?? '');
+        }}
         onClick={(event) => {
           if (!editable && event.detail >= 3) {
             event.preventDefault();

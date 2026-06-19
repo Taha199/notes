@@ -178,12 +178,12 @@ export function Dashboard() {
               {drafts.map((d, i) => (
                 <DraftEditor key={d.id} draft={d} index={i} total={drafts.length} />
               ))}
-              <div className="-mx-3 -mb-3 flex justify-center border-t border-app-border bg-white py-4 dark:border-white/10 dark:bg-gray-950 sm:-mx-5 sm:-mb-5">
+              <div className="-mx-3 -mb-3 px-3 pb-3 pt-2 dark:bg-gray-950 sm:-mx-5 sm:px-5">
                 <button
                   onClick={addDraft}
                   aria-label={t.tAddNote}
                   title={t.tAddNote}
-                  className="flex h-12 w-12 items-center justify-center rounded-full border border-app-border bg-white text-2xl text-primary shadow-md transition-all hover:scale-105 hover:border-primary hover:bg-primary/5 dark:border-white/15 dark:bg-gray-800 dark:hover:bg-primary/10"
+                  className="flex w-full items-center justify-center rounded-2xl border-2 border-dashed border-app-border py-4 text-xl text-app-text-secondary/50 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:hover:border-primary/50 dark:hover:bg-primary/10"
                 >
                   +
                 </button>
