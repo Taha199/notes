@@ -24,8 +24,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
   const pendingMarks = useRef<Partial<Record<ToggleCommand, boolean>>>({});
-  const pendingSize = useRef<number | null>(null);
   const [fontSize, setFontSize] = useState(14);
+  const [baseSize, setBaseSize] = useState(14);
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
@@ -112,10 +112,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     });
   };
 
-  const hasPendingMarks = () => Object.keys(pendingMarks.current).length > 0 || pendingSize.current !== null;
+  const hasPendingMarks = () => Object.keys(pendingMarks.current).length > 0;
 
-  // Read the actual font size at the cursor so the indicator stays in sync with
-  // wherever the caret is — and so new typing inherits that size.
+  // Keep the size indicator in sync with whatever text the caret/selection is on.
   const syncFontSizeFromCaret = () => {
     const ed = editorRef.current;
     const sel = window.getSelection();
@@ -125,7 +124,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (node instanceof Element && ed.contains(node)) {
       const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
       if (px && px !== fontSize) setFontSize(px);
-      if (px) pendingSize.current = px;
     }
   };
 
@@ -181,7 +179,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       `font-style: ${(pendingMarks.current.italic ?? active.has('italic')) ? 'italic' : 'normal'}`,
       `text-decoration-line: ${decoration}`,
       `color: ${barColor}`,
-      pendingSize.current !== null ? `font-size: ${pendingSize.current}px` : '',
     ].filter(Boolean).join('; ');
 
     const escaped = text
@@ -206,13 +203,15 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
     const hasSelection = !!range && !range.collapsed;
 
-    // No selection → remember the size so newly typed text uses it.
+    // No selection → change the editor's base size (affects new typing). The
+    // indicator and typed text stay in lockstep — no per-character span trickery.
     if (!hasSelection) {
-      pendingSize.current = px;
+      setBaseSize(px);
       saveSel();
       return;
     }
 
+    // Selection → resize just that run via a span (overrides the base size).
     document.execCommand('fontSize', false, '7');
     ed.querySelectorAll('font[size="7"]').forEach((f) => {
       const sp = document.createElement('span');
@@ -220,7 +219,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       sp.innerHTML = f.innerHTML;
       f.replaceWith(sp);
     });
-    pendingSize.current = px;
     saveSel();
     onChange(ed.innerHTML);
   };
@@ -455,8 +453,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           if (target instanceof HTMLImageElement) setPreviewImage(target.currentSrc || target.src);
         }}
         suppressContentEditableWarning
-        className="overflow-y-auto px-4 py-3 text-sm leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
-        style={{ minHeight, maxHeight, cursor: editable ? 'text' : 'default' }}
+        className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
+        style={{ minHeight, maxHeight, fontSize: `${baseSize}px`, cursor: editable ? 'text' : 'default' }}
       />
 
       {previewImage && (
