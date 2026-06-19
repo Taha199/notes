@@ -212,7 +212,7 @@ export function QuizPage() {
   const [newQ, setNewQ] = useState('');
   const [newA, setNewA] = useState('');
 
-  // Set creation
+  // Set creation (inline rename after instant create)
   const [creatingSet, setCreatingSet] = useState(false);
   const [newSetName, setNewSetName] = useState('');
 
@@ -260,6 +260,15 @@ export function QuizPage() {
     const s = addQuizSet(name);
     setSelectedSetId(s.id);
     setNewSetName(''); setCreatingSet(false);
+  };
+
+  const handleQuickCreateSet = () => {
+    const num = quizSets.length + 1;
+    const name = `Nameless ${num}`;
+    const s = addQuizSet(name);
+    setSelectedSetId(s.id);
+    setRenamingSetId(s.id);
+    setRenameVal(name);
   };
 
   const handleImport = (pairs: { question: string; answer: string }[]) => {
@@ -367,27 +376,12 @@ export function QuizPage() {
 
         {/* New Set */}
         <div className="border-t border-app-border p-2 dark:border-white/10">
-          {creatingSet ? (
-            <div className="flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-2.5 py-2">
-              <input
-                autoFocus
-                value={newSetName}
-                onChange={(e) => setNewSetName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleCreateSet(); if (e.key === 'Escape') { setCreatingSet(false); setNewSetName(''); } }}
-                placeholder="Set name..."
-                className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none placeholder:text-app-text-secondary/50 dark:text-gray-200"
-              />
-              <button onClick={handleCreateSet} className="text-[11px] font-semibold text-primary">✓</button>
-              <button onClick={() => { setCreatingSet(false); setNewSetName(''); }} className="text-[11px] text-app-text-secondary/50">✕</button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setCreatingSet(true)}
-              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12px] font-medium text-app-text-secondary transition-all hover:bg-white hover:text-primary dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-primary"
-            >
-              <span className="text-base leading-none">+</span> New Set
-            </button>
-          )}
+          <button
+            onClick={handleQuickCreateSet}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12px] font-medium text-app-text-secondary transition-all hover:bg-white hover:text-primary dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-primary"
+          >
+            <span className="text-base leading-none">+</span> New Set
+          </button>
         </div>
       </div>
 
