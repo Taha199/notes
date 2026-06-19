@@ -83,6 +83,17 @@ export function Dashboard() {
   const read = useMemo(() => notes.filter((n) => n.read && !n.archived && !n.trashed), [notes]);
   const archived = useMemo(() => notes.filter((n) => n.archived && !n.trashed), [notes]);
   const trashed = useMemo(() => notes.filter((n) => n.trashed), [notes]);
+  const navigableNotes = useMemo(() => {
+    const source = page === 'unread' ? unread
+      : page === 'read' ? read
+        : page === 'archive' ? archived
+          : page === 'fav' ? [...fav, ...favArch]
+            : active;
+    return hasSearch ? source.filter((note) => noteMatchesSearch(note, search)) : source;
+  }, [active, archived, fav, favArch, hasSearch, page, read, search, unread]);
+  const openNoteIndex = openNoteId === null ? -1 : navigableNotes.findIndex((note) => note.id === openNoteId);
+  const previousNoteId = openNoteIndex > 0 ? navigableNotes[openNoteIndex - 1]?.id : undefined;
+  const nextNoteId = openNoteIndex >= 0 && openNoteIndex < navigableNotes.length - 1 ? navigableNotes[openNoteIndex + 1]?.id : undefined;
 
   const toggleSelect = (id: number) => {
     setSelected((prev) => {
@@ -232,7 +243,16 @@ export function Dashboard() {
         </div>
       </div>
 
-      {openNoteId !== null && <NoteEditorModal noteId={openNoteId} onClose={() => setOpenNoteId(null)} onNavigate={(p) => { setPage(p); setOpenNoteId(null); }} />}
+      {openNoteId !== null && (
+        <NoteEditorModal
+          noteId={openNoteId}
+          previousNoteId={previousNoteId}
+          nextNoteId={nextNoteId}
+          onChangeNote={setOpenNoteId}
+          onClose={() => setOpenNoteId(null)}
+          onNavigate={(p) => { setPage(p); setOpenNoteId(null); }}
+        />
+      )}
       {showSetPassword && <SetPasswordModal onClose={() => setShowSetPassword(false)} />}
       {confirmEmptyTrash && (
         <ConfirmDialog
