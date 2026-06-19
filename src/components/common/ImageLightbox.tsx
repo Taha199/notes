@@ -12,8 +12,6 @@ export function ImageLightbox() {
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target || target.tagName !== 'IMG') return;
-      // Don't zoom while editing inside a contentEditable
-      if (target.closest('[contenteditable="true"]')) return;
       const img = target as HTMLImageElement;
       if (!img.src) return;
       e.preventDefault();
