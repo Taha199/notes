@@ -369,6 +369,11 @@ export function QuizPage() {
   // Import
   const [showImport, setShowImport] = useState(false);
 
+  // Sort the sets list
+  const [setSort, setSetSort] = useState<'manual' | 'name' | 'count'>(() => (localStorage.getItem('malacadhati_quiz_setsort') as 'manual' | 'name' | 'count') || 'manual');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const changeSort = (mode: 'manual' | 'name' | 'count') => { setSetSort(mode); localStorage.setItem('malacadhati_quiz_setsort', mode); setSortMenuOpen(false); };
+
   const toggleFav = (id: number) => setFavs((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const handleSpeak = (id: number) => {
@@ -457,6 +462,13 @@ export function QuizPage() {
   const selectedSet: QuizSet | undefined = quizSets.find((s) => s.id === selectedSetId);
   const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : quizzes;
 
+  const sortedSets = setSort === 'manual'
+    ? quizSets
+    : [...quizSets].sort((a, b) =>
+        setSort === 'name'
+          ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+          : (b.items?.length ?? 0) - (a.items?.length ?? 0));
+
   const progressForSet = (setId: string | null) => {
     const key = setId ?? 'all';
     const prog = allProgress[key] ?? {};
@@ -486,12 +498,40 @@ export function QuizPage() {
 
         {/* Sets */}
         {quizSets.length > 0 && (
-          <div className="mt-2 px-3 pb-1">
+          <div className="relative mt-2 flex items-center justify-between px-3 pb-1">
             <p className="text-[9px] font-bold uppercase tracking-widest text-app-text-secondary/50 dark:text-gray-600">Sets</p>
+            <button
+              onClick={() => setSortMenuOpen((v) => !v)}
+              title="Sortera"
+              className="flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
+            >
+              ⇅ {setSort === 'name' ? 'A–Z' : setSort === 'count' ? '#' : 'Egen'}
+            </button>
+            {sortMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
+                <div className="absolute right-2 top-6 z-50 w-36 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
+                  {([
+                    { key: 'manual', label: '✋ Egen ordning' },
+                    { key: 'name', label: '🔤 Namn (A–Z)' },
+                    { key: 'count', label: '🔢 Antal frågor' },
+                  ] as const).map((o) => (
+                    <button
+                      key={o.key}
+                      onClick={() => changeSort(o.key)}
+                      className={'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' +
+                        (setSort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')}
+                    >
+                      {o.label}{setSort === o.key && ' ✓'}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
         <div className="flex-1 overflow-y-auto px-2">
-          {quizSets.map((s) => {
+          {sortedSets.map((s) => {
             const { known, total } = progressForSet(s.id);
             return (
               <div key={s.id} className="group mb-0.5">
