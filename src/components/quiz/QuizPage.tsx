@@ -4,6 +4,7 @@ import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { BrandedAlert } from '../common/BrandedAlert';
 import { useLanguage } from '../../contexts/LanguageContext';
 import type { QuizItem, QuizSet } from '../../types';
 
@@ -15,6 +16,10 @@ function loadProgress(): Record<string, Record<number, 'known' | 'learning'>> {
 
 function saveProgress(all: Record<string, Record<number, 'known' | 'learning'>>) {
   localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
+}
+
+function normalizeQuizName(value: string) {
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
 // Content is valid if it has visible text OR an embedded image.
@@ -381,6 +386,7 @@ export function QuizPage() {
   const [folderColorPicker, setFolderColorPicker] = useState(false);
   const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
   const [moveMenuForSet, setMoveMenuForSet] = useState<string | null>(null);
+  const [nameAlert, setNameAlert] = useState<'set' | 'folder' | null>(null);
 
   // Import
   const [showImport, setShowImport] = useState(false);
@@ -441,10 +447,47 @@ export function QuizPage() {
   };
 
   const handleQuickCreateSet = () => {
-    const num = quizSets.length + 1;
+    let num = quizSets.length + 1;
+    while (allQuizSets.some((set) => normalizeQuizName(set.name) === normalizeQuizName(`Nameless ${num}`))) num += 1;
     const s = addQuizSet(`Nameless ${num}`);
     if (selectedFolderId) setQuizSetFolder(s.id, selectedFolderId);
     setSelectedSetId(s.id);
+  };
+
+  const commitSetName = (set: QuizSet) => {
+    const name = renameVal.trim().replace(/\s+/g, ' ') || set.name;
+    const duplicate = allQuizSets.some((item) => item.id !== set.id && normalizeQuizName(item.name) === normalizeQuizName(name));
+    if (duplicate) {
+      setNameAlert('set');
+      return;
+    }
+    renameQuizSet(set.id, name);
+    setRenamingSetId(null);
+  };
+
+  const commitFolderName = (folderId: string, fallbackName: string) => {
+    const name = folderRenameVal.trim().replace(/\s+/g, ' ') || fallbackName;
+    const duplicate = allQuizFolders.some((folder) => folder.id !== folderId && normalizeQuizName(folder.name) === normalizeQuizName(name));
+    if (duplicate) {
+      setNameAlert('folder');
+      return;
+    }
+    renameQuizFolder(folderId, name);
+    setRenamingFolderId(null);
+  };
+
+  const createFolder = () => {
+    const base = lang === 'sv' ? 'Ny mapp' : 'New folder';
+    let name = base;
+    let suffix = 2;
+    while (allQuizFolders.some((folder) => normalizeQuizName(folder.name) === normalizeQuizName(name))) {
+      name = `${base} ${suffix}`;
+      suffix += 1;
+    }
+    const folder = addQuizFolder(name);
+    setRenamingFolderId(folder.id);
+    setFolderRenameVal(name);
+    setSelectedFolderId(folder.id);
   };
 
   // Context menu
@@ -539,13 +582,13 @@ export function QuizPage() {
               value={renameVal}
               onChange={(e) => setRenameVal(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }
+                if (e.key === 'Enter') commitSetName(s);
                 if (e.key === 'Escape') setRenamingSetId(null);
               }}
-              onBlur={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }}
+              onBlur={() => commitSetName(s)}
               className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none dark:text-gray-200"
             />
-            <button onClick={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }} className="text-[10px] text-primary">✓</button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => commitSetName(s)} className="text-[10px] text-primary">✓</button>
           </div>
         ) : (
           <div
@@ -636,10 +679,10 @@ export function QuizPage() {
                       value={folderRenameVal}
                       onChange={(e) => setFolderRenameVal(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') { renameQuizFolder(f.id, folderRenameVal.trim() || f.name); setRenamingFolderId(null); }
+                        if (e.key === 'Enter') commitFolderName(f.id, f.name);
                         if (e.key === 'Escape') setRenamingFolderId(null);
                       }}
-                      onBlur={() => { renameQuizFolder(f.id, folderRenameVal.trim() || f.name); setRenamingFolderId(null); }}
+                      onBlur={() => commitFolderName(f.id, f.name)}
                       className="w-full bg-transparent text-[11px] font-semibold text-app-text outline-none dark:text-gray-100"
                     />
                   </div>
@@ -737,7 +780,7 @@ export function QuizPage() {
         {/* Bottom buttons — aligned with their column */}
         <div className="flex border-t border-app-border dark:border-white/10">
           <button
-            onClick={() => { const fo = addQuizFolder('Ny mapp'); setRenamingFolderId(fo.id); setFolderRenameVal('Ny mapp'); setSelectedFolderId(fo.id); }}
+            onClick={createFolder}
             className="flex w-[84px] flex-shrink-0 items-center justify-center gap-1 border-r border-app-border py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:border-white/10 dark:hover:bg-primary/10"
           >
             <span className="text-base leading-none">+</span> Mapp
@@ -792,7 +835,7 @@ export function QuizPage() {
                   onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
                 >
-                  + Add
+                  + {lang === 'sv' ? 'Lägg till' : 'Add'}
                 </button>
               </div>
             )}
@@ -810,7 +853,7 @@ export function QuizPage() {
                   onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
                 >
-                  ✏️ Add Question
+                  <span className="text-base leading-none">+</span> {lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
                 </button>
               </div>
             )}
@@ -873,7 +916,7 @@ export function QuizPage() {
               <button
                 onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
                 className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/60 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10"
-                title="Lägg till fråga"
+                title={lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
               >
                 +
               </button>
@@ -899,6 +942,20 @@ export function QuizPage() {
         <ImportModal
           onImport={handleImport}
           onClose={() => setShowImport(false)}
+        />
+      )}
+
+      {nameAlert && (
+        <BrandedAlert
+          message={lang === 'sv'
+            ? nameAlert === 'folder'
+              ? 'Det finns redan en mapp med det namnet. Försök med ett annat namn.'
+              : 'Det finns redan ett set med det namnet. Försök med ett annat namn.'
+            : nameAlert === 'folder'
+              ? 'A folder with that name already exists. Try a different name.'
+              : 'A set with that name already exists. Try a different name.'}
+          buttonLabel="OK"
+          onClose={() => setNameAlert(null)}
         />
       )}
 
