@@ -423,6 +423,9 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
             {note.lastEdited && <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">Edited: {note.lastEdited}</span>}
           </div>
           <div className="flex flex-wrap gap-1.5">
+            <button onClick={() => { trash(note.id); show(t.tMoved); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10">
+              🗑 {t.mDel}
+            </button>
             <button
               onClick={() => {
                 const text = html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
@@ -437,9 +440,6 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
             </button>
             <button onClick={() => { setManualQuiz((o) => !o); setQuizOpen(false); }} className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
               ✏️ {t.mAddQ}
-            </button>
-            <button onClick={() => { trash(note.id); show(t.tMoved); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10">
-              🗑 {t.mDel}
             </button>
             {note.archived ? (
               <button onClick={() => { unarchive(note.id); show(t.tUnarch); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
