@@ -470,20 +470,6 @@ export function QuizPage() {
             )}
           </div>
 
-          {/* New question panel */}
-          {addingQuestion && (
-            <div className="mb-3">
-              <EditPanel
-                question={newQ}
-                answer={newA}
-                onChangeQ={setNewQ}
-                onChangeA={setNewA}
-                onSave={saveNewQuestion}
-                onCancel={() => { setAddingQuestion(false); setNewQ(''); setNewA(''); }}
-              />
-            </div>
-          )}
-
           {/* Empty state */}
           {displayItems.length === 0 && !addingQuestion && (
             <div className="animate-fade-in flex flex-col items-center py-20 text-center text-app-text-secondary/70 dark:text-gray-500">
@@ -521,6 +507,18 @@ export function QuizPage() {
                 />
               )
             ))}
+
+            {/* New question panel — appears at the bottom, where you add */}
+            {addingQuestion && (
+              <EditPanel
+                question={newQ}
+                answer={newA}
+                onChangeQ={setNewQ}
+                onChangeA={setNewA}
+                onSave={saveNewQuestion}
+                onCancel={() => { setAddingQuestion(false); setNewQ(''); setNewA(''); }}
+              />
+            )}
 
             {/* Quick add button under the list */}
             {displayItems.length > 0 && !addingQuestion && (
