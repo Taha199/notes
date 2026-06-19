@@ -369,6 +369,10 @@ export function QuizPage() {
   // Import
   const [showImport, setShowImport] = useState(false);
 
+  // Show/hide the sets sidebar
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem('malacadhati_quiz_sidebar') !== 'closed');
+  const toggleSidebar = () => setSidebarOpen((v) => { const n = !v; localStorage.setItem('malacadhati_quiz_sidebar', n ? 'open' : 'closed'); return n; });
+
   // Sort the sets list
   const [setSort, setSetSort] = useState<'manual' | 'name' | 'count'>(() => (localStorage.getItem('malacadhati_quiz_setsort') as 'manual' | 'name' | 'count') || 'manual');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
@@ -479,10 +483,31 @@ export function QuizPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {/* Collapsed: thin strip with a reopen button */}
+      {!sidebarOpen && (
+        <div className="flex flex-shrink-0 flex-col items-center border-r border-app-border bg-app-bg px-1.5 pt-3 dark:border-white/10 dark:bg-gray-950">
+          <button
+            onClick={toggleSidebar}
+            title="Visa listan"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
+          >
+            ☰
+          </button>
+        </div>
+      )}
+
       {/* Sidebar */}
+      {sidebarOpen && (
       <div className="flex w-56 flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950">
-        <div className="px-3 pt-4 pb-2">
+        <div className="flex items-center justify-between px-3 pt-4 pb-2">
           <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">Quiz</p>
+          <button
+            onClick={toggleSidebar}
+            title="Dölj listan"
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
+          >
+            «
+          </button>
         </div>
 
         {/* All Questions */}
@@ -597,6 +622,7 @@ export function QuizPage() {
           </button>
         </div>
       </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 overflow-y-auto">
