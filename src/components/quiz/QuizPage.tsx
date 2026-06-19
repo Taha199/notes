@@ -71,7 +71,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
         </div>
         <div className="w-px flex-shrink-0 bg-app-border dark:bg-white/10" />
         <div className="flex w-1/2 flex-shrink-0 items-center px-4 py-4">
-          <span className="text-[13px] text-app-text-secondary dark:text-gray-400 leading-snug" dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }} />
+          <span className="text-[13px] text-app-text dark:text-gray-100 leading-snug" dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }} />
         </div>
         <div className="flex flex-shrink-0 flex-col items-center justify-between gap-2 px-3 py-3">
           <button onClick={() => onToggleFav(item.id)} className={'text-base transition-colors ' + (favs.has(item.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
