@@ -266,7 +266,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const addQuiz = (item: Omit<QuizItem, 'id'>) => {
     setQuizzes((prev) => {
-      const next = [{ ...item, id: Date.now() }, ...prev];
+      const next = [...prev, { ...item, id: Date.now() }];
       persist(notes, undefined, next);
       return next;
     });
