@@ -24,7 +24,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
   const pendingMarks = useRef<Partial<Record<ToggleCommand, boolean>>>({});
-  const [fontSize, setFontSize] = useState(13);
+  const pendingSize = useRef<number | null>(null);
+  const [fontSize, setFontSize] = useState(14);
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
@@ -111,7 +112,22 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     });
   };
 
-  const hasPendingMarks = () => Object.keys(pendingMarks.current).length > 0;
+  const hasPendingMarks = () => Object.keys(pendingMarks.current).length > 0 || pendingSize.current !== null;
+
+  // Read the actual font size at the cursor so the indicator stays in sync with
+  // wherever the caret is — and so new typing inherits that size.
+  const syncFontSizeFromCaret = () => {
+    const ed = editorRef.current;
+    const sel = window.getSelection();
+    if (!ed || !sel || sel.rangeCount === 0) return;
+    let node: Node | null = sel.anchorNode;
+    if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    if (node instanceof Element && ed.contains(node)) {
+      const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
+      if (px && px !== fontSize) setFontSize(px);
+      if (px) pendingSize.current = px;
+    }
+  };
 
   useEffect(() => {
     const handler = () => {
@@ -119,6 +135,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       if (ed && (document.activeElement === ed || ed.contains(document.activeElement))) {
         saveSel();
         readCommandState();
+        syncFontSizeFromCaret();
       }
     };
     document.addEventListener('selectionchange', handler);
@@ -164,6 +181,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       `font-style: ${(pendingMarks.current.italic ?? active.has('italic')) ? 'italic' : 'normal'}`,
       `text-decoration-line: ${decoration}`,
       `color: ${barColor}`,
+      pendingSize.current !== null ? `font-size: ${pendingSize.current}px` : '',
     ].filter(Boolean).join('; ');
 
     const escaped = text
@@ -184,6 +202,17 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!ed) return;
     if (document.activeElement !== ed) ed.focus();
     restoreSel();
+    const selection = window.getSelection();
+    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    const hasSelection = !!range && !range.collapsed;
+
+    // No selection → remember the size so newly typed text uses it.
+    if (!hasSelection) {
+      pendingSize.current = px;
+      saveSel();
+      return;
+    }
+
     document.execCommand('fontSize', false, '7');
     ed.querySelectorAll('font[size="7"]').forEach((f) => {
       const sp = document.createElement('span');
@@ -191,6 +220,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       sp.innerHTML = f.innerHTML;
       f.replaceWith(sp);
     });
+    pendingSize.current = px;
+    saveSel();
     onChange(ed.innerHTML);
   };
 
