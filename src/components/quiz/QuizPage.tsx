@@ -513,17 +513,17 @@ export function QuizPage() {
                 ) : (
                   <div
                     onContextMenu={(e) => openCtxMenu(e, s.id)}
-                    className={'flex w-full flex-col rounded-xl text-left text-[13px] font-medium transition-all ' +
-                      (selectedSetId === s.id ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
+                    className={'relative flex w-full flex-col overflow-hidden rounded-lg text-left text-[13px] font-medium transition-all ' +
+                      (selectedSetId === s.id ? 'bg-primary/10 dark:bg-primary/20' : 'hover:bg-white dark:hover:bg-white/5')}
                   >
+                    {/* OneNote-style full-height section tab on the left edge */}
+                    <span
+                      className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm"
+                      style={{ backgroundColor: s.color || '#9ca3af' }}
+                    />
                     <div className="flex w-full items-center">
-                      {/* Colored section tab */}
-                      <span
-                        className="my-1.5 ml-0.5 h-6 w-2 flex-shrink-0 rounded-r-md"
-                        style={{ backgroundColor: s.color || '#9ca3af' }}
-                      />
-                      <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 px-2.5 py-2 min-w-0">
-                        <span className="flex-1 truncate" style={s.color ? { color: s.color } : undefined}>{s.name}</span>
+                      <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-3.5 pr-2 min-w-0">
+                        <span className={'flex-1 truncate ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>{s.name}</span>
                         <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items?.length ?? 0}</span>
                       </button>
                       <button
