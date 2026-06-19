@@ -2,7 +2,18 @@ import { useState } from 'react';
 import { useNotes } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
+import { StudyMode } from './StudyMode';
 import type { QuizItem, QuizSet } from '../../types';
+
+const PROGRESS_KEY = 'malacadhati_quiz_progress';
+
+function loadProgress(): Record<string, Record<number, 'known' | 'learning'>> {
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; }
+}
+
+function saveProgress(all: Record<string, Record<number, 'known' | 'learning'>>) {
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
+}
 
 function mdToHtml(content: string): string {
   if (/<[a-z][\s\S]*>/i.test(content)) return content;
@@ -13,6 +24,26 @@ function mdToHtml(content: string): string {
     .replace(/\n/g, '<br>');
 }
 
+function parseImportText(raw: string): { question: string; answer: string }[] {
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  const pairs: { question: string; answer: string }[] = [];
+  // Try tab-separated first
+  const tabPairs = lines.map((l) => l.split('\t'));
+  if (tabPairs.every((p) => p.length >= 2)) {
+    return tabPairs.map(([q, ...rest]) => ({ question: q.trim(), answer: rest.join('\t').trim() })).filter((p) => p.question && p.answer);
+  }
+  // Try pipe-separated
+  const pipePairs = lines.map((l) => l.split('|'));
+  if (pipePairs.every((p) => p.length >= 2)) {
+    return pipePairs.map(([q, ...rest]) => ({ question: q.trim(), answer: rest.join('|').trim() })).filter((p) => p.question && p.answer);
+  }
+  // Alternating lines: Q, A, Q, A ...
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    if (lines[i] && lines[i + 1]) pairs.push({ question: lines[i], answer: lines[i + 1] });
+  }
+  return pairs;
+}
+
 interface QuizItemRowProps {
   item: QuizItem;
   onEdit: (item: QuizItem) => void;
@@ -21,13 +52,20 @@ interface QuizItemRowProps {
   onSpeak: (id: number) => void;
   favs: Set<number>;
   onToggleFav: (id: number) => void;
+  progressMap?: Record<number, 'known' | 'learning'>;
 }
 
-function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav }: QuizItemRowProps) {
+function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap }: QuizItemRowProps) {
+  const status = progressMap?.[item.id];
   return (
     <div className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
       <div className="flex items-stretch">
-        <div className="flex flex-1 items-center px-4 py-4">
+        <div className="flex flex-1 items-center gap-2 px-4 py-4">
+          {status && (
+            <span className={`flex-shrink-0 text-[10px] font-bold ${status === 'known' ? 'text-emerald-500' : 'text-red-400'}`}>
+              {status === 'known' ? '✓' : '✗'}
+            </span>
+          )}
           <span className="text-[13px] font-semibold text-app-text dark:text-gray-100 leading-snug" dangerouslySetInnerHTML={{ __html: mdToHtml(item.question) }} />
         </div>
         <div className="w-px flex-shrink-0 bg-app-border dark:bg-white/10" />
@@ -102,30 +140,88 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
   );
 }
 
+function ImportModal({ onImport, onClose }: { onImport: (pairs: { question: string; answer: string }[]) => void; onClose: () => void }) {
+  const [text, setText] = useState('');
+  const preview = parseImportText(text);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-sm">
+      <div className="flex w-full max-w-lg flex-col gap-4 rounded-2xl border border-app-border bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-gray-900">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-app-text dark:text-gray-100">📋 Import from text</h3>
+          <button onClick={onClose} className="text-app-text-secondary hover:text-app-text">✕</button>
+        </div>
+        <p className="text-[12px] text-app-text-secondary dark:text-gray-400">
+          Paste pairs separated by <strong>Tab</strong>, <strong>|</strong>, or <strong>alternating lines</strong> (question, answer, question, answer…)
+        </p>
+        <textarea
+          autoFocus
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={"Capital of France\tParis\nCapital of Japan\tTokyo"}
+          rows={6}
+          className="w-full resize-none rounded-xl border border-app-border bg-app-bg px-4 py-3 text-[13px] font-mono text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
+        />
+        {text && (
+          <div className="rounded-xl border border-app-border bg-app-bg px-3 py-2 dark:border-white/10 dark:bg-gray-800">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Preview — {preview.length} pairs</p>
+            <div className="max-h-32 overflow-y-auto">
+              {preview.slice(0, 5).map((p, i) => (
+                <div key={i} className="flex gap-2 py-0.5 text-[11px]">
+                  <span className="font-semibold text-app-text dark:text-gray-200 truncate">{p.question}</span>
+                  <span className="flex-shrink-0 text-app-text-secondary/50">→</span>
+                  <span className="text-app-text-secondary dark:text-gray-400 truncate">{p.answer}</span>
+                </div>
+              ))}
+              {preview.length > 5 && <p className="text-[10px] text-app-text-secondary/50">+{preview.length - 5} more…</p>}
+            </div>
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-xl border border-app-border px-4 py-2 text-[13px] text-app-text-secondary hover:bg-app-bg dark:border-white/10">Cancel</button>
+          <button
+            onClick={() => { if (preview.length > 0) { onImport(preview); onClose(); } }}
+            disabled={preview.length === 0}
+            className="rounded-xl bg-primary px-5 py-2 text-[13px] font-semibold text-white hover:bg-primary-dark disabled:opacity-40"
+          >
+            Import {preview.length > 0 ? `${preview.length} pairs` : ''}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function QuizPage() {
   const { quizzes, quizSets, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
 
-  const [selectedSetId, setSelectedSetId] = useState<string | null>(null); // null = all questions
+  const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
   const [favs, setFavs] = useState<Set<number>>(new Set());
   const [speakingId, setSpeakingId] = useState<number | null>(null);
+  const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
+
+  // Study mode
+  const [studyMode, setStudyMode] = useState<'flashcard' | 'written' | null>(null);
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editQ, setEditQ] = useState('');
   const [editA, setEditA] = useState('');
 
-  // New question panel (for sets)
+  // New question panel
   const [addingQuestion, setAddingQuestion] = useState(false);
   const [newQ, setNewQ] = useState('');
   const [newA, setNewA] = useState('');
 
-  // New set creation
+  // Set creation
   const [creatingSet, setCreatingSet] = useState(false);
   const [newSetName, setNewSetName] = useState('');
 
   // Rename set
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
+
+  // Import
+  const [showImport, setShowImport] = useState(false);
 
   const toggleFav = (id: number) => setFavs((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -166,8 +262,34 @@ export function QuizPage() {
     setNewSetName(''); setCreatingSet(false);
   };
 
+  const handleImport = (pairs: { question: string; answer: string }[]) => {
+    pairs.forEach((p) => {
+      if (selectedSetId) {
+        addItemToSet(selectedSetId, { noteId: 0, noteTitle: '', question: p.question, answer: p.answer, date: new Date().toLocaleDateString() });
+      }
+    });
+  };
+
+  const progressKey = selectedSetId ?? 'all';
+  const currentProgress = allProgress[progressKey] ?? {};
+  const knownCount = Object.values(currentProgress).filter((v) => v === 'known').length;
+
+  const handleSaveProgress = (p: Record<number, 'known' | 'learning'>) => {
+    const next = { ...allProgress, [progressKey]: p };
+    setAllProgress(next);
+    saveProgress(next);
+  };
+
   const selectedSet: QuizSet | undefined = quizSets.find((s) => s.id === selectedSetId);
   const displayItems: QuizItem[] = selectedSet ? selectedSet.items : quizzes;
+
+  const progressForSet = (setId: string | null) => {
+    const key = setId ?? 'all';
+    const prog = allProgress[key] ?? {};
+    const items = setId ? (quizSets.find((s) => s.id === setId)?.items ?? []) : quizzes;
+    const known = items.filter((i) => prog[i.id] === 'known').length;
+    return { known, total: items.length };
+  };
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -195,47 +317,52 @@ export function QuizPage() {
           </div>
         )}
         <div className="flex-1 overflow-y-auto px-2">
-          {quizSets.map((s) => (
-            <div key={s.id} className="group mb-0.5">
-              {renamingSetId === s.id ? (
-                <div className="flex items-center gap-1 rounded-xl bg-white px-2 py-1.5 dark:bg-white/5">
-                  <input
-                    autoFocus
-                    value={renameVal}
-                    onChange={(e) => setRenameVal(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }
-                      if (e.key === 'Escape') setRenamingSetId(null);
-                    }}
-                    className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none dark:text-gray-200"
-                  />
-                  <button onClick={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }} className="text-[10px] text-primary">✓</button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setSelectedSetId(s.id)}
-                  className={'flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-all ' +
-                    (selectedSetId === s.id ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
-                >
-                  <span>📂</span>
-                  <span className="flex-1 truncate">{s.name}</span>
-                  <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items.length}</span>
-                  <span className="hidden gap-0.5 group-hover:flex">
-                    <span
-                      onClick={(e) => { e.stopPropagation(); setRenamingSetId(s.id); setRenameVal(s.name); }}
-                      className="flex h-4 w-4 items-center justify-center rounded text-[9px] text-app-text-secondary/50 hover:bg-app-border hover:text-app-text"
-                      title="Rename"
-                    >✏️</span>
-                    <span
-                      onClick={(e) => { e.stopPropagation(); if (selectedSetId === s.id) setSelectedSetId(null); deleteQuizSet(s.id); }}
-                      className="flex h-4 w-4 items-center justify-center rounded text-[9px] text-app-text-secondary/50 hover:bg-red-100 hover:text-red-500"
-                      title="Delete"
-                    >✕</span>
-                  </span>
-                </button>
-              )}
-            </div>
-          ))}
+          {quizSets.map((s) => {
+            const { known, total } = progressForSet(s.id);
+            return (
+              <div key={s.id} className="group mb-0.5">
+                {renamingSetId === s.id ? (
+                  <div className="flex items-center gap-1 rounded-xl bg-white px-2 py-1.5 dark:bg-white/5">
+                    <input
+                      autoFocus
+                      value={renameVal}
+                      onChange={(e) => setRenameVal(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }
+                        if (e.key === 'Escape') setRenamingSetId(null);
+                      }}
+                      className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none dark:text-gray-200"
+                    />
+                    <button onClick={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }} className="text-[10px] text-primary">✓</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setSelectedSetId(s.id)}
+                    className={'flex w-full flex-col rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-all ' +
+                      (selectedSetId === s.id ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
+                  >
+                    <div className="flex w-full items-center gap-2">
+                      <span>📂</span>
+                      <span className="flex-1 truncate">{s.name}</span>
+                      <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items.length}</span>
+                      <span className="hidden gap-0.5 group-hover:flex">
+                        <span onClick={(e) => { e.stopPropagation(); setRenamingSetId(s.id); setRenameVal(s.name); }} className="flex h-4 w-4 items-center justify-center rounded text-[9px] text-app-text-secondary/50 hover:bg-app-border hover:text-app-text">✏️</span>
+                        <span onClick={(e) => { e.stopPropagation(); if (selectedSetId === s.id) setSelectedSetId(null); deleteQuizSet(s.id); }} className="flex h-4 w-4 items-center justify-center rounded text-[9px] text-app-text-secondary/50 hover:bg-red-100 hover:text-red-500">✕</span>
+                      </span>
+                    </div>
+                    {total > 0 && known > 0 && (
+                      <div className="mt-1.5 flex items-center gap-2 pl-6">
+                        <div className="h-1 flex-1 rounded-full bg-app-border dark:bg-white/10">
+                          <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${(known / total) * 100}%` }} />
+                        </div>
+                        <span className="text-[9px] text-emerald-500 font-semibold">{known}/{total}</span>
+                      </div>
+                    )}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* New Set */}
@@ -268,17 +395,63 @@ export function QuizPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
           {/* Header */}
-          <div className="mb-3 flex items-center justify-between px-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
+          <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
+            <span className="flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
               {selectedSet ? `📂 ${selectedSet.name}` : '🧠 All Questions'} — {displayItems.length} {displayItems.length === 1 ? 'fråga' : 'frågor'}
+              {knownCount > 0 && displayItems.length > 0 && (
+                <span className="ml-2 font-normal text-emerald-500">· {knownCount}/{displayItems.length} known</span>
+              )}
             </span>
-            {selectedSetId && (
-              <button
-                onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
-                className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
-              >
-                ✏️ Add Question
-              </button>
+            {displayItems.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                {/* Import - only for sets */}
+                {selectedSetId && (
+                  <button
+                    onClick={() => setShowImport(true)}
+                    className="flex items-center gap-1 rounded-xl border border-app-border px-2.5 py-1.5 text-[11px] font-medium text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
+                    title="Import from text"
+                  >
+                    📋 Import
+                  </button>
+                )}
+                {/* Study buttons */}
+                <button
+                  onClick={() => setStudyMode('flashcard')}
+                  className="flex items-center gap-1 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                >
+                  🃏 Flashcards
+                </button>
+                <button
+                  onClick={() => setStudyMode('written')}
+                  className="flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
+                >
+                  ✏️ Written
+                </button>
+                {selectedSetId && (
+                  <button
+                    onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+                    className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
+                  >
+                    + Add
+                  </button>
+                )}
+              </div>
+            )}
+            {displayItems.length === 0 && selectedSetId && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setShowImport(true)}
+                  className="flex items-center gap-1 rounded-xl border border-app-border px-2.5 py-1.5 text-[11px] font-medium text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
+                >
+                  📋 Import
+                </button>
+                <button
+                  onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+                  className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
+                >
+                  ✏️ Add Question
+                </button>
+              </div>
             )}
           </div>
 
@@ -301,7 +474,7 @@ export function QuizPage() {
             <div className="animate-fade-in flex flex-col items-center py-20 text-center text-app-text-secondary/70 dark:text-gray-500">
               <span className="mb-3 text-5xl opacity-30">{selectedSetId ? '📂' : '🧠'}</span>
               {selectedSetId
-                ? <p className="text-sm">This set is empty.<br />Click <strong>Add Question</strong> to get started.</p>
+                ? <p className="text-sm">This set is empty.<br />Click <strong>Add Question</strong> or <strong>Import</strong> to get started.</p>
                 : <p className="text-sm">Inga frågor ännu.<br />Öppna en anteckning och klicka på <strong>Generate Quiz</strong>.</p>}
             </div>
           )}
@@ -329,12 +502,33 @@ export function QuizPage() {
                   onSpeak={handleSpeak}
                   favs={favs}
                   onToggleFav={toggleFav}
+                  progressMap={currentProgress}
                 />
               )
             ))}
           </div>
         </div>
       </div>
+
+      {/* Study mode overlay */}
+      {studyMode && displayItems.length > 0 && (
+        <StudyMode
+          title={selectedSet?.name ?? 'All Questions'}
+          items={displayItems}
+          mode={studyMode}
+          initialProgress={currentProgress}
+          onClose={() => setStudyMode(null)}
+          onSaveProgress={handleSaveProgress}
+        />
+      )}
+
+      {/* Import modal */}
+      {showImport && selectedSetId && (
+        <ImportModal
+          onImport={handleImport}
+          onClose={() => setShowImport(false)}
+        />
+      )}
     </div>
   );
 }
