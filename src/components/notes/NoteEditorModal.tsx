@@ -41,6 +41,9 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
   const [manualQ, setManualQ] = useState('');
   const [manualA, setManualA] = useState('');
   const [manualAiLoading, setManualAiLoading] = useState(false);
+  const [mcqMode, setMcqMode] = useState(false);
+  const [mcqOptions, setMcqOptions] = useState(['', '', '', '']);
+  const [mcqCorrect, setMcqCorrect] = useState(0);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -168,46 +171,87 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
               <div>
                 <div className="mb-1 flex items-center justify-between">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70 dark:text-emerald-400/70">Svar</label>
-                  <button
-                    onClick={async () => {
-                      if (!manualQ.trim()) return;
-                      setManualAiLoading(true);
-                      try { setManualA(await answerQuestion(manualQ)); }
-                      finally { setManualAiLoading(false); }
-                    }}
-                    disabled={manualAiLoading || !manualQ.trim()}
-                    className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
-                  >
-                    {manualAiLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => { setMcqMode((m) => !m); setManualA(''); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }}
+                      className={'flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-all ' + (mcqMode ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300' : 'border-app-border bg-white text-app-text-secondary hover:border-blue-300 hover:text-blue-700 dark:border-white/10 dark:bg-gray-800 dark:text-gray-400')}
+                    >
+                      ☰ MCQ
+                    </button>
+                    {!mcqMode && (
+                      <button
+                        onClick={async () => {
+                          if (!manualQ.trim()) return;
+                          setManualAiLoading(true);
+                          try { setManualA(await answerQuestion(manualQ)); }
+                          finally { setManualAiLoading(false); }
+                        }}
+                        disabled={manualAiLoading || !manualQ.trim()}
+                        className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                      >
+                        {manualAiLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <textarea
-                  value={manualA}
-                  onChange={(e) => setManualA(e.target.value)}
-                  rows={3}
-                  placeholder="Skriv svaret..."
-                  className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
-                />
-                <button
-                  onClick={() => setManualA(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim())}
-                  className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-all hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
-                >
-                  📋 Paste note
-                </button>
+
+                {mcqMode ? (
+                  <div className="flex flex-col gap-2">
+                    {mcqOptions.map((opt, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <button
+                          onClick={() => setMcqCorrect(i)}
+                          className={'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-bold transition-all ' + (mcqCorrect === i ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-app-border bg-white text-app-text-secondary dark:border-white/20 dark:bg-gray-800')}
+                          title="Mark as correct"
+                        >
+                          {mcqCorrect === i ? '✓' : String.fromCharCode(65 + i)}
+                        </button>
+                        <input
+                          value={opt}
+                          onChange={(e) => { const o = [...mcqOptions]; o[i] = e.target.value; setMcqOptions(o); }}
+                          placeholder={`Option ${String.fromCharCode(65 + i)}...`}
+                          className={'flex-1 rounded-xl border px-3 py-2 text-[13px] text-app-text outline-none transition-all dark:bg-gray-800 dark:text-gray-100 ' + (mcqCorrect === i ? 'border-emerald-400 bg-emerald-50 focus:ring-2 focus:ring-emerald-200 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-app-border bg-white focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10')}
+                        />
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">Click the circle to mark the correct answer</p>
+                  </div>
+                ) : (
+                  <>
+                    <textarea
+                      value={manualA}
+                      onChange={(e) => setManualA(e.target.value)}
+                      rows={3}
+                      placeholder="Skriv svaret..."
+                      className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    <button
+                      onClick={() => setManualA(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim())}
+                      className="mt-1.5 flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-all hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
+                    >
+                      📋 Paste note
+                    </button>
+                  </>
+                )}
               </div>
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
+                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
                   Avbryt
                 </button>
                 <button
                   onClick={() => {
                     if (!manualQ.trim()) return;
-                    addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ.trim(), answer: manualA.trim(), date: nowStr() });
+                    let answer = manualA.trim();
+                    if (mcqMode) {
+                      const filled = mcqOptions.filter((o) => o.trim());
+                      if (filled.length < 2) return;
+                      answer = mcqOptions.map((o, i) => `${String.fromCharCode(65 + i)}) ${o.trim()}${i === mcqCorrect ? ' ✓' : ''}`).filter((_, i) => mcqOptions[i].trim()).join('\n');
+                    }
+                    addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ.trim(), answer, date: nowStr() });
                     show('Fråga sparad i Quiz 🧠');
-                    setManualQ('');
-                    setManualA('');
+                    setManualQ(''); setManualA(''); setMcqOptions(['', '', '', '']); setMcqCorrect(0);
                   }}
-                  disabled={!manualQ.trim()}
+                  disabled={!manualQ.trim() || (mcqMode && mcqOptions.filter((o) => o.trim()).length < 2)}
                   className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
                 >
                   💾 Spara fråga
