@@ -147,6 +147,17 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
               onChange={onChangeQ}
               placeholder={`${labels.question}...`}
               minHeight="60px"
+            />
+          </div>
+        </div>
+        <div>
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
+          <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+            <RichTextEditor
+              html={answer}
+              onChange={onChangeA}
+              placeholder={`${labels.answer}...`}
+              minHeight="60px"
               toolbarEnd={(
                 <button
                   type="button"
@@ -158,12 +169,6 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
                 </button>
               )}
             />
-          </div>
-        </div>
-        <div>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
-          <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-            <RichTextEditor html={answer} onChange={onChangeA} placeholder={`${labels.answer}...`} minHeight="60px" />
           </div>
           {aiSuggestion !== null && (
             <div className="mt-2 overflow-hidden rounded-xl border border-violet-300 bg-violet-50 dark:border-violet-500/30 dark:bg-violet-500/10">

@@ -12,6 +12,8 @@ export function ImageLightbox() {
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target || target.tagName !== 'IMG') return;
+      // RichTextEditor handles its own image preview — avoid a double modal.
+      if (target.closest('[contenteditable]')) return;
       const img = target as HTMLImageElement;
       if (!img.src) return;
       e.preventDefault();
