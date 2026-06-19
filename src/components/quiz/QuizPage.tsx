@@ -345,6 +345,7 @@ export function QuizPage() {
   const { quizzes, quizSets, quizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
 
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [favs, setFavs] = useState<Set<number>>(new Set());
   const [speakingId, setSpeakingId] = useState<number | null>(null);
   const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
@@ -367,14 +368,6 @@ export function QuizPage() {
   const [renameVal, setRenameVal] = useState('');
 
   // Folders (OneNote-style notebooks)
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('malacadhati_quiz_folders_collapsed') || '[]')); } catch { return new Set(); }
-  });
-  const toggleFolder = (id: string) => setCollapsedFolders((prev) => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
-    localStorage.setItem('malacadhati_quiz_folders_collapsed', JSON.stringify([...n]));
-    return n;
-  });
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderRenameVal, setFolderRenameVal] = useState('');
   const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number } | null>(null);
@@ -442,8 +435,8 @@ export function QuizPage() {
 
   const handleQuickCreateSet = () => {
     const num = quizSets.length + 1;
-    const name = `Nameless ${num}`;
-    const s = addQuizSet(name);
+    const s = addQuizSet(`Nameless ${num}`);
+    if (selectedFolderId) setQuizSetFolder(s.id, selectedFolderId);
     setSelectedSetId(s.id);
   };
 
@@ -503,7 +496,10 @@ export function QuizPage() {
   const ungroupedSets = sortedSets.filter((s) => !s.folderId || !folderIds.has(s.folderId));
   const setsInFolder = (fid: string) => sortedSets.filter((s) => s.folderId === fid);
 
-  const renderSetRow = (s: QuizSet, indented = false) => {
+  // Sets shown in the right panel depending on which folder is selected
+  const currentSets = selectedFolderId ? setsInFolder(selectedFolderId) : ungroupedSets;
+
+  const renderSetRow = (s: QuizSet) => {
     const { known, total } = progressForSet(s.id);
     return (
       <div key={s.id} className="group mb-0.5">
@@ -526,7 +522,6 @@ export function QuizPage() {
           <div
             onContextMenu={(e) => openCtxMenu(e, s.id)}
             className={'relative flex w-full flex-col overflow-hidden rounded-lg text-left text-[13px] font-medium transition-all ' +
-              (indented ? 'ml-3 ' : '') +
               (selectedSetId === s.id ? 'bg-primary/10 dark:bg-primary/20' : 'hover:bg-white dark:hover:bg-white/5')}
           >
             <span className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm" style={{ backgroundColor: s.color || '#9ca3af' }} />
@@ -570,24 +565,23 @@ export function QuizPage() {
         </div>
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar — two-column: Folders | Sets */}
       {sidebarOpen && (
-      <div className="flex w-56 flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950">
-        <div className="flex items-center justify-between px-3 pt-4 pb-2">
+      <div className="flex w-64 flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950">
+        {/* Header */}
+        <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">Quiz</p>
           <button
             onClick={toggleSidebar}
             title="Dölj listan"
             className="flex h-6 w-6 items-center justify-center rounded-lg text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
-          >
-            «
-          </button>
+          >«</button>
         </div>
 
-        {/* Questions from Notes */}
+        {/* Questions from Notes — full-width special row */}
         <button
-          onClick={() => setSelectedSetId(null)}
-          className={'mx-2 mb-0.5 flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-all ' +
+          onClick={() => { setSelectedSetId(null); setSelectedFolderId(null); }}
+          className={'mx-2 mb-1 flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-all ' +
             (selectedSetId === null ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
         >
           <span>🧠</span>
@@ -595,49 +589,18 @@ export function QuizPage() {
           <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{quizzes.length}</span>
         </button>
 
-        {/* Sets */}
-        {quizSets.length > 0 && (
-          <div className="relative mt-2 flex items-center justify-between px-3 pb-1">
-            <p className="text-[9px] font-bold uppercase tracking-widest text-app-text-secondary/50 dark:text-gray-600">Sets</p>
-            <button
-              onClick={() => setSortMenuOpen((v) => !v)}
-              title="Sortera"
-              className="flex h-5 items-center gap-1 rounded-md px-1.5 text-[10px] font-semibold text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
-            >
-              ⇅ {setSort === 'name' ? 'A–Z' : setSort === 'count' ? '#' : 'Egen'}
-            </button>
-            {sortMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
-                <div className="absolute right-2 top-6 z-50 w-36 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
-                  {([
-                    { key: 'manual', label: '✋ Egen ordning' },
-                    { key: 'name', label: '🔤 Namn (A–Z)' },
-                    { key: 'count', label: '🔢 Antal frågor' },
-                  ] as const).map((o) => (
-                    <button
-                      key={o.key}
-                      onClick={() => changeSort(o.key)}
-                      className={'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' +
-                        (setSort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')}
-                    >
-                      {o.label}{setSort === o.key && ' ✓'}
-                    </button>
-                  ))}
-                </div>
-              </>
+        {/* Two-column area */}
+        <div className="flex flex-1 overflow-hidden border-t border-app-border dark:border-white/10">
+
+          {/* Left column: Folders */}
+          <div className="flex w-[84px] flex-shrink-0 flex-col overflow-y-auto border-r border-app-border py-1 dark:border-white/10">
+            {quizFolders.length === 0 && (
+              <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">Inga<br/>mappar</p>
             )}
-          </div>
-        )}
-        <div className="flex-1 overflow-y-auto px-2">
-          {/* Folders (OneNote-style notebooks) */}
-          {quizFolders.map((f) => {
-            const fSets = setsInFolder(f.id);
-            const collapsed = collapsedFolders.has(f.id);
-            return (
-              <div key={f.id} className="group/folder mb-1">
+            {quizFolders.map((f) => (
+              <div key={f.id} className="group/fl relative">
                 {renamingFolderId === f.id ? (
-                  <div className="flex items-center gap-1 rounded-lg bg-white px-2 py-1.5 dark:bg-white/5">
+                  <div className="px-2 py-1.5">
                     <input
                       autoFocus
                       value={folderRenameVal}
@@ -647,47 +610,74 @@ export function QuizPage() {
                         if (e.key === 'Escape') setRenamingFolderId(null);
                       }}
                       onBlur={() => { renameQuizFolder(f.id, folderRenameVal.trim() || f.name); setRenamingFolderId(null); }}
-                      className="min-w-0 flex-1 bg-transparent text-[13px] font-semibold text-app-text outline-none dark:text-gray-100"
+                      className="w-full bg-transparent text-[11px] font-semibold text-app-text outline-none dark:text-gray-100"
                     />
-                    <button onClick={() => { renameQuizFolder(f.id, folderRenameVal.trim() || f.name); setRenamingFolderId(null); }} className="text-[11px] text-primary">✓</button>
                   </div>
                 ) : (
-                  <div
+                  <button
+                    onClick={() => setSelectedFolderId(f.id)}
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
-                    className="flex w-full items-center gap-1 rounded-lg px-1.5 py-1.5 hover:bg-white dark:hover:bg-white/5"
+                    className={'relative w-full py-2.5 pl-3 pr-1 text-left transition-all ' +
+                      (selectedFolderId === f.id ? 'bg-primary/10 dark:bg-primary/20' : 'hover:bg-white dark:hover:bg-white/5')}
                   >
-                    <button onClick={() => toggleFolder(f.id)} className="flex flex-1 items-center gap-1.5 min-w-0">
-                      <span className="text-[10px] text-app-text-secondary/60 transition-transform" style={{ display: 'inline-block', transform: collapsed ? 'rotate(-90deg)' : 'none' }}>▾</span>
-                      <span className="text-[13px]" style={{ color: f.color || undefined }}>📒</span>
-                      <span className="flex-1 truncate text-[13px] font-bold text-app-text dark:text-gray-100">{f.name}</span>
-                      <span className="text-[10px] text-app-text-secondary/50">{fSets.length}</span>
-                    </button>
-                    <button
+                    <span className="absolute inset-y-0 left-0 w-[3px]" style={{ backgroundColor: f.color || '#9ca3af' }} />
+                    <span className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
+                      {f.name}
+                    </span>
+                    <span className="block text-[9px] text-app-text-secondary/50">{setsInFolder(f.id).length} set</span>
+                    <span
                       onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
-                      className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover/folder:opacity-100 dark:hover:bg-white/10"
-                      title="Options"
-                    >···</button>
-                  </div>
-                )}
-                {!collapsed && (
-                  <div className="mt-0.5">
-                    {fSets.length === 0
-                      ? <p className="ml-3 px-2 py-1 text-[11px] italic text-app-text-secondary/40">Tomt</p>
-                      : fSets.map((s) => renderSetRow(s, true))}
-                  </div>
+                      className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded text-[10px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border group-hover/fl:opacity-100"
+                    >···</span>
+                  </button>
                 )}
               </div>
-            );
-          })}
+            ))}
+          </div>
 
-          {/* Ungrouped sets */}
-          {quizFolders.length > 0 && ungroupedSets.length > 0 && (
-            <p className="mt-2 px-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-app-text-secondary/40">Lösa set</p>
-          )}
-          {ungroupedSets.map((s) => renderSetRow(s))}
+          {/* Right column: Sets */}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Sort control */}
+            <div className="relative flex items-center justify-between px-2 py-1.5">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-app-text-secondary/50 dark:text-gray-600">Sets</p>
+              <button
+                onClick={() => setSortMenuOpen((v) => !v)}
+                className="flex h-5 items-center gap-1 rounded-md px-1 text-[9px] font-semibold text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
+              >⇅ {setSort === 'name' ? 'A–Z' : setSort === 'count' ? '#' : 'Egen'}</button>
+              {sortMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
+                  <div className="absolute right-1 top-7 z-50 w-36 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
+                    {([
+                      { key: 'manual', label: '✋ Egen ordning' },
+                      { key: 'name', label: '🔤 Namn (A–Z)' },
+                      { key: 'count', label: '🔢 Antal frågor' },
+                    ] as const).map((o) => (
+                      <button
+                        key={o.key}
+                        onClick={() => changeSort(o.key)}
+                        className={'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' +
+                          (setSort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')}
+                      >{o.label}{setSort === o.key && ' ✓'}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            {/* Sets list */}
+            <div className="flex-1 overflow-y-auto px-1">
+              {currentSets.length === 0 ? (
+                <p className="py-4 text-center text-[11px] italic text-app-text-secondary/40">
+                  {selectedFolderId ? 'Tomt' : 'Inga lösa set'}
+                </p>
+              ) : (
+                currentSets.map((s) => renderSetRow(s))
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* New Set / New Folder */}
+        {/* Bottom buttons */}
         <div className="flex border-t border-app-border dark:border-white/10">
           <button
             onClick={handleQuickCreateSet}
@@ -697,11 +687,9 @@ export function QuizPage() {
           </button>
           <div className="w-px bg-app-border dark:bg-white/10" />
           <button
-            onClick={() => { const fo = addQuizFolder('Ny mapp'); setRenamingFolderId(fo.id); setFolderRenameVal('Ny mapp'); }}
+            onClick={() => { const fo = addQuizFolder('Ny mapp'); setRenamingFolderId(fo.id); setFolderRenameVal('Ny mapp'); setSelectedFolderId(fo.id); }}
             className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-[12px] font-medium text-app-text-secondary transition-all hover:bg-white hover:text-primary dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-primary"
-          >
-            📒 Mapp
-          </button>
+          >📒 Mapp</button>
         </div>
       </div>
       )}
