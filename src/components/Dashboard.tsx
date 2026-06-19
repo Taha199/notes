@@ -61,12 +61,15 @@ function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMod
   );
 }
 
-function DeletedQuizCard({ icon, name, color, detail, deletedAt, restoreLabel, deleteLabel, onRestore, onDelete }: {
+function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, createdLabel, deletedLabel, restoreLabel, deleteLabel, onRestore, onDelete }: {
   icon: string;
   name: string;
   color?: string;
   detail: string;
+  createdAt: string;
   deletedAt?: string;
+  createdLabel: string;
+  deletedLabel: string;
   restoreLabel: string;
   deleteLabel: string;
   onRestore: () => void;
@@ -80,7 +83,10 @@ function DeletedQuizCard({ icon, name, color, detail, deletedAt, restoreLabel, d
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-app-text dark:text-gray-100">{name}</p>
           <p className="mt-0.5 text-[11px] text-app-text-secondary dark:text-gray-400">{detail}</p>
-          {deletedAt && <p className="mt-1 text-[10px] text-app-text-secondary/60">{deletedAt}</p>}
+          <div className="mt-2 space-y-0.5 text-[10px] text-app-text-secondary/60">
+            <p>{createdLabel}: {createdAt}</p>
+            {deletedAt && <p>{deletedLabel}: {deletedAt}</p>}
+          </div>
         </div>
       </div>
       <div className="mt-3 flex justify-end gap-2 border-t border-app-border/70 pt-3 dark:border-white/10">
@@ -124,8 +130,8 @@ export function Dashboard() {
   const visibleTrashedFolders = useMemo(() => trashedQuizFolders.filter((folder) => normalizeSearch(folder.name).includes(normalizeSearch(search))), [search, trashedQuizFolders]);
   const trashTotal = trashed.length + trashedQuizSets.length + trashedQuizFolders.length;
   const trashCopy = lang === 'sv'
-    ? { notes: 'Anteckningar', sets: 'Sets', folders: 'Mappar', restore: 'Återställ', delete: 'Radera permanent', questions: 'frågor', folderSets: 'sets', deleted: 'Radera permanent?', empty: 'Papperskorgen är tom', emptyConfirm: 'Radera allt i papperskorgen permanent?' }
-    : { notes: 'Notes', sets: 'Sets', folders: 'Folders', restore: 'Restore', delete: 'Delete permanently', questions: 'questions', folderSets: 'sets', deleted: 'Delete permanently?', empty: 'Trash is empty', emptyConfirm: 'Permanently delete everything in trash?' };
+    ? { notes: 'Anteckningar', sets: 'Sets', folders: 'Mappar', restore: 'Återställ', delete: 'Radera permanent', questions: 'frågor', folderSets: 'sets', created: 'Skapad', deletedAt: 'Raderad', deleted: 'Radera permanent?', empty: 'Papperskorgen är tom', emptyConfirm: 'Radera allt i papperskorgen permanent?' }
+    : { notes: 'Notes', sets: 'Sets', folders: 'Folders', restore: 'Restore', delete: 'Delete permanently', questions: 'questions', folderSets: 'sets', created: 'Created', deletedAt: 'Deleted', deleted: 'Delete permanently?', empty: 'Trash is empty', emptyConfirm: 'Permanently delete everything in trash?' };
   const navigableNotes = useMemo(() => {
     const source = page === 'unread' ? unread
       : page === 'read' ? read
@@ -295,7 +301,10 @@ export function Dashboard() {
                           name={set.name}
                           color={set.color}
                           detail={`${set.items?.length ?? 0} ${trashCopy.questions}`}
+                          createdAt={set.createdAt}
                           deletedAt={set.deletedAt}
+                          createdLabel={trashCopy.created}
+                          deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
                           onRestore={() => { restoreQuizSet(set.id); show(t.tRestored2); }}
@@ -317,7 +326,10 @@ export function Dashboard() {
                           name={folder.name}
                           color={folder.color}
                           detail={`${quizSets.filter((set) => set.folderId === folder.id && !set.trashed).length} ${trashCopy.folderSets}`}
+                          createdAt={folder.createdAt}
                           deletedAt={folder.deletedAt}
+                          createdLabel={trashCopy.created}
+                          deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
                           onRestore={() => { restoreQuizFolder(folder.id); show(t.tRestored2); }}
