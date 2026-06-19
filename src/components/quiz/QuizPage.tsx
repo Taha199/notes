@@ -302,7 +302,7 @@ export function QuizPage() {
   };
 
   const selectedSet: QuizSet | undefined = quizSets.find((s) => s.id === selectedSetId);
-  const displayItems: QuizItem[] = selectedSet ? selectedSet.items : quizzes;
+  const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : quizzes;
 
   const progressForSet = (setId: string | null) => {
     const key = setId ?? 'all';
@@ -371,7 +371,7 @@ export function QuizPage() {
                       />
                       <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 px-2.5 py-2 min-w-0">
                         <span className="flex-1 truncate" style={s.color ? { color: s.color } : undefined}>{s.name}</span>
-                        <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items.length}</span>
+                        <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items?.length ?? 0}</span>
                       </button>
                       <button
                         onClick={(e) => openCtxMenu(e, s.id)}
@@ -608,7 +608,7 @@ export function QuizPage() {
         return (
           <ConfirmDialog
             title="Ta bort set"
-            message={`Är du säker på att du vill ta bort "${s?.name ?? ''}"? Alla ${s?.items.length ?? 0} frågor i detta set raderas.`}
+            message={`Är du säker på att du vill ta bort "${s?.name ?? ''}"? Alla ${s?.items?.length ?? 0} frågor i detta set raderas.`}
             confirmLabel="Ta bort"
             cancelLabel="Avbryt"
             onConfirm={() => {

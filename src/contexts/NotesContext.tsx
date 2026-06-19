@@ -117,8 +117,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             localStorage.setItem('malacadhati_chats', JSON.stringify(cloud.chats));
           }
           if (cloud.quizSets) {
-            setQuizSets(cloud.quizSets);
-            localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(cloud.quizSets));
+            // Firebase strips empty arrays, so items can be missing — normalize.
+            const normalizedSets: QuizSet[] = cloud.quizSets
+              .filter(Boolean)
+              .map((s: QuizSet) => ({ ...s, items: s.items ?? [] }));
+            setQuizSets(normalizedSets);
+            localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
           }
           if (cloud.drafts && cloud.drafts.length) {
             const dc = cloud.draftContents || {};
