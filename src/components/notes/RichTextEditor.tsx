@@ -27,6 +27,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
   const [barColor, setBarColor] = useState('#534AB7');
   const colorWrapRef = useRef<HTMLDivElement>(null);
+  const imgInputRef = useRef<HTMLInputElement>(null);
 
   // Set initial HTML once (avoid overwriting cursor on each keystroke)
   useEffect(() => {
@@ -219,6 +220,20 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     onChange(ed.innerHTML);
   };
 
+  const insertImage = (file: File) => {
+    const ed = editorRef.current;
+    if (!ed || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      focusEditor();
+      document.execCommand('insertHTML', false, `<img src="${url}" style="max-width:100%;height:auto;border-radius:8px;margin:4px 0;" /><br>`);
+      saveSel();
+      onChange(ed.innerHTML);
+    };
+    reader.readAsDataURL(file);
+  };
+
   useEffect(() => {
     if (!palOpen) return;
     const closeOutside = (e: MouseEvent) => {
@@ -290,6 +305,15 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('italic'); }} title={t.titleItalic} className={btnCls(activeCmds.has('italic'))}><i>I</i></button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('underline'); }} title={t.titleUnline} className={btnCls(activeCmds.has('underline'))}><u>U</u></button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('strikeThrough'); }} title={t.titleStrike} className={btnCls(activeCmds.has('strikeThrough'))}><s>S</s></button>
+        <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); imgInputRef.current?.click(); }} title="Infoga bild" className={btnCls(false)}>🖼</button>
+        <input
+          ref={imgInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImage(f); e.target.value = ''; }}
+        />
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('removeFormat'); }} title={t.titleClr} className={btnCls(false)}>⌫</button>
       </div>
