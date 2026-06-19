@@ -18,15 +18,13 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
   };
 
   return (
-    <div className="animate-fade-in flex flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-800/60">
-      <div className="flex items-center justify-between rounded-t-2xl border-b border-app-border bg-app-bg px-4 py-2 dark:border-white/10 dark:bg-white/5">
+    <div className="animate-fade-in relative">
+      <div className="flex flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-800/60">
+      <div className="flex items-center rounded-t-2xl border-b border-app-border bg-app-bg px-4 py-2 dark:border-white/10 dark:bg-white/5">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-app-text-secondary dark:text-gray-400">
           ✏️ {t.draft}
           {total > 1 ? ' ' + (index + 1) : ''}
         </span>
-        <button onClick={() => removeDraft(draft.id)} className="rounded-md p-1 text-app-text-secondary hover:bg-app-border/60 dark:hover:bg-white/10">
-          ✕
-        </button>
       </div>
       <input
         value={draft.title}
@@ -51,6 +49,16 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
           🗑
         </button>
       </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => removeDraft(draft.id)}
+        aria-label="Close draft"
+        title="Close draft"
+        className="absolute -right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border border-app-border bg-white text-sm text-app-text-secondary shadow-md transition-all hover:scale-105 hover:border-red-300 hover:text-red-500 dark:border-white/15 dark:bg-gray-800 dark:text-gray-300"
+      >
+        ✕
+      </button>
     </div>
   );
 }
