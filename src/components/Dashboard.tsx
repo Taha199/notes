@@ -174,7 +174,9 @@ export function Dashboard() {
               ))}
               <button
                 onClick={addDraft}
-                className="min-h-[82px] rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/60 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10"
+                aria-label={t.tAddNote}
+                title={t.tAddNote}
+                className="flex h-12 w-12 self-center items-center justify-center rounded-full border border-app-border bg-white text-2xl text-primary shadow-md transition-all hover:scale-105 hover:border-primary hover:bg-primary/5 dark:border-white/15 dark:bg-gray-800 dark:hover:bg-primary/10"
               >
                 +
               </button>
