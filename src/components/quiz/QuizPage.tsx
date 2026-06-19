@@ -204,7 +204,7 @@ const SET_COLORS = [
 ];
 
 export function QuizPage() {
-  const { quizzes, quizSets, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, setQuizSetColor, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const { quizzes, quizSets, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, setQuizSetColor, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
 
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
   const [favs, setFavs] = useState<Set<number>>(new Set());
@@ -256,9 +256,10 @@ export function QuizPage() {
   };
 
   const saveNewQuestion = () => {
-    if (!selectedSetId) return;
     if (!newQ.replace(/<[^>]*>/g, '').trim() || !newA.replace(/<[^>]*>/g, '').trim()) return;
-    addItemToSet(selectedSetId, { noteId: 0, noteTitle: '', question: newQ, answer: newA, date: new Date().toLocaleDateString() });
+    const item = { noteId: 0, noteTitle: '', question: newQ, answer: newA, date: new Date().toLocaleDateString() };
+    if (selectedSetId) addItemToSet(selectedSetId, item);
+    else addQuiz(item);
     setNewQ(''); setNewA(''); setAddingQuestion(false);
   };
 
@@ -441,24 +442,24 @@ export function QuizPage() {
                 >
                   ✏️ Written
                 </button>
-                {selectedSetId && (
-                  <button
-                    onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
-                    className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
-                  >
-                    + Add
-                  </button>
-                )}
+                <button
+                  onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+                  className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
+                >
+                  + Add
+                </button>
               </div>
             )}
-            {displayItems.length === 0 && selectedSetId && (
+            {displayItems.length === 0 && (
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setShowImport(true)}
-                  className="flex items-center gap-1 rounded-xl border border-app-border px-2.5 py-1.5 text-[11px] font-medium text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
-                >
-                  📋 Import
-                </button>
+                {selectedSetId && (
+                  <button
+                    onClick={() => setShowImport(true)}
+                    className="flex items-center gap-1 rounded-xl border border-app-border px-2.5 py-1.5 text-[11px] font-medium text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
+                  >
+                    📋 Import
+                  </button>
+                )}
                 <button
                   onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
@@ -470,7 +471,7 @@ export function QuizPage() {
           </div>
 
           {/* New question panel */}
-          {addingQuestion && selectedSetId && (
+          {addingQuestion && (
             <div className="mb-3">
               <EditPanel
                 question={newQ}
@@ -489,7 +490,7 @@ export function QuizPage() {
               <span className="mb-3 text-5xl opacity-30">{selectedSetId ? '📂' : '🧠'}</span>
               {selectedSetId
                 ? <p className="text-sm">This set is empty.<br />Click <strong>Add Question</strong> or <strong>Import</strong> to get started.</p>
-                : <p className="text-sm">Inga frågor ännu.<br />Öppna en anteckning och klicka på <strong>Generate Quiz</strong>.</p>}
+                : <p className="text-sm">Inga frågor ännu.<br />Klicka på <strong>Add Question</strong> eller öppna en anteckning och klicka på <strong>Generate Quiz</strong>.</p>}
             </div>
           )}
 
