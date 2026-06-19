@@ -98,7 +98,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
             </svg>
           </button>
           <button onClick={() => onEdit(item)} className="text-[11px] text-app-text-secondary/40 transition-colors hover:text-primary" title="Redigera">✏️</button>
-          <button onClick={onDelete} className="text-[11px] text-app-text-secondary/30 transition-colors hover:text-red-500" title="Ta bort">✕</button>
+          <button onClick={onDelete} className="text-[13px] text-app-text-secondary/40 transition-all hover:scale-110 hover:text-red-500" title="Ta bort" aria-label="Ta bort">🗑️</button>
         </div>
       </div>
     </div>
