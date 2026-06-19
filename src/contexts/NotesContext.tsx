@@ -63,6 +63,17 @@ interface NotesCtx {
 const NotesContext = createContext<NotesCtx | null>(null);
 
 const AUTO_QUIZ_COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#10b981', '#ec4899', '#06b6d4', '#f97316'];
+const RESTORED_FOLDER_ID = 'system-restored-sets';
+
+function ensureRestoredFolder(folders: QuizFolder[]) {
+  const restored = folders.find((folder) => folder.id === RESTORED_FOLDER_ID || folder.system === 'restored');
+  if (restored) {
+    return folders.map((folder) => folder.id === restored.id
+      ? { ...folder, id: RESTORED_FOLDER_ID, name: 'Restored Sets', system: 'restored' as const, trashed: false, deletedAt: undefined, color: folder.color || '#6c63ff', colorInitialized: true }
+      : folder);
+  }
+  return [{ id: RESTORED_FOLDER_ID, name: 'Restored Sets', system: 'restored' as const, createdAt: new Date().toISOString(), color: '#6c63ff', colorInitialized: true }, ...folders];
+}
 
 function colorDistance(a: string, b: string) {
   const channels = (value: string) => [1, 3, 5].map((index) => Number.parseInt(value.slice(index, index + 2), 16));
@@ -115,7 +126,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     try { return JSON.parse(localStorage.getItem('malacadhati_quiz_sets') || '[]'); } catch { return []; }
   });
   const [quizFolders, setQuizFolders] = useState<QuizFolder[]>(() => {
-    try { return JSON.parse(localStorage.getItem('malacadhati_quiz_folders') || '[]'); } catch { return []; }
+    try { return ensureRestoredFolder(JSON.parse(localStorage.getItem('malacadhati_quiz_folders') || '[]')); } catch { return ensureRestoredFolder([]); }
   });
   const [chats, setChats] = useState<ChatConversation[]>(() => {
     try { return JSON.parse(localStorage.getItem('malacadhati_chats') || '[]'); } catch { return []; }
@@ -161,9 +172,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             setChats(cloud.chats);
             localStorage.setItem('malacadhati_chats', JSON.stringify(cloud.chats));
           }
-          const normalizedFolders: QuizFolder[] = cloud.quizFolders
-            ? initializeQuizColors(cloud.quizFolders.filter(Boolean))
-            : [];
+          const rawFolders: QuizFolder[] = cloud.quizFolders?.filter(Boolean) ?? [];
+          const normalizedFolders = ensureRestoredFolder(initializeQuizColors(rawFolders));
           if (cloud.quizSets) {
             // Firebase strips empty arrays, so items can be missing — normalize.
             const rawSets: QuizSet[] = cloud.quizSets
@@ -180,16 +190,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
               });
             }
           }
-          if (cloud.quizFolders) {
-            setQuizFolders(normalizedFolders);
-            localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
-            if (normalizedFolders.some((folder, index) => folder !== cloud.quizFolders.filter(Boolean)[index])) {
-              void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
-                method: 'PUT',
-                body: JSON.stringify(normalizedFolders),
-                headers: { 'Content-Type': 'application/json' },
-              });
-            }
+          setQuizFolders(normalizedFolders);
+          localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+          if (normalizedFolders.length !== rawFolders.length || normalizedFolders.some((folder, index) => folder !== rawFolders[index])) {
+            void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
+              method: 'PUT',
+              body: JSON.stringify(normalizedFolders),
+              headers: { 'Content-Type': 'application/json' },
+            });
           }
           if (cloud.drafts && cloud.drafts.length) {
             const dc = cloud.draftContents || {};
@@ -230,6 +238,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     persist(notes, undefined, undefined, undefined, undefined, nextFolders);
   };
+
+  useEffect(() => {
+    if (!loaded || !user) return;
+    setQuizFolders((prev) => {
+      const next = ensureRestoredFolder(prev);
+      persistFolders(next);
+      return next;
+    });
+    // Run once after each account finishes loading.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, user?.uid]);
 
   const saveChats = (nextChats: ChatConversation[]) => {
     setChats(nextChats);
@@ -383,7 +402,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const restoreQuizSet = (id: string) => {
     setQuizSets((prev) => {
-      const next = prev.map((s) => s.id === id ? { ...s, trashed: false, deletedAt: undefined } : s);
+      const set = prev.find((item) => item.id === id);
+      if (!set) return prev;
+      const next = [...prev.filter((item) => item.id !== id), { ...set, trashed: false, deletedAt: undefined, folderId: RESTORED_FOLDER_ID }];
       persistSets(next);
       return next;
     });
@@ -448,6 +469,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const renameQuizFolder = (id: string, name: string) => {
+    if (id === RESTORED_FOLDER_ID) return;
     setQuizFolders((prev) => {
       const next = prev.map((f) => (f.id === id ? { ...f, name } : f));
       persistFolders(next);
@@ -464,6 +486,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteQuizFolder = (id: string) => {
+    if (id === RESTORED_FOLDER_ID) return;
     setQuizFolders((prev) => {
       const next = prev.map((f) => f.id === id ? { ...f, trashed: true, deletedAt: nowStr() } : f);
       persistFolders(next);
@@ -480,6 +503,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const permDeleteQuizFolder = (id: string) => {
+    if (id === RESTORED_FOLDER_ID) return;
     const nextSets = quizSets.map((s) => s.folderId === id ? { ...s, folderId: undefined } : s);
     const nextFolders = quizFolders.filter((f) => f.id !== id);
     setQuizSets(nextSets);
@@ -520,8 +544,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     mutateNotes((prev) => prev.map((n) => (n.id === id ? { ...n, fav: !n.fav } : n)));
   const archive = (id: number) => updateNote(id, { archived: true });
   const unarchive = (id: number) => updateNote(id, { archived: false, read: false });
-  const trash = (id: number) => updateNote(id, { trashed: true });
-  const restore = (id: number) => updateNote(id, { trashed: false });
+  const trash = (id: number) => updateNote(id, { trashed: true, deletedAt: nowStr() });
+  const restore = (id: number) => updateNote(id, { trashed: false, deletedAt: undefined });
   const permDelete = (id: number) => mutateNotes((prev) => prev.filter((n) => n.id !== id));
   const emptyTrash = () => {
     const nextNotes = notes.filter((n) => !n.trashed);
