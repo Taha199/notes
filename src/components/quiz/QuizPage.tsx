@@ -919,10 +919,6 @@ export function QuizPage() {
             </button>
             {moveMenuForSet === ctxMenu.setId && (
               <div className="max-h-44 overflow-y-auto py-0.5">
-                <button
-                  onClick={() => { setQuizSetFolder(ctxMenu.setId, undefined); closeCtxMenu(); }}
-                  className="flex w-full items-center gap-2 px-6 py-1.5 text-[12px] text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/5"
-                >✕ Ingen mapp</button>
                 {quizFolders.map((f) => {
                   const active = quizSets.find((x) => x.id === ctxMenu.setId)?.folderId === f.id;
                   return (
