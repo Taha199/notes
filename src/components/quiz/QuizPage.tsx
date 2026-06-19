@@ -352,6 +352,7 @@ export function QuizPage() {
                         if (e.key === 'Enter') { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }
                         if (e.key === 'Escape') setRenamingSetId(null);
                       }}
+                      onBlur={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }}
                       className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none dark:text-gray-200"
                     />
                     <button onClick={() => { renameQuizSet(s.id, renameVal.trim() || s.name); setRenamingSetId(null); }} className="text-[10px] text-primary">✓</button>
