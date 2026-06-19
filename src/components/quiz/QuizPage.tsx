@@ -342,7 +342,11 @@ const SET_COLORS = [
 ];
 
 export function QuizPage() {
-  const { quizzes, quizSets, quizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const { lang } = useLanguage();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
+  const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
+  const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
 
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -1024,11 +1028,11 @@ export function QuizPage() {
         const f = quizFolders.find((x) => x.id === confirmDeleteFolderId);
         return (
           <ConfirmDialog
-            title="Ta bort mapp"
-            message={`Ta bort mappen "${f?.name ?? ''}"? Seten flyttas ut men raderas inte.`}
-            confirmLabel="Ta bort"
-            cancelLabel="Avbryt"
-            onConfirm={() => { deleteQuizFolder(confirmDeleteFolderId); setConfirmDeleteFolderId(null); }}
+            title={lang === 'sv' ? 'Flytta mapp till papperskorgen' : 'Move folder to trash'}
+            message={lang === 'sv' ? `Mappen "${f?.name ?? ''}" och dess sets flyttas till papperskorgen.` : `The folder "${f?.name ?? ''}" and its sets will be moved to trash.`}
+            confirmLabel={lang === 'sv' ? 'Flytta till papperskorgen' : 'Move to trash'}
+            cancelLabel={lang === 'sv' ? 'Avbryt' : 'Cancel'}
+            onConfirm={() => { deleteQuizFolder(confirmDeleteFolderId); setSelectedFolderId(null); setSelectedSetId(null); setConfirmDeleteFolderId(null); }}
             onCancel={() => setConfirmDeleteFolderId(null)}
           />
         );
@@ -1039,10 +1043,10 @@ export function QuizPage() {
         const s = quizSets.find((x) => x.id === confirmDeleteSetId);
         return (
           <ConfirmDialog
-            title="Ta bort set"
-            message={`Är du säker på att du vill ta bort "${s?.name ?? ''}"? Alla ${s?.items?.length ?? 0} frågor i detta set raderas.`}
-            confirmLabel="Ta bort"
-            cancelLabel="Avbryt"
+            title={lang === 'sv' ? 'Flytta set till papperskorgen' : 'Move set to trash'}
+            message={lang === 'sv' ? `Setet "${s?.name ?? ''}" flyttas till papperskorgen och kan återställas senare.` : `The set "${s?.name ?? ''}" will be moved to trash and can be restored later.`}
+            confirmLabel={lang === 'sv' ? 'Flytta till papperskorgen' : 'Move to trash'}
+            cancelLabel={lang === 'sv' ? 'Avbryt' : 'Cancel'}
             onConfirm={() => {
               if (selectedSetId === confirmDeleteSetId) setSelectedSetId(null);
               deleteQuizSet(confirmDeleteSetId);
