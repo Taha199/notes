@@ -4,13 +4,14 @@ interface Props {
   title?: string;
   message: string;
   count?: number;
+  countLabel?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export function ConfirmDialog({ title, message, count, confirmLabel = 'Delete', cancelLabel = 'Cancel', onConfirm, onCancel }: Props) {
+export function ConfirmDialog({ title, message, count, countLabel, confirmLabel = 'Delete', cancelLabel = 'Cancel', onConfirm, onCancel }: Props) {
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -28,7 +29,7 @@ export function ConfirmDialog({ title, message, count, confirmLabel = 'Delete', 
           {count !== undefined && count > 0 && (
             <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 dark:border-red-500/20 dark:bg-red-500/10">
               <span className="text-[13px] font-semibold text-red-700 dark:text-red-400">
-                {count} {count === 1 ? 'note' : 'notes'} will be deleted
+                {count} {countLabel ?? (count === 1 ? 'note' : 'notes')} will be deleted
               </span>
             </div>
           )}
