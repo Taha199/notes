@@ -698,19 +698,20 @@ export function QuizPage() {
           </div>
         </div>
 
-        {/* Bottom buttons */}
+        {/* Bottom buttons — aligned with their column */}
         <div className="flex border-t border-app-border dark:border-white/10">
           <button
-            onClick={handleQuickCreateSet}
-            className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-[12px] font-medium text-app-text-secondary transition-all hover:bg-white hover:text-primary dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-primary"
-          >
-            <span className="text-base leading-none">+</span> Set
-          </button>
-          <div className="w-px bg-app-border dark:bg-white/10" />
-          <button
             onClick={() => { const fo = addQuizFolder('Ny mapp'); setRenamingFolderId(fo.id); setFolderRenameVal('Ny mapp'); setSelectedFolderId(fo.id); }}
-            className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-[12px] font-medium text-app-text-secondary transition-all hover:bg-white hover:text-primary dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-primary"
-          >📒 Mapp</button>
+            className="flex w-[84px] flex-shrink-0 items-center justify-center gap-1 border-r border-app-border py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:border-white/10 dark:hover:bg-primary/10"
+          >
+            <span className="text-base leading-none">+</span> Mapp
+          </button>
+          <button
+            onClick={handleQuickCreateSet}
+            className="flex flex-1 items-center justify-center gap-1 py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:hover:bg-primary/10"
+          >
+            <span className="text-base leading-none">+</span> Lägg till set
+          </button>
         </div>
       </div>
       )}
