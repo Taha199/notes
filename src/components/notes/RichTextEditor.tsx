@@ -121,7 +121,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!ed || !sel || sel.rangeCount === 0) return;
     let node: Node | null = sel.anchorNode;
     if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    if (node instanceof Element && ed.contains(node)) {
+    // Only adopt the size from actual styled content (a child span). When the
+    // caret sits on the bare editor root, the base size is driven by the
+    // indicator itself — reading it back here would clobber a size the user
+    // just picked (the size button would appear to do nothing).
+    if (node instanceof Element && node !== ed && ed.contains(node)) {
       const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
       if (px && px !== fontSize) setFontSize(px);
     }
