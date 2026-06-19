@@ -16,7 +16,16 @@ function mdToHtml(content: string): string {
     .replace(/\n/g, '<br>');
 }
 
-export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: number; onClose: () => void; onNavigate?: (page: Page) => void }) {
+interface NoteEditorModalProps {
+  noteId: number;
+  previousNoteId?: number;
+  nextNoteId?: number;
+  onChangeNote?: (noteId: number) => void;
+  onClose: () => void;
+  onNavigate?: (page: Page) => void;
+}
+
+export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNote, onClose, onNavigate }: NoteEditorModalProps) {
   const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz } = useNotes();
   const { t } = useLanguage();
   const { show } = useToast();
@@ -53,6 +62,18 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
       setLocked(!!note.read);
     }
   }, [note?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const handleArrowNavigation = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '');
+      if (isTyping) return;
+      if (event.key === 'ArrowLeft' && previousNoteId !== undefined) onChangeNote?.(previousNoteId);
+      if (event.key === 'ArrowRight' && nextNoteId !== undefined) onChangeNote?.(nextNoteId);
+    };
+    window.addEventListener('keydown', handleArrowNavigation);
+    return () => window.removeEventListener('keydown', handleArrowNavigation);
+  }, [nextNoteId, onChangeNote, previousNoteId]);
 
   if (!note) return null;
 
@@ -125,6 +146,26 @@ export function NoteEditorModal({ noteId, onClose, onNavigate }: { noteId: numbe
 
   return (
     <div onClick={(e) => e.target === e.currentTarget && onClose()} className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-2 backdrop-blur-sm sm:p-4">
+      <button
+        type="button"
+        onClick={() => previousNoteId !== undefined && onChangeNote?.(previousNoteId)}
+        disabled={previousNoteId === undefined}
+        aria-label="Previous note"
+        title="Previous note"
+        className="fixed left-3 top-1/2 z-[60] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-gray-950/65 text-3xl text-white shadow-xl backdrop-blur-md transition-all hover:scale-105 hover:bg-gray-950/80 disabled:pointer-events-none disabled:opacity-20 sm:left-6 sm:h-12 sm:w-12"
+      >
+        ‹
+      </button>
+      <button
+        type="button"
+        onClick={() => nextNoteId !== undefined && onChangeNote?.(nextNoteId)}
+        disabled={nextNoteId === undefined}
+        aria-label="Next note"
+        title="Next note"
+        className="fixed right-3 top-1/2 z-[60] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-gray-950/65 text-3xl text-white shadow-xl backdrop-blur-md transition-all hover:scale-105 hover:bg-gray-950/80 disabled:pointer-events-none disabled:opacity-20 sm:right-6 sm:h-12 sm:w-12"
+      >
+        ›
+      </button>
       <div className="flex max-h-[96dvh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900 sm:max-h-[92vh] sm:rounded-3xl" style={{ animation: 'slideUp .22s cubic-bezier(.34,1.56,.64,1)' }}>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
