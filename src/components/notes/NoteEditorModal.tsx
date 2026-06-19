@@ -188,7 +188,14 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
         <input value={title} readOnly={locked} onChange={(e) => setTitle(e.target.value)} placeholder={t.mTiPh} className="border-b border-app-border px-3 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100 sm:px-4 sm:py-3.5 sm:text-lg" />
 
         <div className="flex-1 overflow-y-auto">
-          <RichTextEditor html={html} onChange={setHtml} placeholder="" editable={!locked} minHeight="150px" />
+          <RichTextEditor
+            html={html}
+            onChange={setHtml}
+            placeholder=""
+            editable={!locked}
+            minHeight="150px"
+            onLockedTripleClick={() => setLocked(false)}
+          />
         </div>
 
         {/* Manual quiz panel */}
