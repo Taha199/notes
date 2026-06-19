@@ -106,22 +106,40 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
   );
 }
 
+const OPT_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+export interface SavePayload {
+  question: string;
+  answer: string;
+  options?: string[];
+  correctIndex?: number;
+}
+
 interface EditPanelProps {
   question: string;
   answer: string;
+  initialOptions?: string[];
+  initialCorrect?: number;
   onChangeQ: (v: string) => void;
   onChangeA: (v: string) => void;
-  onSave: () => void;
+  onSave: (override?: SavePayload) => void;
   onCancel: () => void;
 }
 
-function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
+function EditPanel({ question, answer, initialOptions, initialCorrect, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
   const { lang } = useLanguage();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
+  const [options, setOptions] = useState<string[]>(initialOptions && initialOptions.length ? initialOptions : ['', '']);
+  const [correct, setCorrect] = useState<number>(initialCorrect ?? 0);
   const labels = lang === 'en'
-    ? { question: 'Question', answer: 'Answer', aiAnswer: 'AI Answer', aiSuggestion: 'AI suggestion', keep: 'Keep current', replace: 'Replace answer', cancel: 'Cancel', save: 'Save' }
-    : { question: 'Fråga', answer: 'Svar', aiAnswer: 'AI-svar', aiSuggestion: 'AI-förslag', keep: 'Behåll nuvarande', replace: 'Ersätt svaret', cancel: 'Avbryt', save: 'Spara' };
+    ? { question: 'Question', answer: 'Answer', aiAnswer: 'AI Answer', aiSuggestion: 'AI suggestion', keep: 'Keep current', replace: 'Replace answer', cancel: 'Cancel', save: 'Save', mcq: 'MCQ', options: 'Options', addOption: 'Add option', correct: 'Correct', optionPh: 'Option' }
+    : { question: 'Fråga', answer: 'Svar', aiAnswer: 'AI-svar', aiSuggestion: 'AI-förslag', keep: 'Behåll nuvarande', replace: 'Ersätt svaret', cancel: 'Avbryt', save: 'Spara', mcq: 'Flerval', options: 'Alternativ', addOption: 'Lägg till alternativ', correct: 'Rätt', optionPh: 'Alternativ' };
 
   const handleAiAnswer = async () => {
     const plain = question.replace(/<[^>]*>/g, '').trim();
@@ -136,8 +154,42 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
     }
   };
 
+  const setOption = (i: number, v: string) => setOptions((prev) => prev.map((o, idx) => (idx === i ? v : o)));
+  const addOption = () => setOptions((prev) => (prev.length < OPT_LETTERS.length ? [...prev, ''] : prev));
+  const removeOption = (i: number) => setOptions((prev) => {
+    const next = prev.filter((_, idx) => idx !== i);
+    setCorrect((c) => (i === c ? 0 : i < c ? c - 1 : c));
+    return next.length ? next : [''];
+  });
+
+  const handleSave = () => {
+    if (!mcq) { onSave(); return; }
+    // Build composed Q/A from the structured options. Empty options are dropped.
+    const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
+    if (kept.length < 2) return;
+    const finalOptions = kept.map((x) => x.o);
+    let newCorrect = kept.findIndex((x) => x.i === correct);
+    if (newCorrect < 0) newCorrect = 0;
+    const optionsHtml = finalOptions
+      .map((o, i) => `<div>${OPT_LETTERS[i]}) ${escapeHtml(o)}</div>`)
+      .join('');
+    const composedQ = `${question}<div style="margin-top:6px">${optionsHtml}</div>`;
+    const composedA = `${OPT_LETTERS[newCorrect]}) ${escapeHtml(finalOptions[newCorrect])} ✓`;
+    onSave({ question: composedQ, answer: composedA, options: finalOptions, correctIndex: newCorrect });
+  };
+
   return (
     <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
+      <div className="flex items-center justify-between border-b border-app-border px-4 py-2 dark:border-white/10">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? '☑ MCQ' : '✏️ Q/A'}</span>
+        <button
+          onClick={() => setMcq((v) => !v)}
+          className={'flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-all ' +
+            (mcq ? 'border-primary/40 bg-primary/10 text-primary' : 'border-app-border text-app-text-secondary hover:bg-app-bg dark:border-white/10')}
+        >
+          ☑ {labels.mcq}
+        </button>
+      </div>
       <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
         <div>
           <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.question}</p>
@@ -150,6 +202,39 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
             />
           </div>
         </div>
+        {mcq ? (
+          <div>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.options} · <span className="text-emerald-500">{labels.correct} ●</span></p>
+            <div className="flex flex-col gap-2 rounded-xl border border-app-border p-2.5 dark:border-white/10">
+              {options.map((o, i) => (
+                <div key={i} className={'flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all ' + (correct === i ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-app-border dark:border-white/10')}>
+                  <button
+                    type="button"
+                    onClick={() => setCorrect(i)}
+                    title={labels.correct}
+                    className={'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 transition-all ' + (correct === i ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-app-border text-transparent hover:border-emerald-400 dark:border-white/20')}
+                  >✓</button>
+                  <span className="flex-shrink-0 text-[12px] font-bold text-app-text-secondary/60">{OPT_LETTERS[i]}</span>
+                  <input
+                    value={o}
+                    dir="auto"
+                    onChange={(e) => setOption(i, e.target.value)}
+                    placeholder={`${labels.optionPh} ${OPT_LETTERS[i]}`}
+                    className="min-w-0 flex-1 bg-transparent text-[13px] text-app-text outline-none dark:text-gray-100"
+                  />
+                  {options.length > 2 && (
+                    <button type="button" onClick={() => removeOption(i)} className="flex-shrink-0 text-app-text-secondary/40 hover:text-red-500" title="✕">✕</button>
+                  )}
+                </div>
+              ))}
+              {options.length < OPT_LETTERS.length && (
+                <button type="button" onClick={addOption} className="mt-0.5 rounded-lg border border-dashed border-app-border py-1.5 text-[12px] font-medium text-app-text-secondary/70 transition-all hover:border-primary hover:text-primary dark:border-white/10">
+                  + {labels.addOption}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
         <div>
           <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
           <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
@@ -184,9 +269,10 @@ function EditPanel({ question, answer, onChangeQ, onChangeA, onSave, onCancel }:
             </div>
           )}
         </div>
+        )}
         <div className="flex justify-end gap-2 md:col-span-2">
           <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{labels.cancel}</button>
-          <button onClick={onSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{labels.save}</button>
+          <button onClick={handleSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{labels.save}</button>
         </div>
       </div>
     </div>
@@ -297,19 +383,33 @@ export function QuizPage() {
     window.speechSynthesis.speak(u);
   };
 
-  const startEdit = (item: QuizItem) => { setEditingId(item.id); setEditQ(item.question); setEditA(item.answer); };
+  const startEdit = (item: QuizItem) => {
+    setEditingId(item.id);
+    // For MCQ items the question stores the stem + the appended options block;
+    // strip that block so the editor shows just the stem (options have their own fields).
+    const stem = item.options && item.options.length
+      ? item.question.replace(/<div style="margin-top:6px">[\s\S]*$/, '')
+      : item.question;
+    setEditQ(stem);
+    setEditA(item.answer);
+  };
 
-  const saveEdit = () => {
+  const saveEdit = (override?: SavePayload) => {
     if (editingId === null) return;
-    if (!hasContent(editQ) || !hasContent(editA)) return;
-    if (selectedSetId) updateItemInSet(selectedSetId, editingId, { question: editQ, answer: editA });
-    else updateQuiz(editingId, { question: editQ, answer: editA });
+    const q = override?.question ?? editQ;
+    const a = override?.answer ?? editA;
+    if (!hasContent(q) || !hasContent(a)) return;
+    const patch = { question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex };
+    if (selectedSetId) updateItemInSet(selectedSetId, editingId, patch);
+    else updateQuiz(editingId, patch);
     setEditingId(null);
   };
 
-  const saveNewQuestion = () => {
-    if (!hasContent(newQ) || !hasContent(newA)) return;
-    const item = { noteId: 0, noteTitle: '', question: newQ, answer: newA, date: new Date().toLocaleDateString() };
+  const saveNewQuestion = (override?: SavePayload) => {
+    const q = override?.question ?? newQ;
+    const a = override?.answer ?? newA;
+    if (!hasContent(q) || !hasContent(a)) return;
+    const item = { noteId: 0, noteTitle: '', question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex, date: new Date().toLocaleDateString() };
     if (selectedSetId) addItemToSet(selectedSetId, item);
     else addQuiz(item);
     setNewQ(''); setNewA(''); setAddingQuestion(false);
@@ -540,6 +640,8 @@ export function QuizPage() {
                   key={item.id}
                   question={editQ}
                   answer={editA}
+                  initialOptions={item.options}
+                  initialCorrect={item.correctIndex}
                   onChangeQ={setEditQ}
                   onChangeA={setEditA}
                   onSave={saveEdit}

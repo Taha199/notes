@@ -48,6 +48,10 @@ export interface QuizItem {
   question: string;
   answer: string;
   date: string;
+  // Multiple-choice support. When present, `options` holds the choices and
+  // `correctIndex` points at the right one. Plain Q/A items leave these unset.
+  options?: string[];
+  correctIndex?: number;
 }
 
 export interface QuizSet {

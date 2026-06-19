@@ -23,14 +23,14 @@ interface NotesCtx {
   loaded: boolean;
   addQuiz: (item: Omit<QuizItem, 'id'>) => void;
   deleteQuiz: (id: number) => void;
-  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => void;
+  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => void;
   addQuizSet: (name: string) => QuizSet;
   deleteQuizSet: (id: string) => void;
   renameQuizSet: (id: string, name: string) => void;
   setQuizSetColor: (id: string, color: string) => void;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
   removeItemFromSet: (setId: string, itemId: number) => void;
-  updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => void;
+  updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => void;
   addDraft: () => void;
   removeDraft: (id: string) => void;
   updateDraft: (id: string, patch: Partial<Draft>) => void;
@@ -280,7 +280,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => {
+  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => {
     setQuizzes((prev) => {
       const next = prev.map((q) => (q.id === id ? { ...q, ...patch } : q));
       persist(notes, undefined, next);
@@ -339,7 +339,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer'>>) => {
+  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => {
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.map((i) => i.id === itemId ? { ...i, ...patch } : i) } : s);
       persistSets(next);

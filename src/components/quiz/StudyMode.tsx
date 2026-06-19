@@ -14,6 +14,14 @@ function shuffleArr<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
 
+// For MCQ items the question stores the stem with an appended options block —
+// strip it so the card shows just the stem above the clickable choices.
+function stemOnly(html: string): string {
+  return html.replace(/<div style="margin-top:6px">[\s\S]*$/, '');
+}
+
+const MCQ_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
 interface Props {
   title: string;
   items: QuizItem[];
@@ -34,6 +42,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
   const [sessionLearning, setSessionLearning] = useState<Set<number>>(new Set());
   const [done, setDone] = useState(false);
   const [round, setRound] = useState(1);
+  const [selectedOpt, setSelectedOpt] = useState<number | null>(null);
 
   const current = deck[index];
 
@@ -41,6 +50,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
     setFlipped(false);
     setInput('');
     setRevealed(false);
+    setSelectedOpt(null);
   }, [index]);
 
   const saveAndNext = (isKnown: boolean) => {
@@ -114,6 +124,52 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
       {/* Card area */}
       <div className="flex flex-1 flex-col items-center justify-center p-6 overflow-y-auto">
         {mode === 'flashcard' ? (
+          current.options && current.options.length ? (
+            /* MCQ card — clickable choices */
+            <div className="w-full max-w-2xl flex flex-col items-center">
+              <div className="w-full rounded-[28px] p-8 shadow-2xl ring-1 ring-white/10" style={{ background: 'linear-gradient(160deg,#26304f 0%,#1b2440 60%,#161d36 100%)' }}>
+                <p className="mb-5 text-center text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-300/70">Fråga</p>
+                <div dir="auto" className="mx-auto mb-6 w-full max-w-xl text-center text-[20px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(stemOnly(current.question)) }} />
+                <div className="mx-auto flex w-full max-w-xl flex-col gap-2.5">
+                  {current.options.map((opt, i) => {
+                    const isCorrect = i === current.correctIndex;
+                    const chosen = selectedOpt === i;
+                    const answered = selectedOpt !== null;
+                    let cls = 'border-white/15 bg-white/5 text-white hover:bg-white/10';
+                    if (answered) {
+                      if (isCorrect) cls = 'border-emerald-400 bg-emerald-500/20 text-white';
+                      else if (chosen) cls = 'border-red-400 bg-red-500/20 text-white';
+                      else cls = 'border-white/10 bg-white/[0.03] text-white/50';
+                    }
+                    return (
+                      <button
+                        key={i}
+                        disabled={answered}
+                        onClick={() => setSelectedOpt(i)}
+                        className={'flex items-center gap-3 rounded-2xl border px-4 py-3 text-left text-[15px] transition-all ' + cls}
+                      >
+                        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white/10 text-[12px] font-bold">{MCQ_LETTERS[i]}</span>
+                        <span dir="auto" className="flex-1 [overflow-wrap:anywhere]">{opt}</span>
+                        {answered && isCorrect && <span className="text-emerald-300">✓</span>}
+                        {answered && chosen && !isCorrect && <span className="text-red-300">✗</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mt-6 flex gap-4">
+                {selectedOpt === null ? (
+                  <button onClick={() => saveAndNext(false)} className="rounded-xl border border-app-border px-8 py-2.5 text-sm font-medium text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:text-gray-400">
+                    Hoppa över
+                  </button>
+                ) : (
+                  <button onClick={() => saveAndNext(selectedOpt === current.correctIndex)} className="rounded-xl bg-primary px-10 py-2.5 text-sm font-semibold text-white hover:bg-primary-dark">
+                    Nästa →
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
           <div className="w-full max-w-3xl flex flex-col items-center">
             {/* Flip card — Quizlet-style polished card */}
             <div className="w-full cursor-pointer select-none" style={{ perspective: '1600px' }} onClick={() => setFlipped((f) => !f)}>
@@ -155,6 +211,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
               )}
             </div>
           </div>
+          )
         ) : (
           /* Written mode */
           <div className="w-full max-w-2xl">
