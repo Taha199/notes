@@ -169,6 +169,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       return;
     }
 
+    if (toggleCmd) {
+      delete pendingMarks.current[toggleCmd];
+      document.execCommand('styleWithCSS', false, 'true');
+    }
     document.execCommand(cmd, false, value);
     saveSel();
     readCommandState();
@@ -182,11 +186,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const underline = pendingMarks.current.underline ?? active.has('underline');
     const strike = pendingMarks.current.strikeThrough ?? active.has('strikeThrough');
     const decoration = [underline ? 'underline' : '', strike ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
+    const hasPendingDecoration = pendingMarks.current.underline !== undefined || pendingMarks.current.strikeThrough !== undefined;
     const style = [
-      `font-weight: ${(pendingMarks.current.bold ?? active.has('bold')) ? '700' : '400'}`,
-      `font-style: ${(pendingMarks.current.italic ?? active.has('italic')) ? 'italic' : 'normal'}`,
-      `text-decoration-line: ${decoration}`,
-      `color: ${barColor}`,
+      pendingMarks.current.bold === undefined ? '' : `font-weight: ${pendingMarks.current.bold ? '700' : '400'}`,
+      pendingMarks.current.italic === undefined ? '' : `font-style: ${pendingMarks.current.italic ? 'italic' : 'normal'}`,
+      hasPendingDecoration ? `text-decoration-line: ${decoration}` : '',
     ].filter(Boolean).join('; ');
 
     const escaped = text
@@ -219,22 +223,29 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       return;
     }
 
-    // Selection → resize just that run via a span (overrides the base size).
-    document.execCommand('fontSize', false, '7');
-    ed.querySelectorAll('font[size="7"]').forEach((f) => {
-      const sp = document.createElement('span');
-      sp.style.fontSize = px + 'px';
-      sp.innerHTML = f.innerHTML;
-      f.replaceWith(sp);
+    // Apply an exact pixel size instead of the legacy size=7 mapping (48px).
+    const contents = range.extractContents();
+    contents.querySelectorAll?.('[style]').forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.style.removeProperty('font-size');
+      if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
     });
+    contents.querySelectorAll?.('font[size]').forEach((node) => node.removeAttribute('size'));
+    const span = document.createElement('span');
+    span.style.fontSize = `${px}px`;
+    span.appendChild(contents);
+    range.insertNode(span);
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(span);
+    selection?.removeAllRanges();
+    selection?.addRange(nextRange);
     saveSel();
     onChange(ed.innerHTML);
   };
 
   const nextSz = (cur: number, d: number) => {
-    const i = SIZES.indexOf(cur);
-    const ni = d > 0 ? Math.min(i + 1, SIZES.length - 1) : Math.max(i - 1, 0);
-    return SIZES[ni] ?? cur;
+    if (d > 0) return SIZES.find((size) => size > cur) ?? SIZES[SIZES.length - 1];
+    return [...SIZES].reverse().find((size) => size < cur) ?? SIZES[0];
   };
 
   const changeSize = (d: number) => {
