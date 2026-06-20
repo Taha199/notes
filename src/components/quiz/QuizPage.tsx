@@ -91,6 +91,12 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
             className="block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10"
             dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
           />
+          {item.explanation && (
+            <div className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
+              <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Förklaring</p>
+              <p dir="auto" className="text-[13px] leading-relaxed text-amber-900 dark:text-amber-200">{item.explanation}</p>
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-end gap-4 border-t border-app-border px-4 py-2 dark:border-white/10 sm:flex-col sm:justify-center sm:gap-2 sm:border-l sm:border-t-0 sm:px-2">
           <button onClick={() => onToggleFav(item.id)} className={'text-base transition-colors ' + (favs.has(item.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
@@ -122,6 +128,7 @@ export interface SavePayload {
   answer: string;
   options?: string[];
   correctIndex?: number;
+  explanation?: string;
 }
 
 interface EditPanelProps {
@@ -129,19 +136,21 @@ interface EditPanelProps {
   answer: string;
   initialOptions?: string[];
   initialCorrect?: number;
+  initialExplanation?: string;
   onChangeQ: (v: string) => void;
   onChangeA: (v: string) => void;
   onSave: (override?: SavePayload) => void;
   onCancel: () => void;
 }
 
-function EditPanel({ question, answer, initialOptions, initialCorrect, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
+function EditPanel({ question, answer, initialOptions, initialCorrect, initialExplanation, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
   const { lang } = useLanguage();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
   const [options, setOptions] = useState<string[]>(initialOptions && initialOptions.length ? initialOptions : ['', '']);
   const [correct, setCorrect] = useState<number>(initialCorrect ?? 0);
+  const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');
   const labels = lang === 'en'
     ? { question: 'Question', answer: 'Answer', aiAnswer: 'AI Answer', aiSuggestion: 'AI suggestion', keep: 'Keep current', replace: 'Replace answer', cancel: 'Cancel', save: 'Save', mcq: 'MCQ', options: 'Options', addOption: 'Add option', correct: 'Correct', optionPh: 'Option' }
     : { question: 'Fråga', answer: 'Svar', aiAnswer: 'AI-svar', aiSuggestion: 'AI-förslag', keep: 'Behåll nuvarande', replace: 'Ersätt svaret', cancel: 'Avbryt', save: 'Spara', mcq: 'Flerval', options: 'Alternativ', addOption: 'Lägg till alternativ', correct: 'Rätt', optionPh: 'Alternativ' };
@@ -180,7 +189,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, onChangeQ
       .join('');
     const composedQ = `${question}<div style="margin-top:6px">${optionsHtml}</div>`;
     const composedA = `${OPT_LETTERS[newCorrect]}) ${escapeHtml(finalOptions[newCorrect])} ✓`;
-    onSave({ question: composedQ, answer: composedA, options: finalOptions, correctIndex: newCorrect });
+    onSave({ question: composedQ, answer: composedA, options: finalOptions, correctIndex: newCorrect, explanation: explanation.trim() || undefined });
   };
 
   return (
@@ -237,6 +246,17 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, onChangeQ
                   + {labels.addOption}
                 </button>
               )}
+            </div>
+            <div className="mt-3">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{lang === 'en' ? 'Explanation (optional)' : 'Förklaring (valfri)'}</p>
+              <textarea
+                value={explanation}
+                onChange={(e) => setExplanation(e.target.value)}
+                dir="auto"
+                rows={3}
+                placeholder={lang === 'en' ? 'Why is this the correct answer?' : 'Varför är detta rätt svar?'}
+                className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
+              />
             </div>
           </div>
         ) : (
@@ -430,7 +450,7 @@ export function QuizPage() {
     const q = override?.question ?? editQ;
     const a = override?.answer ?? editA;
     if (!hasContent(q) || !hasContent(a)) return;
-    const patch = { question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex };
+    const patch = { question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex, explanation: override?.explanation };
     if (selectedSetId) updateItemInSet(selectedSetId, editingId, patch);
     else updateQuiz(editingId, patch);
     setEditingId(null);
@@ -440,7 +460,7 @@ export function QuizPage() {
     const q = override?.question ?? newQ;
     const a = override?.answer ?? newA;
     if (!hasContent(q) || !hasContent(a)) return;
-    const item = { noteId: 0, noteTitle: '', question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex, date: new Date().toLocaleDateString() };
+    const item = { noteId: 0, noteTitle: '', question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex, explanation: override?.explanation, date: new Date().toLocaleDateString() };
     if (selectedSetId) addItemToSet(selectedSetId, item);
     else addQuiz(item);
     setNewQ(''); setNewA(''); setAddingQuestion(false);
@@ -879,6 +899,7 @@ export function QuizPage() {
                   answer={editA}
                   initialOptions={item.options}
                   initialCorrect={item.correctIndex}
+                  initialExplanation={item.explanation}
                   onChangeQ={setEditQ}
                   onChangeA={setEditA}
                   onSave={saveEdit}
