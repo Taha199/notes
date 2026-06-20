@@ -968,16 +968,14 @@ export function QuizPage() {
               />
             )}
 
-            {/* Add question dashed button — always visible when not adding */}
-            {!addingQuestion && (
-              <button
-                onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
-                className="flex min-h-[56px] w-full items-center justify-center rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/50 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:hover:border-primary/50 dark:hover:bg-primary/10"
-                title={lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
-              >
-                +
-              </button>
-            )}
+            {/* Add question dashed button — always visible */}
+            <button
+              onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+              className="flex min-h-[56px] w-full items-center justify-center rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/50 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:hover:border-primary/50 dark:hover:bg-primary/10"
+              title={lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
+            >
+              +
+            </button>
           </div>
         </div>
       </div>
