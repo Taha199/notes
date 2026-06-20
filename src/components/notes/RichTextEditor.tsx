@@ -116,7 +116,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     });
   };
 
-  const hasPendingFormatting = () => Object.keys(pendingMarks.current).length > 0 || pendingFontSize.current !== null;
+  const hasPendingMarks = () => Object.keys(pendingMarks.current).length > 0;
 
   // Keep the size indicator in sync with whatever text the caret/selection is on.
   const syncFontSizeFromCaret = () => {
@@ -209,6 +209,49 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return true;
   };
 
+  const clearPendingFontMarker = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.querySelectorAll<HTMLElement>('[data-pending-font-size]').forEach((span) => {
+      span.removeAttribute('data-pending-font-size');
+      span.innerHTML = span.innerHTML.replace(/\u200B/g, '');
+      if (!span.textContent) span.remove();
+    });
+    pendingFontSize.current = null;
+  };
+
+  const setFutureFontSize = (px: number) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    focusEditor();
+    const selection = window.getSelection();
+    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    if (!range || !range.collapsed) return;
+
+    const anchorElement = selection?.anchorNode instanceof Element
+      ? selection.anchorNode
+      : selection?.anchorNode?.parentElement;
+    const existing = anchorElement?.closest<HTMLElement>('[data-pending-font-size]');
+    if (existing && ed.contains(existing)) {
+      existing.style.fontSize = `${px}px`;
+    } else {
+      const span = document.createElement('span');
+      span.dataset.pendingFontSize = 'true';
+      span.style.fontSize = `${px}px`;
+      const marker = document.createTextNode('\u200B');
+      span.appendChild(marker);
+      range.insertNode(span);
+      range.setStart(marker, marker.length);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+    pendingFontSize.current = px;
+    setFontSize(px);
+    saveSel();
+    onChange(ed.innerHTML);
+  };
+
   const applyPx = (px: number) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -221,9 +264,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     // No selection → change the editor's base size (affects new typing). The
     // indicator and typed text stay in lockstep — no per-character span trickery.
     if (!hasSelection) {
-      pendingFontSize.current = px;
-      setFontSize(px);
-      saveSel();
+      setFutureFontSize(px);
       return;
     }
 
@@ -264,8 +305,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     } else {
       // No selection → change only the size of text typed from now on.
       const s = nextSz(fontSize, d);
-      setFontSize(s);
-      pendingFontSize.current = s;
+      setFutureFontSize(s);
     }
     saveSel();
   };
@@ -480,10 +520,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onMouseDown={() => { pendingFontSize.current = null; }}
+        onMouseDown={() => clearPendingFontMarker()}
         onBeforeInput={(e) => {
           const native = e.nativeEvent as InputEvent;
-          if (native.inputType === 'insertText' && native.data && hasPendingFormatting()) {
+          if (native.inputType === 'insertText' && native.data && hasPendingMarks()) {
             e.preventDefault();
             insertPendingText(native.data);
           }
