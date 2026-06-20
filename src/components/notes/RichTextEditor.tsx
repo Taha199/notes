@@ -164,14 +164,46 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   // ── Font size ─────────────────────────────────────────────────────────
   const clearPendingFontMarker = () => {
+    const ed = editorRef.current;
+    if (ed) {
+      ed.querySelectorAll<HTMLElement>('[data-font-marker]').forEach((s) => {
+        // Remove the zero-width space; if span is now empty, remove it entirely.
+        s.innerHTML = s.innerHTML.replace(/​/g, '');
+        if (!s.textContent?.trim()) s.remove();
+        else s.removeAttribute('data-font-marker');
+      });
+    }
     pendingFontSize.current = null;
   };
 
-  // Store the desired size for the next typed character — no DOM changes here.
-  // onBeforeInput picks it up and wraps the first typed char in a font-size span.
   const setFutureFontSize = (px: number) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    if (document.activeElement !== ed) {
+      ed.focus({ preventScroll: true });
+      restoreSel();
+    }
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    if (!range || !range.collapsed) { setFontSize(px); return; }
+    // Finalize any previous marker (keep its text, just stop tracking it).
+    ed.querySelectorAll<HTMLElement>('[data-font-marker]').forEach((s) => s.removeAttribute('data-font-marker'));
+    // Insert a zero-width-space span at the caret so the browser types INTO it.
+    const span = document.createElement('span');
+    span.setAttribute('data-font-marker', 'true');
+    span.style.fontSize = `${px}px`;
+    const zws = document.createTextNode('​');
+    span.appendChild(zws);
+    range.insertNode(span);
+    // Place cursor after the zero-width space (inside the span).
+    range.setStart(zws, zws.length);
+    range.collapse(true);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
     pendingFontSize.current = px;
     setFontSize(px);
+    saveSel();
+    onChange(ed.innerHTML);
   };
 
   const applyPx = (px: number) => {
@@ -459,21 +491,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onMouseDown={() => { clearPendingAll(); }}
+        onMouseDown={() => { clearPendingFontMarker(); }}
         onKeyDown={(e) => {
-          if (NAV_KEYS.has(e.key)) clearPendingAll();
-        }}
-        onBeforeInput={(e) => {
-          const native = e.nativeEvent as InputEvent;
-          if (native.inputType === 'insertText' && native.data && pendingFontSize.current !== null) {
-            e.preventDefault();
-            const px = pendingFontSize.current;
-            pendingFontSize.current = null;
-            const escaped = native.data.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-            document.execCommand('insertHTML', false, `<span style="font-size:${px}px">${escaped}</span>`);
-            saveSel();
-            onChange(editorRef.current?.innerHTML ?? '');
-          }
+          if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
         }}
         onInput={() => {
           const ed = editorRef.current;
