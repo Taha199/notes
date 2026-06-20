@@ -34,6 +34,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [hlPalPos, setHlPalPos] = useState({ left: 0, top: 0 });
   const [hlColor, setHlColor] = useState('#FFEB3B');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewZoom, setPreviewZoom] = useState(1);
   const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; rect: DOMRect } | null>(null);
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
@@ -489,7 +490,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             return;
           }
           const target = event.target;
-          if (target instanceof HTMLImageElement) setPreviewImage(target.currentSrc || target.src);
+          if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); }
         }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
@@ -558,12 +559,42 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
               ✕
             </button>
           </div>
-          <img
-            src={previewImage}
-            alt="Expanded note attachment"
-            onClick={(event) => event.stopPropagation()}
-            className="max-h-[90dvh] max-w-full rounded-lg object-contain shadow-2xl"
-          />
+          {/* Zoom controls */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 backdrop-blur-sm"
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold text-white hover:bg-white/20"
+              title="Zoom out"
+            >−</button>
+            <button
+              type="button"
+              onClick={() => setPreviewZoom(1)}
+              className="min-w-[44px] text-center text-[12px] font-semibold text-white hover:text-white/70"
+              title="Reset zoom"
+            >{Math.round(previewZoom * 100)}%</button>
+            <button
+              type="button"
+              onClick={() => setPreviewZoom((z) => Math.min(5, +(z + 0.25).toFixed(2)))}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold text-white hover:bg-white/20"
+              title="Zoom in"
+            >+</button>
+          </div>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="overflow-auto"
+            style={{ maxHeight: '90dvh', maxWidth: '100%' }}
+          >
+            <img
+              src={previewImage}
+              alt="Expanded note attachment"
+              className="rounded-lg object-contain shadow-2xl transition-transform duration-150"
+              style={{ transform: `scale(${previewZoom})`, transformOrigin: 'top left', display: 'block' }}
+            />
+          </div>
         </div>
       )}
     </div>
