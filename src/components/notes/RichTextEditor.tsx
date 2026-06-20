@@ -24,8 +24,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
   const pendingMarks = useRef<Partial<Record<ToggleCommand, boolean>>>({});
+  const pendingFontSize = useRef<number | null>(null);
   const [fontSize, setFontSize] = useState(14);
-  const [baseSize, setBaseSize] = useState(14);
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
@@ -116,7 +116,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     });
   };
 
-  const hasPendingMarks = () => Object.keys(pendingMarks.current).length > 0;
+  const hasPendingFormatting = () => Object.keys(pendingMarks.current).length > 0 || pendingFontSize.current !== null;
 
   // Keep the size indicator in sync with whatever text the caret/selection is on.
   const syncFontSizeFromCaret = () => {
@@ -129,7 +129,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     // caret sits on the bare editor root, the base size is driven by the
     // indicator itself — reading it back here would clobber a size the user
     // just picked (the size button would appear to do nothing).
-    if (node instanceof Element && node !== ed && ed.contains(node)) {
+    if (node === ed) {
+      if (fontSize !== 14) setFontSize(14);
+    } else if (node instanceof Element && ed.contains(node)) {
       const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
       if (px && px !== fontSize) setFontSize(px);
     }
@@ -191,6 +193,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       pendingMarks.current.bold === undefined ? '' : `font-weight: ${pendingMarks.current.bold ? '700' : '400'}`,
       pendingMarks.current.italic === undefined ? '' : `font-style: ${pendingMarks.current.italic ? 'italic' : 'normal'}`,
       hasPendingDecoration ? `text-decoration-line: ${decoration}` : '',
+      pendingFontSize.current === null ? '' : `font-size: ${pendingFontSize.current}px`,
     ].filter(Boolean).join('; ');
 
     const escaped = text
@@ -218,7 +221,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     // No selection → change the editor's base size (affects new typing). The
     // indicator and typed text stay in lockstep — no per-character span trickery.
     if (!hasSelection) {
-      setBaseSize(px);
+      pendingFontSize.current = px;
+      setFontSize(px);
       saveSel();
       return;
     }
@@ -254,13 +258,14 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (hasSelection) {
       // Resize selected text only
       const s = nextSz(fontSize, d);
+      pendingFontSize.current = null;
       applyPx(s);
       setFontSize(s);
     } else {
-      // No selection → change base size for new typing
-      const s = nextSz(baseSize, d);
+      // No selection → change only the size of text typed from now on.
+      const s = nextSz(fontSize, d);
       setFontSize(s);
-      setBaseSize(s);
+      pendingFontSize.current = s;
     }
     saveSel();
   };
@@ -475,9 +480,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
+        onMouseDown={() => { pendingFontSize.current = null; }}
         onBeforeInput={(e) => {
           const native = e.nativeEvent as InputEvent;
-          if (native.inputType === 'insertText' && native.data && hasPendingMarks()) {
+          if (native.inputType === 'insertText' && native.data && hasPendingFormatting()) {
             e.preventDefault();
             insertPendingText(native.data);
           }
@@ -516,7 +522,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
-        style={{ minHeight, maxHeight, fontSize: `${baseSize}px`, cursor: editable ? 'text' : 'default' }}
+        style={{ minHeight, maxHeight, fontSize: '14px', cursor: editable ? 'text' : 'default' }}
       />
 
       {editable && hoveredImg && (() => {
