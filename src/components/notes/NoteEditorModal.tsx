@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -60,6 +60,8 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [mcqOptions, setMcqOptions] = useState(['', '', '', '']);
   const [mcqCorrect, setMcqCorrect] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(note?.lastEdited ?? null);
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (note) {
@@ -87,11 +89,19 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const current = quizItems[quizIndex];
 
   const save = () => {
-    if (!plainText) { show(t.tCantEmpty); return; }
-    updateNote(note.id, { title: title.trim(), html, text: plainText, lastEdited: nowStr() });
-    setLocked(true);
-    show(t.tSaved);
+    if (!plainText) return;
+    const ts = nowStr();
+    updateNote(note.id, { title: title.trim(), html, text: plainText, lastEdited: ts });
+    setLastSavedAt(ts);
   };
+
+  // Auto-save 1.5 s after the user stops typing (only in edit mode)
+  useEffect(() => {
+    if (locked) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => { save(); }, 1500);
+    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
+  }, [html, title, locked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const markDone = () => {
     updateNote(note.id, { read: true });
@@ -511,8 +521,11 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
           <div className="flex flex-col gap-0.5">
-            <span className="text-[11px] text-app-text-secondary/80 dark:text-gray-500">{note.date}</span>
-            {note.lastEdited && <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">Edited: {note.lastEdited}</span>}
+            <span className="text-[10px] text-app-text-secondary/70 dark:text-gray-500">📅 Created: {note.date}</span>
+            {note.lastEdited && <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">✏️ Updated: {note.lastEdited}</span>}
+            <span className={'text-[10px] font-medium ' + (lastSavedAt ? 'text-emerald-600 dark:text-emerald-400' : 'text-app-text-secondary/40 dark:text-gray-600')}>
+              ☁ {lastSavedAt ? `Saved: ${lastSavedAt}` : 'Not saved yet'}
+            </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             <button onClick={() => { trash(note.id); show(t.tMoved); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10">
@@ -558,11 +571,6 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   </button>
                 )}
               </>
-            )}
-            {!locked && (
-              <button onClick={save} className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-primary/30 hover:bg-primary-dark">
-                💾 {t.mSave}
-              </button>
             )}
           </div>
         </div>
