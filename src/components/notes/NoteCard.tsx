@@ -156,7 +156,7 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
                   show(t.tMoved);
                 }}
               >
-                ✕
+                🗑️
               </ActionBtn>
             </>
           ) : (
@@ -211,7 +211,7 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
                   show(t.tMoved);
                 }}
               >
-                ✕
+                🗑️
               </ActionBtn>
             </>
           )}
