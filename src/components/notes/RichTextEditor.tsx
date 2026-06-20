@@ -162,40 +162,35 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── exec: apply a formatting command ─────────────────────────────────
-  // CRITICAL: Capture the live selection RIGHT NOW before touching focus.
-  // When toolbar buttons use e.preventDefault on mousedown the editor
-  // keeps focus and the selection is intact – we must NOT call restoreSel()
-  // which could restore a stale savedRange and apply formatting to the wrong text.
   const exec = (cmd: string, value?: string) => {
     const ed = editorRef.current;
     if (!ed) return;
 
-    // 1. Snapshot the live selection before anything changes.
-    const snap = liveRange()?.cloneRange() ?? savedRange.current;
+    // Clone BEFORE focus() — in some browsers, clicking outside the editor
+    // clears the selection before e.preventDefault() in the button handler
+    // can stop it. Cloning first protects against any async selectionchange.
+    const rangeToUse = savedRange.current?.cloneRange() ?? null;
     const isToggle = TOGGLE_COMMANDS.includes(cmd as ToggleCommand);
-    const hasSelection = !!(snap && !snap.collapsed);
+    const hasSelection = !!(rangeToUse && !rangeToUse.collapsed);
 
-    // 2. If the editor lost focus (e.g. from the color palette), focus it
-    //    and restore the saved selection.
-    if (document.activeElement !== ed) {
-      ed.focus({ preventScroll: true });
-      if (snap) {
-        const s = window.getSelection();
-        s?.removeAllRanges();
-        s?.addRange(snap);
-      }
+    // Always focus + restore so the selection is 100% correct regardless
+    // of whether the editor lost focus or the browser quietly cleared it.
+    ed.focus({ preventScroll: true });
+    if (rangeToUse) {
+      const s = window.getSelection();
+      s?.removeAllRanges();
+      s?.addRange(rangeToUse);
     }
 
-    // 3. No-selection toggle: store as pending mark for the next typed character.
+    // No selection → pending mark for the next typed character.
     if (isToggle && !hasSelection) {
       const cmd_ = cmd as ToggleCommand;
       const current = pendingMarks.current[cmd_] ?? document.queryCommandState(cmd);
       pendingMarks.current[cmd_] = !current;
-      readCommandState(); // immediately update button visual
+      readCommandState();
       return;
     }
 
-    // 4. Apply to selection (or non-toggle command).
     if (isToggle) delete pendingMarks.current[cmd as ToggleCommand];
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand(cmd, false, value);
@@ -280,26 +275,22 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     onChange(ed.innerHTML);
   };
 
-  // Apply a font size in pixels to the current selection.
-  // CRITICAL: Snapshot the live selection before touching focus.
   const applyPx = (px: number) => {
     const ed = editorRef.current;
     if (!ed) return;
 
-    // Snapshot first
-    const snap = liveRange()?.cloneRange() ?? savedRange.current;
-    const hasSelection = !!(snap && !snap.collapsed);
+    const rangeToUse = savedRange.current?.cloneRange() ?? null;
+    const hasSelection = !!(rangeToUse && !rangeToUse.collapsed);
 
     if (!hasSelection) {
       setFutureFontSize(px);
       return;
     }
 
-    // Focus if needed, then set the exact selection we snapshotted
-    if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+    ed.focus({ preventScroll: true });
     const s = window.getSelection();
     s?.removeAllRanges();
-    s?.addRange(snap!);
+    s?.addRange(rangeToUse!);
 
     const range = s?.getRangeAt(0);
     if (!range) return;
@@ -329,10 +320,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   const changeSize = (d: number) => {
-    const snap = liveRange();
-    const hasSelection = snap && !snap.collapsed;
     const s = nextSz(fontSizeRef.current, d);
-    if (hasSelection) {
+    const rangeToUse = savedRange.current;
+    if (rangeToUse && !rangeToUse.collapsed) {
       applyPx(s);
     } else {
       setFutureFontSize(s);
@@ -354,8 +344,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     setBarColor(c);
+    const rangeToUse = savedRange.current?.cloneRange() ?? null;
     ed.focus({ preventScroll: true });
-    restoreSel(); // palette is a separate overlay, editor may have blurred
+    if (rangeToUse) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(rangeToUse); }
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('foreColor', false, c);
     saveSel();
@@ -375,8 +366,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     setHlColor(c);
+    const rangeToUse = savedRange.current?.cloneRange() ?? null;
     ed.focus({ preventScroll: true });
-    restoreSel();
+    if (rangeToUse) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(rangeToUse); }
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('backColor', false, c);
     saveSel();
