@@ -238,10 +238,19 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   const changeSize = (d: number) => {
-    // + / − always change the base size only (new typing), never resize existing selection.
-    const s = nextSz(baseSize, d);
-    setFontSize(s);
-    setBaseSize(s);
+    const sel = window.getSelection();
+    const hasSelection = sel && !sel.isCollapsed;
+    if (hasSelection) {
+      // Resize selected text only
+      const s = nextSz(fontSize, d);
+      applyPx(s);
+      setFontSize(s);
+    } else {
+      // No selection → change base size for new typing
+      const s = nextSz(baseSize, d);
+      setFontSize(s);
+      setBaseSize(s);
+    }
     saveSel();
   };
 
