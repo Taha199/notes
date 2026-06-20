@@ -25,7 +25,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const savedRange = useRef<Range | null>(null);
   const pendingMarks = useRef<Partial<Record<ToggleCommand, boolean>>>({});
   const pendingFontSize = useRef<number | null>(null);
-  const [fontSize, setFontSize] = useState(14);
+  const [fontSize, setFontSize] = useState(12);
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
@@ -130,7 +130,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     // indicator itself — reading it back here would clobber a size the user
     // just picked (the size button would appear to do nothing).
     if (node === ed) {
-      if (fontSize !== 14) setFontSize(14);
+      if (fontSize !== 12) setFontSize(12);
     } else if (node instanceof Element && ed.contains(node)) {
       const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
       if (px && px !== fontSize) setFontSize(px);
@@ -423,7 +423,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           </button>
           <input
             value={fontSize}
-            onChange={(e) => setFontSize(+e.target.value || 13)}
+            onChange={(e) => setFontSize(+e.target.value || 12)}
             onBlur={() => applyPx(fontSize)}
             className="h-[26px] w-8 border-x border-app-border bg-transparent text-center text-xs font-semibold outline-none dark:border-white/10"
           />
@@ -549,7 +549,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
-        style={{ minHeight, maxHeight, fontSize: '14px', cursor: editable ? 'text' : 'default' }}
+        style={{ minHeight, maxHeight, fontSize: '12px', cursor: editable ? 'text' : 'default' }}
       />
 
       {editable && hoveredImg && (() => {
