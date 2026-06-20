@@ -165,27 +165,6 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
                           </div>
                         );
                       })}
-                      {/* Ungrouped sets */}
-                      {sets.filter((s) => !s.folderId).length > 0 && (
-                        <div>
-                          {(folders ?? []).length > 0 && (
-                            <div className="border-b border-app-border/40 px-4 py-2 dark:border-white/5">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/40">Utan mapp</span>
-                            </div>
-                          )}
-                          {sets.filter((s) => !s.folderId).map((s) => (
-                            <button
-                              key={s.id}
-                              onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
-                              className="flex w-full items-center gap-3 border-b border-app-border/30 px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-primary/5 dark:border-white/5 dark:hover:bg-primary/10"
-                            >
-                              <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
-                              <span className="flex-1 truncate text-[13px] text-app-text dark:text-gray-100">{s.name}</span>
-                              <span className="text-[11px] text-app-text-secondary/40">{s.items.length} st</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -1045,8 +1024,8 @@ export function QuizPage() {
                   favs={favs}
                   onToggleFav={toggleFav}
                   progressMap={currentProgress}
-                  sets={quizSets.filter((s) => s.id !== selectedSetId && !s.folderId?.startsWith('system-'))}
-                  folders={quizFolders.filter((f) => !f.system)}
+                  sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId)}
+                  folders={quizFolders}
                   onMoveToSet={(setId) => {
                     addItemToSet(setId, { ...item });
                     if (selectedSetId) removeItemFromSet(selectedSetId, item.id);
