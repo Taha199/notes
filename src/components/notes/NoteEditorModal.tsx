@@ -6,6 +6,8 @@ import { RichTextEditor } from './RichTextEditor';
 import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini';
 import type { Page } from '../../types';
 
+const hasContent = (h: string) => !!h.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+
 function mdToHtml(content: string): string {
   // Only convert if content looks like markdown (not already HTML)
   if (/<[a-z][\s\S]*>/i.test(content)) return content;
@@ -210,18 +212,13 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   <div className="flex items-center justify-between">
                     <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70 dark:text-emerald-400/70">Fråga</label>
                     <button
-                      onClick={() => setManualQ(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim())}
+                      onClick={() => setManualQ(html)}
                       className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
                     >📋 Klistra in</button>
                   </div>
-                  <textarea
-                    value={manualQ}
-                    onChange={(e) => setManualQ(e.target.value)}
-                    rows={5}
-                    dir="auto"
-                    placeholder="Skriv din fråga..."
-                    className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2.5 text-[13.5px] leading-relaxed text-app-text outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
-                  />
+                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                    <RichTextEditor html={manualQ} onChange={setManualQ} placeholder="Skriv din fråga..." minHeight="110px" />
+                  </div>
                 </div>
 
                 {/* Answer */}
@@ -235,8 +232,8 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       >☰ MCQ</button>
                       {!mcqMode && (
                         <button
-                          onClick={async () => { if (!manualQ.trim()) return; setManualAiLoading(true); try { setManualA(await answerQuestion(manualQ)); } finally { setManualAiLoading(false); } }}
-                          disabled={manualAiLoading || !manualQ.trim()}
+                          onClick={async () => { if (!hasContent(manualQ)) return; setManualAiLoading(true); try { setManualA(mdToHtml(await answerQuestion(manualQ.replace(/<[^>]*>/g, '')))); } finally { setManualAiLoading(false); } }}
+                          disabled={manualAiLoading || !hasContent(manualQ)}
                           className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                         >
                           {manualAiLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
@@ -244,7 +241,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       )}
                       {!mcqMode && (
                         <button
-                          onClick={() => setManualA(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim())}
+                          onClick={() => setManualA(html)}
                           className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
                         >📋 Klistra in</button>
                       )}
@@ -270,7 +267,9 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       </div>
                     </div>
                   ) : (
-                    <textarea value={manualA} onChange={(e) => setManualA(e.target.value)} rows={5} dir="auto" placeholder="Skriv svaret..." className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2.5 text-[13.5px] leading-relaxed text-app-text outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100" />
+                    <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                      <RichTextEditor html={manualA} onChange={setManualA} placeholder="Skriv svaret..." minHeight="110px" />
+                    </div>
                   )}
                 </div>
 
@@ -278,18 +277,18 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">Avbryt</button>
                   <button
                     onClick={() => {
-                      if (!manualQ.trim()) return;
-                      let answer = manualA.trim();
+                      if (!hasContent(manualQ)) return;
+                      let answer = mcqMode ? '' : manualA;
                       if (mcqMode) {
                         const filled = mcqOptions.filter((o) => o.trim());
                         if (filled.length < 2) return;
                         answer = mcqOptions.map((o, i) => `${String.fromCharCode(65 + i)}) ${o.trim()}${i === mcqCorrect ? ' ✓' : ''}`).filter((_, i) => mcqOptions[i].trim()).join('\n');
                       }
-                      addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ.trim(), answer, date: nowStr() });
+                      addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ, answer, date: nowStr() });
                       show('Fråga sparad i Quiz 🧠');
                       setManualQ(''); setManualA(''); setMcqOptions(['', '', '', '']); setMcqCorrect(0);
                     }}
-                    disabled={!manualQ.trim() || (mcqMode && mcqOptions.filter((o) => o.trim()).length < 2)}
+                    disabled={!hasContent(manualQ) || (mcqMode && mcqOptions.filter((o) => o.trim()).length < 2)}
                     className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
                   >💾 Spara fråga</button>
                 </div>
@@ -323,7 +322,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         setAiGenQLoading(true);
                         try {
                           const results = await generateQuiz(note.text || plainText);
-                          if (results.length > 0) setAiQ(results[0].question);
+                          if (results.length > 0) setAiQ(mdToHtml(results[0].question));
                         } finally { setAiGenQLoading(false); }
                       }}
                       disabled={aiGenQLoading}
@@ -332,14 +331,9 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       {aiGenQLoading ? <span className="animate-spin">⏳</span> : '🎲'} Generera fråga
                     </button>
                   </div>
-                  <textarea
-                    value={aiQ}
-                    onChange={(e) => setAiQ(e.target.value)}
-                    rows={5}
-                    dir="auto"
-                    placeholder="Generera eller skriv din fråga..."
-                    className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2.5 text-[13.5px] leading-relaxed text-app-text outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
-                  />
+                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                    <RichTextEditor html={aiQ} onChange={setAiQ} placeholder="Generera eller skriv din fråga..." minHeight="110px" />
+                  </div>
                 </div>
 
                 {/* Answer */}
@@ -348,37 +342,32 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                     <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700/70 dark:text-violet-400/70">Svar</label>
                     <button
                       onClick={async () => {
-                        if (!aiQ.trim()) return;
+                        if (!hasContent(aiQ)) return;
                         setAiGenALoading(true);
-                        try { setAiA(await answerQuestion(aiQ)); }
+                        try { setAiA(mdToHtml(await answerQuestion(aiQ.replace(/<[^>]*>/g, '')))); }
                         finally { setAiGenALoading(false); }
                       }}
-                      disabled={aiGenALoading || !aiQ.trim()}
+                      disabled={aiGenALoading || !hasContent(aiQ)}
                       className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
                     >
                       {aiGenALoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
                     </button>
                   </div>
-                  <textarea
-                    value={aiA}
-                    onChange={(e) => setAiA(e.target.value)}
-                    rows={5}
-                    dir="auto"
-                    placeholder="Generera eller skriv svaret..."
-                    className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2.5 text-[13.5px] leading-relaxed text-app-text outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
-                  />
+                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                    <RichTextEditor html={aiA} onChange={setAiA} placeholder="Generera eller skriv svaret..." minHeight="110px" />
+                  </div>
                 </div>
 
                 <div className="flex justify-end gap-2">
                   <button onClick={() => { setAiMode(false); setAiQ(''); setAiA(''); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">Avbryt</button>
                   <button
                     onClick={() => {
-                      if (!aiQ.trim()) return;
-                      addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: aiQ.trim(), answer: aiA.trim(), date: nowStr() });
+                      if (!hasContent(aiQ)) return;
+                      addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: aiQ, answer: aiA, date: nowStr() });
                       show('Fråga sparad i Quiz 🧠');
                       setAiQ(''); setAiA('');
                     }}
-                    disabled={!aiQ.trim()}
+                    disabled={!hasContent(aiQ)}
                     className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
                   >💾 Spara fråga</button>
                 </div>
