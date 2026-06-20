@@ -312,8 +312,8 @@ export function Dashboard() {
                           deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
-                          restoreTo={lang === 'sv' ? 'Återställs till Quiz → Sets' : 'Restores to Quiz → Sets'}
-                          onRestore={() => { restoreQuizSet(set.id); show(lang === 'sv' ? '↩ Återställd till Quiz → Sets' : '↩ Restored to Quiz → Sets'); }}
+                          restoreTo={lang === 'sv' ? 'Återställs till Quiz → Restored Sets' : 'Restores to Quiz → Restored Sets'}
+                          onRestore={() => { restoreQuizSet(set.id); show(lang === 'sv' ? '↩ Återställd till Quiz → Restored Sets' : '↩ Restored to Quiz → Restored Sets'); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'set', id: set.id })}
                         />
                       ))}
