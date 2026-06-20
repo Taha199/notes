@@ -20,7 +20,7 @@ export function Sidebar({
   onMobileClose?: () => void;
 }) {
   const { t } = useLanguage();
-  const { notes } = useNotes();
+  const { notes, trashedQuizzes, quizSets, quizFolders } = useNotes();
   const { user, hasPassword, signOut } = useAuth();
   const { dark, toggleDark } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
@@ -31,7 +31,7 @@ export function Sidebar({
     read: notes.filter((n) => n.read && !n.archived && !n.trashed).length,
     fav: notes.filter((n) => n.fav && !n.trashed).length,
     archive: notes.filter((n) => n.archived && !n.trashed).length,
-    trash: notes.filter((n) => n.trashed).length,
+    trash: notes.filter((n) => n.trashed).length + trashedQuizzes.length + quizSets.filter((s) => s.trashed).length + quizFolders.filter((f) => f.trashed).length,
   };
 
   const items: { page: Page; icon: string; label: string; badge?: number; badgeClass?: string }[] = [

@@ -61,7 +61,7 @@ function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMod
   );
 }
 
-function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, createdLabel, deletedLabel, restoreLabel, deleteLabel, onRestore, onDelete }: {
+function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, createdLabel, deletedLabel, restoreLabel, deleteLabel, restoreTo, onRestore, onDelete }: {
   icon: string;
   name: string;
   color?: string;
@@ -72,6 +72,7 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
   deletedLabel: string;
   restoreLabel: string;
   deleteLabel: string;
+  restoreTo?: string;
   onRestore: () => void;
   onDelete: () => void;
 }) {
@@ -89,6 +90,9 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
           </div>
         </div>
       </div>
+      {restoreTo && (
+        <p className="mt-2 text-[10px] text-emerald-600 dark:text-emerald-400">↩ {restoreTo}</p>
+      )}
       <div className="mt-3 flex justify-end gap-2 border-t border-app-border/70 pt-3 dark:border-white/10">
         <button onClick={onRestore} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:border-white/10">↩ {restoreLabel}</button>
         <button onClick={onDelete} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10">🗑 {deleteLabel}</button>
@@ -308,6 +312,7 @@ export function Dashboard() {
                           deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
+                          restoreTo={lang === 'sv' ? '↩ Återställs till Quiz → Sets' : '↩ Restores to Quiz → Sets'}
                           onRestore={() => { restoreQuizSet(set.id); show(t.tRestored2); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'set', id: set.id })}
                         />
@@ -333,6 +338,7 @@ export function Dashboard() {
                           deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
+                          restoreTo={lang === 'sv' ? '↩ Återställs till Quiz → Mappar' : '↩ Restores to Quiz → Folders'}
                           onRestore={() => { restoreQuizFolder(folder.id); show(t.tRestored2); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'folder', id: folder.id })}
                         />
@@ -357,6 +363,7 @@ export function Dashboard() {
                           deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
+                          restoreTo={lang === 'sv' ? '↩ Återställs till Quiz → Frågor från anteckningar' : '↩ Restores to Quiz → Questions from Notes'}
                           onRestore={() => { restoreQuiz(q.id); show(t.tRestored2); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'question', id: q.id })}
                         />
