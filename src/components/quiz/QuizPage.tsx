@@ -524,7 +524,7 @@ export function QuizPage() {
   };
 
   const selectedSet: QuizSet | undefined = quizSets.find((s) => s.id === selectedSetId);
-  const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : quizzes;
+  const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : [...quizzes].reverse();
 
   const sortedSets = setSort === 'manual'
     ? quizSets
