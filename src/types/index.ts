@@ -54,6 +54,8 @@ export interface QuizItem {
   options?: string[];
   correctIndex?: number;
   explanation?: string;
+  createdAt?: string;
+  updatedAt?: string;
   trashed?: boolean;
   deletedAt?: string;
 }

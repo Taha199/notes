@@ -364,7 +364,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const addQuiz = (item: Omit<QuizItem, 'id'>) => {
     setQuizzes((prev) => {
-      const next = [...prev, { ...item, id: Date.now() }];
+      const now = new Date().toISOString();
+      const next = [...prev, { ...item, id: Date.now(), createdAt: item.createdAt ?? now, updatedAt: now }];
       persist(notes, undefined, next);
       return next;
     });
@@ -396,7 +397,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => {
     setQuizzes((prev) => {
-      const next = prev.map((q) => (q.id === id ? { ...q, ...patch } : q));
+      const next = prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
       persist(notes, undefined, next);
       return next;
     });
@@ -535,7 +536,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const addItemToSet = (setId: string, item: Omit<QuizItem, 'id'>) => {
-    const newItem: QuizItem = { ...item, id: Date.now() };
+    const now = new Date().toISOString();
+    const newItem: QuizItem = { ...item, id: Date.now(), createdAt: item.createdAt ?? now, updatedAt: now };
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === setId ? { ...s, items: [...s.items, newItem] } : s);
       persistSets(next);
@@ -553,7 +555,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => {
     setQuizSets((prev) => {
-      const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.map((i) => i.id === itemId ? { ...i, ...patch } : i) } : s);
+      const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.map((i) => i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i) } : s);
       persistSets(next);
       return next;
     });

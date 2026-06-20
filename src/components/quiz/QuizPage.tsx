@@ -94,6 +94,20 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
             className="block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10"
             dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
           />
+          {(item.createdAt || item.updatedAt) && (
+            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-app-border/50 pt-2 dark:border-white/10">
+              {item.createdAt && (
+                <span className="text-[10px] text-app-text-secondary/40 dark:text-gray-600">
+                  Skapad: {new Date(item.createdAt).toLocaleString()}
+                </span>
+              )}
+              {item.updatedAt && item.updatedAt !== item.createdAt && (
+                <span className="text-[10px] text-app-text-secondary/40 dark:text-gray-600">
+                  Uppdaterad: {new Date(item.updatedAt).toLocaleString()}
+                </span>
+              )}
+            </div>
+          )}
           {item.explanation && (
             <div className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
               <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Förklaring</p>
@@ -490,10 +504,20 @@ export function QuizPage() {
     const q = override?.question ?? newQ;
     const a = override?.answer ?? newA;
     if (!hasContent(q) || !hasContent(a)) return;
-    const item = { noteId: 0, noteTitle: '', question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex, explanation: override?.explanation, date: new Date().toLocaleDateString() };
+    const item = { noteId: 0, noteTitle: '', question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex, explanation: override?.explanation, date: new Date().toLocaleDateString(), createdAt: new Date().toISOString() };
     if (selectedSetId) addItemToSet(selectedSetId, item);
     else addQuiz(item);
     setNewQ(''); setNewA(''); setAddingQuestion(false);
+  };
+
+  const saveAndAddNew = () => {
+    if (hasContent(newQ) && hasContent(newA)) {
+      const item = { noteId: 0, noteTitle: '', question: newQ, answer: newA, date: new Date().toLocaleDateString(), createdAt: new Date().toISOString() };
+      if (selectedSetId) addItemToSet(selectedSetId, item);
+      else addQuiz(item);
+    }
+    setNewQ(''); setNewA('');
+    setAddingQuestion(true);
   };
 
   const handleQuickCreateSet = () => {
@@ -946,7 +970,7 @@ export function QuizPage() {
                   favs={favs}
                   onToggleFav={toggleFav}
                   progressMap={currentProgress}
-                  sets={quizSets}
+                  sets={quizSets.filter((s) => s.id !== selectedSetId)}
                   onMoveToSet={(setId) => {
                     addItemToSet(setId, { ...item });
                     if (selectedSetId) removeItemFromSet(selectedSetId, item.id);
@@ -968,9 +992,9 @@ export function QuizPage() {
               />
             )}
 
-            {/* Add question dashed button — always visible */}
+            {/* Add question dashed button — always visible; saves current if open */}
             <button
-              onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+              onClick={addingQuestion ? saveAndAddNew : () => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
               className="flex min-h-[56px] w-full items-center justify-center rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/50 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:hover:border-primary/50 dark:hover:bg-primary/10"
               title={lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
             >
