@@ -547,9 +547,6 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             >
               {copied ? '✓ Copied!' : `📋 ${t.mCopy}`}
             </button>
-            <button onClick={handleGenerateQuiz} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300">
-              🧠 {t.mGenQuiz}
-            </button>
             <button
               onClick={() => { setManualQuiz((o) => !o); setAiMode(false); setAiQ(''); setAiA(''); setQuizOpen(false); }}
               className={'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ' + (manualQuiz ? 'border-emerald-400 bg-emerald-100 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/20 dark:text-emerald-300' : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300')}
