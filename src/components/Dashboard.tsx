@@ -312,7 +312,7 @@ export function Dashboard() {
                           deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
-                          restoreTo={lang === 'sv' ? '↩ Återställs till Quiz → Sets' : '↩ Restores to Quiz → Sets'}
+                          restoreTo={lang === 'sv' ? 'Återställs till Quiz → Sets' : 'Restores to Quiz → Sets'}
                           onRestore={() => { restoreQuizSet(set.id); show(lang === 'sv' ? '↩ Återställd till Quiz → Sets' : '↩ Restored to Quiz → Sets'); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'set', id: set.id })}
                         />
@@ -338,7 +338,7 @@ export function Dashboard() {
                           deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
-                          restoreTo={lang === 'sv' ? '↩ Återställs till Quiz → Mappar' : '↩ Restores to Quiz → Folders'}
+                          restoreTo={lang === 'sv' ? 'Återställs till Quiz → Mappar' : 'Restores to Quiz → Folders'}
                           onRestore={() => { restoreQuizFolder(folder.id); show(lang === 'sv' ? '↩ Återställd till Quiz → Mappar' : '↩ Restored to Quiz → Folders'); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'folder', id: folder.id })}
                         />
@@ -363,7 +363,7 @@ export function Dashboard() {
                           deletedLabel={trashCopy.deletedAt}
                           restoreLabel={trashCopy.restore}
                           deleteLabel={trashCopy.delete}
-                          restoreTo={lang === 'sv' ? '↩ Återställs till Quiz → Frågor från anteckningar' : '↩ Restores to Quiz → Questions from Notes'}
+                          restoreTo={lang === 'sv' ? 'Återställs till Quiz → Frågor från anteckningar' : 'Restores to Quiz → Questions from Notes'}
                           onRestore={() => { restoreQuiz(q.id); show(lang === 'sv' ? '↩ Återställd till Quiz → Frågor från anteckningar' : '↩ Restored to Quiz → Questions from Notes'); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'question', id: q.id })}
                         />
