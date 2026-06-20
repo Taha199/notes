@@ -291,7 +291,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     reader.onload = () => {
       const url = reader.result as string;
       focusEditor();
-      document.execCommand('insertHTML', false, `<img src="${url}" style="max-width:160px;max-height:160px;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;" /><br>`);
+      document.execCommand('insertHTML', false, `<img src="${url}" style="display:block;max-width:160px;max-height:160px;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;" /><br>`);
       saveSel();
       onChange(ed.innerHTML);
     };
