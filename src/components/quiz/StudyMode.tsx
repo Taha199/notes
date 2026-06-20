@@ -132,7 +132,8 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                 <div dir="auto" className="mx-auto mb-6 w-full max-w-xl text-center text-[20px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(stemOnly(current.question)) }} />
                 <div className="mx-auto flex w-full max-w-xl flex-col gap-2.5">
                   {current.options.map((opt, i) => {
-                    const isCorrect = i === current.correctIndex;
+                    const correctIndexes = current.correctIndexes ?? (current.correctIndex !== undefined ? [current.correctIndex] : [0]);
+                    const isCorrect = correctIndexes.includes(i);
                     const chosen = selectedOpt === i;
                     const answered = selectedOpt !== null;
                     let cls = 'border-white/15 bg-white/5 text-white hover:bg-white/10';
@@ -163,7 +164,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                     Hoppa över
                   </button>
                 ) : (
-                  <button onClick={() => saveAndNext(selectedOpt === current.correctIndex)} className="rounded-xl bg-primary px-10 py-2.5 text-sm font-semibold text-white hover:bg-primary-dark">
+                  <button onClick={() => { const ci = current.correctIndexes ?? (current.correctIndex !== undefined ? [current.correctIndex] : [0]); saveAndNext(selectedOpt !== null && ci.includes(selectedOpt)); }} className="rounded-xl bg-primary px-10 py-2.5 text-sm font-semibold text-white hover:bg-primary-dark">
                     Nästa →
                   </button>
                 )}

@@ -205,6 +205,7 @@ export interface SavePayload {
   answer: string;
   options?: string[];
   correctIndex?: number;
+  correctIndexes?: number[];
   explanation?: string;
 }
 
@@ -213,6 +214,7 @@ interface EditPanelProps {
   answer: string;
   initialOptions?: string[];
   initialCorrect?: number;
+  initialCorrects?: number[];
   initialExplanation?: string;
   onChangeQ: (v: string) => void;
   onChangeA: (v: string) => void;
@@ -220,13 +222,16 @@ interface EditPanelProps {
   onCancel: () => void;
 }
 
-function EditPanel({ question, answer, initialOptions, initialCorrect, initialExplanation, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
+function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
   const { lang } = useLanguage();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
   const [options, setOptions] = useState<string[]>(initialOptions && initialOptions.length ? initialOptions : ['', '']);
-  const [correct, setCorrect] = useState<number>(initialCorrect ?? 0);
+  const initCorrectSet = initialCorrects?.length
+    ? new Set(initialCorrects)
+    : initialCorrect !== undefined ? new Set([initialCorrect]) : new Set([0]);
+  const [correctSet, setCorrectSet] = useState<Set<number>>(initCorrectSet);
   const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');
   const labels = lang === 'en'
     ? { question: 'Question', answer: 'Answer', aiAnswer: 'AI Answer', aiSuggestion: 'AI suggestion', keep: 'Keep current', replace: 'Replace answer', cancel: 'Cancel', save: 'Save', mcq: 'MCQ', options: 'Options', addOption: 'Add option', correct: 'Correct', optionPh: 'Option' }
@@ -249,24 +254,36 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialEx
   const addOption = () => setOptions((prev) => (prev.length < OPT_LETTERS.length ? [...prev, ''] : prev));
   const removeOption = (i: number) => setOptions((prev) => {
     const next = prev.filter((_, idx) => idx !== i);
-    setCorrect((c) => (i === c ? 0 : i < c ? c - 1 : c));
+    setCorrectSet((cs) => {
+      const remapped = new Set<number>();
+      cs.forEach((c) => { if (c !== i) remapped.add(c > i ? c - 1 : c); });
+      return remapped.size ? remapped : new Set([0]);
+    });
     return next.length ? next : [''];
+  });
+  const toggleCorrect = (i: number) => setCorrectSet((prev) => {
+    const next = new Set(prev);
+    if (next.has(i)) { if (next.size > 1) next.delete(i); }
+    else next.add(i);
+    return next;
   });
 
   const handleSave = () => {
     if (!mcq) { onSave(); return; }
-    // Build composed Q/A from the structured options. Empty options are dropped.
     const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
     if (kept.length < 2) return;
     const finalOptions = kept.map((x) => x.o);
-    let newCorrect = kept.findIndex((x) => x.i === correct);
-    if (newCorrect < 0) newCorrect = 0;
+    const newCorrectIndexes = kept
+      .map((x, newIdx) => ({ newIdx, old: x.i }))
+      .filter((x) => correctSet.has(x.old))
+      .map((x) => x.newIdx);
+    const safeCorrects = newCorrectIndexes.length ? newCorrectIndexes : [0];
     const optionsHtml = finalOptions
       .map((o, i) => `<div>${OPT_LETTERS[i]}) ${escapeHtml(o)}</div>`)
       .join('');
     const composedQ = `${question}<div style="margin-top:6px">${optionsHtml}</div>`;
-    const composedA = `${OPT_LETTERS[newCorrect]}) ${escapeHtml(finalOptions[newCorrect])} ✓`;
-    onSave({ question: composedQ, answer: composedA, options: finalOptions, correctIndex: newCorrect, explanation: explanation.trim() || undefined });
+    const composedA = safeCorrects.map((ci) => `${OPT_LETTERS[ci]}) ${escapeHtml(finalOptions[ci])} ✓`).join('<br>');
+    onSave({ question: composedQ, answer: composedA, options: finalOptions, correctIndexes: safeCorrects, explanation: explanation.trim() || undefined });
   };
 
   return (
@@ -295,15 +312,15 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialEx
         </div>
         {mcq ? (
           <div>
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.options} · <span className="text-emerald-500">{labels.correct} ●</span></p>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.options} · <span className="text-emerald-500">{labels.correct} ● {correctSet.size > 1 ? `(${correctSet.size})` : ''}</span></p>
             <div className="flex flex-col gap-2 rounded-xl border border-app-border p-2.5 dark:border-white/10">
               {options.map((o, i) => (
-                <div key={i} className={'flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all ' + (correct === i ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-app-border dark:border-white/10')}>
+                <div key={i} className={'flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all ' + (correctSet.has(i) ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-app-border dark:border-white/10')}>
                   <button
                     type="button"
-                    onClick={() => setCorrect(i)}
+                    onClick={() => toggleCorrect(i)}
                     title={labels.correct}
-                    className={'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border-2 transition-all ' + (correct === i ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-app-border text-transparent hover:border-emerald-400 dark:border-white/20')}
+                    className={'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border-2 transition-all ' + (correctSet.has(i) ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-app-border text-transparent hover:border-emerald-400 dark:border-white/20')}
                   >✓</button>
                   <span className="flex-shrink-0 text-[12px] font-bold text-app-text-secondary/60">{OPT_LETTERS[i]}</span>
                   <input
@@ -527,7 +544,7 @@ export function QuizPage() {
     const q = override?.question ?? editQ;
     const a = override?.answer ?? editA;
     if (!hasContent(q) || !hasContent(a)) return;
-    const patch = { question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex, explanation: override?.explanation };
+    const patch = { question: q, answer: a, options: override?.options, correctIndex: override?.correctIndexes?.[0], correctIndexes: override?.correctIndexes, explanation: override?.explanation };
     if (selectedSetId) updateItemInSet(selectedSetId, editingId, patch);
     else updateQuiz(editingId, patch);
     setEditingId(null);
@@ -537,7 +554,7 @@ export function QuizPage() {
     const q = override?.question ?? newQ;
     const a = override?.answer ?? newA;
     if (!hasContent(q) || !hasContent(a)) return;
-    const item = { noteId: 0, noteTitle: '', question: q, answer: a, options: override?.options, correctIndex: override?.correctIndex, explanation: override?.explanation, date: new Date().toLocaleDateString(), createdAt: new Date().toISOString() };
+    const item = { noteId: 0, noteTitle: '', question: q, answer: a, options: override?.options, correctIndex: override?.correctIndexes?.[0], correctIndexes: override?.correctIndexes, explanation: override?.explanation, date: new Date().toLocaleDateString(), createdAt: new Date().toISOString() };
     if (selectedSetId) addItemToSet(selectedSetId, item);
     else addQuiz(item);
     setNewQ(''); setNewA(''); setAddingQuestion(false);
@@ -986,6 +1003,7 @@ export function QuizPage() {
                   answer={editA}
                   initialOptions={item.options}
                   initialCorrect={item.correctIndex}
+                  initialCorrects={item.correctIndexes}
                   initialExplanation={item.explanation}
                   onChangeQ={setEditQ}
                   onChangeA={setEditA}

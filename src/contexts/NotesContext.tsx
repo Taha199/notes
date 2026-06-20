@@ -27,7 +27,7 @@ interface NotesCtx {
   deleteQuiz: (id: number) => void;
   restoreQuiz: (id: number) => void;
   permDeleteQuiz: (id: number) => void;
-  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => void;
+  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
   addQuizSet: (name: string) => QuizSet;
   deleteQuizSet: (id: string) => void;
   restoreQuizSet: (id: string) => void;
@@ -44,7 +44,7 @@ interface NotesCtx {
   permDeleteQuizFolder: (id: string) => void;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
   removeItemFromSet: (setId: string, itemId: number) => void;
-  updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => void;
+  updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
   addDraft: () => void;
   removeDraft: (id: string) => void;
   updateDraft: (id: string, patch: Partial<Draft>) => void;
@@ -395,7 +395,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => {
+  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => {
     setQuizzes((prev) => {
       const next = prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
       persist(notes, undefined, next);
@@ -553,7 +553,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => {
+  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => {
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.map((i) => i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i) } : s);
       persistSets(next);
