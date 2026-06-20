@@ -101,144 +101,30 @@ body {
   pointer-events: none;
 }
 
-/* ── Word-style TipTap Editor ────────────────────────────────────── */
-.word-editor-content .tiptap {
-  outline: none;
-  font-family: 'Aptos', 'Calibri', Arial, sans-serif;
-  font-size: 12pt;
-  line-height: 1.6;
-  color: #1f2937;
-  min-height: 100%;
+.note-content table tr,
+[contenteditable] table tr {
+  display: flex;
+  flex-direction: row-reverse;
 }
 
-.dark .word-editor-content .tiptap {
-  color: #e5e7eb;
+.note-content table td,
+.note-content table th,
+[contenteditable] table td,
+[contenteditable] table th {
+  min-width: 0;
 }
 
-/* Headings */
-.word-editor-content .tiptap h1 { font-size: 2em; font-weight: 700; margin: 0.67em 0; line-height: 1.2; }
-.word-editor-content .tiptap h2 { font-size: 1.5em; font-weight: 700; margin: 0.75em 0; line-height: 1.3; }
-.word-editor-content .tiptap h3 { font-size: 1.25em; font-weight: 600; margin: 0.83em 0; }
-.word-editor-content .tiptap h4 { font-size: 1.1em; font-weight: 600; margin: 1em 0; }
-.word-editor-content .tiptap h5 { font-size: 1em; font-weight: 600; margin: 1em 0; }
-.word-editor-content .tiptap h6 { font-size: 0.9em; font-weight: 600; margin: 1em 0; }
-
-/* Paragraphs */
-.word-editor-content .tiptap p { margin: 0 0 0.5em; }
-.word-editor-content .tiptap p:last-child { margin-bottom: 0; }
-
-/* Placeholder */
-.word-editor-content .tiptap p.is-editor-empty:first-child::before {
-  color: #9ca3af;
-  content: attr(data-placeholder);
-  float: left;
-  height: 0;
-  pointer-events: none;
+.note-content table td:first-child,
+.note-content table th:first-child,
+[contenteditable] table td:first-child,
+[contenteditable] table th:first-child {
+  flex: 1.55 1 0;
 }
 
-/* Lists */
-.word-editor-content .tiptap ul { list-style-type: disc; padding-left: 1.5em; margin: 0.5em 0; }
-.word-editor-content .tiptap ol { list-style-type: decimal; padding-left: 1.5em; margin: 0.5em 0; }
-.word-editor-content .tiptap li { margin: 0.2em 0; }
-.word-editor-content .tiptap li > p { margin: 0; }
-
-/* Blockquote */
-.word-editor-content .tiptap blockquote {
-  border-left: 3px solid #6c63ff;
-  margin: 1em 0;
-  padding: 0.5em 1em;
-  color: #6b7280;
-  background: #f9f8ff;
-  border-radius: 0 4px 4px 0;
+.note-content table td:last-child,
+.note-content table th:last-child,
+[contenteditable] table td:last-child,
+[contenteditable] table th:last-child {
+  flex: 1 1 0;
 }
-.dark .word-editor-content .tiptap blockquote {
-  background: #1a1a2e;
-  color: #9ca3af;
-}
-
-/* Code */
-.word-editor-content .tiptap code {
-  background: #f3f4f6;
-  border-radius: 3px;
-  font-family: 'Courier New', monospace;
-  font-size: 0.875em;
-  padding: 0.1em 0.3em;
-}
-.dark .word-editor-content .tiptap code { background: #374151; }
-
-.word-editor-content .tiptap pre {
-  background: #1f2937;
-  border-radius: 6px;
-  color: #e5e7eb;
-  font-family: 'Courier New', monospace;
-  font-size: 0.875em;
-  padding: 1em;
-  margin: 0.75em 0;
-  overflow-x: auto;
-}
-
-/* Links */
-.word-editor-content .tiptap a {
-  color: #2563eb;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.dark .word-editor-content .tiptap a { color: #60a5fa; }
-
-/* Images */
-.word-editor-content .tiptap img {
-  max-width: 100%;
-  height: auto;
-  display: block;
-  border-radius: 4px;
-  margin: 0.5em 0;
-  cursor: pointer;
-}
-
-.word-editor-content .tiptap img.ProseMirror-selectednode {
-  outline: 2px solid #6c63ff;
-}
-
-/* Tables */
-.word-editor-content .tiptap table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 0.75em 0;
-  table-layout: fixed;
-  overflow: hidden;
-}
-
-.word-editor-content .tiptap table td,
-.word-editor-content .tiptap table th {
-  border: 1px solid #d1d5db;
-  padding: 6px 10px;
-  vertical-align: top;
-  position: relative;
-  box-sizing: border-box;
-  min-width: 60px;
-}
-.dark .word-editor-content .tiptap table td,
-.dark .word-editor-content .tiptap table th {
-  border-color: #374151;
-}
-
-.word-editor-content .tiptap table th {
-  background: #f3f4f6;
-  font-weight: 600;
-  text-align: left;
-}
-.dark .word-editor-content .tiptap table th { background: #1f2937; }
-
-.word-editor-content .tiptap table .selectedCell {
-  background: #ede9fe;
-}
-.dark .word-editor-content .tiptap table .selectedCell { background: #2e1065; }
-
-/* Horizontal rule */
-.word-editor-content .tiptap hr {
-  border: none;
-  border-top: 1px solid #d1d5db;
-  margin: 1.5em 0;
-}
-.dark .word-editor-content .tiptap hr { border-color: #374151; }
 
