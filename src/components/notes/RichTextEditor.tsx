@@ -491,7 +491,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             return;
           }
           const target = event.target;
-          if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); setNaturalSize(null); }
+          if (!editable && target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); setNaturalSize(null); }
         }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
