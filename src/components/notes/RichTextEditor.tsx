@@ -35,6 +35,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [hlColor, setHlColor] = useState('#FFEB3B');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; rect: DOMRect } | null>(null);
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
@@ -490,7 +491,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             return;
           }
           const target = event.target;
-          if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); }
+          if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); setNaturalSize(null); }
         }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
@@ -531,72 +532,64 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         );
       })()}
 
-      {previewImage && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Image preview"
-          onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-        >
-          <div className="absolute right-4 top-4 flex items-center gap-2">
-            <a
-              href={previewImage}
-              download="taha-note-image"
-              onClick={(event) => event.stopPropagation()}
-              aria-label="Download image"
-              title="Download image"
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl font-bold text-white transition-colors hover:bg-white/25"
-            >
-              ↓
-            </a>
-            <button
-              type="button"
-              onClick={() => setPreviewImage(null)}
-              aria-label="Close image preview"
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white transition-colors hover:bg-white/25"
-            >
-              ✕
-            </button>
-          </div>
-          {/* Zoom controls */}
+      {previewImage && (() => {
+        const maxW = window.innerWidth * 0.9;
+        const maxH = window.innerHeight * 0.82;
+        const nw = naturalSize?.w ?? maxW;
+        const nh = naturalSize?.h ?? maxH;
+        const fitScale = Math.min(1, maxW / nw, maxH / nh);
+        const displayW = nw * fitScale * previewZoom;
+        const displayH = nh * fitScale * previewZoom;
+        return (
           <div
-            onClick={(e) => e.stopPropagation()}
-            className="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image preview"
+            onClick={() => setPreviewImage(null)}
+            className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm"
           >
-            <button
-              type="button"
-              onClick={() => setPreviewZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold text-white hover:bg-white/20"
-              title="Zoom out"
-            >−</button>
-            <button
-              type="button"
-              onClick={() => setPreviewZoom(1)}
-              className="min-w-[44px] text-center text-[12px] font-semibold text-white hover:text-white/70"
-              title="Reset zoom"
-            >{Math.round(previewZoom * 100)}%</button>
-            <button
-              type="button"
-              onClick={() => setPreviewZoom((z) => Math.min(5, +(z + 0.25).toFixed(2)))}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold text-white hover:bg-white/20"
-              title="Zoom in"
-            >+</button>
+            {/* Top bar */}
+            <div className="absolute right-4 top-4 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+              <a
+                href={previewImage}
+                download="taha-note-image"
+                aria-label="Download image"
+                title="Download"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl font-bold text-white transition-colors hover:bg-white/25"
+              >↓</a>
+              <button type="button" onClick={() => setPreviewImage(null)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white transition-colors hover:bg-white/25">✕</button>
+            </div>
+
+            {/* Scrollable image area */}
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="overflow-auto rounded-xl"
+              style={{ maxWidth: '90vw', maxHeight: '82vh' }}
+            >
+              <img
+                src={previewImage}
+                alt="Expanded note attachment"
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+                }}
+                className="block rounded-xl shadow-2xl"
+                style={{ width: displayW, height: displayH, minWidth: displayW }}
+              />
+            </div>
+
+            {/* Zoom bar */}
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="mt-4 flex items-center gap-1 rounded-full bg-black/50 px-2 py-1 backdrop-blur-sm"
+            >
+              <button type="button" onClick={() => setPreviewZoom((z) => Math.max(0.1, +(z - 0.25).toFixed(2)))} className="flex h-9 w-9 items-center justify-center rounded-full text-xl font-bold text-white hover:bg-white/20">−</button>
+              <button type="button" onClick={() => setPreviewZoom(1)} className="min-w-[52px] text-center text-[13px] font-semibold text-white hover:opacity-70">{Math.round(fitScale * previewZoom * 100)}%</button>
+              <button type="button" onClick={() => setPreviewZoom((z) => Math.min(8, +(z + 0.25).toFixed(2)))} className="flex h-9 w-9 items-center justify-center rounded-full text-xl font-bold text-white hover:bg-white/20">+</button>
+            </div>
           </div>
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="overflow-auto"
-            style={{ maxHeight: '90dvh', maxWidth: '100%' }}
-          >
-            <img
-              src={previewImage}
-              alt="Expanded note attachment"
-              className="rounded-lg object-contain shadow-2xl transition-transform duration-150"
-              style={{ transform: `scale(${previewZoom})`, transformOrigin: 'top left', display: 'block' }}
-            />
-          </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
