@@ -6,7 +6,7 @@ import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { BrandedAlert } from '../common/BrandedAlert';
 import { useLanguage } from '../../contexts/LanguageContext';
-import type { QuizItem, QuizSet } from '../../types';
+import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 
@@ -67,11 +67,13 @@ interface QuizItemRowProps {
   onToggleFav: (id: number) => void;
   progressMap?: Record<number, 'known' | 'learning'>;
   sets?: QuizSet[];
+  folders?: QuizFolder[];
   onMoveToSet?: (setId: string) => void;
 }
 
-function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, onMoveToSet }: QuizItemRowProps) {
+function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet }: QuizItemRowProps) {
   const [moveOpen, setMoveOpen] = useState(false);
+  const [expandedFolder, setExpandedFolder] = useState<string | null>(null);
   const status = progressMap?.[item.id];
   return (
     <div className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:border-primary/25 hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
@@ -130,26 +132,57 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
           {onMoveToSet && sets && sets.length > 0 && (
             <div className="relative">
               <button
-                onClick={() => setMoveOpen((v) => !v)}
+                onClick={() => { setMoveOpen((v) => !v); setExpandedFolder(null); }}
                 title="Flytta till set"
                 className="text-[13px] text-app-text-secondary/40 transition-colors hover:text-primary"
               >📂</button>
               {moveOpen && (
                 <div
-                  className="absolute bottom-full right-0 z-50 mb-1.5 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white shadow-xl dark:border-white/10 dark:bg-gray-800"
-                  onMouseLeave={() => setMoveOpen(false)}
+                  className="absolute bottom-full right-0 z-50 mb-1.5 w-[200px] overflow-hidden rounded-xl border border-app-border bg-white shadow-xl dark:border-white/10 dark:bg-gray-800"
+                  onMouseLeave={() => { setMoveOpen(false); setExpandedFolder(null); }}
                 >
                   <p className="border-b border-app-border px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-app-text-secondary/50 dark:border-white/10">Flytta till</p>
-                  {sets.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-app-text transition-colors hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
-                    >
-                      <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
-                      <span className="truncate">{s.name}</span>
-                    </button>
-                  ))}
+                  <div className="max-h-[260px] overflow-y-auto">
+                    {/* Folders with their sets */}
+                    {(folders ?? []).map((f) => {
+                      const folderSets = sets.filter((s) => s.folderId === f.id);
+                      if (folderSets.length === 0) return null;
+                      const open = expandedFolder === f.id;
+                      return (
+                        <div key={f.id}>
+                          <button
+                            onClick={() => setExpandedFolder(open ? null : f.id)}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-semibold text-app-text transition-colors hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+                          >
+                            <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: f.color ?? '#6C63FF' }} />
+                            <span className="flex-1 truncate">{f.name}</span>
+                            <span className="text-[10px] text-app-text-secondary/40">{open ? '▲' : '▼'}</span>
+                          </button>
+                          {open && folderSets.map((s) => (
+                            <button
+                              key={s.id}
+                              onClick={() => { onMoveToSet(s.id); setMoveOpen(false); setExpandedFolder(null); }}
+                              className="flex w-full items-center gap-2 py-1.5 pl-8 pr-3 text-left text-[12px] text-app-text transition-colors hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+                            >
+                              <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
+                              <span className="truncate">{s.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    {/* Ungrouped sets */}
+                    {sets.filter((s) => !s.folderId).map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-app-text transition-colors hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+                      >
+                        <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
+                        <span className="truncate">{s.name}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -971,6 +1004,7 @@ export function QuizPage() {
                   onToggleFav={toggleFav}
                   progressMap={currentProgress}
                   sets={quizSets.filter((s) => s.id !== selectedSetId)}
+                  folders={quizFolders}
                   onMoveToSet={(setId) => {
                     addItemToSet(setId, { ...item });
                     if (selectedSetId) removeItemFromSet(selectedSetId, item.id);
