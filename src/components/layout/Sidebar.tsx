@@ -142,6 +142,11 @@ export function Sidebar({
         <button onClick={signOut} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[13px] font-medium text-red-600 transition-all hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10">
           ⏻ {(!collapsed || mobileOpen) && <span>{t.signOut}</span>}
         </button>
+        {(!collapsed || mobileOpen) && (
+          <p className="mt-1 select-none text-center text-[9.5px] font-medium tracking-wide text-app-text-secondary/30 dark:text-gray-600/50">
+            ✦ Designad av Dr. Abdullah Taha ✦
+          </p>
+        )}
       </div>
     </aside>
   );
