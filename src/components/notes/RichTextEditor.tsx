@@ -400,7 +400,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             onChange={(e) => setSizeInput(e.target.value)}
             onFocus={() => { fontInputFocused.current = true; }}
             onBlur={() => { fontInputFocused.current = false; const v = parseInt(sizeInput, 10); if (v > 0) { setFontSize(v); applyPx(v); } else { setSizeInput(String(fontSize)); } }}
-            onKeyDown={(e) => { if (e.key === 'Enter') { const v = parseInt(sizeInput, 10); if (v > 0) { setFontSize(v); applyPx(v); } (e.target as HTMLInputElement).blur(); } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); const v = parseInt(sizeInput, 10); (e.target as HTMLInputElement).blur(); if (v > 0) { setTimeout(() => { setFontSize(v); applyPx(v); }, 0); } } }}
             className="h-[26px] w-8 border-x border-app-border bg-transparent text-center text-xs font-semibold outline-none dark:border-white/10"
           />
           <button type="button" onMouseDown={(e) => { e.preventDefault(); changeSize(1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">+</button>
