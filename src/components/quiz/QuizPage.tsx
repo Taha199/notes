@@ -122,69 +122,74 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
                 title="Flytta till set"
                 className="text-[13px] text-app-text-secondary/40 transition-colors hover:text-primary"
               >📂</button>
-              {moveOpen && (() => {
-                const activeFolderSets = activeFolderId
-                  ? sets.filter((s) => s.folderId === activeFolderId)
-                  : sets.filter((s) => !s.folderId);
-                const hasAnyFolderSets = (folders ?? []).some((f) => sets.some((s) => s.folderId === f.id));
-                return (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setMoveOpen(false)}>
-                    <div className="w-full max-w-md overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
-                      {/* Header */}
-                      <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
-                        <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">Flytta till set</p>
-                        <button onClick={() => setMoveOpen(false)} className="text-app-text-secondary/50 hover:text-app-text dark:text-gray-500 dark:hover:text-gray-200">✕</button>
-                      </div>
-                      {/* Two-column body */}
-                      <div className="flex h-[320px]">
-                        {/* Left: folders */}
-                        {hasAnyFolderSets && (
-                          <div className="flex w-[120px] flex-shrink-0 flex-col overflow-y-auto border-r border-app-border py-1 dark:border-white/10">
-                            {/* Ungrouped option */}
-                            {sets.some((s) => !s.folderId) && (
-                              <button
-                                onClick={() => setActiveFolderId(null)}
-                                className={'flex flex-col px-2 py-2 text-left transition-colors ' + (!activeFolderId ? 'bg-primary/10 text-primary' : 'text-app-text hover:bg-app-bg dark:text-gray-300 dark:hover:bg-white/5')}
-                              >
-                                <span className="block truncate text-[11px] font-semibold">Utan mapp</span>
-                                <span className="text-[9px] text-app-text-secondary/50">{sets.filter((s) => !s.folderId).length} set</span>
-                              </button>
+              {moveOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setMoveOpen(false)}>
+                  <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
+                      <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">Flytta till set</p>
+                      <button onClick={() => setMoveOpen(false)} className="text-app-text-secondary/50 hover:text-app-text">✕</button>
+                    </div>
+                    <div className="max-h-[420px] overflow-y-auto">
+                      {/* Folders and their sets */}
+                      {(folders ?? []).map((f) => {
+                        const fSets = sets.filter((s) => s.folderId === f.id);
+                        const open = activeFolderId === f.id;
+                        return (
+                          <div key={f.id}>
+                            <button
+                              onClick={() => setActiveFolderId(open ? null : f.id)}
+                              className="flex w-full items-center gap-2.5 border-b border-app-border/40 px-4 py-2.5 text-left transition-colors hover:bg-app-bg dark:border-white/5 dark:hover:bg-white/5"
+                            >
+                              <span className="h-3 w-3 flex-shrink-0 rounded-sm" style={{ background: f.color ?? '#6C63FF' }} />
+                              <span className="flex-1 text-[12px] font-bold text-app-text dark:text-gray-100">{f.name}</span>
+                              <span className="text-[10px] text-app-text-secondary/40">{fSets.length} set</span>
+                              <span className="text-[10px] text-app-text-secondary/30">{open ? '▲' : '▼'}</span>
+                            </button>
+                            {open && (
+                              <div className="border-b border-app-border/40 bg-app-bg/40 dark:border-white/5 dark:bg-white/[0.02]">
+                                {fSets.length === 0 ? (
+                                  <p className="px-6 py-3 text-[11px] italic text-app-text-secondary/40">Inga set i den här mappen</p>
+                                ) : fSets.map((s) => (
+                                  <button
+                                    key={s.id}
+                                    onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
+                                    className="flex w-full items-center gap-3 border-b border-app-border/20 px-6 py-2.5 text-left transition-colors last:border-b-0 hover:bg-primary/5 dark:border-white/5 dark:hover:bg-primary/10"
+                                  >
+                                    <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
+                                    <span className="flex-1 truncate text-[13px] text-app-text dark:text-gray-100">{s.name}</span>
+                                    <span className="text-[11px] text-app-text-secondary/40">{s.items.length} st</span>
+                                  </button>
+                                ))}
+                              </div>
                             )}
-                            {(folders ?? []).filter((f) => sets.some((s) => s.folderId === f.id)).map((f) => (
-                              <button
-                                key={f.id}
-                                onClick={() => setActiveFolderId(f.id)}
-                                className={'relative flex flex-col px-2 py-2 text-left transition-colors ' + (activeFolderId === f.id ? 'bg-primary/10 text-primary' : 'text-app-text hover:bg-app-bg dark:text-gray-300 dark:hover:bg-white/5')}
-                              >
-                                <span className="absolute inset-y-0 left-0 w-[3px] rounded-r" style={{ background: f.color ?? '#6C63FF' }} />
-                                <span className="block truncate pl-1 text-[11px] font-semibold">{f.name}</span>
-                                <span className="pl-1 text-[9px] text-app-text-secondary/50">{sets.filter((s) => s.folderId === f.id).length} set</span>
-                              </button>
-                            ))}
                           </div>
-                        )}
-                        {/* Right: sets */}
-                        <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto p-3">
-                          {activeFolderSets.length === 0 && (
-                            <p className="py-8 text-center text-[12px] italic text-app-text-secondary/40">Inga set</p>
+                        );
+                      })}
+                      {/* Ungrouped sets */}
+                      {sets.filter((s) => !s.folderId).length > 0 && (
+                        <div>
+                          {(folders ?? []).length > 0 && (
+                            <div className="border-b border-app-border/40 px-4 py-2 dark:border-white/5">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/40">Utan mapp</span>
+                            </div>
                           )}
-                          {activeFolderSets.map((s) => (
+                          {sets.filter((s) => !s.folderId).map((s) => (
                             <button
                               key={s.id}
                               onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
-                              className="flex items-center gap-3 rounded-xl border border-app-border px-3 py-2.5 text-left transition-all hover:border-primary/40 hover:bg-primary/5 dark:border-white/10 dark:hover:border-primary/30 dark:hover:bg-primary/10"
+                              className="flex w-full items-center gap-3 border-b border-app-border/30 px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-primary/5 dark:border-white/5 dark:hover:bg-primary/10"
                             >
                               <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
-                              <span className="flex-1 truncate text-[13px] font-medium text-app-text dark:text-gray-100">{s.name}</span>
-                              <span className="text-[11px] text-app-text-secondary/40 dark:text-gray-600">{s.items.length} st</span>
+                              <span className="flex-1 truncate text-[13px] text-app-text dark:text-gray-100">{s.name}</span>
+                              <span className="text-[11px] text-app-text-secondary/40">{s.items.length} st</span>
                             </button>
                           ))}
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
-                );
-              })()}
+                </div>
+              )}
             </>
           )}
           <button onClick={onDelete} className="text-[13px] text-app-text-secondary/40 transition-all hover:scale-110 hover:text-red-500" title="Ta bort" aria-label="Ta bort">🗑️</button>
