@@ -111,8 +111,12 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const markDone = () => {
     updateNote(note.id, { read: true });
     show(t.tStudied);
-    onNavigate?.('read');
-    onClose();
+    if (nextNoteId !== undefined && onChangeNote) {
+      onChangeNote(nextNoteId);
+    } else {
+      onNavigate?.('read');
+      onClose();
+    }
   };
 
   const markUndone = () => {
