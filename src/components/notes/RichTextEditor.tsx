@@ -432,7 +432,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImage(f); e.target.value = ''; }}
         />
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('removeFormat'); }} title={t.titleClr} className={btnCls(false)}>⌫</button>
+        <button type="button" onMouseDown={(e) => {
+          e.preventDefault();
+          focusEditor();
+          document.execCommand('removeFormat');
+          document.execCommand('styleWithCSS', false, 'true');
+          document.execCommand('foreColor', false, '#000000');
+          applyPx(12);
+          setFontSize(12);
+          setBarColor('#000000');
+          saveSel();
+          onChange(editorRef.current?.innerHTML ?? '');
+        }} title={t.titleClr} className={btnCls(false)}>⌫</button>
         {toolbarEnd && <div className="ml-auto flex items-center pl-2">{toolbarEnd}</div>}
       </div>
 
