@@ -525,7 +525,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           aria-modal="true"
           aria-label="Image preview"
           onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
         >
           <div className="absolute right-4 top-4 flex items-center gap-2">
             <a
