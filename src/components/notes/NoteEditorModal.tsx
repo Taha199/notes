@@ -113,26 +113,6 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     onClose();
   };
 
-  const handleGenerateQuiz = async () => {
-    setQuizOpen(true);
-    setManualQuiz(false);
-    setAiMode(false);
-    setQuizItems([]);
-    setQuizIndex(0);
-    setShowAnswer(false);
-    setQuizError('');
-    setSavedCount(0);
-    setQuizLoading(true);
-    try {
-      const results = await generateQuiz(note.text || plainText);
-      setQuizItems(results);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      setQuizError(msg === 'INSUFFICIENT_CONTENT' ? 'Innehållet är inte tillräckligt för att generera frågor.' : 'Det gick inte att generera frågor. Försök igen.');
-    } finally {
-      setQuizLoading(false);
-    }
-  };
 
   const handleSaveCurrent = () => {
     if (!current) return;
