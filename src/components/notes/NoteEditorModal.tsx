@@ -443,44 +443,38 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       <div className="flex flex-col gap-3">
                         <div>
                           <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Fråga</label>
-                          <textarea
-                            value={editQ}
-                            onChange={(e) => setEditQ(e.target.value)}
-                            rows={4}
-                            dir="auto"
-                            className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2.5 text-[13px] text-app-text outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
-                          />
+                          <div className="rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
+                            <RichTextEditor html={editQ} onChange={setEditQ} placeholder="Skriv frågan..." editable={true} minHeight="80px" />
+                          </div>
                         </div>
                         <div>
                           <div className="mb-1 flex items-center justify-between">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Svar</label>
                             <button
                               onClick={async () => {
-                                if (!editQ.trim()) return;
+                                const qText = editQ.replace(/<[^>]*>/g, '').trim();
+                                if (!qText) return;
                                 setAiAnswerLoading(true);
-                                try { setEditA(await answerQuestion(editQ)); }
+                                try { setEditA(mdToHtml(await answerQuestion(qText))); }
                                 finally { setAiAnswerLoading(false); }
                               }}
-                              disabled={aiAnswerLoading || !editQ.trim()}
+                              disabled={aiAnswerLoading || !editQ.replace(/<[^>]*>/g, '').trim()}
                               className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                             >
                               {aiAnswerLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
                             </button>
                           </div>
-                          <textarea
-                            value={editA}
-                            onChange={(e) => setEditA(e.target.value)}
-                            rows={5}
-                            dir="auto"
-                            className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2.5 text-[13px] text-app-text outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
-                          />
+                          <div className="rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
+                            <RichTextEditor html={editA} onChange={setEditA} placeholder="Skriv svaret..." editable={true} minHeight="100px" />
+                          </div>
                         </div>
                         <div className="flex justify-end gap-2">
                           <button onClick={() => setEditingQuiz(false)} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">Avbryt</button>
                           <button
                             onClick={() => {
-                              if (!editQ.trim()) return;
-                              const updated = quizItems.map((item, i) => i === quizIndex ? { question: editQ.trim(), answer: editA.trim() } : item);
+                              const qText = editQ.replace(/<[^>]*>/g, '').trim();
+                              if (!qText) return;
+                              const updated = quizItems.map((item, i) => i === quizIndex ? { question: editQ, answer: editA } : item);
                               setQuizItems(updated);
                               setEditingQuiz(false);
                               setShowAnswer(true);
@@ -495,7 +489,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-[14px] font-semibold leading-snug text-app-text dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
                           <button
-                            onClick={() => { setEditQ(current.question); setEditA(current.answer); setEditingQuiz(true); setShowAnswer(true); }}
+                            onClick={() => { setEditQ(mdToHtml(current.question)); setEditA(mdToHtml(current.answer)); setEditingQuiz(true); setShowAnswer(true); }}
                             className="flex-shrink-0 rounded-lg border border-app-border px-2 py-1 text-[11px] text-app-text-secondary hover:border-primary/40 hover:text-primary dark:border-white/10"
                           >✏️ Redigera</button>
                         </div>
