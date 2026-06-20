@@ -61,7 +61,7 @@ function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMod
   );
 }
 
-function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, createdLabel, deletedLabel, restoreLabel, deleteLabel, restoreTo, onRestore, onDelete }: {
+function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, createdLabel, deletedLabel, restoreLabel, deleteLabel, restoreTo, onRestore, onDelete, selectMode, selected, onToggleSelect }: {
   icon: string;
   name: string;
   color?: string;
@@ -75,10 +75,26 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
   restoreTo?: string;
   onRestore: () => void;
   onDelete: () => void;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-800/60">
+    <div
+      className={'relative overflow-hidden rounded-xl border bg-white p-4 shadow-sm transition-all dark:bg-gray-800/60 ' + (selected ? 'border-primary ring-2 ring-primary/30' : 'border-app-border dark:border-white/10')}
+      onClick={() => selectMode && onToggleSelect?.()}
+      style={{ cursor: selectMode ? 'pointer' : 'default' }}
+    >
       <span className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: color || '#9ca3af' }} />
+      {selectMode && (
+        <input
+          type="checkbox"
+          checked={!!selected}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute right-3 top-3 h-4 w-4 accent-primary"
+        />
+      )}
       <div className="flex items-start gap-3">
         <span className="text-xl">{icon}</span>
         <div className="min-w-0 flex-1">
@@ -90,12 +106,16 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
           </div>
         </div>
       </div>
-      <div className="mt-3 flex justify-end gap-2 border-t border-app-border/70 pt-3 dark:border-white/10">
-        <button onClick={onRestore} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:border-white/10">↩ {restoreLabel}</button>
-        <button onClick={onDelete} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10">🗑 {deleteLabel}</button>
-      </div>
-      {restoreTo && (
-        <p className="mt-2 text-[10px] text-emerald-600/70 dark:text-emerald-400/60">{restoreTo}</p>
+      {!selectMode && (
+        <>
+          <div className="mt-3 flex justify-end gap-2 border-t border-app-border/70 pt-3 dark:border-white/10">
+            <button onClick={(e) => { e.stopPropagation(); onRestore(); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:border-white/10">↩ {restoreLabel}</button>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10">🗑 {deleteLabel}</button>
+          </div>
+          {restoreTo && (
+            <p className="mt-2 text-[10px] text-emerald-600/70 dark:text-emerald-400/60">{restoreTo}</p>
+          )}
+        </>
       )}
     </div>
   );
@@ -111,6 +131,9 @@ export function Dashboard() {
   const [showSetPassword, setShowSetPassword] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selectedSets, setSelectedSets] = useState<Set<string>>(new Set());
+  const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
+  const [selectedQuestions, setSelectedQuestions] = useState<Set<number>>(new Set());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
   const [confirmDelSel, setConfirmDelSel] = useState(false);
@@ -261,20 +284,20 @@ export function Dashboard() {
                   <span className="rounded-full bg-app-bg px-2 py-0.5 text-[11px] font-semibold text-app-text-secondary dark:bg-white/10">{trashTotal}</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {trashed.length > 0 && (
+                  {trashTotal > 0 && (
                     <button
-                      onClick={() => { setSelectMode((s) => !s); setSelected(new Set()); }}
+                      onClick={() => { setSelectMode((s) => !s); setSelected(new Set()); setSelectedSets(new Set()); setSelectedFolders(new Set()); setSelectedQuestions(new Set()); }}
                       className="rounded-lg border border-app-border px-3.5 py-1.5 text-[13px] font-medium text-app-text hover:bg-app-bg dark:border-white/10 dark:text-gray-200"
                     >
                       {selectMode ? t.cancelSel : t.selDel}
                     </button>
                   )}
-                  {selectMode && selected.size > 0 && (
+                  {selectMode && (selected.size + selectedSets.size + selectedFolders.size + selectedQuestions.size) > 0 && (
                     <button
                       onClick={() => setConfirmDelSel(true)}
                       className="rounded-lg bg-red-600 px-3.5 py-1.5 text-[13px] font-semibold text-white hover:bg-red-700"
                     >
-                      🗑 {t.delSelected} ({selected.size})
+                      🗑 {t.delSelected} ({selected.size + selectedSets.size + selectedFolders.size + selectedQuestions.size})
                     </button>
                   )}
                   {trashTotal > 0 && (
@@ -315,6 +338,9 @@ export function Dashboard() {
                           restoreTo={lang === 'sv' ? 'Återställs till Quiz → Restored Sets' : 'Restores to Quiz → Restored Sets'}
                           onRestore={() => { restoreQuizSet(set.id); show(lang === 'sv' ? '↩ Återställd till Quiz → Restored Sets' : '↩ Restored to Quiz → Restored Sets'); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'set', id: set.id })}
+                          selectMode={selectMode}
+                          selected={selectedSets.has(set.id)}
+                          onToggleSelect={() => setSelectedSets((prev) => { const n = new Set(prev); n.has(set.id) ? n.delete(set.id) : n.add(set.id); return n; })}
                         />
                       ))}
                     </div>
@@ -341,6 +367,9 @@ export function Dashboard() {
                           restoreTo={lang === 'sv' ? 'Återställs till Quiz → Mappar' : 'Restores to Quiz → Folders'}
                           onRestore={() => { restoreQuizFolder(folder.id); show(lang === 'sv' ? '↩ Återställd till Quiz → Mappar' : '↩ Restored to Quiz → Folders'); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'folder', id: folder.id })}
+                          selectMode={selectMode}
+                          selected={selectedFolders.has(folder.id)}
+                          onToggleSelect={() => setSelectedFolders((prev) => { const n = new Set(prev); n.has(folder.id) ? n.delete(folder.id) : n.add(folder.id); return n; })}
                         />
                       ))}
                     </div>
@@ -366,6 +395,9 @@ export function Dashboard() {
                           restoreTo={lang === 'sv' ? 'Återställs till Quiz → Frågor från anteckningar' : 'Restores to Quiz → Questions from Notes'}
                           onRestore={() => { restoreQuiz(q.id); show(lang === 'sv' ? '↩ Återställd till Quiz → Frågor från anteckningar' : '↩ Restored to Quiz → Questions from Notes'); }}
                           onDelete={() => setConfirmQuizTrash({ type: 'question', id: q.id })}
+                          selectMode={selectMode}
+                          selected={selectedQuestions.has(q.id)}
+                          onToggleSelect={() => setSelectedQuestions((prev) => { const n = new Set(prev); n.has(q.id) ? n.delete(q.id) : n.add(q.id); return n; })}
                         />
                       ))}
                     </div>
@@ -421,10 +453,19 @@ export function Dashboard() {
       {confirmDelSel && (
         <ConfirmDialog
           message={t.cDelSel}
-          count={selected.size}
+          count={selected.size + selectedSets.size + selectedFolders.size + selectedQuestions.size}
           confirmLabel={t.delSelected}
           cancelLabel="Cancel"
-          onConfirm={() => { setConfirmDelSel(false); deleteMany([...selected]); setSelected(new Set()); setSelectMode(false); show(t.tDelSel); }}
+          onConfirm={() => {
+            setConfirmDelSel(false);
+            if (selected.size > 0) deleteMany([...selected]);
+            selectedSets.forEach((id) => permDeleteQuizSet(id));
+            selectedFolders.forEach((id) => permDeleteQuizFolder(id));
+            selectedQuestions.forEach((id) => permDeleteQuiz(id));
+            setSelected(new Set()); setSelectedSets(new Set()); setSelectedFolders(new Set()); setSelectedQuestions(new Set());
+            setSelectMode(false);
+            show(t.tDelSel);
+          }}
           onCancel={() => setConfirmDelSel(false)}
         />
       )}

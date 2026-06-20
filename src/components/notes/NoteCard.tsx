@@ -101,7 +101,7 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
           {isTrash && (
             <span className="text-[10px] text-emerald-600/70 dark:text-emerald-400/60">
               {lang === 'sv'
-                ? note.archived ? 'Återställs till Arkiv' : note.read ? 'Återställs till Lästa' : 'Återställs till Olästa'
+                ? note.archived ? 'Återställs till Arkiv' : note.read ? 'Återställs till Lästa anteckningar' : 'Återställs till Olästa anteckningar'
                 : note.archived ? 'Restores to Archive' : note.read ? 'Restores to Read Notes' : 'Restores to Unstudied Notes'}
             </span>
           )}

@@ -37,11 +37,11 @@ export function Sidebar({
   const items: { page: Page; icon: string; label: string; badge?: number; badgeClass?: string }[] = [
     { page: 'home', icon: '🏠', label: t.navHome },
     { page: 'fav', icon: '★', label: t.navFav, badge: counts.fav, badgeClass: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' },
+    { page: 'quiz', icon: '🧠', label: 'Quiz' },
     { page: 'unread', icon: '📖', label: t.navUnread, badge: counts.unread, badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
     { page: 'read', icon: '✓', label: t.navRead, badge: counts.read, badgeClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' },
     { page: 'library', icon: '📚', label: t.navLibrary, badge: counts.home, badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
     { page: 'files', icon: '📎', label: t.navFiles },
-    { page: 'quiz', icon: '🧠', label: 'Quiz' },
     { page: 'chat', icon: '💬', label: 'AI Chat' },
   ];
   const items2: { page: Page; icon: string; label: string; badge?: number; badgeClass?: string }[] = [
