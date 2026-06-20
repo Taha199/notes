@@ -25,8 +25,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const savedRange = useRef<Range | null>(null);
   const pendingFontSize = useRef<number | null>(null);
   const [fontSize, setFontSizeState] = useState(12);
-  const fontSizeRef = useRef(12); // ref so selectionchange closure always sees current value
-  const setFontSize = (v: number) => { fontSizeRef.current = v; setFontSizeState(v); };
+  const fontSizeRef = useRef(12);
+  const fontInputFocused = useRef(false);
+  const [sizeInput, setSizeInput] = useState('12');
+  const setFontSize = (v: number) => { fontSizeRef.current = v; setFontSizeState(v); if (!fontInputFocused.current) setSizeInput(String(v)); };
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
@@ -380,10 +382,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         <div className="flex items-center overflow-hidden rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900">
           <button type="button" onMouseDown={(e) => { e.preventDefault(); changeSize(-1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">−</button>
           <input
-            value={fontSize}
-            onChange={(e) => setFontSize(+e.target.value || 12)}
-            onBlur={() => applyPx(fontSize)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { applyPx(fontSize); (e.target as HTMLInputElement).blur(); } }}
+            value={sizeInput}
+            onChange={(e) => setSizeInput(e.target.value)}
+            onFocus={() => { fontInputFocused.current = true; }}
+            onBlur={() => { fontInputFocused.current = false; const v = parseInt(sizeInput, 10); if (v > 0) { setFontSize(v); applyPx(v); } else { setSizeInput(String(fontSize)); } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { const v = parseInt(sizeInput, 10); if (v > 0) { setFontSize(v); applyPx(v); } (e.target as HTMLInputElement).blur(); } }}
             className="h-[26px] w-8 border-x border-app-border bg-transparent text-center text-xs font-semibold outline-none dark:border-white/10"
           />
           <button type="button" onMouseDown={(e) => { e.preventDefault(); changeSize(1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">+</button>
