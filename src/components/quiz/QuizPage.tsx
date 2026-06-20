@@ -868,15 +868,6 @@ export function QuizPage() {
             )}
           </div>
 
-          {/* Empty state */}
-          {displayItems.length === 0 && !addingQuestion && (
-            <div className="animate-fade-in flex flex-col items-center py-20 text-center text-app-text-secondary/70 dark:text-gray-500">
-              <span className="mb-3 text-5xl opacity-30">{selectedSetId ? '📂' : '🧠'}</span>
-              {selectedSetId
-                ? <p className="text-sm">This set is empty.<br />Click <strong>Add Question</strong> or <strong>Import</strong> to get started.</p>
-                : <p className="text-sm">Inga frågor ännu.<br />Klicka på <strong>Add Question</strong> eller öppna en anteckning och klicka på <strong>Generate Quiz</strong>.</p>}
-            </div>
-          )}
 
           {/* Questions list */}
           <div className="flex flex-col gap-2">
@@ -920,11 +911,11 @@ export function QuizPage() {
               />
             )}
 
-            {/* Quick add button under the list */}
-            {displayItems.length > 0 && !addingQuestion && (
+            {/* Add question dashed button — always visible when not adding */}
+            {!addingQuestion && (
               <button
                 onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
-                className="flex min-h-[52px] items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/60 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10"
+                className="flex min-h-[56px] w-full items-center justify-center rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/50 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:hover:border-primary/50 dark:hover:bg-primary/10"
                 title={lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
               >
                 +
