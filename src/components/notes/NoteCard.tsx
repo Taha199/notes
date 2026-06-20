@@ -84,6 +84,9 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
               ) : (
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">{t.tagUnread}</span>
               )}
+              {note.html?.includes('<img') && (
+                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700 dark:bg-purple-500/20 dark:text-purple-300">🖼 Image</span>
+              )}
             </div>
           )}
         </div>
