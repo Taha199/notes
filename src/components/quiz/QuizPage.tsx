@@ -73,7 +73,7 @@ interface QuizItemRowProps {
 
 function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet }: QuizItemRowProps) {
   const [moveOpen, setMoveOpen] = useState(false);
-  const [expandedFolder, setExpandedFolder] = useState<string | null>(null);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const status = progressMap?.[item.id];
   return (
     <div className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:border-primary/25 hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
@@ -132,71 +132,73 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
           {onMoveToSet && sets && sets.length > 0 && (
             <>
               <button
-                onClick={() => setMoveOpen(true)}
+                onClick={() => { setMoveOpen(true); setActiveFolderId(null); }}
                 title="Flytta till set"
                 className="text-[13px] text-app-text-secondary/40 transition-colors hover:text-primary"
               >📂</button>
-              {moveOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setMoveOpen(false)}>
-                  <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
-                      <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">Flytta till set</p>
-                      <button onClick={() => setMoveOpen(false)} className="text-app-text-secondary/50 hover:text-app-text dark:text-gray-500 dark:hover:text-gray-200">✕</button>
-                    </div>
-                    <div className="max-h-[400px] overflow-y-auto p-3">
-                      {/* Folders with their sets */}
-                      {(folders ?? []).map((f) => {
-                        const folderSets = sets.filter((s) => s.folderId === f.id);
-                        if (folderSets.length === 0) return null;
-                        return (
-                          <div key={f.id} className="mb-3">
-                            <div className="mb-1.5 flex items-center gap-2 px-1">
-                              <span className="h-3 w-3 flex-shrink-0 rounded-sm" style={{ background: f.color ?? '#6C63FF' }} />
-                              <span className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">{f.name}</span>
-                            </div>
-                            <div className="flex flex-col gap-1 pl-3">
-                              {folderSets.map((s) => (
-                                <button
-                                  key={s.id}
-                                  onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
-                                  className="flex items-center gap-3 rounded-xl border border-app-border px-3 py-2.5 text-left transition-all hover:border-primary/40 hover:bg-primary/5 dark:border-white/10 dark:hover:border-primary/30 dark:hover:bg-primary/10"
-                                >
-                                  <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
-                                  <span className="text-[13px] font-medium text-app-text dark:text-gray-100">{s.name}</span>
-                                  <span className="ml-auto text-[11px] text-app-text-secondary/40 dark:text-gray-600">{s.items.length} st</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {/* Ungrouped sets */}
-                      {sets.filter((s) => !s.folderId).length > 0 && (
-                        <div className="mb-1">
-                          {(folders ?? []).some((f) => sets.some((s) => s.folderId === f.id)) && (
-                            <div className="mb-1.5 flex items-center gap-2 px-1">
-                              <span className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">Övriga</span>
-                            </div>
-                          )}
-                          <div className="flex flex-col gap-1">
-                            {sets.filter((s) => !s.folderId).map((s) => (
+              {moveOpen && (() => {
+                const activeFolderSets = activeFolderId
+                  ? sets.filter((s) => s.folderId === activeFolderId)
+                  : sets.filter((s) => !s.folderId);
+                const hasAnyFolderSets = (folders ?? []).some((f) => sets.some((s) => s.folderId === f.id));
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setMoveOpen(false)}>
+                    <div className="w-full max-w-md overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
+                      {/* Header */}
+                      <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
+                        <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">Flytta till set</p>
+                        <button onClick={() => setMoveOpen(false)} className="text-app-text-secondary/50 hover:text-app-text dark:text-gray-500 dark:hover:text-gray-200">✕</button>
+                      </div>
+                      {/* Two-column body */}
+                      <div className="flex h-[320px]">
+                        {/* Left: folders */}
+                        {hasAnyFolderSets && (
+                          <div className="flex w-[120px] flex-shrink-0 flex-col overflow-y-auto border-r border-app-border py-1 dark:border-white/10">
+                            {/* Ungrouped option */}
+                            {sets.some((s) => !s.folderId) && (
                               <button
-                                key={s.id}
-                                onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
-                                className="flex items-center gap-3 rounded-xl border border-app-border px-3 py-2.5 text-left transition-all hover:border-primary/40 hover:bg-primary/5 dark:border-white/10 dark:hover:border-primary/30 dark:hover:bg-primary/10"
+                                onClick={() => setActiveFolderId(null)}
+                                className={'flex flex-col px-2 py-2 text-left transition-colors ' + (!activeFolderId ? 'bg-primary/10 text-primary' : 'text-app-text hover:bg-app-bg dark:text-gray-300 dark:hover:bg-white/5')}
                               >
-                                <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
-                                <span className="text-[13px] font-medium text-app-text dark:text-gray-100">{s.name}</span>
-                                <span className="ml-auto text-[11px] text-app-text-secondary/40 dark:text-gray-600">{s.items.length} st</span>
+                                <span className="block truncate text-[11px] font-semibold">Utan mapp</span>
+                                <span className="text-[9px] text-app-text-secondary/50">{sets.filter((s) => !s.folderId).length} set</span>
+                              </button>
+                            )}
+                            {(folders ?? []).filter((f) => sets.some((s) => s.folderId === f.id)).map((f) => (
+                              <button
+                                key={f.id}
+                                onClick={() => setActiveFolderId(f.id)}
+                                className={'relative flex flex-col px-2 py-2 text-left transition-colors ' + (activeFolderId === f.id ? 'bg-primary/10 text-primary' : 'text-app-text hover:bg-app-bg dark:text-gray-300 dark:hover:bg-white/5')}
+                              >
+                                <span className="absolute inset-y-0 left-0 w-[3px] rounded-r" style={{ background: f.color ?? '#6C63FF' }} />
+                                <span className="block truncate pl-1 text-[11px] font-semibold">{f.name}</span>
+                                <span className="pl-1 text-[9px] text-app-text-secondary/50">{sets.filter((s) => s.folderId === f.id).length} set</span>
                               </button>
                             ))}
                           </div>
+                        )}
+                        {/* Right: sets */}
+                        <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto p-3">
+                          {activeFolderSets.length === 0 && (
+                            <p className="py-8 text-center text-[12px] italic text-app-text-secondary/40">Inga set</p>
+                          )}
+                          {activeFolderSets.map((s) => (
+                            <button
+                              key={s.id}
+                              onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
+                              className="flex items-center gap-3 rounded-xl border border-app-border px-3 py-2.5 text-left transition-all hover:border-primary/40 hover:bg-primary/5 dark:border-white/10 dark:hover:border-primary/30 dark:hover:bg-primary/10"
+                            >
+                              <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
+                              <span className="flex-1 truncate text-[13px] font-medium text-app-text dark:text-gray-100">{s.name}</span>
+                              <span className="text-[11px] text-app-text-secondary/40 dark:text-gray-600">{s.items.length} st</span>
+                            </button>
+                          ))}
                         </div>
-                      )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </>
           )}
           <button onClick={onDelete} className="text-[13px] text-app-text-secondary/40 transition-all hover:scale-110 hover:text-red-500" title="Ta bort" aria-label="Ta bort">🗑️</button>
