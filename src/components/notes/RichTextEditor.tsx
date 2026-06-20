@@ -35,7 +35,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [hlColor, setHlColor] = useState('#FFEB3B');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
-  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; rect: DOMRect } | null>(null);
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
@@ -491,7 +491,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             return;
           }
           const target = event.target;
-          if (!editable && target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); setNaturalSize(null); }
+          if (!editable && target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); naturalSizeRef.current = null; }
         }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
@@ -513,7 +513,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
                 e.stopPropagation();
                 setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src);
                 setPreviewZoom(1);
-                setNaturalSize(null);
+                naturalSizeRef.current = null;
               }}
               className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900"
               title="Zoom image"
@@ -538,13 +538,19 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       })()}
 
       {previewImage && (() => {
-        const maxW = window.innerWidth * 0.9;
-        const maxH = window.innerHeight * 0.82;
-        const nw = naturalSize?.w ?? maxW;
-        const nh = naturalSize?.h ?? maxH;
-        const fitScale = Math.min(1, maxW / nw, maxH / nh);
-        const displayW = nw * fitScale * previewZoom;
-        const displayH = nh * fitScale * previewZoom;
+        const ns = naturalSizeRef.current;
+        // At zoom=1: pure CSS fit (no re-render artifacts). Above 1: explicit size.
+        const imgStyle: React.CSSProperties = previewZoom === 1
+          ? { maxWidth: '90vw', maxHeight: '82vh', width: 'auto', height: 'auto' }
+          : ns
+            ? (() => {
+                const maxW = window.innerWidth * 0.9;
+                const maxH = window.innerHeight * 0.82;
+                const fitScale = Math.min(1, maxW / ns.w, maxH / ns.h);
+                return { width: ns.w * fitScale * previewZoom, height: ns.h * fitScale * previewZoom };
+              })()
+            : { width: `${previewZoom * 90}vw`, height: 'auto' };
+        const zoomLabel = previewZoom === 1 ? 'Fit' : `${Math.round(previewZoom * 100)}%`;
         return (
           <div
             role="dialog"
@@ -555,41 +561,26 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           >
             {/* Top bar */}
             <div className="absolute right-4 top-4 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              <a
-                href={previewImage}
-                download="taha-note-image"
-                aria-label="Download image"
-                title="Download"
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl font-bold text-white transition-colors hover:bg-white/25"
-              >↓</a>
+              <a href={previewImage} download="taha-note-image" aria-label="Download" title="Download" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl font-bold text-white transition-colors hover:bg-white/25">↓</a>
               <button type="button" onClick={() => setPreviewImage(null)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white transition-colors hover:bg-white/25">✕</button>
             </div>
 
             {/* Scrollable image area */}
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="overflow-auto rounded-xl"
-              style={{ maxWidth: '90vw', maxHeight: '82vh' }}
-            >
+            <div onClick={(e) => e.stopPropagation()} className="overflow-auto rounded-xl" style={{ maxWidth: '90vw', maxHeight: '82vh' }}>
               <img
                 src={previewImage}
                 alt="Expanded note attachment"
-                onLoad={(e) => {
-                  const img = e.currentTarget;
-                  setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
-                }}
+                onLoad={(e) => { naturalSizeRef.current = { w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight }; }}
+                onClick={(e) => e.stopPropagation()}
                 className="block rounded-xl shadow-2xl"
-                style={{ width: displayW, height: displayH, minWidth: displayW }}
+                style={imgStyle}
               />
             </div>
 
             {/* Zoom bar */}
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="mt-4 flex items-center gap-1 rounded-full bg-black/50 px-2 py-1 backdrop-blur-sm"
-            >
-              <button type="button" onClick={() => setPreviewZoom((z) => Math.max(0.1, +(z - 0.25).toFixed(2)))} className="flex h-9 w-9 items-center justify-center rounded-full text-xl font-bold text-white hover:bg-white/20">−</button>
-              <button type="button" onClick={() => setPreviewZoom(1)} className="min-w-[52px] text-center text-[13px] font-semibold text-white hover:opacity-70">{Math.round(fitScale * previewZoom * 100)}%</button>
+            <div onClick={(e) => e.stopPropagation()} className="mt-4 flex items-center gap-1 rounded-full bg-black/50 px-2 py-1 backdrop-blur-sm">
+              <button type="button" onClick={() => setPreviewZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))} className="flex h-9 w-9 items-center justify-center rounded-full text-xl font-bold text-white hover:bg-white/20">−</button>
+              <button type="button" onClick={() => setPreviewZoom(1)} className="min-w-[52px] text-center text-[13px] font-semibold text-white hover:opacity-70">{zoomLabel}</button>
               <button type="button" onClick={() => setPreviewZoom((z) => Math.min(8, +(z + 0.25).toFixed(2)))} className="flex h-9 w-9 items-center justify-center rounded-full text-xl font-bold text-white hover:bg-white/20">+</button>
             </div>
           </div>
