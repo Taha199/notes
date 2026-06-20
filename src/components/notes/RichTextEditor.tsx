@@ -186,8 +186,22 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       restoreSel();
     }
     const sel = window.getSelection();
-    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    let range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
     if (!range || !range.collapsed) { setFontSize(px); return; }
+
+    // If caret landed at the root editor level (startContainer === ed), move it
+    // into the last block child so we don't create an orphan root-level span.
+    if (range.startContainer === ed) {
+      const lastChild = ed.lastChild;
+      if (lastChild) {
+        range = document.createRange();
+        range.selectNodeContents(lastChild);
+        range.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }
+
     // Finalize any previous marker (keep its text, just stop tracking it).
     ed.querySelectorAll<HTMLElement>('[data-font-marker]').forEach((s) => s.removeAttribute('data-font-marker'));
     // Insert a zero-width-space span at the caret so the browser types INTO it.
