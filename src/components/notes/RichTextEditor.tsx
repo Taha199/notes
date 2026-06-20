@@ -7,6 +7,7 @@ const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48,
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const STATE_COMMANDS = [...TOGGLE_COMMANDS, 'justifyRight', 'justifyCenter', 'justifyLeft'];
 type ToggleCommand = typeof TOGGLE_COMMANDS[number];
+const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 
 interface Props {
   html: string;
@@ -23,9 +24,14 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const { t } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
+  // pendingMarks: format state for the NEXT typed character when no text is selected.
+  // They are applied by insertPendingText on the very first keystroke, then immediately
+  // cleared so the browser can handle subsequent characters naturally.
   const pendingMarks = useRef<Partial<Record<ToggleCommand, boolean>>>({});
   const pendingFontSize = useRef<number | null>(null);
-  const [fontSize, setFontSize] = useState(12);
+  const [fontSize, setFontSizeState] = useState(12);
+  const fontSizeRef = useRef(12); // ref so selectionchange closure always sees current value
+  const setFontSize = (v: number) => { fontSizeRef.current = v; setFontSizeState(v); };
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
@@ -42,25 +48,21 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const imgInputRef = useRef<HTMLInputElement>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
 
-  // Set initial HTML once (avoid overwriting cursor on each keystroke)
-  useEffect(() => {
-    if (editorRef.current && editorRef.current.innerHTML !== html) {
-      editorRef.current.innerHTML = html;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (editorRef.current && document.activeElement !== editorRef.current && editorRef.current.innerHTML !== html) {
-      editorRef.current.innerHTML = html;
-    }
-  }, [html]);
+  // ── Helpers ──────────────────────────────────────────────────────────
+  // Get the live selection inside the editor right now (returns null if focus is elsewhere).
+  const liveRange = (): Range | null => {
+    const ed = editorRef.current;
+    if (!ed) return null;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!ed.contains(range.commonAncestorContainer)) return null;
+    return range;
+  };
 
   const saveSel = () => {
-    const s = window.getSelection();
-    if (s && s.rangeCount > 0 && editorRef.current?.contains(s.anchorNode)) {
-      savedRange.current = s.getRangeAt(0).cloneRange();
-    }
+    const r = liveRange();
+    if (r) savedRange.current = r.cloneRange();
   };
 
   const selectEditorEnd = () => {
@@ -80,60 +82,69 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     s?.addRange(savedRange.current);
   };
 
+  // Ensure the editor has focus. If it already has focus the selection is
+  // untouched (buttons use e.preventDefault to prevent focus theft).
+  const ensureFocus = (restoreIfNeeded = false) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    if (document.activeElement !== ed) {
+      ed.focus({ preventScroll: true });
+      if (restoreIfNeeded) restoreSel();
+    }
+  };
+
+  const clearPendingAll = () => {
+    pendingMarks.current = {};
+    pendingFontSize.current = null;
+  };
+
+  // ── Initial content ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== html) {
+      editorRef.current.innerHTML = html;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (editorRef.current && document.activeElement !== editorRef.current && editorRef.current.innerHTML !== html) {
+      editorRef.current.innerHTML = html;
+    }
+  }, [html]);
+
+  // ── Command state ─────────────────────────────────────────────────────
   const readCommandState = () => {
     const active = new Set<string>();
     STATE_COMMANDS.forEach((c) => {
-      try {
-        if (document.queryCommandState(c)) active.add(c);
-      } catch {
-        /* noop */
-      }
+      try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
     });
-    TOGGLE_COMMANDS.forEach((cmd) => {
-      const pending = pendingMarks.current[cmd];
-      if (pending === true) active.add(cmd);
-      if (pending === false) active.delete(cmd);
-    });
+    // Overlay pending marks so the button state is immediately responsive
+    // (only when no text is selected – pending marks only apply at caret).
+    const sel = window.getSelection();
+    const hasSelection = !!(sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed);
+    if (!hasSelection) {
+      TOGGLE_COMMANDS.forEach((cmd) => {
+        const pending = pendingMarks.current[cmd];
+        if (pending === true) active.add(cmd);
+        if (pending === false) active.delete(cmd);
+      });
+    }
     setActiveCmds(active);
     return active;
   };
 
-  const isToggleCommand = (cmd: string): cmd is ToggleCommand => TOGGLE_COMMANDS.includes(cmd as ToggleCommand);
-
-  const readToggleState = (cmd: ToggleCommand) => {
-    try {
-      return document.queryCommandState(cmd);
-    } catch {
-      return activeCmds.has(cmd);
-    }
-  };
-
-  const setButtonState = (cmd: ToggleCommand, enabled: boolean) => {
-    setActiveCmds((prev) => {
-      const next = new Set(prev);
-      next[enabled ? 'add' : 'delete'](cmd);
-      return next;
-    });
-  };
-
-  const hasPendingMarks = () => Object.keys(pendingMarks.current).length > 0;
-
-  // Keep the size indicator in sync with whatever text the caret/selection is on.
+  // ── Font size indicator in sync with caret ────────────────────────────
   const syncFontSizeFromCaret = () => {
     const ed = editorRef.current;
     const sel = window.getSelection();
     if (!ed || !sel || sel.rangeCount === 0) return;
     let node: Node | null = sel.anchorNode;
     if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    // Only adopt the size from actual styled content (a child span). When the
-    // caret sits on the bare editor root, the base size is driven by the
-    // indicator itself — reading it back here would clobber a size the user
-    // just picked (the size button would appear to do nothing).
     if (node === ed) {
-      if (fontSize !== 12) setFontSize(12);
+      if (fontSizeRef.current !== 12) setFontSize(12);
     } else if (node instanceof Element && ed.contains(node)) {
       const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
-      if (px && px !== fontSize) setFontSize(px);
+      if (px && px !== fontSizeRef.current) setFontSize(px);
     }
   };
 
@@ -148,45 +159,61 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     };
     document.addEventListener('selectionchange', handler);
     return () => document.removeEventListener('selectionchange', handler);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const focusEditor = () => {
-    editorRef.current?.focus({ preventScroll: true });
-    restoreSel();
-  };
-
+  // ── exec: apply a formatting command ─────────────────────────────────
+  // CRITICAL: Capture the live selection RIGHT NOW before touching focus.
+  // When toolbar buttons use e.preventDefault on mousedown the editor
+  // keeps focus and the selection is intact – we must NOT call restoreSel()
+  // which could restore a stale savedRange and apply formatting to the wrong text.
   const exec = (cmd: string, value?: string) => {
-    focusEditor();
-    const toggleCmd = isToggleCommand(cmd) ? cmd : null;
-    const selection = window.getSelection();
-    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    const hasSelection = !!range && !range.collapsed;
+    const ed = editorRef.current;
+    if (!ed) return;
 
-    if (toggleCmd && !hasSelection) {
-      const current = pendingMarks.current[toggleCmd] ?? readToggleState(toggleCmd);
-      const shouldEnable = !current;
-      pendingMarks.current[toggleCmd] = shouldEnable;
-      setButtonState(toggleCmd, shouldEnable);
-      saveSel();
+    // 1. Snapshot the live selection before anything changes.
+    const snap = liveRange()?.cloneRange() ?? savedRange.current;
+    const isToggle = TOGGLE_COMMANDS.includes(cmd as ToggleCommand);
+    const hasSelection = !!(snap && !snap.collapsed);
+
+    // 2. If the editor lost focus (e.g. from the color palette), focus it
+    //    and restore the saved selection.
+    if (document.activeElement !== ed) {
+      ed.focus({ preventScroll: true });
+      if (snap) {
+        const s = window.getSelection();
+        s?.removeAllRanges();
+        s?.addRange(snap);
+      }
+    }
+
+    // 3. No-selection toggle: store as pending mark for the next typed character.
+    if (isToggle && !hasSelection) {
+      const cmd_ = cmd as ToggleCommand;
+      const current = pendingMarks.current[cmd_] ?? document.queryCommandState(cmd);
+      pendingMarks.current[cmd_] = !current;
+      readCommandState(); // immediately update button visual
       return;
     }
 
-    if (toggleCmd) {
-      delete pendingMarks.current[toggleCmd];
-      document.execCommand('styleWithCSS', false, 'true');
-    }
+    // 4. Apply to selection (or non-toggle command).
+    if (isToggle) delete pendingMarks.current[cmd as ToggleCommand];
+    document.execCommand('styleWithCSS', false, 'true');
     document.execCommand(cmd, false, value);
     saveSel();
     readCommandState();
-    onChange(editorRef.current?.innerHTML ?? '');
+    onChange(ed.innerHTML);
   };
 
+  // ── Pending-text insertion (first char after clicking format w/o selection) ──
+  // After inserting the first formatted character the cursor is inside the new
+  // styled span. We clear pendingMarks so the NEXT character is handled
+  // naturally by the browser (inheriting the parent span's style) instead of
+  // creating a new span for every single character.
   const insertPendingText = (text: string) => {
     const ed = editorRef.current;
     if (!ed) return false;
-    const active = readCommandState();
-    const underline = pendingMarks.current.underline ?? active.has('underline');
-    const strike = pendingMarks.current.strikeThrough ?? active.has('strikeThrough');
+    const underline = pendingMarks.current.underline ?? document.queryCommandState('underline');
+    const strike = pendingMarks.current.strikeThrough ?? document.queryCommandState('strikeThrough');
     const decoration = [underline ? 'underline' : '', strike ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
     const hasPendingDecoration = pendingMarks.current.underline !== undefined || pendingMarks.current.strikeThrough !== undefined;
     const style = [
@@ -197,24 +224,28 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     ].filter(Boolean).join('; ');
 
     const escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/\n/g, '<br>');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/\n/g, '<br>');
 
     document.execCommand('insertHTML', false, `<span style="${style}">${escaped}</span>`);
+    // ← CRITICAL FIX: clear pending marks immediately so subsequent characters
+    //   are handled naturally by the browser inside the newly created span.
+    clearPendingAll();
     saveSel();
     onChange(ed.innerHTML);
     return true;
   };
 
+  const hasPendingMarks = () =>
+    Object.keys(pendingMarks.current).length > 0 || pendingFontSize.current !== null;
+
+  // ── Font size ─────────────────────────────────────────────────────────
   const clearPendingFontMarker = () => {
     const ed = editorRef.current;
     if (!ed) return;
     ed.querySelectorAll<HTMLElement>('[data-pending-font-size]').forEach((span) => {
       span.removeAttribute('data-pending-font-size');
-      span.innerHTML = span.innerHTML.replace(/\u200B/g, '');
+      span.innerHTML = span.innerHTML.replace(/​/g, '');
       if (!span.textContent) span.remove();
     });
     pendingFontSize.current = null;
@@ -223,28 +254,25 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const setFutureFontSize = (px: number) => {
     const ed = editorRef.current;
     if (!ed) return;
-    focusEditor();
-    const selection = window.getSelection();
-    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    ensureFocus();
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
     if (!range || !range.collapsed) return;
-
-    const anchorElement = selection?.anchorNode instanceof Element
-      ? selection.anchorNode
-      : selection?.anchorNode?.parentElement;
-    const existing = anchorElement?.closest<HTMLElement>('[data-pending-font-size]');
+    const anchorEl = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement;
+    const existing = anchorEl?.closest<HTMLElement>('[data-pending-font-size]');
     if (existing && ed.contains(existing)) {
       existing.style.fontSize = `${px}px`;
     } else {
       const span = document.createElement('span');
       span.dataset.pendingFontSize = 'true';
       span.style.fontSize = `${px}px`;
-      const marker = document.createTextNode('\u200B');
+      const marker = document.createTextNode('​');
       span.appendChild(marker);
       range.insertNode(span);
       range.setStart(marker, marker.length);
       range.collapse(true);
-      selection?.removeAllRanges();
-      selection?.addRange(range);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
     }
     pendingFontSize.current = px;
     setFontSize(px);
@@ -252,23 +280,30 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     onChange(ed.innerHTML);
   };
 
+  // Apply a font size in pixels to the current selection.
+  // CRITICAL: Snapshot the live selection before touching focus.
   const applyPx = (px: number) => {
     const ed = editorRef.current;
     if (!ed) return;
-    if (document.activeElement !== ed) ed.focus();
-    restoreSel();
-    const selection = window.getSelection();
-    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    const hasSelection = !!range && !range.collapsed;
 
-    // No selection → change the editor's base size (affects new typing). The
-    // indicator and typed text stay in lockstep — no per-character span trickery.
+    // Snapshot first
+    const snap = liveRange()?.cloneRange() ?? savedRange.current;
+    const hasSelection = !!(snap && !snap.collapsed);
+
     if (!hasSelection) {
       setFutureFontSize(px);
       return;
     }
 
-    // Apply an exact pixel size instead of the legacy size=7 mapping (48px).
+    // Focus if needed, then set the exact selection we snapshotted
+    if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+    const s = window.getSelection();
+    s?.removeAllRanges();
+    s?.addRange(snap!);
+
+    const range = s?.getRangeAt(0);
+    if (!range) return;
+
     const contents = range.extractContents();
     contents.querySelectorAll?.('[style]').forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
@@ -282,37 +317,33 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     range.insertNode(span);
     const nextRange = document.createRange();
     nextRange.selectNodeContents(span);
-    selection?.removeAllRanges();
-    selection?.addRange(nextRange);
+    s?.removeAllRanges();
+    s?.addRange(nextRange);
     saveSel();
     onChange(ed.innerHTML);
   };
 
   const nextSz = (cur: number, d: number) => {
-    if (d > 0) return SIZES.find((size) => size > cur) ?? SIZES[SIZES.length - 1];
-    return [...SIZES].reverse().find((size) => size < cur) ?? SIZES[0];
+    if (d > 0) return SIZES.find((s) => s > cur) ?? SIZES[SIZES.length - 1];
+    return [...SIZES].reverse().find((s) => s < cur) ?? SIZES[0];
   };
 
   const changeSize = (d: number) => {
-    const sel = window.getSelection();
-    const hasSelection = sel && !sel.isCollapsed;
+    const snap = liveRange();
+    const hasSelection = snap && !snap.collapsed;
+    const s = nextSz(fontSizeRef.current, d);
     if (hasSelection) {
-      // Resize selected text only
-      const s = nextSz(fontSize, d);
-      pendingFontSize.current = null;
       applyPx(s);
-      setFontSize(s);
     } else {
-      // No selection → change only the size of text typed from now on.
-      const s = nextSz(fontSize, d);
       setFutureFontSize(s);
     }
-    saveSel();
   };
 
+  // ── Color / highlight ─────────────────────────────────────────────────
+  // Color palette is a floating overlay so the editor may have lost focus.
+  // We MUST restore selection here.
   const togglePalette = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     saveSel();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setPalPos({ left: rect.left, top: rect.bottom + 8 });
@@ -323,7 +354,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     setBarColor(c);
-    focusEditor();
+    ed.focus({ preventScroll: true });
+    restoreSel(); // palette is a separate overlay, editor may have blurred
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('foreColor', false, c);
     saveSel();
@@ -332,8 +364,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   const toggleHlPalette = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     saveSel();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setHlPalPos({ left: rect.left, top: rect.bottom + 8 });
@@ -344,7 +375,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     setHlColor(c);
-    focusEditor();
+    ed.focus({ preventScroll: true });
+    restoreSel();
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('backColor', false, c);
     saveSel();
@@ -352,13 +384,14 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     onChange(ed.innerHTML);
   };
 
+  // ── Image ─────────────────────────────────────────────────────────────
   const insertImage = (file: File) => {
     const ed = editorRef.current;
     if (!ed || !file.type.startsWith('image/')) return;
     const reader = new FileReader();
     reader.onload = () => {
       const url = reader.result as string;
-      focusEditor();
+      ensureFocus(true);
       document.execCommand('insertHTML', false, `<img src="${url}" style="display:block;max-width:160px;max-height:160px;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;" /><br>`);
       saveSel();
       onChange(ed.innerHTML);
@@ -366,72 +399,65 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     reader.readAsDataURL(file);
   };
 
+  // ── Close palette on outside click ────────────────────────────────────
   useEffect(() => {
     if (!palOpen) return;
-    const closeOutside = (e: MouseEvent) => {
-      if (!colorWrapRef.current?.contains(e.target as Node)) setPalOpen(false);
-    };
-    const closePalette = () => setPalOpen(false);
-    document.addEventListener('mousedown', closeOutside);
-    window.addEventListener('resize', closePalette);
-    window.addEventListener('scroll', closePalette, true);
-    return () => {
-      document.removeEventListener('mousedown', closeOutside);
-      window.removeEventListener('resize', closePalette);
-      window.removeEventListener('scroll', closePalette, true);
-    };
+    const close = (e: MouseEvent) => { if (!colorWrapRef.current?.contains(e.target as Node)) setPalOpen(false); };
+    const closeAll = () => setPalOpen(false);
+    document.addEventListener('mousedown', close);
+    window.addEventListener('resize', closeAll);
+    window.addEventListener('scroll', closeAll, true);
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('resize', closeAll); window.removeEventListener('scroll', closeAll, true); };
   }, [palOpen]);
 
   useEffect(() => {
     if (!hlPalOpen) return;
-    const closeOutside = (e: MouseEvent) => {
-      if (!hlWrapRef.current?.contains(e.target as Node)) setHlPalOpen(false);
-    };
-    const close = () => setHlPalOpen(false);
-    document.addEventListener('mousedown', closeOutside);
-    window.addEventListener('resize', close);
-    window.addEventListener('scroll', close, true);
-    return () => {
-      document.removeEventListener('mousedown', closeOutside);
-      window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
-    };
+    const close = (e: MouseEvent) => { if (!hlWrapRef.current?.contains(e.target as Node)) setHlPalOpen(false); };
+    const closeAll = () => setHlPalOpen(false);
+    document.addEventListener('mousedown', close);
+    window.addEventListener('resize', closeAll);
+    window.addEventListener('scroll', closeAll, true);
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('resize', closeAll); window.removeEventListener('scroll', closeAll, true); };
   }, [hlPalOpen]);
 
   useEffect(() => {
     if (!previewImage) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPreviewImage(null);
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setPreviewImage(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, [previewImage]);
 
+  // ── Button class ──────────────────────────────────────────────────────
   const btnCls = (active: boolean) =>
     'flex h-7 w-7 items-center justify-center rounded-md text-[14px] transition-all ' +
     (active
-      ? 'bg-gray-900 text-white shadow-[0_3px_0_0_rgba(0,0,0,0.8)] -translate-y-px'
+      ? 'bg-gray-900 text-white shadow-[0_3px_0_0_rgba(0,0,0,0.8)] -translate-y-px dark:bg-primary dark:shadow-[0_3px_0_0_rgba(108,99,255,0.6)]'
       : 'text-app-text-secondary hover:bg-white dark:hover:bg-white/10');
 
+  // ── Render ────────────────────────────────────────────────────────────
   return (
     <div ref={editorWrapRef} className={'relative ' + (editable ? '' : '[&_img]:cursor-zoom-in')}>
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 overflow-x-auto border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5" style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}>
+      <div
+        className="flex flex-wrap items-center gap-0.5 border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5"
+        style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
+      >
+        {/* Font size */}
         <div className="flex items-center overflow-hidden rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900">
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); changeSize(-1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">
-            −
-          </button>
+          <button type="button" onMouseDown={(e) => { e.preventDefault(); changeSize(-1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">−</button>
           <input
             value={fontSize}
             onChange={(e) => setFontSize(+e.target.value || 12)}
             onBlur={() => applyPx(fontSize)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { applyPx(fontSize); (e.target as HTMLInputElement).blur(); } }}
             className="h-[26px] w-8 border-x border-app-border bg-transparent text-center text-xs font-semibold outline-none dark:border-white/10"
           />
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); changeSize(1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">
-            +
-          </button>
+          <button type="button" onMouseDown={(e) => { e.preventDefault(); changeSize(1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">+</button>
         </div>
+
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
+
+        {/* Text color */}
         <div ref={colorWrapRef} className="relative">
           <button type="button" onMouseDown={togglePalette} title={t.titleColor} className="flex h-7 w-7 flex-col items-center justify-center gap-0.5 rounded-md hover:bg-white dark:hover:bg-white/10">
             <span className="text-xs font-bold leading-none">A</span>
@@ -439,26 +465,20 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           </button>
           {palOpen && (
             <div
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
               className="fixed z-[9999] grid w-[184px] grid-cols-6 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
               style={{ left: palPos.left, top: palPos.top }}
             >
               {COLORS.map((c) => (
-                <div
-                  key={c}
-                  onMouseDown={(e) => { e.preventDefault(); applyColor(c); }}
-                  className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125"
-                  style={{ background: c }}
-                />
+                <div key={c} onMouseDown={(e) => { e.preventDefault(); applyColor(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
               ))}
             </div>
           )}
         </div>
+
+        {/* Highlight */}
         <div ref={hlWrapRef} className="relative">
-          <button type="button" onMouseDown={toggleHlPalette} title="تلوين الخط / Highlight" className="flex h-7 w-7 flex-col items-center justify-center gap-0.5 rounded-md hover:bg-white dark:hover:bg-white/10">
+          <button type="button" onMouseDown={toggleHlPalette} title="Highlight" className="flex h-7 w-7 flex-col items-center justify-center gap-0.5 rounded-md hover:bg-white dark:hover:bg-white/10">
             <span className="text-xs font-bold leading-none" style={{ WebkitTextStroke: '0.5px #555' }}>A</span>
             <span className="h-[3px] w-4 rounded-sm" style={{ background: hlColor }} />
           </button>
@@ -469,45 +489,85 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
               style={{ left: hlPalPos.left, top: hlPalPos.top }}
             >
               {HIGHLIGHT_COLORS.map((c) => (
-                <div
-                  key={c}
-                  onMouseDown={(e) => { e.preventDefault(); applyHighlight(c); }}
-                  className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125"
-                  style={{ background: c }}
-                />
+                <div key={c} onMouseDown={(e) => { e.preventDefault(); applyHighlight(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
               ))}
-              <div
-                onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }}
-                className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5"
-              >
-                ✕ إزالة التلوين
-              </div>
+              <div onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }} className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ إزالة التلوين</div>
             </div>
           )}
         </div>
+
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
+
+        {/* B I U S */}
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('bold'); }} title={t.titleBold} className={btnCls(activeCmds.has('bold'))}><b>B</b></button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('italic'); }} title={t.titleItalic} className={btnCls(activeCmds.has('italic'))}><i>I</i></button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('underline'); }} title={t.titleUnline} className={btnCls(activeCmds.has('underline'))}><u>U</u></button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('strikeThrough'); }} title={t.titleStrike} className={btnCls(activeCmds.has('strikeThrough'))}><s>S</s></button>
+
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); imgInputRef.current?.click(); }} title="Infoga bild" className={btnCls(false)}>🖼</button>
-        <input
-          ref={imgInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImage(f); e.target.value = ''; }}
-        />
+
+        {/* Alignment */}
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyLeft'); }} title="Align left" className={btnCls(activeCmds.has('justifyLeft'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="3" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="3" y="20" width="12" height="2" rx="1"/></svg>
+        </button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyCenter'); }} title="Center" className={btnCls(activeCmds.has('justifyCenter'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="6" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="6" y="20" width="12" height="2" rx="1"/></svg>
+        </button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyRight'); }} title="Align right" className={btnCls(activeCmds.has('justifyRight'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="9" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="9" y="20" width="12" height="2" rx="1"/></svg>
+        </button>
+
+        <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
+
+        {/* Remove formatting */}
+        <button
+          type="button"
+          title="Remove formatting"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const ed = editorRef.current;
+            if (!ed) return;
+            const snap = liveRange()?.cloneRange() ?? savedRange.current;
+            if (document.activeElement !== ed) { ed.focus({ preventScroll: true }); if (snap) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(snap); } }
+            document.execCommand('removeFormat');
+            document.execCommand('styleWithCSS', false, 'true');
+            document.execCommand('foreColor', false, '#000000');
+            clearPendingAll();
+            setFontSize(12);
+            setBarColor('#534AB7');
+            saveSel();
+            readCommandState();
+            onChange(ed.innerHTML);
+          }}
+          className={btnCls(false)}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 7h16M7 12h7M9 17h5"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
+        </button>
+
+        {/* Image */}
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); imgInputRef.current?.click(); }} title="Insert image" className={btnCls(false)}>🖼</button>
+        <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImage(f); e.target.value = ''; }} />
+
         {toolbarEnd && <div className="ml-auto flex items-center pl-2">{toolbarEnd}</div>}
       </div>
 
+      {/* Editor area */}
       <div
         ref={editorRef}
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onMouseDown={() => clearPendingFontMarker()}
+        onMouseDown={() => {
+          // Cursor moved by clicking: stale pending marks must not bleed into the new position.
+          clearPendingAll();
+          clearPendingFontMarker();
+        }}
+        onKeyDown={(e) => {
+          // Navigation keys move the cursor: clear pending marks so they don't persist.
+          if (NAV_KEYS.has(e.key)) {
+            clearPendingAll();
+          }
+        }}
         onBeforeInput={(e) => {
           const native = e.nativeEvent as InputEvent;
           if (native.inputType === 'insertText' && native.data && hasPendingMarks()) {
@@ -516,7 +576,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           }
         }}
         onInput={() => {
-          // Ensure each child block gets dir="auto" so Arabic lines go RTL independently.
           const ed = editorRef.current;
           if (ed) {
             ed.childNodes.forEach((node) => {
@@ -527,23 +586,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           }
           onChange(ed?.innerHTML ?? '');
         }}
-            onMouseMove={(event) => {
+        onMouseMove={(event) => {
           if (!editable) return;
           const target = event.target;
           if (target instanceof HTMLImageElement) {
-            const rect = target.getBoundingClientRect();
-            setHoveredImg({ el: target, rect });
+            setHoveredImg({ el: target, rect: target.getBoundingClientRect() });
           } else {
             setHoveredImg(null);
           }
         }}
         onMouseLeave={() => setHoveredImg(null)}
         onClick={(event) => {
-          if (!editable && event.detail >= 3) {
-            event.preventDefault();
-            onLockedTripleClick?.();
-            return;
-          }
+          if (!editable && event.detail >= 3) { event.preventDefault(); onLockedTripleClick?.(); return; }
           const target = event.target;
           if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); naturalSizeRef.current = null; }
         }}
@@ -552,6 +606,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         style={{ minHeight, maxHeight, fontSize: '12px', cursor: editable ? 'text' : 'default' }}
       />
 
+      {/* Image hover buttons */}
       {editable && hoveredImg && (() => {
         const r = hoveredImg.rect;
         return (
@@ -560,78 +615,30 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             onMouseLeave={() => setHoveredImg(null)}
             style={{ position: 'fixed', left: r.right - 56, top: r.top + 4, zIndex: 9999, display: 'flex', gap: 4 }}
           >
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src);
-                setPreviewZoom(1);
-                naturalSizeRef.current = null;
-              }}
-              className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900"
-              title="Zoom image"
-            >🔍</button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const img = hoveredImg.el;
-                const next = img.nextSibling;
-                if (next && next.nodeName === 'BR') next.parentNode?.removeChild(next);
-                img.parentNode?.removeChild(img);
-                setHoveredImg(null);
-                onChange(editorRef.current?.innerHTML ?? '');
-              }}
-              className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700"
-              title="Delete image"
-            >✕</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; }} className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900" title="Zoom">🔍</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); setHoveredImg(null); onChange(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700" title="Delete">✕</button>
           </div>
         );
       })()}
 
+      {/* Image preview modal */}
       {previewImage && (() => {
         const ns = naturalSizeRef.current;
-        // At zoom=1: pure CSS fit (no re-render artifacts). Above 1: explicit size.
         const imgStyle: React.CSSProperties = previewZoom === 1
           ? { maxWidth: '90vw', maxHeight: '82vh', width: 'auto', height: 'auto' }
           : ns
-            ? (() => {
-                const maxW = window.innerWidth * 0.9;
-                const maxH = window.innerHeight * 0.82;
-                const fitScale = Math.min(1, maxW / ns.w, maxH / ns.h);
-                return { width: ns.w * fitScale * previewZoom, height: ns.h * fitScale * previewZoom };
-              })()
+            ? (() => { const maxW = window.innerWidth * 0.9; const maxH = window.innerHeight * 0.82; const fitScale = Math.min(1, maxW / ns.w, maxH / ns.h); return { width: ns.w * fitScale * previewZoom, height: ns.h * fitScale * previewZoom }; })()
             : { width: `${previewZoom * 90}vw`, height: 'auto' };
         const zoomLabel = previewZoom === 1 ? 'Fit' : `${Math.round(previewZoom * 100)}%`;
         return (
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Image preview"
-            onClick={() => setPreviewImage(null)}
-            className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm"
-          >
-            {/* Top bar */}
+          <div role="dialog" aria-modal="true" onClick={() => setPreviewImage(null)} className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm">
             <div className="absolute right-4 top-4 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              <a href={previewImage} download="taha-note-image" aria-label="Download" title="Download" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl font-bold text-white transition-colors hover:bg-white/25">↓</a>
-              <button type="button" onClick={() => setPreviewImage(null)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white transition-colors hover:bg-white/25">✕</button>
+              <a href={previewImage} download="taha-note-image" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl font-bold text-white hover:bg-white/25">↓</a>
+              <button type="button" onClick={() => setPreviewImage(null)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-xl text-white hover:bg-white/25">✕</button>
             </div>
-
-            {/* Scrollable image area */}
             <div onClick={(e) => e.stopPropagation()} className="overflow-auto rounded-xl" style={{ maxWidth: '90vw', maxHeight: '82vh' }}>
-              <img
-                src={previewImage}
-                alt="Expanded note attachment"
-                onLoad={(e) => { naturalSizeRef.current = { w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight }; }}
-                onClick={(e) => e.stopPropagation()}
-                className="block rounded-xl shadow-2xl"
-                style={imgStyle}
-              />
+              <img src={previewImage} alt="Preview" onLoad={(e) => { naturalSizeRef.current = { w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight }; }} onClick={(e) => e.stopPropagation()} className="block rounded-xl shadow-2xl" style={imgStyle} />
             </div>
-
-            {/* Zoom bar */}
             <div onClick={(e) => e.stopPropagation()} className="mt-4 flex items-center gap-1 rounded-full bg-black/50 px-2 py-1 backdrop-blur-sm">
               <button type="button" onClick={() => setPreviewZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))} className="flex h-9 w-9 items-center justify-center rounded-full text-xl font-bold text-white hover:bg-white/20">−</button>
               <button type="button" onClick={() => setPreviewZoom(1)} className="min-w-[52px] text-center text-[13px] font-semibold text-white hover:opacity-70">{zoomLabel}</button>
