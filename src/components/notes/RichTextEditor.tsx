@@ -164,43 +164,14 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   // ── Font size ─────────────────────────────────────────────────────────
   const clearPendingFontMarker = () => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    ed.querySelectorAll<HTMLElement>('[data-pending-font-size]').forEach((span) => {
-      span.removeAttribute('data-pending-font-size');
-      span.innerHTML = span.innerHTML.replace(/​/g, '');
-      if (!span.textContent) span.remove();
-    });
     pendingFontSize.current = null;
   };
 
+  // Store the desired size for the next typed character — no DOM changes here.
+  // onBeforeInput picks it up and wraps the first typed char in a font-size span.
   const setFutureFontSize = (px: number) => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    ensureFocus();
-    const sel = window.getSelection();
-    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
-    if (!range || !range.collapsed) return;
-    const anchorEl = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement;
-    const existing = anchorEl?.closest<HTMLElement>('[data-pending-font-size]');
-    if (existing && ed.contains(existing)) {
-      existing.style.fontSize = `${px}px`;
-    } else {
-      const span = document.createElement('span');
-      span.dataset.pendingFontSize = 'true';
-      span.style.fontSize = `${px}px`;
-      const marker = document.createTextNode('​');
-      span.appendChild(marker);
-      range.insertNode(span);
-      range.setStart(marker, marker.length);
-      range.collapse(true);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    }
     pendingFontSize.current = px;
     setFontSize(px);
-    saveSel();
-    onChange(ed.innerHTML);
   };
 
   const applyPx = (px: number) => {
@@ -488,11 +459,21 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onMouseDown={() => {
-          clearPendingFontMarker();
-        }}
+        onMouseDown={() => { clearPendingAll(); }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingAll();
+        }}
+        onBeforeInput={(e) => {
+          const native = e.nativeEvent as InputEvent;
+          if (native.inputType === 'insertText' && native.data && pendingFontSize.current !== null) {
+            e.preventDefault();
+            const px = pendingFontSize.current;
+            pendingFontSize.current = null;
+            const escaped = native.data.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            document.execCommand('insertHTML', false, `<span style="font-size:${px}px">${escaped}</span>`);
+            saveSel();
+            onChange(editorRef.current?.innerHTML ?? '');
+          }
         }}
         onInput={() => {
           const ed = editorRef.current;
