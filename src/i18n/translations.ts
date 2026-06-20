@@ -164,6 +164,7 @@ export interface Translation {
   featAiSub: string;
   marketingTitle: string;
   marketingDesc: string;
+  designedBy: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -222,6 +223,7 @@ export const LANGS: Record<Lang, Translation> = {
     featQuizTitle: '🧠 Smart Quiz', featQuizSub: 'Turn notes into flashcards and study smarter',
     featAiTitle: '✨ AI Assistant', featAiSub: 'Generate questions and answers automatically',
     marketingTitle: 'Your notes, everywhere.', marketingDesc: 'A modern place to write, organize, and sync everything you need.',
+    designedBy: '✦ Designed by Dr. Abdullah Taha ✦',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -278,5 +280,6 @@ export const LANGS: Record<Lang, Translation> = {
     featQuizTitle: '🧠 Smart Quiz', featQuizSub: 'Gör om anteckningar till flashcards och plugga smartare',
     featAiTitle: '✨ AI-assistent', featAiSub: 'Generera frågor och svar automatiskt',
     marketingTitle: 'Dina anteckningar, överallt.', marketingDesc: 'En modern plats för att skriva, organisera och synkronisera allt du behöver.',
+    designedBy: '✦ Designad av Dr. Abdullah Taha ✦',
   },
 };

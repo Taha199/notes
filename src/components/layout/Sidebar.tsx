@@ -144,7 +144,7 @@ export function Sidebar({
         </button>
         {(!collapsed || mobileOpen) && (
           <p className="mt-1 select-none text-center text-[9.5px] font-medium tracking-wide text-app-text-secondary/30 dark:text-gray-600/50">
-            ✦ Designad av Dr. Abdullah Taha ✦
+            {t.designedBy}
           </p>
         )}
       </div>
