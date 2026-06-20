@@ -166,20 +166,27 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
 
-    // Clone BEFORE focus() — in some browsers, clicking outside the editor
-    // clears the selection before e.preventDefault() in the button handler
-    // can stop it. Cloning first protects against any async selectionchange.
-    const rangeToUse = savedRange.current?.cloneRange() ?? null;
     const isToggle = TOGGLE_COMMANDS.includes(cmd as ToggleCommand);
-    const hasSelection = !!(rangeToUse && !rangeToUse.collapsed);
 
-    // Always focus + restore so the selection is 100% correct regardless
-    // of whether the editor lost focus or the browser quietly cleared it.
-    ed.focus({ preventScroll: true });
-    if (rangeToUse) {
-      const s = window.getSelection();
-      s?.removeAllRanges();
-      s?.addRange(rangeToUse);
+    // Prefer the LIVE browser selection when the editor already has focus
+    // (toolbar buttons use e.preventDefault so focus + selection are intact).
+    // Fall back to savedRange only when the editor has genuinely lost focus.
+    const sel = window.getSelection();
+    const editorHasFocus = document.activeElement === ed;
+
+    let hasSelection: boolean;
+    if (editorHasFocus) {
+      // Trust the live selection directly — do NOT overwrite it with savedRange.
+      hasSelection = !!(sel && sel.rangeCount > 0 && !sel.isCollapsed && ed.contains(sel.anchorNode));
+    } else {
+      // Editor blurred (e.g. after closing a palette) — refocus and restore.
+      const fallback = savedRange.current?.cloneRange() ?? null;
+      hasSelection = !!(fallback && !fallback.collapsed);
+      ed.focus({ preventScroll: true });
+      if (fallback) {
+        sel?.removeAllRanges();
+        sel?.addRange(fallback);
+      }
     }
 
     // No selection → pending mark for the next typed character.
