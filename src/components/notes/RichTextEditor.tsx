@@ -499,36 +499,41 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       />
 
       {editable && hoveredImg && (() => {
-        const wrapRect = editorWrapRef.current?.getBoundingClientRect();
-        if (!wrapRect) return null;
         const r = hoveredImg.rect;
         return (
-          <button
-            type="button"
+          <div
             onMouseEnter={() => setHoveredImg(hoveredImg)}
             onMouseLeave={() => setHoveredImg(null)}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const img = hoveredImg.el;
-              // remove trailing <br> if present
-              const next = img.nextSibling;
-              if (next && next.nodeName === 'BR') next.parentNode?.removeChild(next);
-              img.parentNode?.removeChild(img);
-              setHoveredImg(null);
-              onChange(editorRef.current?.innerHTML ?? '');
-            }}
-            style={{
-              position: 'fixed',
-              left: r.right - 24,
-              top: r.top + 4,
-              zIndex: 9999,
-            }}
-            className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700"
-            title="Delete image"
+            style={{ position: 'fixed', left: r.right - 56, top: r.top + 4, zIndex: 9999, display: 'flex', gap: 4 }}
           >
-            ✕
-          </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src);
+                setPreviewZoom(1);
+                setNaturalSize(null);
+              }}
+              className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900"
+              title="Zoom image"
+            >🔍</button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const img = hoveredImg.el;
+                const next = img.nextSibling;
+                if (next && next.nodeName === 'BR') next.parentNode?.removeChild(next);
+                img.parentNode?.removeChild(img);
+                setHoveredImg(null);
+                onChange(editorRef.current?.innerHTML ?? '');
+              }}
+              className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700"
+              title="Delete image"
+            >✕</button>
+          </div>
         );
       })()}
 
