@@ -317,19 +317,25 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700/70 dark:text-violet-400/70">Fråga</label>
-                    <button
-                      onClick={async () => {
-                        setAiGenQLoading(true);
-                        try {
-                          const results = await generateQuiz(note.text || plainText);
-                          if (results.length > 0) setAiQ(mdToHtml(results[0].question));
-                        } finally { setAiGenQLoading(false); }
-                      }}
-                      disabled={aiGenQLoading}
-                      className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
-                    >
-                      {aiGenQLoading ? <span className="animate-spin">⏳</span> : '🎲'} Generera fråga
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setAiQ(html)}
+                        className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
+                      >📋 Klistra in</button>
+                      <button
+                        onClick={async () => {
+                          setAiGenQLoading(true);
+                          try {
+                            const results = await generateQuiz(note.text || plainText);
+                            if (results.length > 0) setAiQ(mdToHtml(results[0].question));
+                          } finally { setAiGenQLoading(false); }
+                        }}
+                        disabled={aiGenQLoading}
+                        className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
+                      >
+                        {aiGenQLoading ? <span className="animate-spin">⏳</span> : '🎲'} Generera fråga
+                      </button>
+                    </div>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
                     <RichTextEditor html={aiQ} onChange={setAiQ} placeholder="Generera eller skriv din fråga..." minHeight="110px" />
