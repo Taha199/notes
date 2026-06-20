@@ -95,6 +95,13 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
           {isTrash && note.deletedAt && (
             <span className="text-[10px] text-app-text-secondary/70 dark:text-gray-500">{lang === 'sv' ? 'Raderad' : 'Deleted'}: {note.deletedAt}</span>
           )}
+          {isTrash && (
+            <span className="text-[10px] text-emerald-600/70 dark:text-emerald-400/60">
+              {lang === 'sv'
+                ? note.archived ? 'Återställs till Arkiv' : note.read ? 'Återställs till Lästa' : 'Återställs till Olästa'
+                : note.archived ? 'Restores to Archive' : note.read ? 'Restores to Read Notes' : 'Restores to Unstudied Notes'}
+            </span>
+          )}
           {note.lastEdited && (
             <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">Edited: {note.lastEdited}</span>
           )}
