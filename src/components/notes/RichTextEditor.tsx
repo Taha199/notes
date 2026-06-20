@@ -453,31 +453,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
-        {/* Remove formatting */}
-        <button
-          type="button"
-          title="Remove formatting"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            const ed = editorRef.current;
-            if (!ed) return;
-            const snap = liveRange()?.cloneRange() ?? savedRange.current;
-            if (document.activeElement !== ed) { ed.focus({ preventScroll: true }); if (snap) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(snap); } }
-            document.execCommand('removeFormat');
-            document.execCommand('styleWithCSS', false, 'true');
-            document.execCommand('foreColor', false, '#000000');
-            clearPendingAll();
-            setFontSize(12);
-            setBarColor('#534AB7');
-            saveSel();
-            readCommandState();
-            onChange(ed.innerHTML);
-          }}
-          className={btnCls(false)}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 7h16M7 12h7M9 17h5"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
-        </button>
-
         {/* Image */}
         <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); imgInputRef.current?.click(); }} title="Insert image" className={btnCls(false)}>🖼</button>
         <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImage(f); e.target.value = ''; }} />
