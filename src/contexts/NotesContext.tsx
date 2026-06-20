@@ -16,6 +16,7 @@ interface NotesCtx {
   notes: Note[];
   drafts: Draft[];
   quizzes: QuizItem[];
+  trashedQuizzes: QuizItem[];
   quizSets: QuizSet[];
   quizFolders: QuizFolder[];
   chats: ChatConversation[];
@@ -24,6 +25,8 @@ interface NotesCtx {
   loaded: boolean;
   addQuiz: (item: Omit<QuizItem, 'id'>) => void;
   deleteQuiz: (id: number) => void;
+  restoreQuiz: (id: number) => void;
+  permDeleteQuiz: (id: number) => void;
   updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex'>>) => void;
   addQuizSet: (name: string) => QuizSet;
   deleteQuizSet: (id: string) => void;
@@ -369,6 +372,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const deleteQuiz = (id: number) => {
     setQuizzes((prev) => {
+      const next = prev.map((q) => q.id === id ? { ...q, trashed: true, deletedAt: nowStr() } : q);
+      persist(notes, undefined, next);
+      return next;
+    });
+  };
+
+  const restoreQuiz = (id: number) => {
+    setQuizzes((prev) => {
+      const next = prev.map((q) => q.id === id ? { ...q, trashed: false, deletedAt: undefined } : q);
+      persist(notes, undefined, next);
+      return next;
+    });
+  };
+
+  const permDeleteQuiz = (id: number) => {
+    setQuizzes((prev) => {
       const next = prev.filter((q) => q.id !== id);
       persist(notes, undefined, next);
       return next;
@@ -551,18 +570,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const permDelete = (id: number) => mutateNotes((prev) => prev.filter((n) => n.id !== id));
   const emptyTrash = () => {
     const nextNotes = notes.filter((n) => !n.trashed);
+    const nextQuizzes = quizzes.filter((q) => !q.trashed);
     const removedFolderIds = new Set(quizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
     const nextSets = quizSets
       .filter((set) => !set.trashed)
       .map((set) => set.folderId && removedFolderIds.has(set.folderId) ? { ...set, folderId: undefined } : set);
     const nextFolders = quizFolders.filter((folder) => !folder.trashed);
     setNotes(nextNotes);
+    setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
     setQuizFolders(nextFolders);
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    persist(nextNotes, undefined, undefined, undefined, nextSets, nextFolders);
+    persist(nextNotes, undefined, nextQuizzes, undefined, nextSets, nextFolders);
   };
   const deleteMany = (ids: number[]) => {
     const idSet = new Set(ids);
@@ -574,13 +596,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       value={{
         notes,
         drafts,
-        quizzes,
+        quizzes: quizzes.filter((q) => !q.trashed),
+        trashedQuizzes: quizzes.filter((q) => q.trashed),
         quizSets,
         quizFolders,
         cloudStatus,
         loaded,
         addQuiz,
-        deleteQuiz,
+        deleteQuiz, restoreQuiz, permDeleteQuiz,
         updateQuiz,
         addQuizSet,
         reorderQuizSets,

@@ -53,6 +53,8 @@ export interface QuizItem {
   // `correctIndex` points at the right one. Plain Q/A items leave these unset.
   options?: string[];
   correctIndex?: number;
+  trashed?: boolean;
+  deletedAt?: string;
 }
 
 export interface QuizSet {

@@ -99,7 +99,7 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
 
 export function Dashboard() {
   const { t, lang } = useLanguage();
-  const { notes, drafts, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
+  const { notes, drafts, trashedQuizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
   const { show } = useToast();
   const [page, setPage] = useState<Page>('home');
   const [search, setSearch] = useState('');
@@ -110,7 +110,7 @@ export function Dashboard() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
   const [confirmDelSel, setConfirmDelSel] = useState(false);
-  const [confirmQuizTrash, setConfirmQuizTrash] = useState<{ type: 'set' | 'folder'; id: string } | null>(null);
+  const [confirmQuizTrash, setConfirmQuizTrash] = useState<{ type: 'set' | 'folder' | 'question'; id: string | number } | null>(null);
   const hasSearch = normalizeSearch(search).length > 0;
 
   const active = useMemo(() => notes.filter((n) => !n.archived && !n.trashed), [notes]);
@@ -120,6 +120,7 @@ export function Dashboard() {
   const read = useMemo(() => notes.filter((n) => n.read && !n.archived && !n.trashed), [notes]);
   const archived = useMemo(() => notes.filter((n) => n.archived && !n.trashed), [notes]);
   const trashed = useMemo(() => notes.filter((n) => n.trashed), [notes]);
+  const trashedQuizQuestions = trashedQuizzes;
   const trashedQuizSets = useMemo(() => quizSets.filter((set) => set.trashed), [quizSets]);
   const trashedQuizFolders = useMemo(() => quizFolders.filter((folder) => folder.trashed), [quizFolders]);
   const visibleTrashedNotes = useMemo(() => trashed.filter((note) => noteMatchesSearch(note, search)), [search, trashed]);
@@ -128,10 +129,10 @@ export function Dashboard() {
     return query ? trashedQuizSets.filter((set) => normalizeSearch(set.name).includes(query)) : trashedQuizSets;
   }, [search, trashedQuizSets]);
   const visibleTrashedFolders = useMemo(() => trashedQuizFolders.filter((folder) => normalizeSearch(folder.name).includes(normalizeSearch(search))), [search, trashedQuizFolders]);
-  const trashTotal = trashed.length + trashedQuizSets.length + trashedQuizFolders.length;
+  const trashTotal = trashed.length + trashedQuizQuestions.length + trashedQuizSets.length + trashedQuizFolders.length;
   const trashCopy = lang === 'sv'
-    ? { notes: 'Anteckningar', sets: 'Sets', folders: 'Mappar', restore: 'Återställ', delete: 'Radera permanent', questions: 'frågor', folderSets: 'sets', created: 'Skapad', deletedAt: 'Raderad', deleted: 'Radera permanent?', empty: 'Papperskorgen är tom', emptyConfirm: 'Radera allt i papperskorgen permanent?' }
-    : { notes: 'Notes', sets: 'Sets', folders: 'Folders', restore: 'Restore', delete: 'Delete permanently', questions: 'questions', folderSets: 'sets', created: 'Created', deletedAt: 'Deleted', deleted: 'Delete permanently?', empty: 'Trash is empty', emptyConfirm: 'Permanently delete everything in trash?' };
+    ? { notes: 'Anteckningar', sets: 'Sets', folders: 'Mappar', questions: 'Frågor', restore: 'Återställ', delete: 'Radera permanent', questionsUnit: 'frågor', folderSets: 'sets', created: 'Skapad', deletedAt: 'Raderad', deleted: 'Radera permanent?', empty: 'Papperskorgen är tom', emptyConfirm: 'Radera allt i papperskorgen permanent?' }
+    : { notes: 'Notes', sets: 'Sets', folders: 'Folders', questions: 'Questions', restore: 'Restore', delete: 'Delete permanently', questionsUnit: 'questions', folderSets: 'sets', created: 'Created', deletedAt: 'Deleted', deleted: 'Delete permanently?', empty: 'Trash is empty', emptyConfirm: 'Permanently delete everything in trash?' };
   const navigableNotes = useMemo(() => {
     const source = page === 'unread' ? unread
       : page === 'read' ? read
@@ -340,7 +341,31 @@ export function Dashboard() {
                   </section>
                 )}
 
-                {visibleTrashedNotes.length === 0 && visibleTrashedSets.length === 0 && visibleTrashedFolders.length === 0 && (
+                {trashedQuizQuestions.length > 0 && (
+                  <section>
+                    <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">❓ {trashCopy.questions} · {trashedQuizQuestions.length}</div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {trashedQuizQuestions.map((q) => (
+                        <DeletedQuizCard
+                          key={q.id}
+                          icon="❓"
+                          name={q.question.replace(/<[^>]*>/g, '').slice(0, 80)}
+                          detail={q.noteTitle}
+                          createdAt={q.date}
+                          deletedAt={q.deletedAt}
+                          createdLabel={trashCopy.created}
+                          deletedLabel={trashCopy.deletedAt}
+                          restoreLabel={trashCopy.restore}
+                          deleteLabel={trashCopy.delete}
+                          onRestore={() => { restoreQuiz(q.id); show(t.tRestored2); }}
+                          onDelete={() => setConfirmQuizTrash({ type: 'question', id: q.id })}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {visibleTrashedNotes.length === 0 && trashedQuizQuestions.length === 0 && visibleTrashedSets.length === 0 && visibleTrashedFolders.length === 0 && (
                   <EmptyState text={hasSearch ? t.emptySearch : trashCopy.empty} />
                 )}
               </div>
@@ -377,8 +402,9 @@ export function Dashboard() {
           confirmLabel={trashCopy.delete}
           cancelLabel={lang === 'sv' ? 'Avbryt' : 'Cancel'}
           onConfirm={() => {
-            if (confirmQuizTrash.type === 'set') permDeleteQuizSet(confirmQuizTrash.id);
-            else permDeleteQuizFolder(confirmQuizTrash.id);
+            if (confirmQuizTrash.type === 'set') permDeleteQuizSet(confirmQuizTrash.id as string);
+            else if (confirmQuizTrash.type === 'folder') permDeleteQuizFolder(confirmQuizTrash.id as string);
+            else permDeleteQuiz(confirmQuizTrash.id as number);
             setConfirmQuizTrash(null);
             show(t.tPermDel);
           }}
