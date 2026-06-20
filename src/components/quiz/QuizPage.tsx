@@ -140,7 +140,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
                               onClick={() => setActiveFolderId(open ? null : f.id)}
                               className="flex w-full items-center gap-2.5 border-b border-app-border/40 px-4 py-2.5 text-left transition-colors hover:bg-app-bg dark:border-white/5 dark:hover:bg-white/5"
                             >
-                              <span className="h-3 w-3 flex-shrink-0 rounded-sm" style={{ background: f.color ?? '#6C63FF' }} />
+                              <span className="text-base">📁</span>
                               <span className="flex-1 text-[12px] font-bold text-app-text dark:text-gray-100">{f.name}</span>
                               <span className="text-[10px] text-app-text-secondary/40">{fSets.length} set</span>
                               <span className="text-[10px] text-app-text-secondary/30">{open ? '▲' : '▼'}</span>
@@ -1045,8 +1045,8 @@ export function QuizPage() {
                   favs={favs}
                   onToggleFav={toggleFav}
                   progressMap={currentProgress}
-                  sets={quizSets.filter((s) => s.id !== selectedSetId)}
-                  folders={quizFolders}
+                  sets={quizSets.filter((s) => s.id !== selectedSetId && !s.folderId?.startsWith('system-'))}
+                  folders={quizFolders.filter((f) => !f.system)}
                   onMoveToSet={(setId) => {
                     addItemToSet(setId, { ...item });
                     if (selectedSetId) removeItemFromSet(selectedSetId, item.id);
