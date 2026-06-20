@@ -11,6 +11,8 @@ export function FeatureCards({ align = 'center' }: { align?: 'center' | 'start' 
     { title: t.featNotesTitle, sub: t.featNotesSub },
     { title: t.featCloudTitle, sub: t.featCloudSub },
     { title: t.featSecureTitle, sub: t.featSecureSub },
+    { title: t.featQuizTitle, sub: t.featQuizSub },
+    { title: t.featAiTitle, sub: t.featAiSub },
   ];
   return (
     <div className={'w-full max-w-[465px] overflow-hidden rounded-[28px] border border-white/75 bg-white/52 p-2 shadow-[0_28px_90px_-54px_rgba(31,41,55,0.55),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl dark:border-white/10 dark:bg-white/5 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ' + (align === 'center' ? 'mx-auto' : '')}>

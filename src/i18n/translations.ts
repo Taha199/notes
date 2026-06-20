@@ -158,6 +158,10 @@ export interface Translation {
   featCloudSub: string;
   featSecureTitle: string;
   featSecureSub: string;
+  featQuizTitle: string;
+  featQuizSub: string;
+  featAiTitle: string;
+  featAiSub: string;
   marketingTitle: string;
   marketingDesc: string;
 }
@@ -214,7 +218,10 @@ export const LANGS: Record<Lang, Translation> = {
     authErrSendFail: 'Could not send email, check the address',
     featNotesTitle: '📝 Quick Notes', featNotesSub: 'Save ideas in seconds',
     featCloudTitle: '☁️ Cloud Sync', featCloudSub: 'Access your notes everywhere',
-    featSecureTitle: '🔒 Secure Storage', featSecureSub: 'Your data is protected and backed up', marketingTitle: 'Your notes, everywhere.', marketingDesc: 'A modern place to write, organize, and sync everything you need.',
+    featSecureTitle: '🔒 Secure Storage', featSecureSub: 'Your data is protected and backed up',
+    featQuizTitle: '🧠 Smart Quiz', featQuizSub: 'Turn notes into flashcards and study smarter',
+    featAiTitle: '✨ AI Assistant', featAiSub: 'Generate questions and answers automatically',
+    marketingTitle: 'Your notes, everywhere.', marketingDesc: 'A modern place to write, organize, and sync everything you need.',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -267,6 +274,9 @@ export const LANGS: Record<Lang, Translation> = {
     authErrSendFail: 'Kunde inte skicka e-post, kontrollera adressen',
     featNotesTitle: '📝 Snabba anteckningar', featNotesSub: 'Spara idéer på några sekunder',
     featCloudTitle: '☁️ Molnsynkronisering', featCloudSub: 'Kom åt dina anteckningar överallt',
-    featSecureTitle: '🔒 Säker lagring', featSecureSub: 'Dina data skyddas och säkerhetskopieras', marketingTitle: 'Dina anteckningar, överallt.', marketingDesc: 'En modern plats för att skriva, organisera och synkronisera allt du behöver.',
+    featSecureTitle: '🔒 Säker lagring', featSecureSub: 'Dina data skyddas och säkerhetskopieras',
+    featQuizTitle: '🧠 Smart Quiz', featQuizSub: 'Gör om anteckningar till flashcards och plugga smartare',
+    featAiTitle: '✨ AI-assistent', featAiSub: 'Generera frågor och svar automatiskt',
+    marketingTitle: 'Dina anteckningar, överallt.', marketingDesc: 'En modern plats för att skriva, organisera och synkronisera allt du behöver.',
   },
 };
