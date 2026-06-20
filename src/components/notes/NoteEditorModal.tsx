@@ -27,7 +27,7 @@ interface NoteEditorModalProps {
 
 export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNote, onClose, onNavigate }: NoteEditorModalProps) {
   const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz } = useNotes();
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { show } = useToast();
   const note = notes.find((n) => n.id === noteId);
   const [locked, setLocked] = useState(() => !!note?.read);
@@ -61,6 +61,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [mcqCorrect, setMcqCorrect] = useState(0);
   const [copied, setCopied] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(note?.lastEdited ?? null);
+  const [isSaving, setIsSaving] = useState(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -93,11 +94,13 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     const ts = nowStr();
     updateNote(note.id, { title: title.trim(), html, text: plainText, lastEdited: ts });
     setLastSavedAt(ts);
+    setIsSaving(false);
   };
 
   // Auto-save 1.5 s after the user stops typing (only in edit mode)
   useEffect(() => {
     if (locked) return;
+    setIsSaving(true);
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => { save(); }, 1500);
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
@@ -519,13 +522,16 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
           </>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-app-text-secondary/70 dark:text-gray-500">📅 Created: {note.date}</span>
-            {note.lastEdited && <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-600">✏️ Updated: {note.lastEdited}</span>}
-            <span className={'text-[10px] font-medium ' + (lastSavedAt ? 'text-emerald-600 dark:text-emerald-400' : 'text-app-text-secondary/40 dark:text-gray-600')}>
-              ☁ {lastSavedAt ? `Saved: ${lastSavedAt}` : 'Not saved yet'}
-            </span>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-3 py-2 dark:border-white/10 dark:bg-white/5 sm:px-4">
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col gap-0">
+              <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">{lang === 'sv' ? 'Skapad' : 'Created'}: {note.date}</span>
+              {note.lastEdited && <span className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">{lang === 'sv' ? 'Uppdaterad' : 'Updated'}: {note.lastEdited}</span>}
+            </div>
+            <div className={'flex items-center gap-1 text-[10px] font-medium ' + (isSaving ? 'text-amber-500 dark:text-amber-400' : lastSavedAt ? 'text-emerald-600 dark:text-emerald-400' : 'text-app-text-secondary/40')}>
+              <span className={isSaving ? 'animate-bounce' : ''}>☁</span>
+              <span>{isSaving ? (lang === 'sv' ? 'Sparar…' : 'Saving…') : lastSavedAt ? `${lang === 'sv' ? 'Sparad' : 'Saved'}: ${lastSavedAt}` : (lang === 'sv' ? 'Ej sparad' : 'Not saved')}</span>
+            </div>
           </div>
           <div className="flex flex-wrap gap-1.5">
             <button onClick={() => { trash(note.id); show(t.tMoved); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10">
