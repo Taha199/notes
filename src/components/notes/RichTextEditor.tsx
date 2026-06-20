@@ -238,10 +238,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   const changeSize = (d: number) => {
-    saveSel();
-    const s = nextSz(fontSize, d);
+    // + / − always change the base size only (new typing), never resize existing selection.
+    const s = nextSz(baseSize, d);
     setFontSize(s);
-    applyPx(s);
+    setBaseSize(s);
+    saveSel();
   };
 
   const togglePalette = (e: React.MouseEvent) => {
