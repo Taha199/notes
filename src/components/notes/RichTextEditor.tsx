@@ -6,7 +6,6 @@ const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8',
 const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48, 56, 64, 72];
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const STATE_COMMANDS = [...TOGGLE_COMMANDS, 'justifyRight', 'justifyCenter', 'justifyLeft'];
-type ToggleCommand = typeof TOGGLE_COMMANDS[number];
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 
 interface Props {
@@ -24,10 +23,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const { t } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
-  // pendingMarks: format state for the NEXT typed character when no text is selected.
-  // They are applied by insertPendingText on the very first keystroke, then immediately
-  // cleared so the browser can handle subsequent characters naturally.
-  const pendingMarks = useRef<Partial<Record<ToggleCommand, boolean>>>({});
   const pendingFontSize = useRef<number | null>(null);
   const [fontSize, setFontSizeState] = useState(12);
   const fontSizeRef = useRef(12); // ref so selectionchange closure always sees current value
@@ -94,7 +89,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   const clearPendingAll = () => {
-    pendingMarks.current = {};
     pendingFontSize.current = null;
   };
 
@@ -118,17 +112,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     STATE_COMMANDS.forEach((c) => {
       try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
     });
-    // Overlay pending marks so the button state is immediately responsive
-    // (only when no text is selected – pending marks only apply at caret).
-    const sel = window.getSelection();
-    const hasSelection = !!(sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed);
-    if (!hasSelection) {
-      TOGGLE_COMMANDS.forEach((cmd) => {
-        const pending = pendingMarks.current[cmd];
-        if (pending === true) active.add(cmd);
-        if (pending === false) active.delete(cmd);
-      });
-    }
     setActiveCmds(active);
     return active;
   };
@@ -165,81 +148,19 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const exec = (cmd: string, value?: string) => {
     const ed = editorRef.current;
     if (!ed) return;
-
-    const isToggle = TOGGLE_COMMANDS.includes(cmd as ToggleCommand);
-
-    // Prefer the LIVE browser selection when the editor already has focus
-    // (toolbar buttons use e.preventDefault so focus + selection are intact).
-    // Fall back to savedRange only when the editor has genuinely lost focus.
-    const sel = window.getSelection();
-    const editorHasFocus = document.activeElement === ed;
-
-    let hasSelection: boolean;
-    if (editorHasFocus) {
-      // Trust the live selection directly — do NOT overwrite it with savedRange.
-      hasSelection = !!(sel && sel.rangeCount > 0 && !sel.isCollapsed && ed.contains(sel.anchorNode));
-    } else {
-      // Editor blurred (e.g. after closing a palette) — refocus and restore.
-      const fallback = savedRange.current?.cloneRange() ?? null;
-      hasSelection = !!(fallback && !fallback.collapsed);
+    // Buttons use e.preventDefault so editor keeps focus & selection intact.
+    // Only restore savedRange when editor actually lost focus (e.g. after palette).
+    if (document.activeElement !== ed) {
+      const saved = savedRange.current?.cloneRange() ?? null;
       ed.focus({ preventScroll: true });
-      if (fallback) {
-        sel?.removeAllRanges();
-        sel?.addRange(fallback);
-      }
+      if (saved) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(saved); }
     }
-
-    // No selection → pending mark for the next typed character.
-    if (isToggle && !hasSelection) {
-      const cmd_ = cmd as ToggleCommand;
-      const current = pendingMarks.current[cmd_] ?? document.queryCommandState(cmd);
-      pendingMarks.current[cmd_] = !current;
-      readCommandState();
-      return;
-    }
-
-    if (isToggle) delete pendingMarks.current[cmd as ToggleCommand];
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand(cmd, false, value);
     saveSel();
     readCommandState();
     onChange(ed.innerHTML);
   };
-
-  // ── Pending-text insertion (first char after clicking format w/o selection) ──
-  // After inserting the first formatted character the cursor is inside the new
-  // styled span. We clear pendingMarks so the NEXT character is handled
-  // naturally by the browser (inheriting the parent span's style) instead of
-  // creating a new span for every single character.
-  const insertPendingText = (text: string) => {
-    const ed = editorRef.current;
-    if (!ed) return false;
-    const underline = pendingMarks.current.underline ?? document.queryCommandState('underline');
-    const strike = pendingMarks.current.strikeThrough ?? document.queryCommandState('strikeThrough');
-    const decoration = [underline ? 'underline' : '', strike ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
-    const hasPendingDecoration = pendingMarks.current.underline !== undefined || pendingMarks.current.strikeThrough !== undefined;
-    const style = [
-      pendingMarks.current.bold === undefined ? '' : `font-weight: ${pendingMarks.current.bold ? '700' : '400'}`,
-      pendingMarks.current.italic === undefined ? '' : `font-style: ${pendingMarks.current.italic ? 'italic' : 'normal'}`,
-      hasPendingDecoration ? `text-decoration-line: ${decoration}` : '',
-      pendingFontSize.current === null ? '' : `font-size: ${pendingFontSize.current}px`,
-    ].filter(Boolean).join('; ');
-
-    const escaped = text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/\n/g, '<br>');
-
-    document.execCommand('insertHTML', false, `<span style="${style}">${escaped}</span>`);
-    // ← CRITICAL FIX: clear pending marks immediately so subsequent characters
-    //   are handled naturally by the browser inside the newly created span.
-    clearPendingAll();
-    saveSel();
-    onChange(ed.innerHTML);
-    return true;
-  };
-
-  const hasPendingMarks = () =>
-    Object.keys(pendingMarks.current).length > 0 || pendingFontSize.current !== null;
 
   // ── Font size ─────────────────────────────────────────────────────────
   const clearPendingFontMarker = () => {
@@ -286,21 +207,29 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
 
-    const rangeToUse = savedRange.current?.cloneRange() ?? null;
-    const hasSelection = !!(rangeToUse && !rangeToUse.collapsed);
+    let range: Range | null = null;
+    if (document.activeElement === ed) {
+      // Editor has focus: trust the live selection (e.g. +/− buttons with e.preventDefault).
+      const s = window.getSelection();
+      if (s && s.rangeCount > 0 && !s.isCollapsed && ed.contains(s.anchorNode)) {
+        range = s.getRangeAt(0);
+      }
+    } else {
+      // Editor blurred (e.g. typed a value in the font-size input): restore savedRange.
+      const saved = savedRange.current?.cloneRange() ?? null;
+      if (saved && !saved.collapsed) {
+        ed.focus({ preventScroll: true });
+        const s = window.getSelection();
+        s?.removeAllRanges();
+        s?.addRange(saved);
+        range = s?.getRangeAt(0) ?? null;
+      }
+    }
 
-    if (!hasSelection) {
+    if (!range) {
       setFutureFontSize(px);
       return;
     }
-
-    ed.focus({ preventScroll: true });
-    const s = window.getSelection();
-    s?.removeAllRanges();
-    s?.addRange(rangeToUse!);
-
-    const range = s?.getRangeAt(0);
-    if (!range) return;
 
     const contents = range.extractContents();
     contents.querySelectorAll?.('[style]').forEach((node) => {
@@ -315,8 +244,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     range.insertNode(span);
     const nextRange = document.createRange();
     nextRange.selectNodeContents(span);
-    s?.removeAllRanges();
-    s?.addRange(nextRange);
+    const finalSel = window.getSelection();
+    finalSel?.removeAllRanges();
+    finalSel?.addRange(nextRange);
     saveSel();
     onChange(ed.innerHTML);
   };
@@ -328,8 +258,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   const changeSize = (d: number) => {
     const s = nextSz(fontSizeRef.current, d);
-    const rangeToUse = savedRange.current;
-    if (rangeToUse && !rangeToUse.collapsed) {
+    const ed = editorRef.current;
+    const sel = window.getSelection();
+    const hasLiveSelection = !!(ed && sel && sel.rangeCount > 0 && !sel.isCollapsed && ed.contains(sel.anchorNode));
+    if (hasLiveSelection) {
       applyPx(s);
     } else {
       setFutureFontSize(s);
@@ -557,22 +489,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         data-placeholder={placeholder}
         dir="auto"
         onMouseDown={() => {
-          // Cursor moved by clicking: stale pending marks must not bleed into the new position.
-          clearPendingAll();
           clearPendingFontMarker();
         }}
         onKeyDown={(e) => {
-          // Navigation keys move the cursor: clear pending marks so they don't persist.
-          if (NAV_KEYS.has(e.key)) {
-            clearPendingAll();
-          }
-        }}
-        onBeforeInput={(e) => {
-          const native = e.nativeEvent as InputEvent;
-          if (native.inputType === 'insertText' && native.data && hasPendingMarks()) {
-            e.preventDefault();
-            insertPendingText(native.data);
-          }
+          if (NAV_KEYS.has(e.key)) clearPendingAll();
         }}
         onInput={() => {
           const ed = editorRef.current;
