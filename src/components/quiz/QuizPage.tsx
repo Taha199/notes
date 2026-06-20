@@ -519,7 +519,7 @@ export function QuizPage() {
   // Folders (OneNote-style notebooks)
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderRenameVal, setFolderRenameVal] = useState('');
-  const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number } | null>(null);
+  const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number; flip?: boolean } | null>(null);
   const [folderColorPicker, setFolderColorPicker] = useState(false);
   const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
   const [moveMenuForSet, setMoveMenuForSet] = useState<string | null>(null);
@@ -638,14 +638,15 @@ export function QuizPage() {
   };
 
   // Context menu
-  const [ctxMenu, setCtxMenu] = useState<{ setId: string; x: number; y: number } | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ setId: string; x: number; y: number; flip?: boolean } | null>(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [confirmDeleteSetId, setConfirmDeleteSetId] = useState<string | null>(null);
 
   const openCtxMenu = (e: React.MouseEvent, setId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    setCtxMenu({ setId, x: e.clientX, y: e.clientY });
+    const flipY = e.clientY > window.innerHeight * 0.6;
+    setCtxMenu({ setId, x: e.clientX, y: flipY ? window.innerHeight - e.clientY : e.clientY, flip: flipY });
     setShowColorPicker(false);
     setMoveMenuForSet(null);
   };
@@ -840,7 +841,7 @@ export function QuizPage() {
                       e.preventDefault();
                       e.stopPropagation();
                       if (!f.system) {
-                        setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY });
+                        setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY > window.innerHeight * 0.6 ? window.innerHeight - e.clientY : e.clientY, flip: e.clientY > window.innerHeight * 0.6 });
                         setFolderColorPicker(false);
                       }
                     }}
@@ -881,7 +882,7 @@ export function QuizPage() {
                     <span className="block text-[9px] text-app-text-secondary/50">{setsInFolder(f.id).length} set</span>
                     {!f.system && (
                       <span
-                        onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY }); setFolderColorPicker(false); }}
+                        onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY > window.innerHeight * 0.6 ? window.innerHeight - e.clientY : e.clientY, flip: e.clientY > window.innerHeight * 0.6 }); setFolderColorPicker(false); }}
                         className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded text-[10px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border group-hover/fl:opacity-100"
                       >···</span>
                     )}
@@ -1119,7 +1120,7 @@ export function QuizPage() {
           <div className="fixed inset-0 z-40" onClick={closeCtxMenu} onContextMenu={(e) => { e.preventDefault(); closeCtxMenu(); }} />
           <div
             className="fixed z-50 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
-            style={{ top: ctxMenu.y, left: ctxMenu.x }}
+            style={ctxMenu.flip ? { bottom: ctxMenu.y, left: ctxMenu.x } : { top: ctxMenu.y, left: ctxMenu.x }}
           >
             <button
               onClick={() => {
@@ -1197,7 +1198,7 @@ export function QuizPage() {
       {folderCtxMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setFolderCtxMenu(null); setFolderColorPicker(false); }} onContextMenu={(e) => { e.preventDefault(); setFolderCtxMenu(null); }} />
-          <div className="fixed z-50 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800" style={{ top: folderCtxMenu.y, left: folderCtxMenu.x }}>
+          <div className="fixed z-50 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800" style={folderCtxMenu.flip ? { bottom: folderCtxMenu.y, left: folderCtxMenu.x } : { top: folderCtxMenu.y, left: folderCtxMenu.x }}>
             <button
               onClick={() => { const f = quizFolders.find((x) => x.id === folderCtxMenu.folderId); if (f) { setRenamingFolderId(f.id); setFolderRenameVal(f.name); } setFolderCtxMenu(null); }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
