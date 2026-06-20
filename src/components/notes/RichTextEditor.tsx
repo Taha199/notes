@@ -34,9 +34,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [hlPalPos, setHlPalPos] = useState({ left: 0, top: 0 });
   const [hlColor, setHlColor] = useState('#FFEB3B');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; rect: DOMRect } | null>(null);
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
+  const editorWrapRef = useRef<HTMLDivElement>(null);
 
   // Set initial HTML once (avoid overwriting cursor on each keystroke)
   useEffect(() => {
@@ -344,7 +346,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       : 'text-app-text-secondary hover:bg-white dark:hover:bg-white/10');
 
   return (
-    <div className={editable ? '' : '[&_img]:cursor-zoom-in'}>
+    <div ref={editorWrapRef} className={'relative ' + (editable ? '' : '[&_img]:cursor-zoom-in')}>
       {/* Toolbar */}
       <div className="flex items-center gap-0.5 overflow-x-auto border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5" style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}>
         <div className="flex items-center overflow-hidden rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900">
@@ -458,6 +460,17 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           }
           onChange(ed?.innerHTML ?? '');
         }}
+            onMouseMove={(event) => {
+          if (!editable) return;
+          const target = event.target;
+          if (target instanceof HTMLImageElement) {
+            const rect = target.getBoundingClientRect();
+            setHoveredImg({ el: target, rect });
+          } else {
+            setHoveredImg(null);
+          }
+        }}
+        onMouseLeave={() => setHoveredImg(null)}
         onClick={(event) => {
           if (!editable && event.detail >= 3) {
             event.preventDefault();
@@ -471,6 +484,40 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
         style={{ minHeight, maxHeight, fontSize: `${baseSize}px`, cursor: editable ? 'text' : 'default' }}
       />
+
+      {editable && hoveredImg && (() => {
+        const wrapRect = editorWrapRef.current?.getBoundingClientRect();
+        if (!wrapRect) return null;
+        const r = hoveredImg.rect;
+        return (
+          <button
+            type="button"
+            onMouseEnter={() => setHoveredImg(hoveredImg)}
+            onMouseLeave={() => setHoveredImg(null)}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const img = hoveredImg.el;
+              // remove trailing <br> if present
+              const next = img.nextSibling;
+              if (next && next.nodeName === 'BR') next.parentNode?.removeChild(next);
+              img.parentNode?.removeChild(img);
+              setHoveredImg(null);
+              onChange(editorRef.current?.innerHTML ?? '');
+            }}
+            style={{
+              position: 'fixed',
+              left: r.right - 24,
+              top: r.top + 4,
+              zIndex: 9999,
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700"
+            title="Delete image"
+          >
+            ✕
+          </button>
+        );
+      })()}
 
       {previewImage && (
         <div
