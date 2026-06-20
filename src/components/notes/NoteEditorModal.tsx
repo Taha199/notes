@@ -174,7 +174,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
       >
         ›
       </button>
-      <div className="flex max-h-[96dvh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900 sm:max-h-[92vh] sm:rounded-3xl" style={{ animation: 'slideUp .22s cubic-bezier(.34,1.56,.64,1)' }}>
+      <div className="flex max-h-[96dvh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900 sm:max-h-[92vh] sm:rounded-3xl" style={{ animation: 'slideUp .22s cubic-bezier(.34,1.56,.64,1)' }}>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <button
@@ -408,7 +408,24 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   🧠 Quiz
                   {quizItems.length > 0 && <span className="ml-2 text-[11px] font-normal opacity-60">{quizIndex + 1} / {quizItems.length}</span>}
                 </span>
-                <button onClick={() => setQuizOpen(false)} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Stäng</button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      setQuizLoading(true);
+                      try {
+                        const more = await generateQuiz(note.text || plainText);
+                        setQuizItems((prev) => [...prev, ...more]);
+                      } catch {
+                        // ignore
+                      } finally { setQuizLoading(false); }
+                    }}
+                    disabled={quizLoading}
+                    className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
+                  >
+                    {quizLoading ? <span className="animate-spin">⏳</span> : '+'} Generera fler
+                  </button>
+                  <button onClick={() => setQuizOpen(false)} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Stäng</button>
+                </div>
               </div>
 
               <div className="flex flex-1 flex-col gap-3 p-4">
