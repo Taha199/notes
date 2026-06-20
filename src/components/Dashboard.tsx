@@ -174,7 +174,7 @@ export function Dashboard() {
           )}
 
           {page === 'home' && !hasSearch && (
-            <div className="flex flex-col gap-3.5 border-b border-app-border bg-app-bg p-3 dark:border-white/10 dark:bg-white/5 sm:p-5">
+            <div className="flex min-h-full flex-col gap-3.5 bg-app-bg p-3 dark:bg-white/5 sm:p-5">
               {drafts.map((d, i) => (
                 <DraftEditor key={d.id} draft={d} index={i} total={drafts.length} />
               ))}
