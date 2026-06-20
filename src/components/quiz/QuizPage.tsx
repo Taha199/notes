@@ -96,20 +96,6 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
             className="block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10"
             dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
           />
-          {(item.createdAt || item.updatedAt) && (
-            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-app-border/50 pt-2 dark:border-white/10">
-              {item.createdAt && (
-                <span className="text-[10px] text-app-text-secondary/40 dark:text-gray-600">
-                  Skapad: {new Date(item.createdAt).toLocaleString()}
-                </span>
-              )}
-              {item.updatedAt && item.updatedAt !== item.createdAt && (
-                <span className="text-[10px] text-app-text-secondary/40 dark:text-gray-600">
-                  Uppdaterad: {new Date(item.updatedAt).toLocaleString()}
-                </span>
-              )}
-            </div>
-          )}
           {item.explanation && (
             <div className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
               <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Förklaring</p>
@@ -204,6 +190,24 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
           <button onClick={onDelete} className="text-[13px] text-app-text-secondary/40 transition-all hover:scale-110 hover:text-red-500" title="Ta bort" aria-label="Ta bort">🗑️</button>
         </div>
       </div>
+      {/* Footer: timestamps */}
+      {(item.createdAt || item.updatedAt) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-app-border/40 bg-app-bg/30 px-5 py-1.5 dark:border-white/5 dark:bg-white/[0.015]">
+          <span className="flex items-center gap-1 text-[10px] text-app-text-secondary/35 dark:text-gray-600">
+            <span>☁</span> Saved
+          </span>
+          {item.createdAt && (
+            <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
+              Skapad: {new Date(item.createdAt).toLocaleString()}
+            </span>
+          )}
+          {item.updatedAt && item.updatedAt !== item.createdAt && (
+            <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
+              Uppdaterad: {new Date(item.updatedAt).toLocaleString()}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
