@@ -1,4 +1,11 @@
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string;
+
+let tokenSink: ((n: number) => void) | null = null;
+export function setTokenSink(fn: (n: number) => void) { tokenSink = fn; }
+function reportTokens(data: { usageMetadata?: { totalTokenCount?: number } }) {
+  const n = data?.usageMetadata?.totalTokenCount;
+  if (n && n > 0) tokenSink?.(n);
+}
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
 
 export interface QuizResult {
@@ -41,6 +48,7 @@ ${noteText.slice(0, 6000)}`,
     throw new Error(err?.error?.message || 'Gemini API error: ' + res.status);
   }
   const data = await res.json();
+  reportTokens(data);
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!text) throw new Error('No response returned');
   if (text.includes('INSUFFICIENT_CONTENT')) throw new Error('INSUFFICIENT_CONTENT');
@@ -135,6 +143,7 @@ export async function answerQuestion(question: string): Promise<string> {
     throw new Error(err?.error?.message || 'API error');
   }
   const data = await res.json();
+  reportTokens(data);
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!text) throw new Error('No answer returned');
   return text;
@@ -168,6 +177,7 @@ ${qa}`,
   });
   if (!res.ok) return items; // fallback to original if verify fails
   const data = await res.json();
+  reportTokens(data);
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
   if (!text) return items;
 

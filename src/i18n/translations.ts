@@ -165,6 +165,26 @@ export interface Translation {
   marketingTitle: string;
   marketingDesc: string;
   designedBy: string;
+  // Settings page
+  settingsTitle: string;
+  settingsProfile: string;
+  settingsProfileName: string;
+  settingsProfileEmail: string;
+  settingsSave: string;
+  settingsSaved: string;
+  settingsPassword: string;
+  settingsChangePass: string;
+  settingsSetPass: string;
+  settingsPassEmailSent: string;
+  settingsStorage: string;
+  settingsStorageNotes: string;
+  settingsStorageQuiz: string;
+  settingsStorageChat: string;
+  settingsStorageTotal: string;
+  settingsAIUsage: string;
+  settingsTokensUsed: string;
+  settingsResetTokens: string;
+  settingsTokensReset: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -224,6 +244,25 @@ export const LANGS: Record<Lang, Translation> = {
     featAiTitle: '✨ AI Assistant', featAiSub: 'Generate questions and answers automatically',
     marketingTitle: 'Your notes, everywhere.', marketingDesc: 'A modern place to write, organize, and sync everything you need.',
     designedBy: '✦ Designed by Dr. Abdullah Taha ✦',
+    settingsTitle: 'Settings',
+    settingsProfile: 'Profile',
+    settingsProfileName: 'Display name',
+    settingsProfileEmail: 'Email address',
+    settingsSave: 'Save',
+    settingsSaved: '✓ Saved',
+    settingsPassword: 'Password',
+    settingsChangePass: 'Send password reset email',
+    settingsSetPass: 'Set a password',
+    settingsPassEmailSent: '✓ Reset email sent',
+    settingsStorage: 'Storage',
+    settingsStorageNotes: 'Notes',
+    settingsStorageQuiz: 'Quiz',
+    settingsStorageChat: 'AI Chat',
+    settingsStorageTotal: 'Total used',
+    settingsAIUsage: 'AI Token Usage',
+    settingsTokensUsed: 'Total tokens used',
+    settingsResetTokens: 'Reset counter',
+    settingsTokensReset: '✓ Counter reset',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -281,5 +320,24 @@ export const LANGS: Record<Lang, Translation> = {
     featAiTitle: '✨ AI-assistent', featAiSub: 'Generera frågor och svar automatiskt',
     marketingTitle: 'Dina anteckningar, överallt.', marketingDesc: 'En modern plats för att skriva, organisera och synkronisera allt du behöver.',
     designedBy: '✦ Designad av Dr. Abdullah Taha ✦',
+    settingsTitle: 'Inställningar',
+    settingsProfile: 'Profil',
+    settingsProfileName: 'Visningsnamn',
+    settingsProfileEmail: 'E-postadress',
+    settingsSave: 'Spara',
+    settingsSaved: '✓ Sparad',
+    settingsPassword: 'Lösenord',
+    settingsChangePass: 'Skicka e-post för återställning',
+    settingsSetPass: 'Skapa ett lösenord',
+    settingsPassEmailSent: '✓ Återställningsmail skickat',
+    settingsStorage: 'Lagring',
+    settingsStorageNotes: 'Anteckningar',
+    settingsStorageQuiz: 'Quiz',
+    settingsStorageChat: 'AI-chatt',
+    settingsStorageTotal: 'Totalt använt',
+    settingsAIUsage: 'AI-tokenanvändning',
+    settingsTokensUsed: 'Totalt använda tokens',
+    settingsResetTokens: 'Nollställ räknare',
+    settingsTokensReset: '✓ Räknare nollställd',
   },
 };

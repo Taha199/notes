@@ -47,6 +47,7 @@ export function Sidebar({
   const items2: { page: Page; icon: string; label: string; badge?: number; badgeClass?: string }[] = [
     { page: 'archive', icon: '🗄', label: t.navArchive, badge: counts.archive, badgeClass: 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400' },
     { page: 'trash', icon: '🗑', label: t.navTrash, badge: counts.trash, badgeClass: 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400' },
+    { page: 'settings', icon: '⚙️', label: t.settingsTitle },
   ];
 
   const NavBtn = ({ it }: { it: (typeof items)[number] }) => (

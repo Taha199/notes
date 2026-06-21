@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Note, QuizItem, QuizSet, QuizFolder, ChatConversation } from '../types';
 import { FB_DB_URL } from '../lib/firebase';
+import { setTokenSink } from '../lib/gemini';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 
@@ -45,6 +46,9 @@ interface NotesCtx {
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
+  tokenUsage: number;
+  addTokens: (n: number) => void;
+  resetTokens: () => void;
   addDraft: () => void;
   removeDraft: (id: string) => void;
   updateDraft: (id: string, patch: Partial<Draft>) => void;
@@ -134,6 +138,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [chats, setChats] = useState<ChatConversation[]>(() => {
     try { return JSON.parse(localStorage.getItem('malacadhati_chats') || '[]'); } catch { return []; }
   });
+  const [tokenUsage, setTokenUsage] = useState<number>(0);
   const draftCounter = useRef(0);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
   const [loaded, setLoaded] = useState(false);
@@ -164,6 +169,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const r = await fetch(`${FB_DB_URL}/users/${user.uid}.json`);
         const cloud = await r.json();
         if (cancelled) return;
+        if (cloud && cloud.tokenUsage) {
+          setTokenUsage(cloud.tokenUsage);
+        }
         if (cloud && cloud.notes) {
           setNotes(cloud.notes);
           localStorage.setItem('malacadhati', JSON.stringify(cloud.notes));
@@ -261,6 +269,33 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persist(notes, undefined, undefined, nextChats);
   };
 
+  const addTokens = (n: number) => {
+    setTokenUsage((prev) => {
+      const next = prev + n;
+      if (user) {
+        fetch(`${FB_DB_URL}/users/${user.uid}/tokenUsage.json`, {
+          method: 'PUT',
+          body: JSON.stringify(next),
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return next;
+    });
+  };
+
+  const resetTokens = () => {
+    setTokenUsage(0);
+    if (user) {
+      fetch(`${FB_DB_URL}/users/${user.uid}/tokenUsage.json`, {
+        method: 'PUT',
+        body: JSON.stringify(0),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  };
+
+  setTokenSink(addTokens);
+
   const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[], nextQuizSets?: QuizSet[], nextQuizFolders?: QuizFolder[]) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
     const qList = nextQuizzes ?? quizzes;
@@ -289,6 +324,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           chats: chatList,
           quizSets: qsList,
           quizFolders: qfList,
+          tokenUsage,
         }),
         headers: { 'Content-Type': 'application/json' },
       })
@@ -642,6 +678,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         nowStr,
         chats,
         saveChats,
+        tokenUsage,
+        addTokens,
+        resetTokens,
       }}
     >
       {children}

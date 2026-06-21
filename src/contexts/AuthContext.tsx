@@ -9,6 +9,7 @@ import {
   confirmPasswordReset as fbConfirmPasswordReset,
   verifyPasswordResetCode as fbVerifyPasswordResetCode,
   linkWithCredential,
+  updateProfile,
   type User,
 } from 'firebase/auth';
 import { auth, googleProvider, EmailAuthProvider } from '../lib/firebase';
@@ -25,6 +26,7 @@ interface AuthCtx {
   verifyResetCode: (code: string) => Promise<string>;
   confirmReset: (code: string, newPass: string) => Promise<void>;
   setPasswordForAccount: (pass: string) => Promise<void>;
+  updateDisplayName: (name: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthCtx | null>(null);
@@ -74,6 +76,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const cred = EmailAuthProvider.credential(auth.currentUser.email, pass);
       await linkWithCredential(auth.currentUser, cred);
       setHasPassword(true);
+    },
+    updateDisplayName: async (name) => {
+      if (!auth.currentUser) throw new Error('no-user');
+      await updateProfile(auth.currentUser, { displayName: name });
+      setUser({ ...auth.currentUser });
     },
   };
 
