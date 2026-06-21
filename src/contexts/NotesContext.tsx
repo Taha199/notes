@@ -269,11 +269,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persist(notes, undefined, undefined, nextChats);
   };
 
-  const addTokens = (n: number) => {
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  const addTokens = useRef((n: number) => {
     setTokenUsage((prev) => {
       const next = prev + n;
-      if (user) {
-        fetch(`${FB_DB_URL}/users/${user.uid}/tokenUsage.json`, {
+      const u = userRef.current;
+      if (u) {
+        fetch(`${FB_DB_URL}/users/${u.uid}/tokenUsage.json`, {
           method: 'PUT',
           body: JSON.stringify(next),
           headers: { 'Content-Type': 'application/json' },
@@ -281,7 +285,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  };
+  }).current;
+
+  useEffect(() => {
+    setTokenSink(addTokens);
+    return () => setTokenSink(() => {});
+  }, [addTokens]);
 
   const resetTokens = () => {
     setTokenUsage(0);
@@ -293,8 +302,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       });
     }
   };
-
-  setTokenSink(addTokens);
 
   const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[], nextQuizSets?: QuizSet[], nextQuizFolders?: QuizFolder[]) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
