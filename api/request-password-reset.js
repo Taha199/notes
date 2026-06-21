@@ -107,6 +107,20 @@ function isRateLimited(request) {
   return now - previous < REQUEST_WINDOW_MS;
 }
 
+function readServiceAccount(rawValue) {
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    // Vercel can preserve pasted line breaks in the PEM value. Convert only
+    // those embedded line breaks back to JSON escapes before parsing again.
+    const repaired = rawValue.replace(
+      /("private_key"\s*:\s*")([\s\S]*?)(",\s*"client_email")/,
+      (_, start, key, end) => `${start}${key.replace(/\r?\n/g, '\\n')}${end}`
+    );
+    return JSON.parse(repaired);
+  }
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
@@ -123,7 +137,7 @@ export default async function handler(request, response) {
   if (isRateLimited(request)) return response.status(202).json({ ok: true });
 
   try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
+    const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
     const accessToken = await getGoogleAccessToken(serviceAccount);
     const linkResponse = await fetch(
       `https://identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/accounts:sendOobCode`,
