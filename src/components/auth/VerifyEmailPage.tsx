@@ -6,10 +6,11 @@ import { AuthCard } from './AuthCard';
 import { Logo } from '../common/Logo';
 
 export function VerifyEmailPage() {
-  const { user, signOut, sendVerification, reloadUser } = useAuth();
+  const { user, signOut, sendVerification, reloadUser, deleteAccount } = useAuth();
   const { t } = useLanguage();
   const [resent, setResent] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const handleResend = async () => {
     try {
@@ -25,6 +26,15 @@ export function VerifyEmailPage() {
       await reloadUser();
     } finally {
       setChecking(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    try {
+      await deleteAccount();
+    } catch {
+      await signOut();
     }
   };
 
@@ -60,9 +70,16 @@ export function VerifyEmailPage() {
           </button>
           <button
             onClick={signOut}
-            className="text-center text-xs font-medium text-app-text-secondary/60 transition hover:text-red-500 dark:text-gray-500"
+            className="text-center text-xs font-medium text-app-text-secondary/60 transition hover:text-app-text dark:text-gray-500"
           >
             {t.signOut}
+          </button>
+          <button
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="text-center text-xs font-medium text-red-400/70 transition hover:text-red-500 disabled:opacity-50 dark:text-red-400/50"
+          >
+            {cancelling ? '...' : t.verifyCancel}
           </button>
         </div>
       </AuthCard>

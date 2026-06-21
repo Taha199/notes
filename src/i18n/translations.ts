@@ -212,6 +212,7 @@ export interface Translation {
   verifyResent: string;
   verifyDone: string;
   verifyCheck: string;
+  verifyCancel: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -309,6 +310,7 @@ export const LANGS: Record<Lang, Translation> = {
     verifyResent: '✓ Email sent',
     verifyDone: 'I have verified',
     verifyCheck: 'Checking...',
+    verifyCancel: 'Cancel registration & delete account',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -404,5 +406,6 @@ export const LANGS: Record<Lang, Translation> = {
     verifyResent: '✓ E-post skickad',
     verifyDone: 'Jag har verifierat',
     verifyCheck: 'Kontrollerar...',
+    verifyCancel: 'Avbryt registrering & radera konto',
   },
 };
