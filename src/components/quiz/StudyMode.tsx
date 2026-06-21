@@ -65,6 +65,9 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
     else setIndex((i) => i + 1);
   };
 
+  const goPrev = () => setIndex((i) => Math.max(0, i - 1));
+  const goNext = () => setIndex((i) => Math.min(deck.length - 1, i + 1));
+
   const restartDontKnow = () => {
     const retry = items.filter((i) => sessionLearning.has(i.id));
     if (!retry.length) return;
@@ -262,11 +265,25 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
         )}
       </div>
 
-      {/* Bottom stats */}
-      <div className="flex items-center justify-center gap-8 border-t border-app-border px-4 py-3 dark:border-white/10">
+      {/* Bottom stats + navigation */}
+      <div className="flex items-center justify-center gap-6 border-t border-app-border px-4 py-3 dark:border-white/10">
+        <button
+          onClick={goPrev}
+          disabled={index === 0}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-app-border text-app-text-secondary transition hover:bg-app-bg disabled:opacity-30 dark:border-white/10 dark:text-gray-400"
+          title="Föregående"
+          aria-label="Föregående"
+        >‹</button>
         <span className="text-[12px] font-semibold text-red-500">✗ {sessionLearning.size}</span>
         <span className="text-[11px] text-app-text-secondary/40">{deck.length - index - 1} remaining</span>
         <span className="text-[12px] font-semibold text-emerald-500">✓ {sessionKnown.size}</span>
+        <button
+          onClick={goNext}
+          disabled={index >= deck.length - 1}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-app-border text-app-text-secondary transition hover:bg-app-bg disabled:opacity-30 dark:border-white/10 dark:text-gray-400"
+          title="Nästa"
+          aria-label="Nästa"
+        >›</button>
       </div>
     </div>
   );
