@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -11,9 +11,9 @@ import { BootLoader } from './components/common/BootLoader';
 import { ImageLightbox } from './components/common/ImageLightbox';
 import { Dashboard } from './components/Dashboard';
 
-function getResetCode(): string | null {
+function getUrlAction(): { mode: string | null; oobCode: string | null } {
   const p = new URLSearchParams(window.location.search);
-  return p.get('mode') === 'resetPassword' ? p.get('oobCode') : null;
+  return { mode: p.get('mode'), oobCode: p.get('oobCode') };
 }
 
 function returnToSignIn() {
@@ -21,13 +21,26 @@ function returnToSignIn() {
 }
 
 function Root() {
-  const { user, loading } = useAuth();
-  const [resetCode] = useState(getResetCode);
+  const { user, loading, applyVerifyCode } = useAuth();
+  const [{ mode, oobCode }] = useState(getUrlAction);
+  const [verifying, setVerifying] = useState(mode === 'verifyEmail' && !!oobCode);
 
-  if (resetCode) {
+  useEffect(() => {
+    if (mode === 'verifyEmail' && oobCode) {
+      applyVerifyCode(oobCode).finally(() => {
+        window.history.replaceState({}, '', window.location.pathname);
+        setVerifying(false);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (verifying) return <BootLoader />;
+
+  if (mode === 'resetPassword' && oobCode) {
     return (
       <ResetPasswordPage
-        oobCode={resetCode}
+        oobCode={oobCode}
         onDone={returnToSignIn}
       />
     );

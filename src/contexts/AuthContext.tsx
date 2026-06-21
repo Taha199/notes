@@ -7,12 +7,21 @@ import {
   signOut as fbSignOut,
   confirmPasswordReset as fbConfirmPasswordReset,
   verifyPasswordResetCode as fbVerifyPasswordResetCode,
+  applyActionCode,
   linkWithCredential,
   updateProfile,
-  sendEmailVerification,
   type User,
 } from 'firebase/auth';
 import { auth, googleProvider, EmailAuthProvider } from '../lib/firebase';
+
+async function sendVerificationEmailDirect(email: string): Promise<void> {
+  const lang = document.documentElement.lang === 'en' ? 'en' : 'sv';
+  await fetch('/api/send-verification', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, lang }),
+  });
+}
 
 async function sendResetEmailDirect(email: string): Promise<void> {
   const lang = document.documentElement.lang === 'en' ? 'en' : 'sv';
@@ -38,6 +47,7 @@ interface AuthCtx {
   resetPassword: (email: string) => Promise<void>;
   verifyResetCode: (code: string) => Promise<string>;
   confirmReset: (code: string, newPass: string) => Promise<void>;
+  applyVerifyCode: (code: string) => Promise<void>;
   setPasswordForAccount: (pass: string) => Promise<void>;
   updateDisplayName: (name: string) => Promise<void>;
   sendVerification: () => Promise<void>;
@@ -68,8 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithEmailAndPassword(auth, email, pass);
     },
     signUp: async (email, pass) => {
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      await sendEmailVerification(cred.user);
+      await createUserWithEmailAndPassword(auth, email, pass);
+      await sendVerificationEmailDirect(email);
     },
     signInGoogle: async () => {
       await signInWithPopup(auth, googleProvider);
@@ -96,8 +106,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser({ ...auth.currentUser });
     },
     sendVerification: async () => {
-      if (!auth.currentUser) throw new Error('no-user');
-      await sendEmailVerification(auth.currentUser);
+      if (!auth.currentUser?.email) throw new Error('no-user');
+      await sendVerificationEmailDirect(auth.currentUser.email);
+    },
+    applyVerifyCode: async (code) => {
+      await applyActionCode(auth, code);
+      if (auth.currentUser) {
+        await auth.currentUser.reload();
+        setUser({ ...auth.currentUser });
+      }
     },
     reloadUser: async () => {
       if (!auth.currentUser) return;
