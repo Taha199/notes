@@ -126,10 +126,23 @@ export interface Translation {
   setpassErrRelogin: string;
   setpassErrGeneric: string;
   resetpassTitle: string;
+  resetpassEyebrow: string;
+  resetpassSubtitle: string;
   resetpassFor: string;
   resetpassOk: string;
+  resetpassSuccessTitle: string;
+  resetpassSuccessSub: string;
   resetpassErrInvalid: string;
   resetpassErrExpired: string;
+  resetpassChecking: string;
+  resetpassNewLabel: string;
+  resetpassConfirmLabel: string;
+  resetpassHint: string;
+  resetpassShow: string;
+  resetpassHide: string;
+  resetpassSaving: string;
+  resetpassBack: string;
+  resetpassRequestNew: string;
   // Auth page
   authLogin: string;
   authSignup: string;
@@ -225,9 +238,16 @@ export const LANGS: Record<Lang, Translation> = {
     setpassErrShort: 'Password must be at least 6 characters', setpassErrMatch: 'Passwords do not match',
     setpassOk: '✓ Password created successfully', setpassErrRelogin: 'Please sign out and sign in again, then retry',
     setpassErrGeneric: 'Something went wrong, please try again',
-    resetpassTitle: 'Reset Password', resetpassFor: 'for account',
-    resetpassOk: '✓ Password changed successfully, redirecting...', resetpassErrInvalid: 'This link is invalid or has expired',
-    resetpassErrExpired: 'Could not reset password, the link has expired',
+    resetpassTitle: 'Create a new password', resetpassEyebrow: 'SECURE ACCOUNT',
+    resetpassSubtitle: 'Choose a strong password that you have not used before.', resetpassFor: 'Resetting the password for',
+    resetpassOk: 'Password changed successfully', resetpassSuccessTitle: 'Your password is ready',
+    resetpassSuccessSub: 'You can now sign in to Taha Note using your new password.',
+    resetpassErrInvalid: 'This reset link is invalid or has expired.',
+    resetpassErrExpired: 'Could not reset the password. Please request a new link.',
+    resetpassChecking: 'Checking your secure link...', resetpassNewLabel: 'New password',
+    resetpassConfirmLabel: 'Confirm new password', resetpassHint: 'Use at least 6 characters.',
+    resetpassShow: 'Show', resetpassHide: 'Hide', resetpassSaving: 'Updating password...',
+    resetpassBack: 'Back to sign in', resetpassRequestNew: 'Request a new link',
     authLogin: 'Sign In', authSignup: 'Create Account', authLoginBtn: 'Sign In', authSignupBtn: 'Create Account',
     authForgot: 'Forgot password?', authEmailPh: 'Email address', authPassPh: 'Password', authPass2Ph: 'Confirm password',
     authGoogle: 'Continue with Google', authOr: 'or',
@@ -301,9 +321,16 @@ export const LANGS: Record<Lang, Translation> = {
     setpassErrShort: 'Lösenordet måste vara minst 6 tecken', setpassErrMatch: 'Lösenorden matchar inte',
     setpassOk: '✓ Lösenordet har skapats', setpassErrRelogin: 'Logga ut och in igen, och försök sedan på nytt',
     setpassErrGeneric: 'Något gick fel, försök igen',
-    resetpassTitle: 'Återställ lösenord', resetpassFor: 'för kontot',
-    resetpassOk: '✓ Lösenordet har ändrats, omdirigerar...', resetpassErrInvalid: 'Länken är ogiltig eller har gått ut',
-    resetpassErrExpired: 'Kunde inte återställa lösenordet, länken har gått ut',
+    resetpassTitle: 'Skapa ett nytt lösenord', resetpassEyebrow: 'SÄKERT KONTO',
+    resetpassSubtitle: 'Välj ett starkt lösenord som du inte har använt tidigare.', resetpassFor: 'Lösenordet återställs för',
+    resetpassOk: 'Lösenordet har ändrats', resetpassSuccessTitle: 'Ditt lösenord är klart',
+    resetpassSuccessSub: 'Du kan nu logga in på Taha Note med ditt nya lösenord.',
+    resetpassErrInvalid: 'Återställningslänken är ogiltig eller har gått ut.',
+    resetpassErrExpired: 'Kunde inte återställa lösenordet. Begär en ny länk.',
+    resetpassChecking: 'Kontrollerar din säkra länk...', resetpassNewLabel: 'Nytt lösenord',
+    resetpassConfirmLabel: 'Bekräfta nytt lösenord', resetpassHint: 'Använd minst 6 tecken.',
+    resetpassShow: 'Visa', resetpassHide: 'Dölj', resetpassSaving: 'Uppdaterar lösenord...',
+    resetpassBack: 'Tillbaka till inloggning', resetpassRequestNew: 'Begär en ny länk',
     authLogin: 'Logga in', authSignup: 'Skapa konto', authLoginBtn: 'Logga in', authSignupBtn: 'Skapa konto',
     authForgot: 'Glömt lösenordet?', authEmailPh: 'E-postadress', authPassPh: 'Lösenord', authPass2Ph: 'Bekräfta lösenord',
     authGoogle: 'Fortsätt med Google', authOr: 'eller',

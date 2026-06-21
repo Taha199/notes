@@ -15,18 +15,19 @@ function getResetCode(): string | null {
   return p.get('mode') === 'resetPassword' ? p.get('oobCode') : null;
 }
 
+function returnToSignIn() {
+  window.location.replace(window.location.origin);
+}
+
 function Root() {
   const { user, loading } = useAuth();
-  const [resetCode, setResetCode] = useState<string | null>(getResetCode);
+  const [resetCode] = useState(getResetCode);
 
   if (resetCode) {
     return (
       <ResetPasswordPage
         oobCode={resetCode}
-        onDone={() => {
-          window.history.replaceState({}, '', window.location.origin);
-          setResetCode(null);
-        }}
+        onDone={returnToSignIn}
       />
     );
   }

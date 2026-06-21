@@ -62,8 +62,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await fbSignOut(auth);
     },
     resetPassword: async (email) => {
+      const language = document.documentElement.lang === 'en' ? 'en' : 'sv';
+      auth.languageCode = language;
+      const continueUrl = new URL('/', window.location.origin);
+      continueUrl.searchParams.set('lang', language);
       await sendPasswordResetEmail(auth, email, {
-        url: window.location.origin,
+        url: continueUrl.toString(),
         handleCodeInApp: true,
       });
     },
