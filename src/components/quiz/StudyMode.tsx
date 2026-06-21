@@ -125,7 +125,22 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
       </div>
 
       {/* Card area */}
-      <div className="flex flex-1 flex-col items-center justify-center p-6 overflow-y-auto">
+      <div className="relative flex flex-1 flex-col items-center justify-center p-6 overflow-y-auto">
+        {/* Large side navigation arrows */}
+        <button
+          onClick={goPrev}
+          disabled={index === 0}
+          className="absolute left-3 top-1/2 z-10 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-app-border bg-white/90 text-3xl text-app-text-secondary shadow-lg backdrop-blur transition hover:scale-105 hover:text-primary disabled:pointer-events-none disabled:opacity-25 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 sm:left-6 sm:h-16 sm:w-16"
+          title="Föregående"
+          aria-label="Föregående"
+        >‹</button>
+        <button
+          onClick={goNext}
+          disabled={index >= deck.length - 1}
+          className="absolute right-3 top-1/2 z-10 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-app-border bg-white/90 text-3xl text-app-text-secondary shadow-lg backdrop-blur transition hover:scale-105 hover:text-primary disabled:pointer-events-none disabled:opacity-25 dark:border-white/10 dark:bg-white/10 dark:text-gray-300 sm:right-6 sm:h-16 sm:w-16"
+          title="Nästa"
+          aria-label="Nästa"
+        >›</button>
         {mode === 'flashcard' ? (
           current.options && current.options.length ? (
             /* MCQ card — clickable choices */
@@ -265,25 +280,11 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
         )}
       </div>
 
-      {/* Bottom stats + navigation */}
-      <div className="flex items-center justify-center gap-6 border-t border-app-border px-4 py-3 dark:border-white/10">
-        <button
-          onClick={goPrev}
-          disabled={index === 0}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-app-border text-app-text-secondary transition hover:bg-app-bg disabled:opacity-30 dark:border-white/10 dark:text-gray-400"
-          title="Föregående"
-          aria-label="Föregående"
-        >‹</button>
+      {/* Bottom stats */}
+      <div className="flex items-center justify-center gap-8 border-t border-app-border px-4 py-3 dark:border-white/10">
         <span className="text-[12px] font-semibold text-red-500">✗ {sessionLearning.size}</span>
         <span className="text-[11px] text-app-text-secondary/40">{deck.length - index - 1} remaining</span>
         <span className="text-[12px] font-semibold text-emerald-500">✓ {sessionKnown.size}</span>
-        <button
-          onClick={goNext}
-          disabled={index >= deck.length - 1}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-app-border text-app-text-secondary transition hover:bg-app-bg disabled:opacity-30 dark:border-white/10 dark:text-gray-400"
-          title="Nästa"
-          aria-label="Nästa"
-        >›</button>
       </div>
     </div>
   );
