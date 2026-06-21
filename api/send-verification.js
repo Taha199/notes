@@ -129,9 +129,9 @@ export default async function handler(request, response) {
     return response.status(403).json({ error: 'forbidden' });
   }
 
-  const idToken = typeof request.body?.idToken === 'string' ? request.body.idToken : '';
+  const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
   const lang = request.body?.lang === 'sv' ? 'sv' : 'en';
-  if (!idToken) return response.status(400).json({ error: 'missing-token' });
+  if (!/^\S+@\S+\.\S+$/.test(email)) return response.status(400).json({ error: 'invalid-email' });
   if (isRateLimited(request)) return response.status(202).json({ ok: true });
 
   try {
@@ -148,7 +148,7 @@ export default async function handler(request, response) {
         },
         body: JSON.stringify({
           requestType: 'VERIFY_EMAIL',
-          idToken,
+          email,
           continueUrl: `${APP_URL}/?lang=${lang}`,
           returnOobLink: true,
         }),
@@ -157,14 +157,13 @@ export default async function handler(request, response) {
     const linkData = await linkResponse.json();
     if (!linkResponse.ok) {
       console.error('Firebase OOB error', linkData);
-      return response.status(202).json({ ok: true });
+      return response.status(500).json({ error: 'reset-link-failed', detail: linkData?.error?.message || 'unknown' });
     }
 
     const oobCode = linkData.oobCode || (
       linkData.oobLink ? new URL(linkData.oobLink).searchParams.get('oobCode') : null
     );
-    const recipientEmail = linkData.email;
-    if (!oobCode || !recipientEmail) throw new Error('missing-verify-code');
+    if (!oobCode) throw new Error('missing-verify-code');
 
     const verifyUrl = new URL('/', APP_URL);
     verifyUrl.searchParams.set('mode', 'verifyEmail');
@@ -180,7 +179,7 @@ export default async function handler(request, response) {
       },
       body: JSON.stringify({
         from: process.env.RESEND_FROM || 'Taha Note <onboarding@resend.dev>',
-        to: [recipientEmail],
+        to: [email],
         subject: emailContent.subject,
         html: emailContent.html,
       }),

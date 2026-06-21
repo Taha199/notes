@@ -15,14 +15,17 @@ import {
 } from 'firebase/auth';
 import { auth, googleProvider, EmailAuthProvider } from '../lib/firebase';
 
-async function sendVerificationEmailDirect(user: import('firebase/auth').User): Promise<void> {
+async function sendVerificationEmailDirect(email: string): Promise<void> {
   const lang = document.documentElement.lang === 'en' ? 'en' : 'sv';
-  const idToken = await user.getIdToken();
-  await fetch('/api/send-verification', {
+  const res = await fetch('/api/send-verification', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ idToken, lang }),
+    body: JSON.stringify({ email, lang }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    console.error('Verification email failed', err);
+  }
 }
 
 async function sendResetEmailDirect(email: string): Promise<void> {
@@ -81,8 +84,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithEmailAndPassword(auth, email, pass);
     },
     signUp: async (email, pass) => {
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      await sendVerificationEmailDirect(cred.user);
+      await createUserWithEmailAndPassword(auth, email, pass);
+      await sendVerificationEmailDirect(email);
     },
     signInGoogle: async () => {
       await signInWithPopup(auth, googleProvider);
@@ -109,8 +112,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser({ ...auth.currentUser });
     },
     sendVerification: async () => {
-      if (!auth.currentUser) throw new Error('no-user');
-      await sendVerificationEmailDirect(auth.currentUser);
+      if (!auth.currentUser?.email) throw new Error('no-user');
+      await sendVerificationEmailDirect(auth.currentUser.email);
     },
     applyVerifyCode: async (code) => {
       await applyActionCode(auth, code);
