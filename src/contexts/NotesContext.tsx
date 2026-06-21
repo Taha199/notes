@@ -227,6 +227,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             setDrafts([{ id: 'd1', title: '', html: '' }]);
           }
         } else {
+          // New user with no data — clear everything so previous account's localStorage data doesn't leak
+          setNotes([]);
+          setQuizzes([]);
+          setQuizSets([]);
+          setQuizFolders(ensureRestoredFolder([]));
+          setChats([]);
+          setTokenUsage(0);
+          localStorage.removeItem('malacadhati');
+          localStorage.removeItem('malacadhati_quiz');
+          localStorage.removeItem('malacadhati_quiz_sets');
+          localStorage.removeItem('malacadhati_quiz_folders');
+          localStorage.removeItem('malacadhati_chats');
           draftCounter.current = 1;
           setDrafts([{ id: 'd1', title: '', html: '' }]);
         }
