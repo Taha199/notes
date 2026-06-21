@@ -13,24 +13,13 @@ import {
 } from 'firebase/auth';
 import { auth, googleProvider, EmailAuthProvider } from '../lib/firebase';
 
-const FB_API_KEY = 'AIzaSyDvmhfrgIWtgdSCnvwPgt5u0P4-unx0HL4';
-const APP_ORIGIN = 'https://notes-woad-pi.vercel.app';
-
 async function sendResetEmailDirect(email: string): Promise<void> {
   const lang = document.documentElement.lang === 'en' ? 'en' : 'sv';
-  const res = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${FB_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        requestType: 'PASSWORD_RESET',
-        email,
-        continueUrl: `${APP_ORIGIN}/?lang=${lang}`,
-        canHandleCodeInApp: true,
-      }),
-    }
-  );
+  const res = await fetch('/api/request-password-reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, lang }),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || 'send-failed');
