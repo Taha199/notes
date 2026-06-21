@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNotes } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
@@ -69,12 +69,17 @@ interface QuizItemRowProps {
   sets?: QuizSet[];
   folders?: QuizFolder[];
   onMoveToSet?: (setId: string) => void;
+  hideAnswers?: boolean;
 }
 
-function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet }: QuizItemRowProps) {
+function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers }: QuizItemRowProps) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  // Re-hide a revealed card whenever the global toggle flips
+  useEffect(() => { setRevealed(false); }, [hideAnswers]);
   const status = progressMap?.[item.id];
+  const masked = !!hideAnswers && !revealed;
   return (
     <div className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:border-primary/25 hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
       <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]">
@@ -91,11 +96,21 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
           <span className="mb-2 flex items-center gap-1.5 text-[9px] font-bold uppercase text-primary/70">
             <span className="h-1.5 w-1.5 rounded-full bg-primary/70" /> Svar
           </span>
-          <span
-            dir="auto"
-            className="block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10"
-            dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
-          />
+          <div className="relative w-full min-w-0">
+            <span
+              dir="auto"
+              className={'block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] transition-all dark:text-gray-100 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
+              dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
+            />
+            {masked && (
+              <button
+                onClick={() => setRevealed(true)}
+                className="absolute inset-0 flex items-center justify-center rounded-lg bg-app-bg/40 text-[11px] font-semibold text-app-text-secondary backdrop-blur-[2px] transition hover:text-primary dark:bg-white/[0.02]"
+              >
+                👁️ Visa
+              </button>
+            )}
+          </div>
           {item.explanation && (
             <div className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
               <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Förklaring</p>
@@ -480,6 +495,8 @@ export function QuizPage() {
 
   // Study mode
   const [studyMode, setStudyMode] = useState<'flashcard' | 'written' | null>(null);
+  // Hide answers (self-test): blur all Svar, click a card to reveal it
+  const [hideAnswers, setHideAnswers] = useState(false);
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -954,6 +971,14 @@ export function QuizPage() {
                     📋 Import
                   </button>
                 )}
+                {/* Hide/show answers toggle */}
+                <button
+                  onClick={() => setHideAnswers((v) => !v)}
+                  className={'flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ' + (hideAnswers ? 'border-primary bg-primary text-white' : 'border-app-border bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:border-white/10 dark:text-gray-400')}
+                  title={hideAnswers ? (lang === 'sv' ? 'Visa svar' : 'Show answers') : (lang === 'sv' ? 'Dölj svar' : 'Hide answers')}
+                >
+                  {hideAnswers ? '👁️ ' : '🙈 '}{hideAnswers ? (lang === 'sv' ? 'Visa svar' : 'Show') : (lang === 'sv' ? 'Dölj svar' : 'Hide')}
+                </button>
                 {/* Study buttons */}
                 <button
                   onClick={() => setStudyMode('flashcard')}
@@ -1024,6 +1049,7 @@ export function QuizPage() {
                   favs={favs}
                   onToggleFav={toggleFav}
                   progressMap={currentProgress}
+                  hideAnswers={hideAnswers}
                   sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId)}
                   folders={quizFolders}
                   onMoveToSet={(setId) => {
