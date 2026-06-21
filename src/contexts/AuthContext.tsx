@@ -81,11 +81,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     hasPassword,
     signIn: async (email, pass) => {
-      await signInWithEmailAndPassword(auth, email, pass);
+      const cred = await signInWithEmailAndPassword(auth, email, pass);
+      // Unverified accounts are treated as "not registered" — resend a fresh
+      // verification email on every sign-in attempt until they verify.
+      if (!cred.user.emailVerified) {
+        await sendVerificationEmailDirect(email);
+      }
     },
     signUp: async (email, pass) => {
-      await createUserWithEmailAndPassword(auth, email, pass);
-      await sendVerificationEmailDirect(email);
+      try {
+        await createUserWithEmailAndPassword(auth, email, pass);
+        await sendVerificationEmailDirect(email);
+      } catch (e) {
+        // Email belongs to an existing (likely unverified) account. If the
+        // password matches, sign in and resend verification so the user can
+        // retry — the account stays gated until verified.
+        const code = (e as { code?: string })?.code;
+        if (code === 'auth/email-already-in-use') {
+          const cred = await signInWithEmailAndPassword(auth, email, pass);
+          if (!cred.user.emailVerified) {
+            await sendVerificationEmailDirect(email);
+          }
+          return;
+        }
+        throw e;
+      }
     },
     signInGoogle: async () => {
       await signInWithPopup(auth, googleProvider);
