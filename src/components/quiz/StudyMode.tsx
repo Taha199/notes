@@ -175,6 +175,12 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                     );
                   })}
                 </div>
+                {selectedOpt !== null && current.explanation && (
+                  <div className="mx-auto mt-5 w-full max-w-xl rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3">
+                    <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-amber-300/80">Förklaring</p>
+                    <div dir="auto" className="text-[14px] leading-relaxed text-amber-100/90 [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.explanation) }} />
+                  </div>
+                )}
               </div>
               <div className="mt-6 flex gap-4">
                 {selectedOpt === null ? (
