@@ -1,6 +1,7 @@
 import { createSign } from 'node:crypto';
 
-const APP_URL = 'https://notes-woad-pi.vercel.app';
+const APP_URL = 'https://tahanote.com';
+const ALLOWED_ORIGINS = new Set([APP_URL, 'https://notes-woad-pi.vercel.app']);
 const REQUEST_WINDOW_MS = 60_000;
 const recentRequests = new Map();
 
@@ -125,7 +126,7 @@ export default async function handler(request, response) {
     return response.status(405).json({ error: 'method-not-allowed' });
   }
 
-  if (request.headers.origin && request.headers.origin !== APP_URL) {
+  if (request.headers.origin && !ALLOWED_ORIGINS.has(request.headers.origin)) {
     return response.status(403).json({ error: 'forbidden' });
   }
 
