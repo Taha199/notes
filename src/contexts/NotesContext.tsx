@@ -118,26 +118,12 @@ function nextId() {
 export function NotesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
-  const [notes, setNotes] = useState<Note[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('malacadhati') || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [notes, setNotes] = useState<Note[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [quizzes, setQuizzes] = useState<QuizItem[]>(() => {
-    try { return JSON.parse(localStorage.getItem('malacadhati_quiz') || '[]'); } catch { return []; }
-  });
-  const [quizSets, setQuizSets] = useState<QuizSet[]>(() => {
-    try { return JSON.parse(localStorage.getItem('malacadhati_quiz_sets') || '[]'); } catch { return []; }
-  });
-  const [quizFolders, setQuizFolders] = useState<QuizFolder[]>(() => {
-    try { return ensureRestoredFolder(JSON.parse(localStorage.getItem('malacadhati_quiz_folders') || '[]')); } catch { return ensureRestoredFolder([]); }
-  });
-  const [chats, setChats] = useState<ChatConversation[]>(() => {
-    try { return JSON.parse(localStorage.getItem('malacadhati_chats') || '[]'); } catch { return []; }
-  });
+  const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
+  const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
+  const [quizFolders, setQuizFolders] = useState<QuizFolder[]>(ensureRestoredFolder([]));
+  const [chats, setChats] = useState<ChatConversation[]>([]);
   const [tokenUsage, setTokenUsage] = useState<number>(0);
   const draftCounter = useRef(0);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
