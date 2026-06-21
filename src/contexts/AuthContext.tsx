@@ -8,6 +8,7 @@ import {
   confirmPasswordReset as fbConfirmPasswordReset,
   verifyPasswordResetCode as fbVerifyPasswordResetCode,
   applyActionCode,
+  deleteUser,
   linkWithCredential,
   updateProfile,
   type User,
@@ -48,6 +49,7 @@ interface AuthCtx {
   verifyResetCode: (code: string) => Promise<string>;
   confirmReset: (code: string, newPass: string) => Promise<void>;
   applyVerifyCode: (code: string) => Promise<void>;
+  deleteAccount: () => Promise<void>;
   setPasswordForAccount: (pass: string) => Promise<void>;
   updateDisplayName: (name: string) => Promise<void>;
   sendVerification: () => Promise<void>;
@@ -115,6 +117,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await auth.currentUser.reload();
         setUser({ ...auth.currentUser });
       }
+    },
+    deleteAccount: async () => {
+      if (!auth.currentUser) throw new Error('no-user');
+      await deleteUser(auth.currentUser);
     },
     reloadUser: async () => {
       if (!auth.currentUser) return;

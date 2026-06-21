@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
+import { FB_DB_URL } from '../../lib/firebase';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
@@ -26,7 +27,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 export function SettingsPage() {
-  const { user, hasPassword, updateDisplayName, resetPassword } = useAuth();
+  const { user, hasPassword, updateDisplayName, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { notes, quizzes, quizSets, quizFolders, chats, tokenUsage, resetTokens } = useNotes();
 
@@ -41,6 +42,10 @@ export function SettingsPage() {
 
   // Tokens reset
   const [tokensReset, setTokensReset] = useState(false);
+
+  // Delete account
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleSaveName = async () => {
     const trimmed = nameInput.trim();
@@ -60,6 +65,19 @@ export function SettingsPage() {
     await resetPassword(user.email);
     setPassEmailSent(true);
     setTimeout(() => setPassEmailSent(false), 3000);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    setDeleting(true);
+    try {
+      // Delete all user data from Firebase first
+      await fetch(`${FB_DB_URL}/users/${user.uid}.json`, { method: 'DELETE' });
+      await deleteAccount();
+    } catch {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
   };
 
   const handleResetTokens = () => {
@@ -226,6 +244,64 @@ export function SettingsPage() {
           </button>
         </div>
       </SectionCard>
+
+      {/* Danger Zone */}
+      <div className="overflow-hidden rounded-2xl border border-red-200 bg-white shadow-sm dark:border-red-500/20 dark:bg-gray-900">
+        <div className="border-b border-red-200 px-5 py-3.5 dark:border-red-500/20">
+          <h2 className="text-[13px] font-semibold uppercase tracking-wider text-red-500">
+            {t.settingsDanger}
+          </h2>
+        </div>
+        <div className="px-5 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-app-text dark:text-gray-100">{t.settingsDeleteAccount}</p>
+              <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
+                {lang === 'sv' ? 'Raderar kontot och all data permanent' : 'Permanently deletes account and all data'}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-500 transition hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10"
+            >
+              {t.settingsDeleteAccount}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 text-2xl dark:bg-red-500/10">
+              🗑️
+            </div>
+            <h2 className="mb-2 text-lg font-bold text-app-text dark:text-gray-100">
+              {t.settingsDeleteConfirmTitle}
+            </h2>
+            <p className="mb-6 text-sm text-app-text-secondary dark:text-gray-400">
+              {t.settingsDeleteConfirmSub}
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+                className="w-full rounded-xl bg-red-500 py-3 text-sm font-bold text-white transition hover:bg-red-600 disabled:opacity-60"
+              >
+                {deleting ? t.settingsDeleting : t.settingsDeleteConfirmBtn}
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="w-full rounded-xl border border-app-border py-3 text-sm font-semibold text-app-text transition hover:bg-gray-50 dark:border-white/10 dark:text-gray-200 dark:hover:bg-white/5"
+              >
+                {lang === 'sv' ? 'Avbryt' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSetPass && <SetPasswordModal onClose={() => setShowSetPass(false)} />}
     </div>

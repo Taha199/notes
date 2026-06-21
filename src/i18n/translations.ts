@@ -198,6 +198,13 @@ export interface Translation {
   settingsTokensUsed: string;
   settingsResetTokens: string;
   settingsTokensReset: string;
+  // Danger zone
+  settingsDanger: string;
+  settingsDeleteAccount: string;
+  settingsDeleteConfirmTitle: string;
+  settingsDeleteConfirmSub: string;
+  settingsDeleteConfirmBtn: string;
+  settingsDeleting: string;
   // Email verification
   verifyTitle: string;
   verifySub: string;
@@ -290,6 +297,12 @@ export const LANGS: Record<Lang, Translation> = {
     settingsTokensUsed: 'Total tokens used',
     settingsResetTokens: 'Reset counter',
     settingsTokensReset: '✓ Counter reset',
+    settingsDanger: 'Danger Zone',
+    settingsDeleteAccount: 'Delete Account',
+    settingsDeleteConfirmTitle: 'Delete your account?',
+    settingsDeleteConfirmSub: 'This will permanently delete all your notes, quizzes, chats, and account data. This action cannot be undone.',
+    settingsDeleteConfirmBtn: 'Yes, delete everything',
+    settingsDeleting: 'Deleting...',
     verifyTitle: 'Verify your email',
     verifySub: 'We sent a verification link to',
     verifyResend: 'Resend email',
@@ -379,6 +392,12 @@ export const LANGS: Record<Lang, Translation> = {
     settingsTokensUsed: 'Totalt använda tokens',
     settingsResetTokens: 'Nollställ räknare',
     settingsTokensReset: '✓ Räknare nollställd',
+    settingsDanger: 'Farlig zon',
+    settingsDeleteAccount: 'Radera konto',
+    settingsDeleteConfirmTitle: 'Radera ditt konto?',
+    settingsDeleteConfirmSub: 'Detta raderar permanent alla dina anteckningar, quiz, chattar och kontodata. Åtgärden kan inte ångras.',
+    settingsDeleteConfirmBtn: 'Ja, radera allt',
+    settingsDeleting: 'Raderar...',
     verifyTitle: 'Verifiera din e-post',
     verifySub: 'Vi skickade en verifieringslänk till',
     verifyResend: 'Skicka igen',
