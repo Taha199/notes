@@ -184,10 +184,14 @@ export default async function handler(request, response) {
         html: emailContent.html,
       }),
     });
-    if (!mailResponse.ok) throw new Error('email-send-failed');
+    if (!mailResponse.ok) {
+      const resendError = await mailResponse.json().catch(() => ({}));
+      console.error('Resend send failed', resendError);
+      return response.status(502).json({ error: 'email-send-failed', detail: resendError });
+    }
     return response.status(200).json({ ok: true });
   } catch (error) {
     console.error('Verification email failed', error);
-    return response.status(500).json({ error: 'request-failed' });
+    return response.status(500).json({ error: 'request-failed', detail: String(error) });
   }
 }
