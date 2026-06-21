@@ -6,6 +6,7 @@ import { NotesProvider } from './contexts/NotesContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AuthPage } from './components/auth/AuthPage';
 import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
+import { VerifyEmailPage } from './components/auth/VerifyEmailPage';
 import { BootLoader } from './components/common/BootLoader';
 import { ImageLightbox } from './components/common/ImageLightbox';
 import { Dashboard } from './components/Dashboard';
@@ -35,6 +36,12 @@ function Root() {
   if (loading) return <BootLoader />;
 
   if (!user) return <AuthPage />;
+
+  const needsVerification =
+    !user.emailVerified &&
+    user.providerData.some((p) => p.providerId === 'password');
+
+  if (needsVerification) return <VerifyEmailPage />;
 
   return (
     <NotesProvider>

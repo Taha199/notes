@@ -9,6 +9,7 @@ import {
   verifyPasswordResetCode as fbVerifyPasswordResetCode,
   linkWithCredential,
   updateProfile,
+  sendEmailVerification,
   type User,
 } from 'firebase/auth';
 import { auth, googleProvider, EmailAuthProvider } from '../lib/firebase';
@@ -39,6 +40,8 @@ interface AuthCtx {
   confirmReset: (code: string, newPass: string) => Promise<void>;
   setPasswordForAccount: (pass: string) => Promise<void>;
   updateDisplayName: (name: string) => Promise<void>;
+  sendVerification: () => Promise<void>;
+  reloadUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthCtx | null>(null);
@@ -65,7 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithEmailAndPassword(auth, email, pass);
     },
     signUp: async (email, pass) => {
-      await createUserWithEmailAndPassword(auth, email, pass);
+      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      await sendEmailVerification(cred.user);
     },
     signInGoogle: async () => {
       await signInWithPopup(auth, googleProvider);
@@ -89,6 +93,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     updateDisplayName: async (name) => {
       if (!auth.currentUser) throw new Error('no-user');
       await updateProfile(auth.currentUser, { displayName: name });
+      setUser({ ...auth.currentUser });
+    },
+    sendVerification: async () => {
+      if (!auth.currentUser) throw new Error('no-user');
+      await sendEmailVerification(auth.currentUser);
+    },
+    reloadUser: async () => {
+      if (!auth.currentUser) return;
+      await auth.currentUser.reload();
       setUser({ ...auth.currentUser });
     },
   };

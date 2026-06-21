@@ -198,6 +198,13 @@ export interface Translation {
   settingsTokensUsed: string;
   settingsResetTokens: string;
   settingsTokensReset: string;
+  // Email verification
+  verifyTitle: string;
+  verifySub: string;
+  verifyResend: string;
+  verifyResent: string;
+  verifyDone: string;
+  verifyCheck: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -283,6 +290,12 @@ export const LANGS: Record<Lang, Translation> = {
     settingsTokensUsed: 'Total tokens used',
     settingsResetTokens: 'Reset counter',
     settingsTokensReset: '✓ Counter reset',
+    verifyTitle: 'Verify your email',
+    verifySub: 'We sent a verification link to',
+    verifyResend: 'Resend email',
+    verifyResent: '✓ Email sent',
+    verifyDone: 'I have verified',
+    verifyCheck: 'Checking...',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -366,5 +379,11 @@ export const LANGS: Record<Lang, Translation> = {
     settingsTokensUsed: 'Totalt använda tokens',
     settingsResetTokens: 'Nollställ räknare',
     settingsTokensReset: '✓ Räknare nollställd',
+    verifyTitle: 'Verifiera din e-post',
+    verifySub: 'Vi skickade en verifieringslänk till',
+    verifyResend: 'Skicka igen',
+    verifyResent: '✓ E-post skickad',
+    verifyDone: 'Jag har verifierat',
+    verifyCheck: 'Kontrollerar...',
   },
 };
