@@ -161,7 +161,9 @@ export default async function handler(request, response) {
       throw new Error('reset-link-failed');
     }
 
-    const oobCode = new URL(linkData.oobLink).searchParams.get('oobCode');
+    const oobCode = linkData.oobCode || (
+      linkData.oobLink ? new URL(linkData.oobLink).searchParams.get('oobCode') : null
+    );
     if (!oobCode) throw new Error('missing-reset-code');
     const resetUrl = new URL('/', APP_URL);
     resetUrl.searchParams.set('mode', 'resetPassword');
