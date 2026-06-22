@@ -21,3 +21,6 @@ export const googleProvider = new GoogleAuthProvider();
 export { EmailAuthProvider };
 
 export const FB_DB_URL = 'https://noteclaude-a5b3b-default-rtdb.europe-west1.firebasedatabase.app';
+
+// Only this account sees the admin panel.
+export const ADMIN_EMAIL = 'abdomar200@gmail.com';

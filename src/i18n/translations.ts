@@ -180,6 +180,7 @@ export interface Translation {
   designedBy: string;
   // Settings page
   settingsTitle: string;
+  adminTitle: string;
   settingsProfile: string;
   settingsProfileName: string;
   settingsProfileEmail: string;
@@ -280,6 +281,7 @@ export const LANGS: Record<Lang, Translation> = {
     marketingTitle: 'Your notes, everywhere.', marketingDesc: 'A modern place to write, organize, and sync everything you need.',
     designedBy: '✦ Designed by Dr. Abdullah Taha ✦',
     settingsTitle: 'Settings',
+    adminTitle: 'User Panel',
     settingsProfile: 'Profile',
     settingsProfileName: 'Display name',
     settingsProfileEmail: 'Email address',
@@ -376,6 +378,7 @@ export const LANGS: Record<Lang, Translation> = {
     marketingTitle: 'Dina anteckningar, överallt.', marketingDesc: 'En modern plats för att skriva, organisera och synkronisera allt du behöver.',
     designedBy: '✦ Designad av Dr. Abdullah Taha ✦',
     settingsTitle: 'Inställningar',
+    adminTitle: 'Användarpanel',
     settingsProfile: 'Profil',
     settingsProfileName: 'Visningsnamn',
     settingsProfileEmail: 'E-postadress',

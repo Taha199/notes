@@ -19,7 +19,7 @@ export interface DraftContent {
   html: string;
 }
 
-export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz' | 'chat' | 'settings';
+export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz' | 'chat' | 'settings' | 'admin';
 
 export interface ChatAttachment {
   name: string;

@@ -21,7 +21,7 @@ function returnToSignIn() {
 }
 
 function Root() {
-  const { user, loading, applyVerifyCode } = useAuth();
+  const { user, loading, applyVerifyCode, blocked, signOut } = useAuth();
   const [{ mode, oobCode }] = useState(getUrlAction);
   const [verifying, setVerifying] = useState(mode === 'verifyEmail' && !!oobCode);
 
@@ -55,6 +55,24 @@ function Root() {
     user.providerData.some((p) => p.providerId === 'password');
 
   if (needsVerification) return <VerifyEmailPage />;
+
+  if (blocked) {
+    return (
+      <div dir="ltr" className="flex min-h-screen flex-col items-center justify-center gap-4 bg-app-bg px-6 text-center">
+        <div className="text-5xl">🚫</div>
+        <h1 className="text-xl font-bold text-app-text dark:text-gray-100">Ditt konto har blockerats</h1>
+        <p className="max-w-sm text-sm text-app-text-secondary dark:text-gray-400">
+          Kontakta administratören om du tror att detta är ett misstag.
+        </p>
+        <button
+          onClick={signOut}
+          className="rounded-xl border border-app-border px-5 py-2.5 text-sm font-semibold text-app-text-secondary transition hover:bg-app-border/30 dark:border-white/10"
+        >
+          Logga ut
+        </button>
+      </div>
+    );
+  }
 
   return (
     <NotesProvider>

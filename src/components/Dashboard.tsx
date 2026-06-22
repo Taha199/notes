@@ -13,6 +13,7 @@ import { FilesPage } from './files/FilesPage';
 import { QuizPage } from './quiz/QuizPage';
 import { ChatPage } from './chat/ChatPage';
 import { SettingsPage } from './settings/SettingsPage';
+import { AdminPanel } from './admin/AdminPanel';
 import { ConfirmDialog } from './common/ConfirmDialog';
 
 function EmptyState({ text }: { text: string }) {
@@ -243,6 +244,7 @@ export function Dashboard() {
           {page === 'quiz' && <QuizPage />}
           {page === 'chat' && <ChatPage />}
           {page === 'settings' && <SettingsPage />}
+          {page === 'admin' && <AdminPanel />}
 
           {page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">

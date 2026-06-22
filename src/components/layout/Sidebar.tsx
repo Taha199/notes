@@ -3,6 +3,7 @@ import type { Page } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { ADMIN_EMAIL } from '../../lib/firebase';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Logo } from '../common/Logo';
 
@@ -48,6 +49,7 @@ export function Sidebar({
     { page: 'archive', icon: '🗄', label: t.navArchive, badge: counts.archive, badgeClass: 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400' },
     { page: 'trash', icon: '🗑', label: t.navTrash, badge: counts.trash, badgeClass: 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400' },
     { page: 'settings', icon: '⚙️', label: t.settingsTitle },
+    ...(user?.email === ADMIN_EMAIL ? [{ page: 'admin' as Page, icon: '👑', label: t.adminTitle }] : []),
   ];
 
   const NavBtn = ({ it }: { it: (typeof items)[number] }) => (
