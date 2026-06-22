@@ -29,9 +29,11 @@ interface Props {
   initialProgress?: Record<number, 'known' | 'learning'>;
   onClose: () => void;
   onSaveProgress: (p: Record<number, 'known' | 'learning'>) => void;
+  allItems?: QuizItem[];
+  lang?: 'sv' | 'en';
 }
 
-export function StudyMode({ title, items, mode, initialProgress = {}, onClose, onSaveProgress }: Props) {
+export function StudyMode({ title, items, mode, initialProgress = {}, onClose, onSaveProgress, allItems, lang = 'sv' }: Props) {
   const [deck, setDeck] = useState(() => shuffleArr(items));
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -43,6 +45,18 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
   const [done, setDone] = useState(false);
   const [round, setRound] = useState(1);
   const [selectedOpt, setSelectedOpt] = useState<number | null>(null);
+  const [chooserOpen, setChooserOpen] = useState(false);
+
+  const pool = allItems ?? items;
+  const pickScope = (subset: QuizItem[]) => {
+    if (!subset.length) return;
+    setDeck(shuffleArr(subset));
+    setIndex(0);
+    setDone(false);
+    setSessionKnown(new Set());
+    setSessionLearning(new Set());
+    setChooserOpen(false);
+  };
 
   const current = deck[index];
 
@@ -116,7 +130,14 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
           <p className="text-[11px] font-bold uppercase tracking-wider text-primary">{mode === 'flashcard' ? '🃏 Flashcards' : '✏️ Written'}</p>
           <p className="text-[11px] text-app-text-secondary dark:text-gray-500 truncate max-w-[180px]">{title}</p>
         </div>
-        <span className="text-[12px] font-semibold text-app-text-secondary dark:text-gray-400">{index + 1}/{deck.length}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setChooserOpen(true)}
+            className="flex items-center gap-1 rounded-lg border border-app-border px-2.5 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-bg dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10"
+            title={lang === 'sv' ? 'Välj frågor' : 'Choose questions'}
+          >🎯 {lang === 'sv' ? 'Välj' : 'Pick'}</button>
+          <span className="text-[12px] font-semibold text-app-text-secondary dark:text-gray-400">{index + 1}/{deck.length}</span>
+        </div>
       </div>
 
       {/* Progress bar */}
@@ -292,6 +313,44 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
         <span className="text-[11px] text-app-text-secondary/40">{deck.length - index - 1} remaining</span>
         <span className="text-[12px] font-semibold text-emerald-500">✓ {sessionKnown.size}</span>
       </div>
+
+      {/* In-session scope chooser */}
+      {chooserOpen && (() => {
+        const known = pool.filter((it) => progress[it.id] === 'known');
+        const learning = pool.filter((it) => progress[it.id] === 'learning');
+        const fresh = pool.filter((it) => !progress[it.id]);
+        const scopes = [
+          { key: 'all', label: lang === 'sv' ? 'Alla frågor' : 'All questions', items: pool, cls: 'text-app-text dark:text-gray-100' },
+          { key: 'new', label: lang === 'sv' ? 'Ej studerade' : 'Not studied', items: fresh, cls: 'text-app-text-secondary' },
+          { key: 'learning', label: lang === 'sv' ? 'Kan inte (fel)' : "Don't know", items: learning, cls: 'text-red-500' },
+          { key: 'known', label: lang === 'sv' ? 'Kan (rätt)' : 'Known', items: known, cls: 'text-emerald-500' },
+        ];
+        return (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm" onClick={() => setChooserOpen(false)}>
+            <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-app-border px-5 py-3.5 dark:border-white/10">
+                <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">
+                  {mode === 'flashcard' ? '🃏 Flashcards' : '✏️ Written'} — {lang === 'sv' ? 'vad vill du plugga?' : 'what to study?'}
+                </p>
+                <button onClick={() => setChooserOpen(false)} className="text-app-text-secondary/50 hover:text-app-text">✕</button>
+              </div>
+              <div className="flex flex-col p-2">
+                {scopes.map((s) => (
+                  <button
+                    key={s.key}
+                    disabled={s.items.length === 0}
+                    onClick={() => pickScope(s.items)}
+                    className="flex items-center justify-between rounded-xl px-4 py-3 text-left transition-colors hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-white/5"
+                  >
+                    <span className={'text-[14px] font-medium ' + s.cls}>{s.label}</span>
+                    <span className="rounded-full bg-app-bg px-2.5 py-0.5 text-[11px] font-semibold text-app-text-secondary/70 dark:bg-white/10">{s.items.length}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

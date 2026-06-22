@@ -1178,6 +1178,8 @@ export function QuizPage() {
         <StudyMode
           title={selectedSet?.name ?? 'Questions from Notes'}
           items={studyDeck ?? displayItems}
+          allItems={displayItems}
+          lang={lang}
           mode={studyMode}
           initialProgress={currentProgress}
           onClose={() => { setStudyMode(null); setStudyDeck(null); }}
