@@ -1037,6 +1037,16 @@ export function QuizPage() {
                 >
                   📊 {lang === 'sv' ? 'Gruppera' : 'Group'}
                 </button>
+                {/* Clear classification (reset progress) */}
+                {Object.keys(currentProgress).length > 0 && (
+                  <button
+                    onClick={() => { handleSaveProgress({}); setGroupByProgress(false); }}
+                    className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-3 py-1.5 text-[11px] font-semibold text-app-text-secondary transition-colors hover:border-red-300 hover:text-red-500 dark:border-white/10 dark:text-gray-400"
+                    title={lang === 'sv' ? 'Rensa klassificering (nollställ kan/kan inte)' : 'Clear classification (reset known/unknown)'}
+                  >
+                    ♻️ {lang === 'sv' ? 'Rensa' : 'Reset'}
+                  </button>
+                )}
                 {/* Study buttons */}
                 <button
                   onClick={() => setPendingStudyMode('flashcard')}
