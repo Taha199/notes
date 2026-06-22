@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { useNotes } from '../../contexts/NotesContext';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 import { StudyMode } from './StudyMode';
@@ -64,7 +64,7 @@ interface QuizItemRowProps {
   speakingId: number | null;
   onSpeak: (id: number) => void;
   favs: Set<number>;
-  onToggleFav: (id: number) => void;
+  onToggleFav: (item: QuizItem) => void;
   progressMap?: Record<number, 'known' | 'learning'>;
   sets?: QuizSet[];
   folders?: QuizFolder[];
@@ -149,7 +149,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
               >☑️</button>
             )
           )}
-          <button onClick={() => onToggleFav(item.id)} className={'text-base transition-colors ' + (favs.has(item.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
+          <button onClick={() => onToggleFav(item)} className={'text-base transition-colors ' + ((favs.has(item.id) || item.favOf != null) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
           <button
             onClick={() => onSpeak(item.id)}
             className={'transition-colors ' + (speakingId === item.id ? 'text-primary' : 'text-app-text-secondary/40 hover:text-primary')}
@@ -519,7 +519,13 @@ export function QuizPage() {
   const dragSetId = useRef<string | null>(null);
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
-  const [favs, setFavs] = useState<Set<number>>(new Set());
+  // Favorites are persisted as copies inside the system "Favoriter" set.
+  // favs = the set of ORIGINAL item ids that have a copy there.
+  const favItems = allQuizSets.find((s) => s.id === FAVORITES_SET_ID)?.items ?? [];
+  const favs = useMemo(
+    () => new Set(favItems.map((i) => i.favOf).filter((x): x is number => x != null)),
+    [favItems]
+  );
   const [speakingId, setSpeakingId] = useState<number | null>(null);
   const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
 
@@ -571,7 +577,20 @@ export function QuizPage() {
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const changeSort = (mode: 'manual' | 'name' | 'count') => { setSetSort(mode); localStorage.setItem('malacadhati_quiz_setsort', mode); setSortMenuOpen(false); };
 
-  const toggleFav = (id: number) => setFavs((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleFav = (item: QuizItem) => {
+    // Inside the Favorites set: the card itself is the copy — remove it.
+    if (item.favOf != null) { removeItemFromSet(FAVORITES_SET_ID, item.id); return; }
+    const existing = favItems.find((i) => i.favOf === item.id);
+    if (existing) {
+      removeItemFromSet(FAVORITES_SET_ID, existing.id);
+    } else {
+      addItemToSet(FAVORITES_SET_ID, {
+        noteId: item.noteId, noteTitle: item.noteTitle, question: item.question, answer: item.answer,
+        date: item.date, options: item.options, correctIndex: item.correctIndex,
+        correctIndexes: item.correctIndexes, explanation: item.explanation, favOf: item.id,
+      });
+    }
+  };
 
   const handleSpeak = (id: number) => {
     const item = selectedSet ? selectedSet.items.find((i) => i.id === id) : quizzes.find((q) => q.id === id);
@@ -743,7 +762,7 @@ export function QuizPage() {
         progressMap={currentProgress}
         hideAnswers={hideAnswers}
         onSetStatus={setItemStatus}
-        sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId)}
+        sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId && !s.system)}
         folders={quizFolders}
         onMoveToSet={(setId) => {
           addItemToSet(setId, { ...item });
@@ -800,7 +819,7 @@ export function QuizPage() {
       <div
         key={s.id}
         className="group mb-0.5"
-        draggable
+        draggable={!s.system}
         onDragStart={(e) => {
           dragSetId.current = s.id;
           e.dataTransfer.effectAllowed = 'move';
@@ -837,22 +856,24 @@ export function QuizPage() {
           </div>
         ) : (
           <div
-            onContextMenu={(e) => openCtxMenu(e, s.id)}
+            onContextMenu={(e) => { if (!s.system) openCtxMenu(e, s.id); }}
             className={'relative flex w-full flex-col overflow-hidden rounded-lg text-left text-[13px] font-medium transition-all ' +
               (selectedSetId === s.id ? 'bg-primary/10 dark:bg-primary/20' : 'hover:bg-white dark:hover:bg-white/5')}
           >
             <span className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm" style={{ backgroundColor: s.color || '#9ca3af' }} />
             <div className="flex w-full items-center">
-              <span className="flex-shrink-0 cursor-grab select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing">⠿</span>
+              <span className="flex-shrink-0 select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100">{s.system === 'favorites' ? '⭐' : '⠿'}</span>
               <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
                 <span className={'flex-1 truncate ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>{s.name}</span>
                 <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items?.length ?? 0}</span>
               </button>
-              <button
-                onClick={(e) => openCtxMenu(e, s.id)}
-                className="mr-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover:opacity-100 dark:hover:bg-white/10"
-                title="Options"
-              >···</button>
+              {!s.system && (
+                <button
+                  onClick={(e) => openCtxMenu(e, s.id)}
+                  className="mr-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover:opacity-100 dark:hover:bg-white/10"
+                  title="Options"
+                >···</button>
+              )}
             </div>
             {total > 0 && known > 0 && (
               <div className="mb-1.5 flex items-center gap-2 pl-10 pr-3">
@@ -973,8 +994,8 @@ export function QuizPage() {
                           : 'hover:bg-white dark:hover:bg-white/5')}
                   >
                     <span className="absolute inset-y-0 left-0 w-[3px]" style={{ backgroundColor: f.color || '#9ca3af' }} />
-                    <span title={f.system ? (lang === 'sv' ? 'Återställda set' : 'Restored Sets') : f.name} className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
-                      {f.system ? `🔒 ${lang === 'sv' ? 'Återställda' : 'Restored'}` : f.name}
+                    <span title={f.system === 'favorites' ? 'Favoriter' : f.system ? (lang === 'sv' ? 'Återställda set' : 'Restored Sets') : f.name} className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
+                      {f.system === 'favorites' ? '⭐ Favoriter' : f.system ? `🔒 ${lang === 'sv' ? 'Återställda' : 'Restored'}` : f.name}
                     </span>
                     <span className="block text-[9px] text-app-text-secondary/50">{setsInFolder(f.id).length} set</span>
                     {!f.system && (

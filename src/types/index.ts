@@ -59,6 +59,8 @@ export interface QuizItem {
   updatedAt?: string;
   trashed?: boolean;
   deletedAt?: string;
+  // When this item is a copy living in the Favorites set, points at the original item's id.
+  favOf?: number;
 }
 
 export interface QuizSet {
@@ -72,6 +74,8 @@ export interface QuizSet {
   deletedAt?: string;
   // OneNote-style notebook this set belongs to (unset = ungrouped).
   folderId?: string;
+  // Non-deletable system set (e.g. the Favorites mirror set).
+  system?: 'favorites';
 }
 
 // A OneNote-style notebook/folder that groups quiz sets.
@@ -83,5 +87,5 @@ export interface QuizFolder {
   trashed?: boolean;
   deletedAt?: string;
   createdAt: string;
-  system?: 'restored';
+  system?: 'restored' | 'favorites';
 }

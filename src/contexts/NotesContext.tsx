@@ -71,6 +71,8 @@ const NotesContext = createContext<NotesCtx | null>(null);
 
 const AUTO_QUIZ_COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#10b981', '#ec4899', '#06b6d4', '#f97316'];
 const RESTORED_FOLDER_ID = 'system-restored-sets';
+export const FAVORITES_FOLDER_ID = 'system-favorites';
+export const FAVORITES_SET_ID = 'system-favorites-set';
 
 function ensureRestoredFolder(folders: QuizFolder[]) {
   const restored = folders.find((folder) => folder.id === RESTORED_FOLDER_ID || folder.system === 'restored');
@@ -80,6 +82,34 @@ function ensureRestoredFolder(folders: QuizFolder[]) {
       : folder);
   }
   return [{ id: RESTORED_FOLDER_ID, name: 'Restored Sets', system: 'restored' as const, createdAt: new Date().toISOString(), color: '#6c63ff', colorInitialized: true }, ...folders];
+}
+
+function ensureFavoritesFolder(folders: QuizFolder[]) {
+  const fav = folders.find((folder) => folder.id === FAVORITES_FOLDER_ID || folder.system === 'favorites');
+  if (fav) {
+    return folders.map((folder) => folder.id === fav.id
+      ? { ...folder, id: FAVORITES_FOLDER_ID, name: 'Favoriter', system: 'favorites' as const, trashed: false, deletedAt: undefined, color: folder.color || '#f59e0b', colorInitialized: true }
+      : folder);
+  }
+  const favFolder: QuizFolder = { id: FAVORITES_FOLDER_ID, name: 'Favoriter', system: 'favorites', createdAt: new Date().toISOString(), color: '#f59e0b', colorInitialized: true };
+  // Place right after the restored folder (which sits first).
+  const idx = folders.findIndex((f) => f.id === RESTORED_FOLDER_ID || f.system === 'restored');
+  if (idx >= 0) {
+    const copy = [...folders];
+    copy.splice(idx + 1, 0, favFolder);
+    return copy;
+  }
+  return [favFolder, ...folders];
+}
+
+function ensureFavoritesSet(sets: QuizSet[]) {
+  const fav = sets.find((s) => s.id === FAVORITES_SET_ID || s.system === 'favorites');
+  if (fav) {
+    return sets.map((s) => s.id === fav.id
+      ? { ...s, id: FAVORITES_SET_ID, name: 'Favoriter', system: 'favorites' as const, folderId: FAVORITES_FOLDER_ID, trashed: false, deletedAt: undefined, color: s.color || '#f59e0b', colorInitialized: true }
+      : s);
+  }
+  return [...sets, { id: FAVORITES_SET_ID, name: 'Favoriter', system: 'favorites' as const, folderId: FAVORITES_FOLDER_ID, items: [], createdAt: new Date().toISOString(), color: '#f59e0b', colorInitialized: true }];
 }
 
 function colorDistance(a: string, b: string) {
@@ -253,8 +283,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!loaded || !user) return;
     setQuizFolders((prev) => {
-      const next = ensureRestoredFolder(prev);
+      const next = ensureFavoritesFolder(ensureRestoredFolder(prev));
       persistFolders(next);
+      return next;
+    });
+    setQuizSets((prev) => {
+      const next = ensureFavoritesSet(prev);
+      persistSets(next);
       return next;
     });
     // Run once after each account finishes loading.
@@ -456,6 +491,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteQuizSet = (id: string) => {
+    if (id === FAVORITES_SET_ID) return;
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === id ? { ...s, trashed: true, deletedAt: nowStr() } : s);
       persistSets(next);
@@ -549,7 +585,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteQuizFolder = (id: string) => {
-    if (id === RESTORED_FOLDER_ID) return;
+    if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
     setQuizFolders((prev) => {
       const next = prev.map((f) => f.id === id ? { ...f, trashed: true, deletedAt: nowStr() } : f);
       persistFolders(next);
