@@ -70,9 +70,10 @@ interface QuizItemRowProps {
   folders?: QuizFolder[];
   onMoveToSet?: (setId: string) => void;
   hideAnswers?: boolean;
+  onSetStatus?: (id: number, status: 'known' | 'learning' | null) => void;
 }
 
-function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers }: QuizItemRowProps) {
+function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus }: QuizItemRowProps) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
@@ -88,7 +89,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
       : 'border-l-4 border-l-amber-400';
   const studyMore = status !== 'known';
   return (
-    <div className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:border-primary/25 hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
+    <div className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
       <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]">
         <div className="flex min-w-0 flex-col items-start px-5 py-4">
           <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
@@ -133,6 +134,21 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
           )}
         </div>
         <div className="flex items-center justify-end gap-4 border-t border-app-border px-4 py-2 dark:border-white/10 sm:flex-col sm:justify-center sm:gap-2 sm:border-l sm:border-t-0 sm:px-2">
+          {onSetStatus && (
+            status === 'known' ? (
+              <button
+                onClick={() => onSetStatus(item.id, 'learning')}
+                className="text-base text-emerald-500 transition-colors hover:text-red-500"
+                title="Markera som ej klar (plugga mer)"
+              >✅</button>
+            ) : (
+              <button
+                onClick={() => onSetStatus(item.id, 'known')}
+                className="text-base text-app-text-secondary/40 transition-colors hover:text-emerald-500"
+                title="Markera som studerad (kan)"
+              >☑️</button>
+            )
+          )}
           <button onClick={() => onToggleFav(item.id)} className={'text-base transition-colors ' + (favs.has(item.id) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
           <button
             onClick={() => onSpeak(item.id)}
@@ -517,6 +533,8 @@ export function QuizPage() {
   // Ordering: default = study priority (not-known/not-studied first, known last).
   // Toggle to chronological (original) order.
   const [chronological, setChronological] = useState(false);
+  // Which questions to show: all / only to-study (not known) / only known
+  const [viewFilter, setViewFilter] = useState<'all' | 'study' | 'known'>('all');
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -687,6 +705,13 @@ export function QuizPage() {
     saveProgress(next);
   };
 
+  // Manually mark a single question as studied/known or send it back to "needs study"
+  const setItemStatus = (id: number, status: 'known' | 'learning' | null) => {
+    const p = { ...currentProgress };
+    if (status) p[id] = status; else delete p[id];
+    handleSaveProgress(p);
+  };
+
   const selectedSet: QuizSet | undefined = quizSets.find((s) => s.id === selectedSetId);
   const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : [...quizzes].reverse();
 
@@ -717,6 +742,7 @@ export function QuizPage() {
         onToggleFav={toggleFav}
         progressMap={currentProgress}
         hideAnswers={hideAnswers}
+        onSetStatus={setItemStatus}
         sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId)}
         folders={quizFolders}
         onMoveToSet={(setId) => {
@@ -736,9 +762,14 @@ export function QuizPage() {
     if (!s) return 1;
     return 2; // known
   };
+  const filteredItems = displayItems.filter((it) => {
+    if (viewFilter === 'known') return currentProgress[it.id] === 'known';
+    if (viewFilter === 'study') return currentProgress[it.id] !== 'known';
+    return true;
+  });
   const orderedItems = chronological
-    ? displayItems
-    : displayItems.map((it, i) => ({ it, i })).sort((a, b) => priorityRank(a.it) - priorityRank(b.it) || a.i - b.i).map((x) => x.it);
+    ? filteredItems
+    : filteredItems.map((it, i) => ({ it, i })).sort((a, b) => priorityRank(a.it) - priorityRank(b.it) || a.i - b.i).map((x) => x.it);
 
   const sortedSets = setSort === 'manual'
     ? quizSets
@@ -1031,6 +1062,17 @@ export function QuizPage() {
             </span>
             {displayItems.length > 0 && (
               <div className="flex items-center gap-1.5">
+                {/* View filter: all / to-study / known */}
+                <select
+                  value={viewFilter}
+                  onChange={(e) => setViewFilter(e.target.value as 'all' | 'study' | 'known')}
+                  className="rounded-xl border border-app-border bg-app-bg px-2.5 py-1.5 text-[11px] font-semibold text-app-text-secondary outline-none transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
+                  title={lang === 'sv' ? 'Visa frågor' : 'Show questions'}
+                >
+                  <option value="all">{lang === 'sv' ? 'Alla frågor' : 'All questions'}</option>
+                  <option value="study">{lang === 'sv' ? 'Att plugga' : 'To study'}</option>
+                  <option value="known">{lang === 'sv' ? 'Kan' : 'Known'}</option>
+                </select>
                 {/* Import - only for sets */}
                 {selectedSetId && (
                   <button
