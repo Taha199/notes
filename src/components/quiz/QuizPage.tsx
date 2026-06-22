@@ -531,8 +531,7 @@ export function QuizPage() {
 
   // Study mode
   const [studyMode, setStudyMode] = useState<'flashcard' | 'written' | null>(null);
-  // Scope chooser: which questions to study before launching
-  const [pendingStudyMode, setPendingStudyMode] = useState<'flashcard' | 'written' | null>(null);
+  // Optional filtered deck chosen from inside study mode (🎯 Välj)
   const [studyDeck, setStudyDeck] = useState<QuizItem[] | null>(null);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
   const [hideAnswers, setHideAnswers] = useState(false);
@@ -1122,13 +1121,13 @@ export function QuizPage() {
                 </button>
                 {/* Study buttons */}
                 <button
-                  onClick={() => setPendingStudyMode('flashcard')}
+                  onClick={() => { setStudyDeck(null); setStudyMode('flashcard'); }}
                   className="flex items-center gap-1 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                 >
                   🃏 Flashcards
                 </button>
                 <button
-                  onClick={() => setPendingStudyMode('written')}
+                  onClick={() => { setStudyDeck(null); setStudyMode('written'); }}
                   className="flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
                 >
                   ✏️ Written
@@ -1189,50 +1188,6 @@ export function QuizPage() {
           </div>
         </div>
       </div>
-
-      {/* Study scope chooser */}
-      {pendingStudyMode && (() => {
-        const known = displayItems.filter((it) => currentProgress[it.id] === 'known');
-        const learning = displayItems.filter((it) => currentProgress[it.id] === 'learning');
-        const fresh = displayItems.filter((it) => !currentProgress[it.id]);
-        const scopes = [
-          { key: 'all', label: lang === 'sv' ? 'Alla frågor' : 'All questions', items: displayItems, cls: 'text-app-text dark:text-gray-100' },
-          { key: 'new', label: lang === 'sv' ? 'Ej studerade' : 'Not studied', items: fresh, cls: 'text-app-text-secondary' },
-          { key: 'learning', label: lang === 'sv' ? 'Kan inte (fel)' : "Don't know", items: learning, cls: 'text-red-500' },
-          { key: 'known', label: lang === 'sv' ? 'Kan (rätt)' : 'Known', items: known, cls: 'text-emerald-500' },
-        ];
-        const start = (items: QuizItem[]) => {
-          if (!items.length) return;
-          setStudyDeck(items);
-          setStudyMode(pendingStudyMode);
-          setPendingStudyMode(null);
-        };
-        return (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm" onClick={() => setPendingStudyMode(null)}>
-            <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between border-b border-app-border px-5 py-3.5 dark:border-white/10">
-                <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">
-                  {pendingStudyMode === 'flashcard' ? '🃏 Flashcards' : '✏️ Written'} — {lang === 'sv' ? 'vad vill du plugga?' : 'what to study?'}
-                </p>
-                <button onClick={() => setPendingStudyMode(null)} className="text-app-text-secondary/50 hover:text-app-text">✕</button>
-              </div>
-              <div className="flex flex-col p-2">
-                {scopes.map((s) => (
-                  <button
-                    key={s.key}
-                    disabled={s.items.length === 0}
-                    onClick={() => start(s.items)}
-                    className="flex items-center justify-between rounded-xl px-4 py-3 text-left transition-colors hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-white/5"
-                  >
-                    <span className={'text-[14px] font-medium ' + s.cls}>{s.label}</span>
-                    <span className="rounded-full bg-app-bg px-2.5 py-0.5 text-[11px] font-semibold text-app-text-secondary/70 dark:bg-white/10">{s.items.length}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Study mode overlay */}
       {studyMode && (studyDeck ?? displayItems).length > 0 && (
