@@ -497,6 +497,8 @@ export function QuizPage() {
   const [studyMode, setStudyMode] = useState<'flashcard' | 'written' | null>(null);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
   const [hideAnswers, setHideAnswers] = useState(false);
+  // Group questions by study progress (known / learning / not studied)
+  const [groupByProgress, setGroupByProgress] = useState(false);
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -669,6 +671,51 @@ export function QuizPage() {
 
   const selectedSet: QuizSet | undefined = quizSets.find((s) => s.id === selectedSetId);
   const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : [...quizzes].reverse();
+
+  const renderItem = (item: QuizItem) => (
+    editingId === item.id ? (
+      <EditPanel
+        key={item.id}
+        question={editQ}
+        answer={editA}
+        initialOptions={item.options}
+        initialCorrect={item.correctIndex}
+        initialCorrects={item.correctIndexes}
+        initialExplanation={item.explanation}
+        onChangeQ={setEditQ}
+        onChangeA={setEditA}
+        onSave={saveEdit}
+        onCancel={() => setEditingId(null)}
+      />
+    ) : (
+      <QuizItemRow
+        key={item.id}
+        item={item}
+        onEdit={startEdit}
+        onDelete={() => selectedSetId ? removeItemFromSet(selectedSetId, item.id) : deleteQuiz(item.id)}
+        speakingId={speakingId}
+        onSpeak={handleSpeak}
+        favs={favs}
+        onToggleFav={toggleFav}
+        progressMap={currentProgress}
+        hideAnswers={hideAnswers}
+        sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId)}
+        folders={quizFolders}
+        onMoveToSet={(setId) => {
+          addItemToSet(setId, { ...item });
+          if (selectedSetId) removeItemFromSet(selectedSetId, item.id);
+          else deleteQuiz(item.id);
+        }}
+      />
+    )
+  );
+
+  // Split items into known / learning / not-studied for grouped view
+  const progressGroups = [
+    { key: 'known', label: lang === 'sv' ? '✓ Kan' : '✓ Known', cls: 'text-emerald-500', items: displayItems.filter((it) => currentProgress[it.id] === 'known') },
+    { key: 'learning', label: lang === 'sv' ? '✗ Kan inte' : "✗ Don't know", cls: 'text-red-400', items: displayItems.filter((it) => currentProgress[it.id] === 'learning') },
+    { key: 'new', label: lang === 'sv' ? '• Ej studerat' : '• Not studied', cls: 'text-app-text-secondary/60', items: displayItems.filter((it) => !currentProgress[it.id]) },
+  ].filter((g) => g.items.length > 0);
 
   const sortedSets = setSort === 'manual'
     ? quizSets
@@ -979,6 +1026,14 @@ export function QuizPage() {
                 >
                   {hideAnswers ? '👁️ ' : '🙈 '}{hideAnswers ? (lang === 'sv' ? 'Visa svar' : 'Show') : (lang === 'sv' ? 'Dölj svar' : 'Hide')}
                 </button>
+                {/* Group by progress toggle */}
+                <button
+                  onClick={() => setGroupByProgress((v) => !v)}
+                  className={'flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ' + (groupByProgress ? 'border-primary bg-primary text-white' : 'border-app-border bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:border-white/10 dark:text-gray-400')}
+                  title={lang === 'sv' ? 'Gruppera efter framsteg' : 'Group by progress'}
+                >
+                  📊 {lang === 'sv' ? 'Gruppera' : 'Group'}
+                </button>
                 {/* Study buttons */}
                 <button
                   onClick={() => setStudyMode('flashcard')}
@@ -1023,43 +1078,19 @@ export function QuizPage() {
 
           {/* Questions list */}
           <div className="flex flex-col gap-2">
-            {displayItems.map((item) => (
-              editingId === item.id ? (
-                <EditPanel
-                  key={item.id}
-                  question={editQ}
-                  answer={editA}
-                  initialOptions={item.options}
-                  initialCorrect={item.correctIndex}
-                  initialCorrects={item.correctIndexes}
-                  initialExplanation={item.explanation}
-                  onChangeQ={setEditQ}
-                  onChangeA={setEditA}
-                  onSave={saveEdit}
-                  onCancel={() => setEditingId(null)}
-                />
-              ) : (
-                <QuizItemRow
-                  key={item.id}
-                  item={item}
-                  onEdit={startEdit}
-                  onDelete={() => selectedSetId ? removeItemFromSet(selectedSetId, item.id) : deleteQuiz(item.id)}
-                  speakingId={speakingId}
-                  onSpeak={handleSpeak}
-                  favs={favs}
-                  onToggleFav={toggleFav}
-                  progressMap={currentProgress}
-                  hideAnswers={hideAnswers}
-                  sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId)}
-                  folders={quizFolders}
-                  onMoveToSet={(setId) => {
-                    addItemToSet(setId, { ...item });
-                    if (selectedSetId) removeItemFromSet(selectedSetId, item.id);
-                    else deleteQuiz(item.id);
-                  }}
-                />
-              )
-            ))}
+            {groupByProgress ? (
+              progressGroups.map((g) => (
+                <div key={g.key} className="flex flex-col gap-2">
+                  <div className={'mt-2 flex items-center gap-2 px-1 text-[11px] font-bold uppercase tracking-wider ' + g.cls}>
+                    <span>{g.label}</span>
+                    <span className="rounded-full bg-app-bg px-2 py-0.5 text-[10px] text-app-text-secondary/60 dark:bg-white/10">{g.items.length}</span>
+                  </div>
+                  {g.items.map((item) => renderItem(item))}
+                </div>
+              ))
+            ) : (
+              displayItems.map((item) => renderItem(item))
+            )}
 
             {/* New question panel — appears at the bottom, where you add */}
             {addingQuestion && (
