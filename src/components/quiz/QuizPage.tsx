@@ -570,6 +570,25 @@ export function QuizPage() {
   // Show/hide the sets sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem('malacadhati_quiz_sidebar') !== 'closed');
   const toggleSidebar = () => setSidebarOpen((v) => { const n = !v; localStorage.setItem('malacadhati_quiz_sidebar', n ? 'open' : 'closed'); return n; });
+  // Resizable width of the folders column
+  const [folderColW, setFolderColW] = useState<number>(() => Number(localStorage.getItem('malacadhati_quiz_foldercol')) || 84);
+  const startFolderResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = folderColW;
+    let lastW = startW;
+    const onMove = (ev: MouseEvent) => {
+      lastW = Math.min(220, Math.max(56, startW + ev.clientX - startX));
+      setFolderColW(lastW);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      localStorage.setItem('malacadhati_quiz_foldercol', String(lastW));
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
 
   // Sort the sets list
   const [setSort, setSetSort] = useState<'manual' | 'name' | 'count'>(() => (localStorage.getItem('malacadhati_quiz_setsort') as 'manual' | 'name' | 'count') || 'manual');
@@ -905,7 +924,7 @@ export function QuizPage() {
 
       {/* Sidebar — two-column: Folders | Sets */}
       {sidebarOpen && (
-      <div className="flex w-64 flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950">
+      <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: folderColW + 184 }}>
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">Quiz</p>
@@ -931,7 +950,7 @@ export function QuizPage() {
         <div className="flex flex-1 overflow-hidden border-t border-app-border dark:border-white/10">
 
           {/* Left column: Folders */}
-          <div className="flex w-[84px] flex-shrink-0 flex-col overflow-y-auto border-r border-app-border py-1 dark:border-white/10">
+          <div className="flex flex-shrink-0 flex-col overflow-y-auto py-1" style={{ width: folderColW }}>
             {quizFolders.length === 0 && (
               <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">Inga<br/>mappar</p>
             )}
@@ -1007,6 +1026,15 @@ export function QuizPage() {
                 )}
               </div>
             ))}
+          </div>
+
+          {/* Drag handle to resize folders column */}
+          <div
+            onMouseDown={startFolderResize}
+            className="group/handle relative w-1 flex-shrink-0 cursor-col-resize border-r border-app-border bg-transparent transition-colors hover:bg-primary/30 dark:border-white/10"
+            title="Dra för att ändra bredd"
+          >
+            <span className="absolute inset-y-0 -left-1 -right-1" />
           </div>
 
           {/* Right column: Sets */}
