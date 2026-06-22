@@ -80,11 +80,25 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
   useEffect(() => { setRevealed(false); }, [hideAnswers]);
   const status = progressMap?.[item.id];
   const masked = !!hideAnswers && !revealed;
+  // Mark which cards need more studying: known = done (green), everything else = study more.
+  const accent = status === 'known'
+    ? 'border-l-4 border-l-emerald-400'
+    : status === 'learning'
+      ? 'border-l-4 border-l-red-400'
+      : 'border-l-4 border-l-amber-400';
+  const studyMore = status !== 'known';
   return (
-    <div className="group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:border-primary/25 hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e]">
+    <div className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-all hover:border-primary/25 hover:shadow-md dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
       <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]">
         <div className="flex min-w-0 flex-col items-start px-5 py-4">
-          <span className="mb-2 text-[9px] font-bold uppercase text-app-text-secondary/45">Fråga</span>
+          <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
+            Fråga
+            {studyMore && (
+              <span className={'rounded-full px-2 py-0.5 text-[8px] font-bold normal-case tracking-normal ' + (status === 'learning' ? 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400')}>
+                📚 Plugga mer
+              </span>
+            )}
+          </span>
           {status && (
             <span className={`flex-shrink-0 text-[10px] font-bold ${status === 'known' ? 'text-emerald-500' : 'text-red-400'}`}>
               {status === 'known' ? '✓' : '✗'}
@@ -500,8 +514,9 @@ export function QuizPage() {
   const [studyDeck, setStudyDeck] = useState<QuizItem[] | null>(null);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
   const [hideAnswers, setHideAnswers] = useState(false);
-  // Group questions by study progress (known / learning / not studied)
-  const [groupByProgress, setGroupByProgress] = useState(false);
+  // Ordering: default = study priority (not-known/not-studied first, known last).
+  // Toggle to chronological (original) order.
+  const [chronological, setChronological] = useState(false);
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -713,12 +728,17 @@ export function QuizPage() {
     )
   );
 
-  // Split items into known / learning / not-studied for grouped view
-  const progressGroups = [
-    { key: 'known', label: lang === 'sv' ? '✓ Kan' : '✓ Known', cls: 'text-emerald-500', items: displayItems.filter((it) => currentProgress[it.id] === 'known') },
-    { key: 'learning', label: lang === 'sv' ? '✗ Kan inte' : "✗ Don't know", cls: 'text-red-400', items: displayItems.filter((it) => currentProgress[it.id] === 'learning') },
-    { key: 'new', label: lang === 'sv' ? '• Ej studerat' : '• Not studied', cls: 'text-app-text-secondary/60', items: displayItems.filter((it) => !currentProgress[it.id]) },
-  ].filter((g) => g.items.length > 0);
+  // Study-priority order: learning (got wrong) first, then not-studied, then known last.
+  // Stable sort preserves original order within each tier.
+  const priorityRank = (it: QuizItem) => {
+    const s = currentProgress[it.id];
+    if (s === 'learning') return 0;
+    if (!s) return 1;
+    return 2; // known
+  };
+  const orderedItems = chronological
+    ? displayItems
+    : displayItems.map((it, i) => ({ it, i })).sort((a, b) => priorityRank(a.it) - priorityRank(b.it) || a.i - b.i).map((x) => x.it);
 
   const sortedSets = setSort === 'manual'
     ? quizSets
@@ -1029,18 +1049,18 @@ export function QuizPage() {
                 >
                   {hideAnswers ? '👁️ ' : '🙈 '}{hideAnswers ? (lang === 'sv' ? 'Visa svar' : 'Show') : (lang === 'sv' ? 'Dölj svar' : 'Hide')}
                 </button>
-                {/* Group by progress toggle */}
+                {/* Order toggle: study priority vs chronological */}
                 <button
-                  onClick={() => setGroupByProgress((v) => !v)}
-                  className={'flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ' + (groupByProgress ? 'border-primary bg-primary text-white' : 'border-app-border bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:border-white/10 dark:text-gray-400')}
-                  title={lang === 'sv' ? 'Gruppera efter framsteg' : 'Group by progress'}
+                  onClick={() => setChronological((v) => !v)}
+                  className={'flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ' + (chronological ? 'border-primary bg-primary text-white' : 'border-app-border bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:border-white/10 dark:text-gray-400')}
+                  title={chronological ? (lang === 'sv' ? 'Visa studieordning (att plugga först)' : 'Show study order') : (lang === 'sv' ? 'Ordna i kronologisk ordning' : 'Chronological order')}
                 >
-                  📊 {lang === 'sv' ? 'Gruppera' : 'Group'}
+                  {chronological ? '🎯 ' : '🕑 '}{chronological ? (lang === 'sv' ? 'Studieordning' : 'Study order') : (lang === 'sv' ? 'Kronologisk' : 'Chronological')}
                 </button>
                 {/* Clear classification (reset progress) */}
                 {Object.keys(currentProgress).length > 0 && (
                   <button
-                    onClick={() => { handleSaveProgress({}); setGroupByProgress(false); }}
+                    onClick={() => handleSaveProgress({})}
                     className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-3 py-1.5 text-[11px] font-semibold text-app-text-secondary transition-colors hover:border-red-300 hover:text-red-500 dark:border-white/10 dark:text-gray-400"
                     title={lang === 'sv' ? 'Rensa klassificering (nollställ kan/kan inte)' : 'Clear classification (reset known/unknown)'}
                   >
@@ -1091,19 +1111,7 @@ export function QuizPage() {
 
           {/* Questions list */}
           <div className="flex flex-col gap-2">
-            {groupByProgress ? (
-              progressGroups.map((g) => (
-                <div key={g.key} className="flex flex-col gap-2">
-                  <div className={'mt-2 flex items-center gap-2 px-1 text-[11px] font-bold uppercase tracking-wider ' + g.cls}>
-                    <span>{g.label}</span>
-                    <span className="rounded-full bg-app-bg px-2 py-0.5 text-[10px] text-app-text-secondary/60 dark:bg-white/10">{g.items.length}</span>
-                  </div>
-                  {g.items.map((item) => renderItem(item))}
-                </div>
-              ))
-            ) : (
-              displayItems.map((item) => renderItem(item))
-            )}
+            {orderedItems.map((item) => renderItem(item))}
 
             {/* New question panel — appears at the bottom, where you add */}
             {addingQuestion && (
