@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
-const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#FFFFFF'];
+const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
 const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48, 56, 64, 72];
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
@@ -313,6 +313,29 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     onChange(ed.innerHTML);
   };
 
+  // Remove explicit text color so the text follows the theme (white in dark, dark in light).
+  const clearTextColor = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const rangeToUse = savedRange.current?.cloneRange() ?? null;
+    ed.focus({ preventScroll: true });
+    if (rangeToUse) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(rangeToUse); }
+    const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null;
+    // Strip inline color from spans the selection touches; leave background-color intact.
+    ed.querySelectorAll<HTMLElement>('[style*="color"]').forEach((el) => {
+      if (!range || range.intersectsNode(el)) {
+        el.style.color = '';
+        if (!el.getAttribute('style')) el.removeAttribute('style');
+      }
+    });
+    ed.querySelectorAll('font[color]').forEach((el) => {
+      if (!range || range.intersectsNode(el)) el.removeAttribute('color');
+    });
+    saveSel();
+    setPalOpen(false);
+    onChange(ed.innerHTML);
+  };
+
   const toggleHlPalette = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     saveSel();
@@ -446,6 +469,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
               {COLORS.map((c) => (
                 <div key={c} onMouseDown={(e) => { e.preventDefault(); applyColor(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
               ))}
+              <div onMouseDown={(e) => { e.preventDefault(); clearTextColor(); }} className="col-span-6 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ Standardfärg (auto)</div>
             </div>
           )}
         </div>
