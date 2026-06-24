@@ -329,6 +329,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (rangeToUse) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(rangeToUse); }
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('backColor', false, c);
+    if (c === 'transparent') {
+      // backColor only adds a transparent layer — strip background from the
+      // actual spans that the selection touches so the highlight truly clears.
+      const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null;
+      ed.querySelectorAll<HTMLElement>('[style*="background"]').forEach((el) => {
+        if (!range || range.intersectsNode(el)) {
+          el.style.backgroundColor = '';
+          el.style.background = '';
+          if (!el.getAttribute('style')) el.removeAttribute('style');
+        }
+      });
+    }
     saveSel();
     setHlPalOpen(false);
     onChange(ed.innerHTML);
@@ -452,7 +464,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
               {HIGHLIGHT_COLORS.map((c) => (
                 <div key={c} onMouseDown={(e) => { e.preventDefault(); applyHighlight(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
               ))}
-              <div dir="rtl" onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }} className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">إزالة التلوين ✕</div>
+              <div onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }} className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ Ta bort markering</div>
             </div>
           )}
         </div>
