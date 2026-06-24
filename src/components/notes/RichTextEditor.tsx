@@ -17,9 +17,10 @@ interface Props {
   maxHeight?: string;
   toolbarEnd?: ReactNode;
   onLockedTripleClick?: () => void;
+  resizable?: boolean;
 }
 
-export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick }: Props) {
+export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable }: Props) {
   const { t } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -541,8 +542,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); naturalSizeRef.current = null; }
         }}
         suppressContentEditableWarning
-        className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
-        style={{ minHeight, maxHeight, fontSize: '15px', cursor: editable ? 'text' : 'default' }}
+        className={'overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5' + (resizable && editable ? ' resize-y' : '')}
+        style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: '15px', cursor: editable ? 'text' : 'default' }}
       />
 
       {/* Image hover buttons */}
