@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
-const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
-const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF'];
+const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#FFFFFF'];
+const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
 const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48, 56, 64, 72];
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const STATE_COMMANDS = [...TOGGLE_COMMANDS, 'justifyRight', 'justifyCenter', 'justifyLeft'];
@@ -24,10 +24,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
   const pendingFontSize = useRef<number | null>(null);
-  const [fontSize, setFontSizeState] = useState(12);
-  const fontSizeRef = useRef(12);
+  const [fontSize, setFontSizeState] = useState(15);
+  const fontSizeRef = useRef(15);
   const fontInputFocused = useRef(false);
-  const [sizeInput, setSizeInput] = useState('12');
+  const [sizeInput, setSizeInput] = useState('15');
   const setFontSize = (v: number) => { fontSizeRef.current = v; setFontSizeState(v); if (!fontInputFocused.current) setSizeInput(String(v)); };
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
@@ -126,7 +126,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     let node: Node | null = sel.anchorNode;
     if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
     if (node === ed) {
-      if (fontSizeRef.current !== 12) setFontSize(12);
+      if (fontSizeRef.current !== 15) setFontSize(15);
     } else if (node instanceof Element && ed.contains(node)) {
       const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
       if (px && px !== fontSizeRef.current) setFontSize(px);
@@ -349,6 +349,16 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     reader.readAsDataURL(file);
   };
 
+  // ── Divider: underline the current line + start a new paragraph below ──
+  const insertDivider = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ensureFocus(true);
+    document.execCommand('insertHTML', false, '<hr style="border:0;border-top:1px solid currentColor;opacity:0.3;margin:10px 0" /><div dir="auto"><br></div>');
+    saveSel();
+    onChange(ed.innerHTML);
+  };
+
   // ── Close palette on outside click ────────────────────────────────────
   useEffect(() => {
     if (!palOpen) return;
@@ -401,7 +411,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             onFocus={() => { fontInputFocused.current = true; }}
             onBlur={() => { fontInputFocused.current = false; const v = parseInt(sizeInput, 10); if (v > 0) { setFontSize(v); applyPx(v); } else { setSizeInput(String(fontSize)); } }}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); const v = parseInt(sizeInput, 10); (e.target as HTMLInputElement).blur(); if (v > 0) { setTimeout(() => { setFontSize(v); applyPx(v); }, 0); } } }}
-            className="h-[26px] w-8 border-x border-app-border bg-transparent text-center text-xs font-semibold outline-none dark:border-white/10"
+            className="h-[26px] w-8 border-x border-app-border bg-transparent text-center text-xs font-semibold text-app-text outline-none dark:border-white/10 dark:text-gray-100"
           />
           <button type="button" onMouseDown={(e) => { e.preventDefault(); changeSize(1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">+</button>
         </div>
@@ -442,7 +452,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
               {HIGHLIGHT_COLORS.map((c) => (
                 <div key={c} onMouseDown={(e) => { e.preventDefault(); applyHighlight(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
               ))}
-              <div onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }} className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ إزالة التلوين</div>
+              <div dir="rtl" onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }} className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">إزالة التلوين ✕</div>
             </div>
           )}
         </div>
@@ -473,6 +483,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         {/* Image */}
         <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); imgInputRef.current?.click(); }} title="Insert image" className={btnCls(false)}>🖼</button>
         <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImage(f); e.target.value = ''; }} />
+
+        {/* Divider line + new paragraph */}
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); insertDivider(); }} title="Avdelare (linje + ny rad)" className={btnCls(false)}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="11" width="18" height="2" rx="1"/></svg>
+        </button>
 
         {toolbarEnd && <div className="ml-auto flex items-center pl-2">{toolbarEnd}</div>}
       </div>
@@ -515,7 +530,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         }}
         suppressContentEditableWarning
         className="overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5"
-        style={{ minHeight, maxHeight, fontSize: '12px', cursor: editable ? 'text' : 'default' }}
+        style={{ minHeight, maxHeight, fontSize: '15px', cursor: editable ? 'text' : 'default' }}
       />
 
       {/* Image hover buttons */}
