@@ -253,6 +253,17 @@ export interface SavePayload {
   explanation?: string;
 }
 
+interface OpenQuestionForm {
+  formId: string;
+  itemId: number | null;
+  question: string;
+  answer: string;
+}
+
+function newFormId() {
+  return `f${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 interface EditPanelProps {
   question: string;
   answer: string;
@@ -549,17 +560,124 @@ export function QuizPage() {
   // Which questions to show: all / only to-study (not known) / only known
   const [viewFilter, setViewFilter] = useState<'all' | 'study' | 'known'>('all');
 
-  // Edit state
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editQ, setEditQ] = useState('');
-  const [editA, setEditA] = useState('');
+  // Multiple open question forms (new drafts + in-progress edits)
+  const [openForms, setOpenForms] = useState<OpenQuestionForm[]>([]);
+  const openFormsRef = useRef(openForms);
+  openFormsRef.current = openForms;
+  const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  // New question panel
-  const [addingQuestion, setAddingQuestion] = useState(false);
-  const [newQ, setNewQ] = useState('');
-  const [newA, setNewA] = useState('');
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingCreateIdRef = useRef<number | null>(null);
+  const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId'>>) => {
+    setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
+  };
+
+  const closeForm = (formId: string) => {
+    const timer = autoSaveTimers.current.get(formId);
+    if (timer) clearTimeout(timer);
+    autoSaveTimers.current.delete(formId);
+    setOpenForms((prev) => prev.filter((f) => f.formId !== formId));
+  };
+
+  const clearAllForms = () => {
+    autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
+    autoSaveTimers.current.clear();
+    setOpenForms([]);
+  };
+
+  const persistForm = (formId: string, override?: SavePayload): number | null => {
+    const form = openFormsRef.current.find((f) => f.formId === formId);
+    if (!form) return null;
+    const q = override?.question ?? form.question;
+    const a = override?.answer ?? form.answer;
+    if (!hasContent(q) || !hasContent(a)) return null;
+    const patch = {
+      question: q,
+      answer: a,
+      options: override?.options,
+      correctIndex: override?.correctIndexes?.[0],
+      correctIndexes: override?.correctIndexes,
+      explanation: override?.explanation,
+    };
+
+    if (form.itemId !== null) {
+      if (selectedSetId) updateItemInSet(selectedSetId, form.itemId, patch);
+      else updateQuiz(form.itemId, patch);
+      updateForm(formId, { question: q, answer: a });
+      return form.itemId;
+    }
+
+    const item = {
+      noteId: 0,
+      noteTitle: '',
+      ...patch,
+      date: new Date().toLocaleDateString(),
+      createdAt: new Date().toISOString(),
+    };
+    const id = selectedSetId ? addItemToSet(selectedSetId, item) : addQuiz(item);
+    updateForm(formId, { itemId: id, question: q, answer: a });
+    return id;
+  };
+
+  const flushForm = (formId: string, override?: SavePayload) => {
+    const timer = autoSaveTimers.current.get(formId);
+    if (timer) {
+      clearTimeout(timer);
+      autoSaveTimers.current.delete(formId);
+    }
+    persistForm(formId, override);
+  };
+
+  const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
+    setOpenForms((prev) => [
+      ...prev,
+      {
+        formId: newFormId(),
+        itemId: initial?.itemId ?? null,
+        question: initial?.question ?? '',
+        answer: initial?.answer ?? '',
+      },
+    ]);
+  };
+
+  const handleSaveForm = (formId: string, override?: SavePayload) => {
+    flushForm(formId, override);
+    closeForm(formId);
+  };
+
+  const handleCancelForm = (formId: string) => {
+    const timer = autoSaveTimers.current.get(formId);
+    if (timer) clearTimeout(timer);
+    autoSaveTimers.current.delete(formId);
+    closeForm(formId);
+  };
+
+  const handleAddQuestionClick = () => {
+    addNewForm();
+  };
+
+  useEffect(() => {
+    openForms.forEach((form) => {
+      if (!hasContent(form.question) || !hasContent(form.answer)) {
+        const timer = autoSaveTimers.current.get(form.formId);
+        if (timer) {
+          clearTimeout(timer);
+          autoSaveTimers.current.delete(form.formId);
+        }
+        return;
+      }
+      const existing = autoSaveTimers.current.get(form.formId);
+      if (existing) clearTimeout(existing);
+      autoSaveTimers.current.set(
+        form.formId,
+        setTimeout(() => {
+          persistForm(form.formId);
+        }, 1500),
+      );
+    });
+  }, [openForms, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    clearAllForms();
+  }, [selectedSetId, selectedFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Rename set
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
@@ -633,154 +751,12 @@ export function QuizPage() {
   };
 
   const startEdit = (item: QuizItem) => {
-    setEditingId(item.id);
-    // For MCQ items the question stores the stem + the appended options block;
-    // strip that block so the editor shows just the stem (options have their own fields).
+    if (openFormsRef.current.some((f) => f.itemId === item.id)) return;
     const stem = item.options && item.options.length
       ? item.question.replace(/<div style="margin-top:6px">[\s\S]*$/, '')
       : item.question;
-    setEditQ(stem);
-    setEditA(item.answer);
+    addNewForm({ itemId: item.id, question: stem, answer: item.answer });
   };
-
-  const saveEditSilent = (override?: SavePayload) => {
-    if (editingId === null) return;
-    const q = override?.question ?? editQ;
-    const a = override?.answer ?? editA;
-    if (!hasContent(q) || !hasContent(a)) return;
-    const patch = {
-      question: q,
-      answer: a,
-      options: override?.options,
-      correctIndex: override?.correctIndexes?.[0],
-      correctIndexes: override?.correctIndexes,
-      explanation: override?.explanation,
-    };
-    if (selectedSetId) updateItemInSet(selectedSetId, editingId, patch);
-    else updateQuiz(editingId, patch);
-  };
-
-  const saveEdit = (override?: SavePayload) => {
-    flushPendingQuestionSave(override);
-    setEditingId(null);
-    setEditQ('');
-    setEditA('');
-    pendingCreateIdRef.current = null;
-  };
-
-  const persistNewQuestion = (override?: SavePayload): number | null => {
-    const q = override?.question ?? newQ;
-    const a = override?.answer ?? newA;
-    if (!hasContent(q) || !hasContent(a)) return null;
-    const patch = {
-      question: q,
-      answer: a,
-      options: override?.options,
-      correctIndex: override?.correctIndexes?.[0],
-      correctIndexes: override?.correctIndexes,
-      explanation: override?.explanation,
-    };
-
-    if (pendingCreateIdRef.current !== null) {
-      const id = pendingCreateIdRef.current;
-      if (selectedSetId) updateItemInSet(selectedSetId, id, patch);
-      else updateQuiz(id, patch);
-      setEditingId(id);
-      setEditQ(q);
-      setEditA(a);
-      setAddingQuestion(false);
-      setNewQ('');
-      setNewA('');
-      return id;
-    }
-
-    if (editingId !== null) {
-      saveEditSilent(override);
-      return editingId;
-    }
-
-    const item = {
-      noteId: 0,
-      noteTitle: '',
-      ...patch,
-      date: new Date().toLocaleDateString(),
-      createdAt: new Date().toISOString(),
-    };
-    const id = selectedSetId ? addItemToSet(selectedSetId, item) : addQuiz(item);
-    pendingCreateIdRef.current = id;
-    setEditingId(id);
-    setEditQ(q);
-    setEditA(a);
-    setAddingQuestion(false);
-    setNewQ('');
-    setNewA('');
-    return id;
-  };
-
-  const flushPendingQuestionSave = (override?: SavePayload) => {
-    if (autoSaveTimer.current) {
-      clearTimeout(autoSaveTimer.current);
-      autoSaveTimer.current = null;
-    }
-    if (addingQuestion) {
-      persistNewQuestion(override);
-    } else if (editingId !== null) {
-      saveEditSilent(override);
-    }
-  };
-
-  const resetQuestionForm = () => {
-    setAddingQuestion(false);
-    setEditingId(null);
-    setNewQ('');
-    setNewA('');
-    setEditQ('');
-    setEditA('');
-    pendingCreateIdRef.current = null;
-  };
-
-  const openNewQuestionForm = () => {
-    flushPendingQuestionSave();
-    resetQuestionForm();
-    setAddingQuestion(true);
-  };
-
-  const saveAndAddNew = () => {
-    flushPendingQuestionSave();
-    resetQuestionForm();
-    setAddingQuestion(true);
-  };
-
-  const saveNewQuestion = (override?: SavePayload) => {
-    flushPendingQuestionSave(override);
-    resetQuestionForm();
-  };
-
-  const handleAddQuestionClick = () => {
-    if (addingQuestion || editingId !== null) saveAndAddNew();
-    else openNewQuestionForm();
-  };
-
-  useEffect(() => {
-    if (!addingQuestion && editingId === null) return;
-    const q = addingQuestion ? newQ : editQ;
-    const a = addingQuestion ? newA : editA;
-    if (!hasContent(q) || !hasContent(a)) return;
-
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => {
-      if (addingQuestion) persistNewQuestion();
-      else saveEditSilent();
-    }, 1500);
-
-    return () => {
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    };
-  }, [newQ, newA, editQ, editA, addingQuestion, editingId, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    resetQuestionForm();
-  }, [selectedSetId, selectedFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleQuickCreateSet = () => {
     let num = quizSets.length + 1;
@@ -873,28 +849,14 @@ export function QuizPage() {
   const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : isNotesView ? [...quizzes].reverse() : [];
+  const openItemIds = useMemo(
+    () => new Set(openForms.map((f) => f.itemId).filter((id): id is number => id !== null)),
+    [openForms],
+  );
 
-  const renderItem = (item: QuizItem) => (
-    editingId === item.id ? (
-      <EditPanel
-        key={item.id}
-        question={editQ}
-        answer={editA}
-        initialOptions={item.options}
-        initialCorrect={item.correctIndex}
-        initialCorrects={item.correctIndexes}
-        initialExplanation={item.explanation}
-        onChangeQ={setEditQ}
-        onChangeA={setEditA}
-        onSave={saveEdit}
-        onCancel={() => {
-          if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-          setEditingId(null);
-          setEditQ('');
-          setEditA('');
-        }}
-      />
-    ) : (
+  const renderItem = (item: QuizItem) => {
+    if (openItemIds.has(item.id)) return null;
+    return (
       <QuizItemRow
         key={item.id}
         item={item}
@@ -915,8 +877,27 @@ export function QuizPage() {
           else deleteQuiz(item.id);
         }}
       />
-    )
-  );
+    );
+  };
+
+  const renderOpenForm = (form: OpenQuestionForm) => {
+    const item = form.itemId ? displayItems.find((i) => i.id === form.itemId) : undefined;
+    return (
+      <EditPanel
+        key={form.formId}
+        question={form.question}
+        answer={form.answer}
+        initialOptions={item?.options}
+        initialCorrect={item?.correctIndex}
+        initialCorrects={item?.correctIndexes}
+        initialExplanation={item?.explanation}
+        onChangeQ={(v) => updateForm(form.formId, { question: v })}
+        onChangeA={(v) => updateForm(form.formId, { answer: v })}
+        onSave={(override) => handleSaveForm(form.formId, override)}
+        onCancel={() => handleCancelForm(form.formId)}
+      />
+    );
+  };
 
   // Study-priority order: learning (got wrong) first, then not-studied, then known last.
   // Stable sort preserves original order within each tier.
@@ -1414,22 +1395,9 @@ export function QuizPage() {
           <div className="flex flex-col gap-2">
             {orderedItems.map((item) => renderItem(item))}
 
-            {/* New question panel — appears at the bottom, where you add */}
-            {addingQuestion && (
-              <EditPanel
-                question={newQ}
-                answer={newA}
-                onChangeQ={setNewQ}
-                onChangeA={setNewA}
-                onSave={saveNewQuestion}
-                onCancel={() => {
-                  if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-                  resetQuestionForm();
-                }}
-              />
-            )}
+            {openForms.map((form) => renderOpenForm(form))}
 
-            {/* Add question dashed button — saves current draft then opens a new form */}
+            {/* Add question dashed button — opens another form without closing existing ones */}
             <button
               onClick={handleAddQuestionClick}
               className="flex min-h-[56px] w-full items-center justify-center rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/50 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:hover:border-primary/50 dark:hover:bg-primary/10"
