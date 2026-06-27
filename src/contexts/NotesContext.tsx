@@ -44,6 +44,7 @@ interface NotesCtx {
   deleteQuizFolder: (id: string) => void;
   restoreQuizFolder: (id: string) => void;
   permDeleteQuizFolder: (id: string) => void;
+  recoverQuizFolders: () => Promise<number>;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
@@ -168,6 +169,58 @@ function initializeQuizColors<T extends { color?: string; colorInitialized?: boo
   });
 }
 
+function inferRecoveredFolderName(sets: QuizSet[]): string {
+  const blob = sets
+    .flatMap((set) => [set.name, ...(set.items ?? []).map((item) => `${item.question} ${item.answer}`)])
+    .join(' ')
+    .toLowerCase();
+  if (blob.includes('sepsis')) return 'sepsis';
+  if (sets.length === 1 && sets[0].name.trim()) return sets[0].name.trim();
+  return 'Återställd mapp';
+}
+
+function recoverMissingFoldersFromSets(folders: QuizFolder[], sets: QuizSet[]): QuizFolder[] {
+  const known = new Map(folders.map((folder) => [folder.id, folder]));
+  const referenced = new Set<string>();
+  for (const set of sets) {
+    if (!set.folderId || set.trashed) continue;
+    if (set.folderId === FAVORITES_FOLDER_ID || set.folderId === RESTORED_FOLDER_ID) continue;
+    referenced.add(set.folderId);
+  }
+
+  const recovered = [...folders];
+  for (const folderId of referenced) {
+    if (known.has(folderId)) continue;
+    const setsInFolder = sets.filter((set) => set.folderId === folderId && !set.trashed);
+    const usedColors = [...folders, ...sets].map((item) => item.color).filter((color): color is string => !!color);
+    recovered.push({
+      id: folderId,
+      name: inferRecoveredFolderName(setsInFolder),
+      createdAt: new Date().toISOString(),
+      color: pickSpacedColor(usedColors),
+      colorInitialized: true,
+    });
+    known.set(folderId, recovered[recovered.length - 1]);
+  }
+  return recovered;
+}
+
+function autoRestoreReferencedTrashedFolders(folders: QuizFolder[], sets: QuizSet[]): QuizFolder[] {
+  const referenced = new Set(sets.filter((set) => set.folderId && !set.trashed).map((set) => set.folderId!));
+  return folders.map((folder) => {
+    if (folder.trashed && !folder.system && referenced.has(folder.id)) {
+      return { ...folder, trashed: false, deletedAt: undefined };
+    }
+    return folder;
+  });
+}
+
+function finalizeQuizFolders(folders: QuizFolder[], sets: QuizSet[]): QuizFolder[] {
+  const merged = recoverMissingFoldersFromSets(folders, sets);
+  const restored = autoRestoreReferencedTrashedFolders(merged, sets);
+  return ensureRestoredFolder(initializeQuizColors(restored));
+}
+
 function nextId() {
   return Date.now();
 }
@@ -231,9 +284,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           }
 
           let dedicatedFolders: QuizFolder[] = [];
+          let dedicatedSets: QuizSet[] = [];
           try {
             const folderRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`);
             dedicatedFolders = firebaseToArray<QuizFolder>(await folderRes.json());
+          } catch { /* ignore */ }
+          try {
+            const setRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`);
+            dedicatedSets = firebaseToArray<QuizSet>(await setRes.json()).map((set) => ({ ...set, items: set.items ?? [] }));
           } catch { /* ignore */ }
 
           const rawFolders = mergeById(
@@ -241,20 +299,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             dedicatedFolders,
             firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []),
           );
-          const normalizedFolders = ensureRestoredFolder(initializeQuizColors(rawFolders));
-          if (cloud.quizSets) {
-            // Firebase strips empty arrays, so items can be missing — normalize.
-            const rawSets: QuizSet[] = firebaseToArray<QuizSet>(cloud.quizSets).map((s) => ({ ...s, items: s.items ?? [] }));
-            const normalizedSets = initializeQuizColors(rawSets, normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color));
-            setQuizSets(normalizedSets);
-            localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
-            if (normalizedSets.some((set, index) => set !== rawSets[index])) {
-              void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
-                method: 'PUT',
-                body: JSON.stringify(normalizedSets),
-                headers: { 'Content-Type': 'application/json' },
-              });
-            }
+          const rawSets: QuizSet[] = mergeById(
+            firebaseToArray<QuizSet>(cloud.quizSets).map((set) => ({ ...set, items: set.items ?? [] })),
+            dedicatedSets,
+            firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({ ...set, items: set.items ?? [] })),
+          );
+          const normalizedFolders = finalizeQuizFolders(rawFolders, rawSets);
+          const normalizedSets = initializeQuizColors(rawSets, normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color));
+          setQuizSets(normalizedSets);
+          localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+          if (normalizedSets.some((set, index) => set !== rawSets[index])) {
+            void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
+              method: 'PUT',
+              body: JSON.stringify(normalizedSets),
+              headers: { 'Content-Type': 'application/json' },
+            });
           }
           setQuizFolders(normalizedFolders);
           localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
@@ -332,12 +391,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!loaded || !user) return;
     setQuizFolders((prev) => {
       const next = ensureFavoritesFolder(ensureRestoredFolder(prev));
-      persistFolders(next);
+      if (JSON.stringify(next) !== JSON.stringify(prev)) {
+        persistFolders(next);
+      }
       return next;
     });
     setQuizSets((prev) => {
       const next = ensureFavoritesSet(prev);
-      persistSets(next);
+      if (JSON.stringify(next) !== JSON.stringify(prev)) {
+        persistSets(next);
+      }
       return next;
     });
     // Run once after each account finishes loading.
@@ -684,6 +747,47 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persist(notes, undefined, undefined, undefined, nextSets, nextFolders);
   };
 
+  const recoverQuizFolders = async (): Promise<number> => {
+    if (!user) return 0;
+    const before = new Set(quizFolders.filter((folder) => !folder.system && !folder.trashed).map((folder) => folder.id));
+    let cloudFolders: QuizFolder[] = [];
+    let cloudSets: QuizSet[] = [];
+    let dedicatedFolders: QuizFolder[] = [];
+    let dedicatedSets: QuizSet[] = [];
+    try {
+      const cloud = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json());
+      cloudFolders = firebaseToArray<QuizFolder>(cloud?.quizFolders);
+      cloudSets = firebaseToArray<QuizSet>(cloud?.quizSets).map((set) => ({ ...set, items: set.items ?? [] }));
+    } catch { /* ignore */ }
+    try {
+      dedicatedFolders = firebaseToArray<QuizFolder>(await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`).then((r) => r.json()));
+    } catch { /* ignore */ }
+    try {
+      dedicatedSets = firebaseToArray<QuizSet>(await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`).then((r) => r.json())).map((set) => ({ ...set, items: set.items ?? [] }));
+    } catch { /* ignore */ }
+
+    const rawFolders = mergeById(
+      cloudFolders,
+      dedicatedFolders,
+      quizFolders,
+      firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []),
+    );
+    const rawSets = mergeById(
+      cloudSets,
+      dedicatedSets,
+      quizSets,
+      firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({ ...set, items: set.items ?? [] })),
+    );
+    const nextFolders = ensureFavoritesFolder(finalizeQuizFolders(rawFolders, rawSets));
+    const nextSets = ensureFavoritesSet(initializeQuizColors(rawSets, nextFolders.map((folder) => folder.color).filter((color): color is string => !!color)));
+    setQuizFolders(nextFolders);
+    setQuizSets(nextSets);
+    persistFolders(nextFolders);
+    persistSets(nextSets);
+    const after = nextFolders.filter((folder) => !folder.system && !folder.trashed);
+    return after.filter((folder) => !before.has(folder.id)).length;
+  };
+
   const addItemToSet = (setId: string, item: Omit<QuizItem, 'id'>) => {
     const now = new Date().toISOString();
     const newItem: QuizItem = { ...item, id: Date.now(), createdAt: item.createdAt ?? now, updatedAt: now };
@@ -771,6 +875,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         deleteQuizFolder,
         restoreQuizFolder,
         permDeleteQuizFolder,
+        recoverQuizFolders,
         addItemToSet,
         removeItemFromSet,
         updateItemInSet,
