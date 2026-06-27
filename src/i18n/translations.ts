@@ -73,6 +73,7 @@ export interface Translation {
   filesTooLarge: string;
   filesSaveFailed: string;
   filesUploadFailed: string;
+  filesUploadSuccess: string;
   selDel: string;
   cancelSel: string;
   emptyTrashBtn: string;
@@ -239,7 +240,7 @@ export const LANGS: Record<Lang, Translation> = {
     emptyNotes: 'No notes here', emptySearch: 'No results', emptyTrash: 'Trash is empty',
     filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesUpload: 'Choose files',
     filesEmpty: 'No files uploaded yet', filesOpen: 'Open', filesDelete: 'Delete', filesStored: 'Saved in cloud',
-    filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.',
+    filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough',
     titleRight: 'Align Right', titleCenter: 'Center', titleLeft: 'Align Left', titleClr: 'Clear Formatting', titleColor: 'Text Color',
@@ -337,7 +338,7 @@ export const LANGS: Record<Lang, Translation> = {
     emptyNotes: 'Inga anteckningar här', emptySearch: 'Inga resultat', emptyTrash: 'Papperskorgen är tom',
     filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesUpload: 'Välj filer',
     filesEmpty: 'Inga filer uppladdade ännu', filesOpen: 'Öppna', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
-    filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.',
+    filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken',
     titleRight: 'Höger', titleCenter: 'Centrera', titleLeft: 'Vänster', titleClr: 'Ta bort formatering', titleColor: 'Textfärg',

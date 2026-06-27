@@ -1,7 +1,8 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import { FB_DB_URL, storage } from '../../lib/firebase';
 
 interface StoredFile {
@@ -15,6 +16,8 @@ interface StoredFile {
   /** Legacy uploads stored inline in Realtime Database */
   dataUrl?: string;
 }
+
+const FILE_INPUT_ID = 'files-upload-input';
 
 function formatSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -51,10 +54,12 @@ function readFileAsDataUrl(file: File): Promise<string> {
 export function FilesPage({ search }: { search: string }) {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const inputId = useId();
+  const { show } = useToast();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -109,7 +114,7 @@ export function FilesPage({ search }: { search: string }) {
   }, [files, search]);
 
   const MAX_FILE_SIZE = 20 * 1024 * 1024;
-  const MAX_RTDB_FILE_SIZE = 2 * 1024 * 1024;
+  const MAX_RTDB_FILE_SIZE = 7 * 1024 * 1024;
 
   const uploadOneFile = async (file: File): Promise<StoredFile> => {
     if (!user) throw new Error('no-user');
@@ -122,21 +127,25 @@ export function FilesPage({ search }: { search: string }) {
       addedAt: new Date().toLocaleString(),
     };
 
-    try {
-      const storagePath = `users/${user.uid}/files/${id}/${file.name}`;
-      const storageRef = ref(storage, storagePath);
-      await uploadBytes(storageRef, file, { contentType: base.type });
-      const downloadUrl = await getDownloadURL(storageRef);
-      return { ...base, downloadUrl, storagePath };
-    } catch {
-      if (file.size > MAX_RTDB_FILE_SIZE) throw new Error('storage-unavailable');
+    if (file.size <= MAX_RTDB_FILE_SIZE) {
       const dataUrl = await readFileAsDataUrl(file);
       return { ...base, dataUrl };
     }
+
+    const storagePath = `users/${user.uid}/files/${id}/${file.name}`;
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file, { contentType: base.type });
+    const downloadUrl = await getDownloadURL(storageRef);
+    return { ...base, downloadUrl, storagePath };
   };
 
   const handleFiles = async (list: FileList | null) => {
-    if (!list?.length || !user) return;
+    if (!list?.length) return;
+    if (!user) {
+      setError(t.filesUploadFailed);
+      return;
+    }
+
     setError('');
     const selected = Array.from(list);
     const oversized = selected.filter((f) => f.size > MAX_FILE_SIZE);
@@ -155,11 +164,14 @@ export function FilesPage({ search }: { search: string }) {
       }
       if (uploaded.length) {
         setFiles((prev) => [...uploaded, ...prev]);
+        show(uploaded.length === 1 ? t.filesUploadSuccess : `${uploaded.length} ${t.filesUploadSuccess}`);
       }
-    } catch {
+    } catch (err) {
+      console.error('File upload failed', err);
       setError(t.filesUploadFailed);
     } finally {
       setUploading(false);
+      if (inputRef.current) inputRef.current.value = '';
     }
   };
 
@@ -178,9 +190,32 @@ export function FilesPage({ search }: { search: string }) {
     }
   };
 
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!uploading) setDragging(true);
+  };
+
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    if (!uploading) void handleFiles(e.dataTransfer.files);
+  };
+
   return (
     <div className="px-3 py-4 sm:px-5 sm:py-5">
-      <div className="mb-5 rounded-3xl border border-app-border bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+      <div
+        className={`mb-5 rounded-3xl border bg-white p-5 shadow-sm transition-colors dark:bg-white/5 ${
+          dragging ? 'border-primary bg-primary/5 dark:border-primary/50' : 'border-app-border dark:border-white/10'
+        }`}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-2xl shadow-sm shadow-primary/10 dark:bg-primary/20">
@@ -192,26 +227,25 @@ export function FilesPage({ search }: { search: string }) {
             </div>
           </div>
           <label
-            htmlFor={inputId}
-            aria-disabled={uploading}
-            className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark ${
+            htmlFor={FILE_INPUT_ID}
+            className={`relative inline-flex cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark ${
               uploading ? 'pointer-events-none cursor-not-allowed opacity-60' : ''
             }`}
           >
-            <span className="text-base">{uploading ? '☁️' : '☁️➕'}</span>
-            <span>{uploading ? t.cloudSaving : t.filesUpload}</span>
+            <input
+              ref={inputRef}
+              id={FILE_INPUT_ID}
+              type="file"
+              multiple
+              disabled={uploading}
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              onChange={(e) => {
+                void handleFiles(e.target.files);
+              }}
+            />
+            <span className="pointer-events-none text-base">{uploading ? '☁️' : '☁️➕'}</span>
+            <span className="pointer-events-none">{uploading ? t.cloudSaving : t.filesUpload}</span>
           </label>
-          <input
-            id={inputId}
-            type="file"
-            multiple
-            disabled={uploading}
-            className="sr-only"
-            onChange={(e) => {
-              void handleFiles(e.target.files);
-              e.target.value = '';
-            }}
-          />
         </div>
       </div>
 
@@ -222,7 +256,14 @@ export function FilesPage({ search }: { search: string }) {
       )}
 
       {loading || !filtered.length ? (
-        <div className="animate-fade-in flex flex-col items-center py-20 text-center text-app-text-secondary/70 dark:text-gray-500">
+        <div
+          className={`animate-fade-in flex flex-col items-center rounded-3xl py-20 text-center text-app-text-secondary/70 transition-colors dark:text-gray-500 ${
+            dragging ? 'bg-primary/5' : ''
+          }`}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+        >
           <span className="mb-3 text-5xl opacity-30">📎</span>
           <p className="text-sm">{loading ? t.cloudSaving : search ? t.emptySearch : t.filesEmpty}</p>
         </div>
