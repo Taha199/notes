@@ -354,7 +354,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         draftContents[d.id] = { title: d.title, html: d.html };
       });
       fetch(`${FB_DB_URL}/users/${user.uid}.json`, {
-        method: 'PUT',
+        method: 'PATCH',
         body: JSON.stringify({
           notes: nextNotes,
           drafts: dList.map((d) => d.id),
