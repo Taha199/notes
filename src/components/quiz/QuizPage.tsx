@@ -6,6 +6,7 @@ import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { BrandedAlert } from '../common/BrandedAlert';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 
@@ -357,17 +358,11 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
       <div className="flex items-center justify-between border-b border-app-border px-4 py-2 dark:border-white/10">
         <div className="flex min-w-0 items-center gap-3">
           <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? '☑ MCQ' : '✏️ Q/A'}</span>
-          {persisted || saveStatus === 'saved' ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-              <span aria-hidden>☁</span>
-              <span>{t.cloudSavedMain}</span>
-            </span>
-          ) : saveStatus === 'pending' ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-500 dark:text-amber-400">
-              <span className="animate-pulse" aria-hidden>☁</span>
-              <span>{t.cloudSaving}</span>
-            </span>
-          ) : null}
+          <SaveStatusBadge
+            status={persisted || saveStatus === 'saved' ? 'saved' : saveStatus === 'pending' ? 'syncing' : 'none'}
+            title={saveStatus === 'pending' ? t.cloudSaving : t.cloudSavedMain}
+            size="xs"
+          />
         </div>
         <button
           onClick={() => setMcq((v) => !v)}
