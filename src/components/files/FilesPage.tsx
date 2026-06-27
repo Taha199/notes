@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
+import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { FB_DB_URL } from '../../lib/firebase';
+import { FB_DB_URL, storage } from '../../lib/firebase';
 
 interface StoredFile {
   id: string;
   name: string;
   type: string;
   size: number;
-  dataUrl: string;
   addedAt: string;
+  downloadUrl?: string;
+  storagePath?: string;
+  /** Legacy uploads stored inline in Realtime Database */
+  dataUrl?: string;
 }
 
 function formatSize(size: number) {
@@ -18,20 +22,28 @@ function formatSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function readFile(file: File): Promise<StoredFile> {
+function normalizeFiles(data: unknown): StoredFile[] {
+  if (!data) return [];
+  if (Array.isArray(data)) {
+    return data.filter((file): file is StoredFile => !!file && typeof file === 'object' && 'id' in file);
+  }
+  if (typeof data === 'object') {
+    return Object.values(data as Record<string, StoredFile>).filter(
+      (file) => !!file && typeof file === 'object' && 'id' in file,
+    );
+  }
+  return [];
+}
+
+function fileHref(file: StoredFile) {
+  return file.downloadUrl || file.dataUrl || '#';
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      resolve({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        name: file.name,
-        type: file.type || 'application/octet-stream',
-        size: file.size,
-        dataUrl: String(reader.result),
-        addedAt: new Date().toLocaleString(),
-      });
-    };
+    reader.onload = () => resolve(String(reader.result));
     reader.readAsDataURL(file);
   });
 }
@@ -39,7 +51,7 @@ function readFile(file: File): Promise<StoredFile> {
 export function FilesPage({ search }: { search: string }) {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputId = useId();
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -57,7 +69,13 @@ export function FilesPage({ search }: { search: string }) {
       try {
         const res = await fetch(`${FB_DB_URL}/users/${user.uid}/files.json`);
         const cloudFiles = await res.json();
-        if (!cancelled) setFiles(Array.isArray(cloudFiles) ? cloudFiles : []);
+        if (!cancelled) {
+          setFiles(
+            normalizeFiles(cloudFiles).sort(
+              (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
+            ),
+          );
+        }
       } catch {
         if (!cancelled) setFiles([]);
       } finally {
@@ -69,18 +87,19 @@ export function FilesPage({ search }: { search: string }) {
     };
   }, [user]);
 
-  const saveFiles = async (next: StoredFile[]) => {
-    if (!user) return;
-    setFiles(next);
-    const res = await fetch(`${FB_DB_URL}/users/${user.uid}/files.json`, {
+  const saveFileMeta = async (file: StoredFile) => {
+    if (!user) throw new Error('no-user');
+    const res = await fetch(`${FB_DB_URL}/users/${user.uid}/files/${file.id}.json`, {
       method: 'PUT',
-      body: JSON.stringify(next),
+      body: JSON.stringify(file),
       headers: { 'Content-Type': 'application/json' },
     });
-    if (!res.ok) {
-      setFiles(files); // revert
-      setError('Failed to save files. The file may be too large for cloud storage.');
-    }
+    if (!res.ok) throw new Error('save-failed');
+  };
+
+  const deleteFileMeta = async (fileId: string) => {
+    if (!user) return;
+    await fetch(`${FB_DB_URL}/users/${user.uid}/files/${fileId}.json`, { method: 'DELETE' });
   };
 
   const filtered = useMemo(() => {
@@ -89,28 +108,74 @@ export function FilesPage({ search }: { search: string }) {
     return files.filter((file) => file.name.toLowerCase().includes(q) || file.type.toLowerCase().includes(q));
   }, [files, search]);
 
-  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB per file
+  const MAX_FILE_SIZE = 20 * 1024 * 1024;
+  const MAX_RTDB_FILE_SIZE = 2 * 1024 * 1024;
+
+  const uploadOneFile = async (file: File): Promise<StoredFile> => {
+    if (!user) throw new Error('no-user');
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const base: Omit<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl'> = {
+      id,
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      addedAt: new Date().toLocaleString(),
+    };
+
+    try {
+      const storagePath = `users/${user.uid}/files/${id}/${file.name}`;
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, file, { contentType: base.type });
+      const downloadUrl = await getDownloadURL(storageRef);
+      return { ...base, downloadUrl, storagePath };
+    } catch {
+      if (file.size > MAX_RTDB_FILE_SIZE) throw new Error('storage-unavailable');
+      const dataUrl = await readFileAsDataUrl(file);
+      return { ...base, dataUrl };
+    }
+  };
 
   const handleFiles = async (list: FileList | null) => {
     if (!list?.length || !user) return;
     setError('');
-    const oversized = Array.from(list).filter((f) => f.size > MAX_FILE_SIZE);
+    const selected = Array.from(list);
+    const oversized = selected.filter((f) => f.size > MAX_FILE_SIZE);
     if (oversized.length) {
-      setError(`File too large: ${oversized.map((f) => f.name).join(', ')} (max 5MB per file)`);
+      setError(`${t.filesTooLarge} ${oversized.map((f) => f.name).join(', ')}`);
       return;
     }
+
     setUploading(true);
+    const uploaded: StoredFile[] = [];
     try {
-      const uploaded = await Promise.all(Array.from(list).map(readFile));
-      await saveFiles([...uploaded, ...files]);
-      if (inputRef.current) inputRef.current.value = '';
+      for (const file of selected) {
+        const stored = await uploadOneFile(file);
+        await saveFileMeta(stored);
+        uploaded.push(stored);
+      }
+      if (uploaded.length) {
+        setFiles((prev) => [...uploaded, ...prev]);
+      }
+    } catch {
+      setError(t.filesUploadFailed);
     } finally {
       setUploading(false);
     }
   };
 
   const removeFile = async (file: StoredFile) => {
-    await saveFiles(files.filter((item) => item.id !== file.id));
+    setError('');
+    const previous = files;
+    setFiles((prev) => prev.filter((item) => item.id !== file.id));
+    try {
+      if (file.storagePath) {
+        await deleteObject(ref(storage, file.storagePath));
+      }
+      await deleteFileMeta(file.id);
+    } catch {
+      setFiles(previous);
+      setError(t.filesSaveFailed);
+    }
   };
 
   return (
@@ -126,15 +191,27 @@ export function FilesPage({ search }: { search: string }) {
               <p className="mt-1 text-sm text-app-text-secondary dark:text-gray-400">{t.filesSub}</p>
             </div>
           </div>
-          <button
-            onClick={() => inputRef.current?.click()}
-            disabled={uploading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+          <label
+            htmlFor={inputId}
+            aria-disabled={uploading}
+            className={`inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark ${
+              uploading ? 'pointer-events-none cursor-not-allowed opacity-60' : ''
+            }`}
           >
             <span className="text-base">{uploading ? '☁️' : '☁️➕'}</span>
             <span>{uploading ? t.cloudSaving : t.filesUpload}</span>
-          </button>
-          <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => handleFiles(e.target.files)} />
+          </label>
+          <input
+            id={inputId}
+            type="file"
+            multiple
+            disabled={uploading}
+            className="sr-only"
+            onChange={(e) => {
+              void handleFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
         </div>
       </div>
 
@@ -162,10 +239,16 @@ export function FilesPage({ search }: { search: string }) {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <a href={file.dataUrl} download={file.name} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">
+                <a
+                  href={fileHref(file)}
+                  download={file.name}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+                >
                   {t.filesOpen}
                 </a>
-                <button onClick={() => removeFile(file)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
+                <button onClick={() => void removeFile(file)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
                   {t.filesDelete}
                 </button>
               </div>
