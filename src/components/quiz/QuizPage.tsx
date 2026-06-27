@@ -11,6 +11,20 @@ import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
+const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
+
+function loadQuizSelection(): { folderId: string | null; setId: string | null } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(QUIZ_SELECTION_KEY) || '{}');
+    return { folderId: raw.folderId ?? null, setId: raw.setId ?? null };
+  } catch {
+    return { folderId: null, setId: null };
+  }
+}
+
+function saveQuizSelection(folderId: string | null, setId: string | null) {
+  localStorage.setItem(QUIZ_SELECTION_KEY, JSON.stringify({ folderId, setId }));
+}
 
 function loadProgress(): Record<string, Record<number, 'known' | 'learning'>> {
   try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; }
@@ -261,10 +275,6 @@ interface OpenQuestionForm {
   saveStatus: 'empty' | 'pending' | 'saved';
 }
 
-function newFormId() {
-  return `f${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
 interface EditPanelProps {
   question: string;
   answer: string;
@@ -273,13 +283,14 @@ interface EditPanelProps {
   initialCorrects?: number[];
   initialExplanation?: string;
   saveStatus?: 'empty' | 'pending' | 'saved';
+  persisted?: boolean;
   onChangeQ: (v: string) => void;
   onChangeA: (v: string) => void;
   onSave: (override?: SavePayload) => void;
   onCancel: () => void;
 }
 
-function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
+function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
   const { lang, t } = useLanguage();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
@@ -348,7 +359,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
       <div className="flex items-center justify-between border-b border-app-border px-4 py-2 dark:border-white/10">
         <div className="flex min-w-0 items-center gap-3">
           <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? '☑ MCQ' : '✏️ Q/A'}</span>
-          {saveStatus !== 'empty' && (
+          {saveStatus !== 'empty' || persisted ? (
             <span
               className={
                 'inline-flex items-center gap-1 text-[10px] font-medium ' +
@@ -360,7 +371,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
               <span className={saveStatus === 'pending' ? 'animate-pulse' : ''} aria-hidden>☁</span>
               <span>{saveStatus === 'pending' ? t.cloudSaving : t.cloudSavedMain}</span>
             </span>
-          )}
+          ) : null}
         </div>
         <button
           onClick={() => setMcq((v) => !v)}
@@ -535,7 +546,7 @@ const SET_COLORS = [
 export function QuizPage() {
   const { lang } = useLanguage();
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -548,8 +559,9 @@ export function QuizPage() {
     return allQuizSets.filter((set) => !set.trashed && set.folderId && !folderIds.has(set.folderId)).length;
   }, [allQuizFolders, allQuizSets]);
 
-  const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const savedSelection = useMemo(() => loadQuizSelection(), []);
+  const [selectedSetId, setSelectedSetId] = useState<string | null>(() => savedSelection.setId);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => savedSelection.folderId);
   const dragSetId = useRef<string | null>(null);
   const dragFolderId = useRef<string | null>(null);
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
@@ -592,9 +604,9 @@ export function QuizPage() {
       prev.map((f) => {
         if (f.formId !== formId) return f;
         const next = { ...f, ...patch };
+        if (f.itemId !== null) return { ...next, saveStatus: 'pending' as const };
         const complete = hasContent(next.question) && hasContent(next.answer);
         if (!complete) return { ...next, saveStatus: 'empty' as const };
-        if (f.saveStatus === 'saved') return { ...next, saveStatus: 'pending' as const };
         return { ...next, saveStatus: 'pending' as const };
       }),
     );
@@ -607,18 +619,11 @@ export function QuizPage() {
     setOpenForms((prev) => prev.filter((f) => f.formId !== formId));
   };
 
-  const clearAllForms = () => {
-    autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
-    autoSaveTimers.current.clear();
-    setOpenForms([]);
-  };
-
-  const persistForm = (formId: string, override?: SavePayload): number | null => {
+  const persistForm = (formId: string, override?: SavePayload, finalize = false): number | null => {
     const form = openFormsRef.current.find((f) => f.formId === formId);
-    if (!form) return null;
+    if (!form || form.itemId === null) return null;
     const q = override?.question ?? form.question;
     const a = override?.answer ?? form.answer;
-    if (!hasContent(q) || !hasContent(a)) return null;
     const patch = {
       question: q,
       answer: a,
@@ -626,56 +631,73 @@ export function QuizPage() {
       correctIndex: override?.correctIndexes?.[0],
       correctIndexes: override?.correctIndexes,
       explanation: override?.explanation,
+      draft: finalize ? false : true,
     };
 
-    if (form.itemId !== null) {
-      if (selectedSetId) updateItemInSet(selectedSetId, form.itemId, patch);
-      else updateQuiz(form.itemId, patch);
-      updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
-      return form.itemId;
-    }
-
-    const item = {
-      noteId: 0,
-      noteTitle: '',
-      ...patch,
-      date: new Date().toLocaleDateString(),
-      createdAt: new Date().toISOString(),
-    };
-    const id = selectedSetId ? addItemToSet(selectedSetId, item) : addQuiz(item);
-    updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved' });
-    return id;
+    if (selectedSetId) updateItemInSet(selectedSetId, form.itemId, patch);
+    else updateQuiz(form.itemId, patch);
+    updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
+    return form.itemId;
   };
 
-  const flushForm = (formId: string, override?: SavePayload) => {
+  const flushForm = (formId: string, override?: SavePayload, finalize = false) => {
     const timer = autoSaveTimers.current.get(formId);
     if (timer) {
       clearTimeout(timer);
       autoSaveTimers.current.delete(formId);
     }
-    persistForm(formId, override);
+    persistForm(formId, override, finalize);
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
-    const complete = initial?.question && initial?.answer && hasContent(initial.question) && hasContent(initial.answer);
+    if (initial?.itemId) {
+      if (openFormsRef.current.some((f) => f.itemId === initial.itemId)) return;
+      setOpenForms((prev) => [
+        ...prev,
+        {
+          formId: `item-${initial.itemId}`,
+          itemId: initial.itemId!,
+          question: initial.question ?? '',
+          answer: initial.answer ?? '',
+          saveStatus: 'saved',
+        },
+      ]);
+      return;
+    }
+
+    const item = {
+      noteId: 0,
+      noteTitle: '',
+      question: '',
+      answer: '',
+      date: new Date().toLocaleDateString(),
+      createdAt: new Date().toISOString(),
+      draft: true,
+    };
+    const id = selectedSetId ? addItemToSet(selectedSetId, item) : addQuiz(item);
     setOpenForms((prev) => [
       ...prev,
       {
-        formId: newFormId(),
-        itemId: initial?.itemId ?? null,
-        question: initial?.question ?? '',
-        answer: initial?.answer ?? '',
-        saveStatus: initial?.itemId ? 'saved' : complete ? 'pending' : 'empty',
+        formId: `item-${id}`,
+        itemId: id,
+        question: '',
+        answer: '',
+        saveStatus: 'saved',
       },
     ]);
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
-    flushForm(formId, override);
+    flushForm(formId, override, true);
     closeForm(formId);
   };
 
   const handleCancelForm = (formId: string) => {
+    const form = openFormsRef.current.find((f) => f.formId === formId);
+    if (form?.itemId && !hasContent(form.question) && !hasContent(form.answer)) {
+      if (selectedSetId) removeItemFromSet(selectedSetId, form.itemId);
+      else permDeleteQuiz(form.itemId);
+    }
     const timer = autoSaveTimers.current.get(formId);
     if (timer) clearTimeout(timer);
     autoSaveTimers.current.delete(formId);
@@ -688,28 +710,73 @@ export function QuizPage() {
 
   useEffect(() => {
     openForms.forEach((form) => {
-      if (!hasContent(form.question) || !hasContent(form.answer)) {
-        const timer = autoSaveTimers.current.get(form.formId);
-        if (timer) {
-          clearTimeout(timer);
-          autoSaveTimers.current.delete(form.formId);
-        }
-        return;
-      }
+      if (form.itemId === null) return;
       const existing = autoSaveTimers.current.get(form.formId);
       if (existing) clearTimeout(existing);
       autoSaveTimers.current.set(
         form.formId,
         setTimeout(() => {
           persistForm(form.formId);
-        }, 1500),
+        }, 800),
       );
     });
   }, [openForms, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    clearAllForms();
-  }, [selectedSetId, selectedFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
+    saveQuizSelection(selectedFolderId, selectedSetId);
+  }, [selectedFolderId, selectedSetId]);
+
+  const isNotesViewRef = useRef(false);
+  useEffect(() => {
+    if (!loaded) return;
+    autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
+    autoSaveTimers.current.clear();
+
+    const notesView = !selectedFolderId && !selectedSetId;
+    isNotesViewRef.current = notesView;
+    if (!selectedSetId && !notesView) {
+      setOpenForms([]);
+      return;
+    }
+
+    const items = selectedSetId
+      ? (allQuizSets.find((s) => s.id === selectedSetId)?.items ?? [])
+      : quizzes.filter((q) => !q.trashed);
+
+    setOpenForms(
+      items
+        .filter((item) => item.draft)
+        .map((item) => ({
+          formId: `item-${item.id}`,
+          itemId: item.id,
+          question: item.question,
+          answer: item.answer,
+          saveStatus: 'saved' as const,
+        })),
+    );
+  }, [selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (!selectedSetId && !isNotesViewRef.current) return;
+    const items = selectedSetId
+      ? (allQuizSets.find((s) => s.id === selectedSetId)?.items ?? [])
+      : quizzes.filter((q) => !q.trashed);
+    const drafts = items.filter((item) => item.draft);
+    setOpenForms((prev) => {
+      const openIds = new Set(prev.map((f) => f.itemId));
+      const additions = drafts
+        .filter((d) => !openIds.has(d.id))
+        .map((item) => ({
+          formId: `item-${item.id}`,
+          itemId: item.id,
+          question: item.question,
+          answer: item.answer,
+          saveStatus: 'saved' as const,
+        }));
+      return additions.length ? [...prev, ...additions] : prev;
+    });
+  }, [allQuizSets, quizzes, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Rename set
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
@@ -881,6 +948,7 @@ export function QuizPage() {
   const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : isNotesView ? [...quizzes].reverse() : [];
+  const studyItems = useMemo(() => displayItems.filter((item) => !item.draft), [displayItems]);
   const openItemIds = useMemo(
     () => new Set(openForms.map((f) => f.itemId).filter((id): id is number => id !== null)),
     [openForms],
@@ -920,6 +988,7 @@ export function QuizPage() {
         question={form.question}
         answer={form.answer}
         saveStatus={form.saveStatus}
+        persisted={form.itemId !== null}
         initialOptions={item?.options}
         initialCorrect={item?.correctIndex}
         initialCorrects={item?.correctIndexes}
@@ -1445,11 +1514,11 @@ export function QuizPage() {
       </div>
 
       {/* Study mode overlay */}
-      {studyMode && (studyDeck ?? displayItems).length > 0 && (
+      {studyMode && (studyDeck ?? studyItems).length > 0 && (
         <StudyMode
           title={selectedSet?.name ?? 'Questions from Notes'}
-          items={studyDeck ?? displayItems}
-          allItems={displayItems}
+          items={studyDeck ?? studyItems}
+          allItems={studyItems}
           lang={lang}
           mode={studyMode}
           initialProgress={currentProgress}

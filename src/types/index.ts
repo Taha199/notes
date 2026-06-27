@@ -61,6 +61,8 @@ export interface QuizItem {
   deletedAt?: string;
   // When this item is a copy living in the Favorites set, points at the original item's id.
   favOf?: number;
+  // In-progress question being composed; kept in cloud even when empty.
+  draft?: boolean;
 }
 
 export interface QuizSet {

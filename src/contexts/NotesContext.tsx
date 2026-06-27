@@ -28,7 +28,7 @@ interface NotesCtx {
   deleteQuiz: (id: number) => void;
   restoreQuiz: (id: number) => void;
   permDeleteQuiz: (id: number) => void;
-  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
+  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => void;
   addQuizSet: (name: string) => QuizSet;
   deleteQuizSet: (id: string) => void;
   restoreQuizSet: (id: string) => void;
@@ -605,7 +605,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => {
+  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => {
     setQuizzes((prev) => {
       const next = prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
       persist(notes, undefined, next);
@@ -870,7 +870,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => {
+  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => {
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.map((i) => i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i) } : s);
       persistSets(next);
