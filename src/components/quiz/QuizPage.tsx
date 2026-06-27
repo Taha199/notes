@@ -840,6 +840,11 @@ export function QuizPage() {
   const ungroupedSets = sortedSets.filter((s) => !s.folderId || !folderIds.has(s.folderId));
   const setsInFolder = (fid: string) => sortedSets.filter((s) => s.folderId === fid);
 
+  const selectFolder = (folderId: string) => {
+    setSelectedFolderId(folderId);
+    setSelectedSetId(setsInFolder(folderId)[0]?.id ?? null);
+  };
+
   // Sets shown in the right panel depending on which folder is selected
   const currentSets = selectedFolderId ? setsInFolder(selectedFolderId) : ungroupedSets;
 
@@ -1021,7 +1026,7 @@ export function QuizPage() {
                       e.dataTransfer.effectAllowed = 'move';
                       e.dataTransfer.setData('application/x-quiz-folder', f.id);
                     }}
-                    onClick={() => setSelectedFolderId(f.id)}
+                    onClick={() => selectFolder(f.id)}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -1066,7 +1071,7 @@ export function QuizPage() {
                       if (setId) {
                         setQuizSetFolder(setId, f.id);
                         if (setSort !== 'manual') changeSort('manual');
-                        setSelectedFolderId(f.id);
+                        selectFolder(f.id);
                       }
                       dragSetId.current = null;
                       setDragOverSetId(null);
