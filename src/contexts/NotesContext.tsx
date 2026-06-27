@@ -24,7 +24,7 @@ interface NotesCtx {
   saveChats: (chats: ChatConversation[]) => void;
   cloudStatus: CloudStatus;
   loaded: boolean;
-  addQuiz: (item: Omit<QuizItem, 'id'>) => void;
+  addQuiz: (item: Omit<QuizItem, 'id'>) => number;
   deleteQuiz: (id: number) => void;
   restoreQuiz: (id: number) => void;
   permDeleteQuiz: (id: number) => void;
@@ -47,7 +47,7 @@ interface NotesCtx {
   recoverQuizFolders: () => Promise<number>;
   listQuizFolderBackups: () => Promise<{ key: string; label: string; folderCount: number }[]>;
   restoreQuizFolderBackup: (key: string) => Promise<number>;
-  addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
+  addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => number;
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
   tokenUsage: number;
@@ -570,13 +570,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateNote = (id: number, patch: Partial<Note>) =>
     mutateNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)));
 
-  const addQuiz = (item: Omit<QuizItem, 'id'>) => {
+  const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
+    const newId = Date.now();
     setQuizzes((prev) => {
       const now = new Date().toISOString();
-      const next = [...prev, { ...item, id: Date.now(), createdAt: item.createdAt ?? now, updatedAt: now }];
+      const next = [...prev, { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now }];
       persist(notes, undefined, next);
       return next;
     });
+    return newId;
   };
 
   const deleteQuiz = (id: number) => {
@@ -848,14 +850,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return after.filter((folder) => !before.has(folder.id)).length;
   };
 
-  const addItemToSet = (setId: string, item: Omit<QuizItem, 'id'>) => {
+  const addItemToSet = (setId: string, item: Omit<QuizItem, 'id'>): number => {
     const now = new Date().toISOString();
-    const newItem: QuizItem = { ...item, id: Date.now(), createdAt: item.createdAt ?? now, updatedAt: now };
+    const newId = Date.now();
+    const newItem: QuizItem = { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now };
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === setId ? { ...s, items: [...s.items, newItem] } : s);
       persistSets(next);
       return next;
     });
+    return newId;
   };
 
   const removeItemFromSet = (setId: string, itemId: number) => {

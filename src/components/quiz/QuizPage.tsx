@@ -558,6 +558,8 @@ export function QuizPage() {
   const [addingQuestion, setAddingQuestion] = useState(false);
   const [newQ, setNewQ] = useState('');
   const [newA, setNewA] = useState('');
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCreateIdRef = useRef<number | null>(null);
 
   // Rename set
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
@@ -641,36 +643,144 @@ export function QuizPage() {
     setEditA(item.answer);
   };
 
-  const saveEdit = (override?: SavePayload) => {
+  const saveEditSilent = (override?: SavePayload) => {
     if (editingId === null) return;
     const q = override?.question ?? editQ;
     const a = override?.answer ?? editA;
     if (!hasContent(q) || !hasContent(a)) return;
-    const patch = { question: q, answer: a, options: override?.options, correctIndex: override?.correctIndexes?.[0], correctIndexes: override?.correctIndexes, explanation: override?.explanation };
+    const patch = {
+      question: q,
+      answer: a,
+      options: override?.options,
+      correctIndex: override?.correctIndexes?.[0],
+      correctIndexes: override?.correctIndexes,
+      explanation: override?.explanation,
+    };
     if (selectedSetId) updateItemInSet(selectedSetId, editingId, patch);
     else updateQuiz(editingId, patch);
-    setEditingId(null);
   };
 
-  const saveNewQuestion = (override?: SavePayload) => {
+  const saveEdit = (override?: SavePayload) => {
+    flushPendingQuestionSave(override);
+    setEditingId(null);
+    setEditQ('');
+    setEditA('');
+    pendingCreateIdRef.current = null;
+  };
+
+  const persistNewQuestion = (override?: SavePayload): number | null => {
     const q = override?.question ?? newQ;
     const a = override?.answer ?? newA;
-    if (!hasContent(q) || !hasContent(a)) return;
-    const item = { noteId: 0, noteTitle: '', question: q, answer: a, options: override?.options, correctIndex: override?.correctIndexes?.[0], correctIndexes: override?.correctIndexes, explanation: override?.explanation, date: new Date().toLocaleDateString(), createdAt: new Date().toISOString() };
-    if (selectedSetId) addItemToSet(selectedSetId, item);
-    else addQuiz(item);
-    setNewQ(''); setNewA(''); setAddingQuestion(false);
+    if (!hasContent(q) || !hasContent(a)) return null;
+    const patch = {
+      question: q,
+      answer: a,
+      options: override?.options,
+      correctIndex: override?.correctIndexes?.[0],
+      correctIndexes: override?.correctIndexes,
+      explanation: override?.explanation,
+    };
+
+    if (pendingCreateIdRef.current !== null) {
+      const id = pendingCreateIdRef.current;
+      if (selectedSetId) updateItemInSet(selectedSetId, id, patch);
+      else updateQuiz(id, patch);
+      setEditingId(id);
+      setEditQ(q);
+      setEditA(a);
+      setAddingQuestion(false);
+      setNewQ('');
+      setNewA('');
+      return id;
+    }
+
+    if (editingId !== null) {
+      saveEditSilent(override);
+      return editingId;
+    }
+
+    const item = {
+      noteId: 0,
+      noteTitle: '',
+      ...patch,
+      date: new Date().toLocaleDateString(),
+      createdAt: new Date().toISOString(),
+    };
+    const id = selectedSetId ? addItemToSet(selectedSetId, item) : addQuiz(item);
+    pendingCreateIdRef.current = id;
+    setEditingId(id);
+    setEditQ(q);
+    setEditA(a);
+    setAddingQuestion(false);
+    setNewQ('');
+    setNewA('');
+    return id;
+  };
+
+  const flushPendingQuestionSave = (override?: SavePayload) => {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = null;
+    }
+    if (addingQuestion) {
+      persistNewQuestion(override);
+    } else if (editingId !== null) {
+      saveEditSilent(override);
+    }
+  };
+
+  const resetQuestionForm = () => {
+    setAddingQuestion(false);
+    setEditingId(null);
+    setNewQ('');
+    setNewA('');
+    setEditQ('');
+    setEditA('');
+    pendingCreateIdRef.current = null;
+  };
+
+  const openNewQuestionForm = () => {
+    flushPendingQuestionSave();
+    resetQuestionForm();
+    setAddingQuestion(true);
   };
 
   const saveAndAddNew = () => {
-    if (hasContent(newQ) && hasContent(newA)) {
-      const item = { noteId: 0, noteTitle: '', question: newQ, answer: newA, date: new Date().toLocaleDateString(), createdAt: new Date().toISOString() };
-      if (selectedSetId) addItemToSet(selectedSetId, item);
-      else addQuiz(item);
-    }
-    setNewQ(''); setNewA('');
+    flushPendingQuestionSave();
+    resetQuestionForm();
     setAddingQuestion(true);
   };
+
+  const saveNewQuestion = (override?: SavePayload) => {
+    flushPendingQuestionSave(override);
+    resetQuestionForm();
+  };
+
+  const handleAddQuestionClick = () => {
+    if (addingQuestion || editingId !== null) saveAndAddNew();
+    else openNewQuestionForm();
+  };
+
+  useEffect(() => {
+    if (!addingQuestion && editingId === null) return;
+    const q = addingQuestion ? newQ : editQ;
+    const a = addingQuestion ? newA : editA;
+    if (!hasContent(q) || !hasContent(a)) return;
+
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      if (addingQuestion) persistNewQuestion();
+      else saveEditSilent();
+    }, 1500);
+
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, [newQ, newA, editQ, editA, addingQuestion, editingId, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    resetQuestionForm();
+  }, [selectedSetId, selectedFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleQuickCreateSet = () => {
     let num = quizSets.length + 1;
@@ -777,7 +887,12 @@ export function QuizPage() {
         onChangeQ={setEditQ}
         onChangeA={setEditA}
         onSave={saveEdit}
-        onCancel={() => setEditingId(null)}
+        onCancel={() => {
+          if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+          setEditingId(null);
+          setEditQ('');
+          setEditA('');
+        }}
       />
     ) : (
       <QuizItemRow
@@ -1246,7 +1361,7 @@ export function QuizPage() {
                   ✏️ Written
                 </button>
                 <button
-                  onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+                  onClick={handleAddQuestionClick}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
                 >
                   + {lang === 'sv' ? 'Lägg till' : 'Add'}
@@ -1264,7 +1379,7 @@ export function QuizPage() {
                   </button>
                 )}
                 <button
-                  onClick={() => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+                  onClick={handleAddQuestionClick}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
                 >
                   <span className="text-base leading-none">+</span> {lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
@@ -1307,13 +1422,16 @@ export function QuizPage() {
                 onChangeQ={setNewQ}
                 onChangeA={setNewA}
                 onSave={saveNewQuestion}
-                onCancel={() => { setAddingQuestion(false); setNewQ(''); setNewA(''); }}
+                onCancel={() => {
+                  if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+                  resetQuestionForm();
+                }}
               />
             )}
 
-            {/* Add question dashed button — always visible; saves current if open */}
+            {/* Add question dashed button — saves current draft then opens a new form */}
             <button
-              onClick={addingQuestion ? saveAndAddNew : () => { setAddingQuestion(true); setNewQ(''); setNewA(''); }}
+              onClick={handleAddQuestionClick}
               className="flex min-h-[56px] w-full items-center justify-center rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/50 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:hover:border-primary/50 dark:hover:bg-primary/10"
               title={lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
             >
