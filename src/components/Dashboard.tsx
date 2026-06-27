@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Page, Note } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useNotes } from '../contexts/NotesContext';
 import { useToast } from '../contexts/ToastContext';
+import { pageFromPath, pathFromPage } from '../lib/pageRoute';
 import { Sidebar } from './layout/Sidebar';
 import { Header } from './layout/Header';
 import { NoteCard } from './notes/NoteCard';
@@ -127,7 +128,14 @@ export function Dashboard() {
   const { t, lang } = useLanguage();
   const { notes, drafts, trashedQuizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
   const { show } = useToast();
-  const [page, setPage] = useState<Page>('home');
+  const [page, setPageState] = useState<Page>(() => pageFromPath(window.location.pathname));
+  const setPage = useCallback((next: Page) => {
+    setPageState(next);
+    const nextPath = pathFromPage(next);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ page: next }, '', `${nextPath}${window.location.search}`);
+    }
+  }, []);
   const [search, setSearch] = useState('');
   const [openNoteId, setOpenNoteId] = useState<number | null>(null);
   const [showSetPassword, setShowSetPassword] = useState(false);
@@ -141,6 +149,14 @@ export function Dashboard() {
   const [confirmDelSel, setConfirmDelSel] = useState(false);
   const [confirmQuizTrash, setConfirmQuizTrash] = useState<{ type: 'set' | 'folder' | 'question'; id: string | number } | null>(null);
   const hasSearch = normalizeSearch(search).length > 0;
+
+  useEffect(() => {
+    const onPopState = () => {
+      setPageState(pageFromPath(window.location.pathname));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const active = useMemo(() => notes.filter((n) => !n.archived && !n.trashed), [notes]);
   const unread = useMemo(() => active.filter((n) => !n.read), [active]);
