@@ -224,6 +224,7 @@ export function FilesPage({ search }: { search: string }) {
             <div>
               <h3 className="text-lg font-bold text-app-text dark:text-gray-100">{t.filesTitle}</h3>
               <p className="mt-1 text-sm text-app-text-secondary dark:text-gray-400">{t.filesSub}</p>
+              <p className="mt-1 text-xs text-app-text-secondary/80 dark:text-gray-500">{t.filesSizeLimit}</p>
             </div>
           </div>
           <label

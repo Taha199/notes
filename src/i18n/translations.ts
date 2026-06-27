@@ -65,6 +65,7 @@ export interface Translation {
   emptyTrash: string;
   filesTitle: string;
   filesSub: string;
+  filesSizeLimit: string;
   filesUpload: string;
   filesEmpty: string;
   filesOpen: string;
@@ -238,7 +239,7 @@ export const LANGS: Record<Lang, Translation> = {
     secRead: 'Read', secArch: 'Archive',
     tagFav: '⭐ Favourite', tagRead: '✓ Read', tagUnread: '📖 Unread', tagArch: '🗄 Archived',
     emptyNotes: 'No notes here', emptySearch: 'No results', emptyTrash: 'Trash is empty',
-    filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesUpload: 'Choose files',
+    filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesSizeLimit: 'Maximum file size: 20 MB per file.', filesUpload: 'Choose files',
     filesEmpty: 'No files uploaded yet', filesOpen: 'Open', filesDelete: 'Delete', filesStored: 'Saved in cloud',
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
@@ -336,7 +337,7 @@ export const LANGS: Record<Lang, Translation> = {
     secRead: 'Lästa', secArch: 'Arkiv',
     tagFav: '⭐ Favorit', tagRead: '✓ Läst', tagUnread: '📖 Oläst', tagArch: '🗄 Arkiverad',
     emptyNotes: 'Inga anteckningar här', emptySearch: 'Inga resultat', emptyTrash: 'Papperskorgen är tom',
-    filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesUpload: 'Välj filer',
+    filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesSizeLimit: 'Maximal filstorlek: 20 MB per fil.', filesUpload: 'Välj filer',
     filesEmpty: 'Inga filer uppladdade ännu', filesOpen: 'Öppna', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
