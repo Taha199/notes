@@ -3,8 +3,6 @@ name: Apply quiz folder reorder patch
 on:
   push:
     branches: [main]
-    paths:
-      - .github/workflows/quiz-folder-reorder-patch.yml
   workflow_dispatch:
 
 permissions:
