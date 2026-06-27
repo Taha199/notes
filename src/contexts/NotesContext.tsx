@@ -39,6 +39,7 @@ interface NotesCtx {
   setQuizSetFolder: (id: string, folderId: string | undefined) => void;
   addQuizFolder: (name: string) => QuizFolder;
   renameQuizFolder: (id: string, name: string) => void;
+  reorderQuizFolders: (dragId: string, targetId: string) => void;
   setQuizFolderColor: (id: string, color: string) => void;
   deleteQuizFolder: (id: string) => void;
   restoreQuizFolder: (id: string) => void;
@@ -106,10 +107,10 @@ function ensureFavoritesSet(sets: QuizSet[]) {
   const fav = sets.find((s) => s.id === FAVORITES_SET_ID || s.system === 'favorites');
   if (fav) {
     return sets.map((s) => s.id === fav.id
-      ? { ...s, id: FAVORITES_SET_ID, name: 'Favoriter', system: 'favorites' as const, folderId: FAVORITES_FOLDER_ID, trashed: false, deletedAt: undefined, color: s.color || '#f59e0b', colorInitialized: true }
+      ? { ...s, id: FAVORITES_SET_ID, name: 'Favorit frågor', system: 'favorites' as const, folderId: FAVORITES_FOLDER_ID, trashed: false, deletedAt: undefined, color: s.color || '#f59e0b', colorInitialized: true }
       : s);
   }
-  return [...sets, { id: FAVORITES_SET_ID, name: 'Favoriter', system: 'favorites' as const, folderId: FAVORITES_FOLDER_ID, items: [], createdAt: new Date().toISOString(), color: '#f59e0b', colorInitialized: true }];
+  return [...sets, { id: FAVORITES_SET_ID, name: 'Favorit frågor', system: 'favorites' as const, folderId: FAVORITES_FOLDER_ID, items: [], createdAt: new Date().toISOString(), color: '#f59e0b', colorInitialized: true }];
 }
 
 function colorDistance(a: string, b: string) {
@@ -510,6 +511,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const permDeleteQuizSet = (id: string) => {
+    if (id === FAVORITES_SET_ID) return;
     setQuizSets((prev) => {
       const next = prev.filter((s) => s.id !== id);
       persistSets(next);
@@ -523,6 +525,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const from = next.findIndex((s) => s.id === dragId);
       const to = next.findIndex((s) => s.id === targetId);
       if (from < 0 || to < 0 || from === to) return prev;
+      if (next[from].system || next[to].system) return prev;
       const [item] = next.splice(from, 1);
       next.splice(to, 0, item);
       persistSets(next);
@@ -547,8 +550,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const setQuizSetFolder = (id: string, folderId: string | undefined) => {
+    if (id === FAVORITES_SET_ID) return;
     setQuizSets((prev) => {
       const set = prev.find((s) => s.id === id);
+      if (set?.system) return prev;
+      if (folderId && quizFolders.find((f) => f.id === folderId)?.system) return prev;
       if (!set || set.folderId === folderId) return prev;
       const next = [...prev.filter((s) => s.id !== id), { ...set, folderId }];
       persistSets(next);
@@ -568,7 +574,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const renameQuizFolder = (id: string, name: string) => {
-    if (id === RESTORED_FOLDER_ID) return;
+    if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
     setQuizFolders((prev) => {
       const next = prev.map((f) => (f.id === id ? { ...f, name } : f));
       persistFolders(next);
@@ -577,8 +583,27 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const setQuizFolderColor = (id: string, color: string) => {
+    if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
     setQuizFolders((prev) => {
       const next = prev.map((f) => (f.id === id ? { ...f, color, colorInitialized: true } : f));
+      persistFolders(next);
+      return next;
+    });
+  };
+
+  const reorderQuizFolders = (dragId: string, targetId: string) => {
+    setQuizFolders((prev) => {
+      const drag = prev.find((f) => f.id === dragId);
+      const target = prev.find((f) => f.id === targetId);
+      if (!drag || !target || drag.system || target.system || dragId === targetId) return prev;
+      const systemFolders = prev.filter((f) => f.system);
+      const normalFolders = prev.filter((f) => !f.system);
+      const from = normalFolders.findIndex((f) => f.id === dragId);
+      const to = normalFolders.findIndex((f) => f.id === targetId);
+      if (from < 0 || to < 0) return prev;
+      const [item] = normalFolders.splice(from, 1);
+      normalFolders.splice(to, 0, item);
+      const next = [...systemFolders, ...normalFolders];
       persistFolders(next);
       return next;
     });
@@ -602,7 +627,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const permDeleteQuizFolder = (id: string) => {
-    if (id === RESTORED_FOLDER_ID) return;
+    if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
     const nextSets = quizSets.map((s) => s.folderId === id ? { ...s, folderId: undefined } : s);
     const nextFolders = quizFolders.filter((f) => f.id !== id);
     setQuizSets(nextSets);
@@ -694,6 +719,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setQuizSetFolder,
         addQuizFolder,
         renameQuizFolder,
+        reorderQuizFolders,
         setQuizFolderColor,
         deleteQuizFolder,
         restoreQuizFolder,
