@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -14,23 +13,15 @@ export function CloudSaveIndicator({
   const { user } = useAuth();
   const { cloudStatus } = useNotes();
   const { t } = useLanguage();
-  const [showSaving, setShowSaving] = useState(false);
-
-  useEffect(() => {
-    if (cloudStatus !== 'saving') {
-      setShowSaving(false);
-      return;
-    }
-    const timer = setTimeout(() => setShowSaving(true), 700);
-    return () => clearTimeout(timer);
-  }, [cloudStatus]);
 
   if (!user) return null;
 
+  const syncing = cloudStatus === 'saving';
+
   return (
     <SaveStatusBadge
-      status={showSaving ? 'syncing' : 'saved'}
-      title={showSaving ? t.cloudSaving : t.cloudSavedMain}
+      status={syncing ? 'syncing' : 'saved'}
+      title={syncing ? t.cloudSaving : t.cloudSavedMain}
       size={size}
       className={className}
     />

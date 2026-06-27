@@ -242,8 +242,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
   const [loaded, setLoaded] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savingUiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savesInFlight = useRef(0);
+  const savingStartedAt = useRef(0);
+  const MIN_SYNC_VISIBLE_MS = 650;
 
   const nowStr = () =>
     new Date().toLocaleString(t.dateLocale, {
@@ -480,11 +481,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       savesInFlight.current += 1;
-      if (!savingUiTimer.current) {
-        savingUiTimer.current = setTimeout(() => {
-          if (savesInFlight.current > 0) setCloudStatus('saving');
-        }, 700);
-      }
+      setCloudStatus('saving');
+      savingStartedAt.current = Date.now();
       const dList = nextDrafts ?? drafts;
       const chatList = nextChats ?? chats;
       const qsList = nextQuizSets ?? quizSets;
@@ -512,11 +510,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         .finally(() => {
           savesInFlight.current = Math.max(0, savesInFlight.current - 1);
           if (savesInFlight.current === 0) {
-            if (savingUiTimer.current) {
-              clearTimeout(savingUiTimer.current);
-              savingUiTimer.current = null;
-            }
-            setCloudStatus('saved');
+            const elapsed = Date.now() - savingStartedAt.current;
+            const delay = Math.max(0, MIN_SYNC_VISIBLE_MS - elapsed);
+            const markSaved = () => setCloudStatus('saved');
+            if (delay > 0) setTimeout(markSaved, delay);
+            else markSaved();
           }
         });
     }, 1200);

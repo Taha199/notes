@@ -41,7 +41,7 @@ export function Header({
         </button>
         <span className="text-lg text-primary">{ICONS[page]}</span>
         <h2 className="truncate text-[15px] font-bold tracking-tight text-app-text dark:text-gray-100">{titles[page]}</h2>
-        <CloudSaveIndicator className="hidden sm:inline-flex" />
+        <CloudSaveIndicator className="inline-flex" />
       </div>
       <div className="flex w-full min-w-0 items-center gap-2 md:w-auto">
         <div className="relative min-w-0 flex-1 md:flex-none">

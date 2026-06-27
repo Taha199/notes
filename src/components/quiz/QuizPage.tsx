@@ -271,7 +271,7 @@ interface OpenQuestionForm {
   itemId: number | null;
   question: string;
   answer: string;
-  saveStatus: 'empty' | 'pending' | 'saved';
+  saveStatus: 'empty' | 'syncing' | 'saved';
 }
 
 interface EditPanelProps {
@@ -281,7 +281,7 @@ interface EditPanelProps {
   initialCorrect?: number;
   initialCorrects?: number[];
   initialExplanation?: string;
-  saveStatus?: 'empty' | 'pending' | 'saved';
+  saveStatus?: 'empty' | 'syncing' | 'saved';
   persisted?: boolean;
   onChangeQ: (v: string) => void;
   onChangeA: (v: string) => void;
@@ -359,8 +359,14 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         <div className="flex min-w-0 items-center gap-3">
           <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? '☑ MCQ' : '✏️ Q/A'}</span>
           <SaveStatusBadge
-            status={persisted || saveStatus === 'saved' ? 'saved' : saveStatus === 'pending' ? 'syncing' : 'none'}
-            title={saveStatus === 'pending' ? t.cloudSaving : t.cloudSavedMain}
+            status={
+              saveStatus === 'syncing'
+                ? 'syncing'
+                : persisted || saveStatus === 'saved'
+                  ? 'saved'
+                  : 'none'
+            }
+            title={saveStatus === 'syncing' ? t.cloudSaving : t.cloudSavedMain}
             size="xs"
           />
         </div>
@@ -598,7 +604,7 @@ export function QuizPage() {
         if (f.itemId !== null) return next;
         const complete = hasContent(next.question) && hasContent(next.answer);
         if (!complete) return { ...next, saveStatus: 'empty' as const };
-        return { ...next, saveStatus: 'pending' as const };
+        return next;
       }),
     );
   };
@@ -625,9 +631,12 @@ export function QuizPage() {
       draft: finalize ? false : true,
     };
 
+    updateForm(formId, { saveStatus: 'syncing' });
     if (selectedSetId) updateItemInSet(selectedSetId, form.itemId, patch);
     else updateQuiz(form.itemId, patch);
-    updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
+    window.setTimeout(() => {
+      updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
+    }, 650);
     return form.itemId;
   };
 
