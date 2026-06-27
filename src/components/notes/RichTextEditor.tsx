@@ -29,17 +29,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const savedRange = useRef<Range | null>(null);
   const savedFormattingRange = useRef<Range | null>(null);
   const pendingFontSize = useRef<number | null>(null);
-  const previousFontSizeRef = useRef(DEFAULT_FONT_PX);
   const [fontSize, setFontSizeState] = useState(15);
   const fontSizeRef = useRef(15);
+  const fontInputFocused = useRef(false);
   const [sizeInput, setSizeInput] = useState('15');
-  const [sizeEditing, setSizeEditing] = useState(false);
-  const [sizeDraft, setSizeDraft] = useState('15');
-  const sizeEditingRef = useRef(false);
-  const sizeDraftRef = useRef('15');
-  const sizeDraftFresh = useRef(true);
-  const formattingMarkRef = useRef<HTMLElement | null>(null);
-  const setFontSize = (v: number) => { fontSizeRef.current = v; setFontSizeState(v); if (!sizeEditingRef.current) setSizeInput(String(v)); };
+  const setFontSize = (v: number) => { fontSizeRef.current = v; setFontSizeState(v); if (!fontInputFocused.current) setSizeInput(String(v)); };
   const [activeCmds, setActiveCmds] = useState<Set<string>>(new Set());
   const [palOpen, setPalOpen] = useState(false);
   const [palPos, setPalPos] = useState({ left: 0, top: 0 });
@@ -75,33 +69,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!r.collapsed) savedFormattingRange.current = r.cloneRange();
   };
 
-  const getFormattingRange = (): Range | null => {
-    const ed = editorRef.current;
-    if (!ed) return null;
-    const mark = formattingMarkRef.current;
-    if (mark?.isConnected) {
-      const r = document.createRange();
-      r.selectNodeContents(mark);
-      return r;
-    }
-    const live = liveRange();
-    if (live && !live.collapsed) return live;
-    const saved = savedFormattingRange.current?.cloneRange() ?? null;
-    if (saved && !saved.collapsed && ed.contains(saved.commonAncestorContainer)) return saved;
-    return null;
-  };
-
-  const restoreFormattingRange = (): Range | null => {
-    const ed = editorRef.current;
-    const range = getFormattingRange();
-    if (!ed || !range) return null;
-    ed.focus({ preventScroll: true });
-    const s = window.getSelection();
-    s?.removeAllRanges();
-    s?.addRange(range);
-    return s?.getRangeAt(0) ?? range;
-  };
-
   const captureFormattingSelection = () => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -111,74 +78,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!ed.contains(range.commonAncestorContainer)) return;
     savedRange.current = range.cloneRange();
     if (!range.collapsed) savedFormattingRange.current = range.cloneRange();
-  };
-
-  const unwrapFormattingMark = () => {
-    const mark = formattingMarkRef.current ?? editorRef.current?.querySelector<HTMLElement>('mark[data-rt-format-target]') ?? null;
-    if (!mark?.isConnected) {
-      formattingMarkRef.current = null;
-      return;
-    }
-    const parent = mark.parentNode;
-    if (!parent) return;
-    while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
-    parent.removeChild(mark);
-    formattingMarkRef.current = null;
-  };
-
-  const markFormattingSelection = (): boolean => {
-    const ed = editorRef.current;
-    if (!ed) return false;
-    unwrapFormattingMark();
-
-    let range: Range | null = null;
-    const sel = window.getSelection();
-    if (sel?.rangeCount) {
-      const live = sel.getRangeAt(0);
-      if (ed.contains(live.commonAncestorContainer) && !live.collapsed) {
-        range = live.cloneRange();
-      }
-    }
-    if (!range) {
-      const saved = savedFormattingRange.current;
-      if (saved && !saved.collapsed && ed.contains(saved.commonAncestorContainer)) {
-        range = saved.cloneRange();
-      }
-    }
-    if (!range) return false;
-
-    const mark = document.createElement('mark');
-    mark.setAttribute('data-rt-format-target', 'true');
-    mark.style.backgroundColor = 'rgba(59, 130, 246, 0.35)';
-    mark.style.color = 'inherit';
-
-    try {
-      range.surroundContents(mark);
-    } catch {
-      try {
-        const fragment = range.extractContents();
-        mark.appendChild(fragment);
-        range.insertNode(mark);
-      } catch {
-        return false;
-      }
-    }
-
-    formattingMarkRef.current = mark;
-    const marked = document.createRange();
-    marked.selectNodeContents(mark);
-    savedFormattingRange.current = marked.cloneRange();
-    savedRange.current = marked.cloneRange();
-    return true;
-  };
-
-  const startSizeEdit = () => {
-    sizeDraftFresh.current = true;
-    const cur = String(fontSizeRef.current);
-    sizeDraftRef.current = cur;
-    setSizeDraft(cur);
-    sizeEditingRef.current = true;
-    setSizeEditing(true);
   };
 
   const selectEditorEnd = () => {
@@ -228,353 +127,17 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return null;
   };
 
-  const findNonDefaultFontSpan = (node: Node | null, ed: HTMLElement): HTMLSpanElement | null => {
-    let el: Node | null = node;
-    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
-    while (el instanceof HTMLElement && el !== ed) {
-      if (el.tagName === 'SPAN' && el.style.fontSize) {
-        const px = parseInt(el.style.fontSize, 10);
-        if (px && px !== DEFAULT_FONT_PX) return el;
-      }
-      el = el.parentElement;
-    }
-    return null;
-  };
-
-  const getTailTextInSpan = (range: Range, span: HTMLElement): string => {
-    const tail = document.createRange();
-    tail.setStart(range.startContainer, range.startOffset);
-    tail.setEndAfter(span.lastChild ?? span);
-    return tail.cloneContents().textContent?.replace(/\u200B/g, '').trim() ?? '';
-  };
-
-  const isCaretOnNewLineInStyledSpan = (range: Range, span: HTMLElement): boolean => {
-    if (getTailTextInSpan(range, span)) return false;
-
-    const { startContainer, startOffset } = range;
-    if (startContainer.nodeType === Node.TEXT_NODE && startContainer.parentElement === span) {
-      const before = startContainer.textContent?.slice(0, startOffset).replace(/\u200B/g, '').trim() ?? '';
-      if (before) return false;
-      let prev: Node | null = startContainer.previousSibling;
-      while (prev) {
-        if (prev instanceof HTMLBRElement) return true;
-        const t = prev.textContent?.replace(/\u200B/g, '').trim() ?? '';
-        if (t) return false;
-        prev = prev.previousSibling;
-      }
-      return false;
-    }
-
-    if (startContainer === span) {
-      for (let i = startOffset - 1; i >= 0; i--) {
-        const child = span.childNodes[i];
-        if (child instanceof HTMLBRElement) return true;
-        const t = child.textContent?.replace(/\u200B/g, '').trim() ?? '';
-        if (t) return false;
-      }
-    }
-    return false;
-  };
-
-  const readFontSizeAtCaret = (ed: HTMLElement): number => {
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return fontSizeRef.current;
-    let node: Node | null = sel.anchorNode;
-    if (node?.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    if (node === ed || !(node instanceof Element) || !ed.contains(node)) return DEFAULT_FONT_PX;
-    const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
-    return px || DEFAULT_FONT_PX;
-  };
-
-  const findFontMarkerAncestor = (node: Node | null, ed: HTMLElement): HTMLSpanElement | null => {
-    let el: Node | null = node;
-    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
-    while (el instanceof HTMLElement && el !== ed) {
-      if (el.hasAttribute('data-font-marker')) return el;
-      el = el.parentElement;
-    }
-    return null;
-  };
-
-  const findRevertMarkerAncestor = (node: Node | null, ed: HTMLElement): HTMLSpanElement | null => {
-    let el: Node | null = node;
-    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
-    while (el instanceof HTMLElement && el !== ed) {
-      if (el.hasAttribute('data-revert-marker')) return el;
-      el = el.parentElement;
-    }
-    return null;
-  };
-
-  const findAdjacentStyledSpanBeforeCaret = (range: Range, ed: HTMLElement): HTMLSpanElement | null => {
-    const { startContainer, startOffset } = range;
-    let prev: Node | null = null;
-
-    if (startContainer.nodeType === Node.TEXT_NODE) {
-      if (startOffset > 0) return null;
-      prev = startContainer.previousSibling;
-    } else if (startContainer instanceof HTMLElement && startContainer !== ed) {
-      if (startOffset === 0) return null;
-      prev = startContainer.childNodes[startOffset - 1] ?? null;
-    } else {
-      return null;
-    }
-
-    while (prev) {
-      if (prev instanceof HTMLSpanElement && (prev.style.fontSize || prev.hasAttribute('data-font-size-lock'))) {
-        const px = parseInt(prev.style.fontSize, 10);
-        if (prev.hasAttribute('data-font-size-lock') || (px && px !== previousFontSizeRef.current)) return prev;
-      }
-      const t = prev.textContent?.replace(/\u200B/g, '').trim() ?? '';
-      if (t) break;
-      prev = prev.previousSibling;
-    }
-    return null;
-  };
-
-  const isComposingEnlargedText = (range: Range, ed: HTMLElement): boolean => {
-    const marker = findFontMarkerAncestor(range.startContainer, ed);
-    if (!marker || marker.hasAttribute('data-font-size-lock')) return false;
-    const pending = pendingFontSize.current;
-    if (pending === null) return false;
-    return pending !== previousFontSizeRef.current;
-  };
-
-  const lockStyledSpan = (span: HTMLSpanElement) => {
-    const len = span.textContent?.replace(/\u200B/g, '').length ?? 0;
-    span.setAttribute('data-font-size-lock', 'true');
-    span.setAttribute('data-locked-length', String(len));
-  };
-
-  const findStyledSpanAtCaretEnd = (range: Range, ed: HTMLElement): HTMLSpanElement | null => {
-    let node: Node | null = range.startContainer;
-    if (node.nodeType === Node.TEXT_NODE) {
-      if (range.startOffset !== (node as Text).length) return null;
-      node = node.parentElement;
-    } else {
-      return null;
-    }
-    let span: HTMLSpanElement | null = null;
-    while (node instanceof HTMLElement && node !== ed) {
-      if (node.tagName === 'SPAN' && node.style.fontSize) span = node;
-      node = node.parentElement;
-    }
-    if (!span) return null;
-    const endRange = document.createRange();
-    endRange.selectNodeContents(span);
-    endRange.collapse(false);
-    return range.compareBoundaryPoints(Range.START_TO_START, endRange) === 0 ? span : null;
-  };
-
-  const finalizeFontMarker = (span: HTMLElement) => {
-    span.innerHTML = span.innerHTML.replace(/\u200B/g, '');
-    span.removeAttribute('data-font-marker');
-  };
-
-  const createFontMarkerSpan = (px: number): HTMLSpanElement => {
-    const span = document.createElement('span');
-    span.setAttribute('data-font-marker', 'true');
-    applyFontSizeStyle(span, px);
-    span.appendChild(document.createTextNode('\u200B'));
-    return span;
-  };
-
-  const createRevertTypingSpan = (px: number): HTMLSpanElement => {
-    const span = document.createElement('span');
-    span.setAttribute('data-revert-marker', 'true');
-    if (px !== DEFAULT_FONT_PX) applyFontSizeStyle(span, px);
-    span.appendChild(document.createTextNode('\u200B'));
-    return span;
-  };
-
-  const continueTypingAtFontSize = (px: number, afterNode?: Node) => {
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
-
-    const revertSpan = createRevertTypingSpan(px);
-    if (afterNode instanceof HTMLElement) {
-      afterNode.after(revertSpan);
-    } else {
-      sel.getRangeAt(0).insertNode(revertSpan);
-    }
-    placeCaretInMarkerSpan(revertSpan, sel);
-    pendingFontSize.current = null;
-    setFontSize(px);
-  };
-
-  const placeCaretInMarkerSpan = (span: HTMLSpanElement, sel: Selection) => {
-    const zws = span.firstChild;
-    if (!zws) return;
-    const range = document.createRange();
-    range.setStart(zws, zws.textContent?.length ?? 1);
-    range.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(range);
-    savedRange.current = range.cloneRange();
-  };
-
-  const closeStyledSpanTailBeforeParagraph = (ed: HTMLElement) => {
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    if (!range.collapsed) return;
-
-    const styledSpan = findNonDefaultFontSpan(range.startContainer, ed);
-    if (!styledSpan) return;
-    if (!isCaretOnNewLineInStyledSpan(range, styledSpan)) return;
-
-    const tailRange = document.createRange();
-    tailRange.setStart(range.startContainer, range.startOffset);
-    tailRange.setEndAfter(styledSpan.lastChild ?? styledSpan);
-    if (!tailRange.collapsed) tailRange.deleteContents();
-
-    const endRange = document.createRange();
-    endRange.selectNodeContents(styledSpan);
-    endRange.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(endRange);
-  };
-
-  const resetFontContextAtCaret = (ed: HTMLElement) => {
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return false;
-    const range = sel.getRangeAt(0);
-    if (!range.collapsed) return false;
-
-    const revertPx = previousFontSizeRef.current;
-    const block = getBlockParent(range.startContainer, ed);
-    if (!block) return false;
-
-    const blockText = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
-    if (!blockText) {
-      block.innerHTML = '';
-      block.style.removeProperty('font-size');
-      block.style.removeProperty('line-height');
-      if (revertPx === DEFAULT_FONT_PX) {
-        const emptyRange = document.createRange();
-        emptyRange.setStart(block, 0);
-        emptyRange.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(emptyRange);
-        savedRange.current = emptyRange.cloneRange();
-        pendingFontSize.current = null;
-        setFontSize(DEFAULT_FONT_PX);
-      } else {
-        const marker = createFontMarkerSpan(revertPx);
-        block.appendChild(marker);
-        placeCaretInMarkerSpan(marker, sel);
-        pendingFontSize.current = revertPx;
-        setFontSize(revertPx);
-      }
-      return true;
-    }
-
-    const styledSpan = findNonDefaultFontSpan(range.startContainer, ed);
-    if (!styledSpan || !block.contains(styledSpan)) return false;
-    if (!isCaretOnNewLineInStyledSpan(range, styledSpan)) return false;
-
-    const tailRange = document.createRange();
-    tailRange.setStart(range.startContainer, range.startOffset);
-    tailRange.setEndAfter(styledSpan.lastChild ?? styledSpan);
-    if (!tailRange.collapsed) tailRange.deleteContents();
-
-    continueTypingAtFontSize(revertPx, styledSpan);
-    return true;
-  };
-
-  const prepareTypingBeforeChar = (ed: HTMLElement): boolean => {
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return false;
-    const range = sel.getRangeAt(0);
-    if (!range.collapsed) return false;
-    if (findRevertMarkerAncestor(range.startContainer, ed)) return false;
-    if (isComposingEnlargedText(range, ed)) return false;
-
-    const revertPx = previousFontSizeRef.current;
-
-    const adjacent = findAdjacentStyledSpanBeforeCaret(range, ed);
-    if (adjacent) {
-      continueTypingAtFontSize(revertPx, adjacent);
-      return true;
-    }
-
-    const atEnd = findStyledSpanAtCaretEnd(range, ed);
-    if (atEnd) {
-      const spanPx = parseInt(atEnd.style.fontSize, 10);
-      if (spanPx && spanPx !== revertPx && (atEnd.hasAttribute('data-font-size-lock') || !atEnd.hasAttribute('data-font-marker'))) {
-        continueTypingAtFontSize(revertPx, atEnd);
-        return true;
-      }
-    }
-
-    const inner = findNonDefaultFontSpan(range.startContainer, ed);
-    if (inner?.hasAttribute('data-font-size-lock') && atEnd !== inner) {
-      const splitRange = document.createRange();
-      splitRange.setStart(range.startContainer, range.startOffset);
-      splitRange.setEndAfter(inner.lastChild ?? inner);
-      const trailing = splitRange.extractContents();
-      const trailingSpan = createRevertTypingSpan(revertPx);
-      trailingSpan.appendChild(trailing);
-      inner.after(trailingSpan);
-      placeCaretInMarkerSpan(trailingSpan, sel);
-      pendingFontSize.current = null;
-      setFontSize(revertPx);
-      return true;
-    }
-
-    return false;
-  };
-
-  const repairLockedSpanOverflow = (ed: HTMLElement): boolean => {
-    let changed = false;
-    ed.querySelectorAll<HTMLElement>('span[data-font-size-lock]').forEach((span) => {
-      const lockedLen = parseInt(span.getAttribute('data-locked-length') ?? '0', 10);
-      if (!lockedLen) return;
-      const raw = span.textContent?.replace(/\u200B/g, '') ?? '';
-      if (raw.length <= lockedLen) return;
-
-      const keep = raw.slice(0, lockedLen);
-      const overflow = raw.slice(lockedLen);
-      span.textContent = keep;
-
-      const revertPx = previousFontSizeRef.current;
-      const overflowSpan = createRevertTypingSpan(revertPx);
-      overflowSpan.textContent = overflow;
-      span.after(overflowSpan);
-
-      const sel = window.getSelection();
-      if (sel?.rangeCount) {
-        const textNode = overflowSpan.firstChild;
-        if (textNode) {
-          const r = document.createRange();
-          r.setStart(textNode, overflow.length);
-          r.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(r);
-          savedRange.current = r.cloneRange();
-        }
-      }
-      pendingFontSize.current = null;
-      setFontSize(revertPx);
-      changed = true;
-    });
-    return changed;
-  };
-
   const normalizeEmptyFontBlocks = (ed: HTMLElement) => {
     ed.querySelectorAll<HTMLElement>('div, p').forEach((block) => {
       block.querySelectorAll<HTMLElement>('span[style*="font-size"]').forEach((span) => {
-        if (span.hasAttribute('data-font-marker')) return;
         const text = span.textContent?.replace(/\u200B/g, '').trim() ?? '';
         if (!text) span.remove();
       });
       const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
       if (!text) {
+        block.innerHTML = '<br>';
         block.style.removeProperty('font-size');
         block.style.removeProperty('line-height');
-        if (block.querySelector('[data-font-marker]')) return;
-        block.innerHTML = '';
-        block.appendChild(createFontMarkerSpan(DEFAULT_FONT_PX));
       }
     });
 
@@ -597,61 +160,33 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!ed) return;
 
     clearPendingFontMarker();
-    closeStyledSpanTailBeforeParagraph(ed);
     document.execCommand('insertParagraph');
-    resetFontContextAtCaret(ed);
-    normalizeEmptyFontBlocks(ed);
-    saveSel();
-    onChange(ed.innerHTML);
-  };
 
-  const handleEditorSpace = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== ' ' || e.ctrlKey || e.metaKey || e.altKey) return;
-    const ed = editorRef.current;
-    if (!ed) return;
+    requestAnimationFrame(() => {
+      const sel = window.getSelection();
+      if (!sel?.rangeCount) return;
 
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    if (!range.collapsed) return;
+      const block = getBlockParent(sel.anchorNode, ed);
+      if (block) {
+        const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
+        if (!text) {
+          block.innerHTML = '<br>';
+          block.style.removeProperty('font-size');
+          block.style.removeProperty('line-height');
+          const range = document.createRange();
+          range.setStart(block, 0);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
 
-    const markerSpan = findFontMarkerAncestor(range.startContainer, ed);
-    if (!markerSpan || pendingFontSize.current === null) return;
-
-    const enlargedPx = pendingFontSize.current;
-    const revertPx = previousFontSizeRef.current;
-    if (enlargedPx === revertPx) return;
-
-    const text = markerSpan.textContent?.replace(/\u200B/g, '').trim() ?? '';
-    if (!text) return;
-
-    e.preventDefault();
-    finalizeFontMarker(markerSpan);
-    lockStyledSpan(markerSpan);
-    pendingFontSize.current = null;
-
-    const endRange = document.createRange();
-    endRange.selectNodeContents(markerSpan);
-    endRange.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(endRange);
-    document.execCommand('insertText', false, ' ');
-    continueTypingAtFontSize(revertPx);
-    saveSel();
-    onChange(ed.innerHTML);
-  };
-
-  const handleEditorTypingFontReset = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key === ' ') return;
-    const ed = editorRef.current;
-    if (!ed) return;
-    if (prepareTypingBeforeChar(ed)) {
+      normalizeEmptyFontBlocks(ed);
+      pendingFontSize.current = null;
+      setFontSize(DEFAULT_FONT_PX);
+      saveSel();
       onChange(ed.innerHTML);
-      return;
-    }
-    if (pendingFontSize.current !== null) return;
-    if (resetFontContextAtCaret(ed)) onChange(ed.innerHTML);
+    });
   };
 
   // ── Initial content ───────────────────────────────────────────────────
@@ -699,16 +234,12 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       if (ed && (document.activeElement === ed || ed.contains(document.activeElement))) {
         saveSel();
         readCommandState();
-        if (!sizeEditingRef.current) syncFontSizeFromCaret();
+        syncFontSizeFromCaret();
       }
     };
     document.addEventListener('selectionchange', handler);
     return () => document.removeEventListener('selectionchange', handler);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { sizeDraftRef.current = sizeDraft; }, [sizeDraft]);
-
-  useEffect(() => () => unwrapFormattingMark(), []);
 
   // ── exec: apply a formatting command ─────────────────────────────────
   const exec = (cmd: string, value?: string) => {
@@ -766,11 +297,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       }
     }
 
-    const hadActiveMarker = !!ed.querySelector('[data-font-marker]');
-    if (!hadActiveMarker) {
-      previousFontSizeRef.current = readFontSizeAtCaret(ed);
-    }
-
     // Finalize any previous marker (keep its text, just stop tracking it).
     ed.querySelectorAll<HTMLElement>('[data-font-marker]').forEach((s) => s.removeAttribute('data-font-marker'));
     // Insert a zero-width-space span at the caret so the browser types INTO it.
@@ -795,28 +321,45 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
 
-    let range = getFormattingRange();
-    if (range) {
-      ed.focus({ preventScroll: true });
+    let range: Range | null = null;
+    if (document.activeElement === ed) {
+      // Editor has focus: trust the live selection (e.g. +/− buttons with e.preventDefault).
       const s = window.getSelection();
-      s?.removeAllRanges();
-      s?.addRange(range);
-      range = s?.getRangeAt(0) ?? range;
-    } else {
-      range = restoreFormattingRange();
+      if (s && s.rangeCount > 0 && !s.isCollapsed && ed.contains(s.anchorNode)) {
+        range = s.getRangeAt(0);
+      }
     }
 
-    if (!range || range.collapsed) {
-      unwrapFormattingMark();
+    if (!range) {
+      const savedFmt = savedFormattingRange.current?.cloneRange() ?? null;
+      if (savedFmt && !savedFmt.collapsed && ed.contains(savedFmt.commonAncestorContainer)) {
+        ed.focus({ preventScroll: true });
+        const s = window.getSelection();
+        s?.removeAllRanges();
+        s?.addRange(savedFmt);
+        range = s?.getRangeAt(0) ?? savedFmt;
+      }
+    }
+
+    if (!range && document.activeElement !== ed) {
+      // Editor blurred (e.g. typed a value in the font-size input): restore savedRange.
+      const saved = savedRange.current?.cloneRange() ?? null;
+      if (saved && !saved.collapsed) {
+        ed.focus({ preventScroll: true });
+        const s = window.getSelection();
+        s?.removeAllRanges();
+        s?.addRange(saved);
+        range = s?.getRangeAt(0) ?? null;
+      }
+    }
+
+    if (!range) {
       setFutureFontSize(px);
       return;
     }
 
-    const revertPx = readFontSizeAtCaret(ed);
-    previousFontSizeRef.current = revertPx;
-
+    savedFormattingRange.current = null;
     const contents = range.extractContents();
-    unwrapFormattingMark();
     contents.querySelectorAll?.('[style]').forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
       node.style.removeProperty('font-size');
@@ -827,24 +370,12 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     applyFontSizeStyle(span, px);
     span.appendChild(contents);
     range.insertNode(span);
-    lockStyledSpan(span);
-    savedFormattingRange.current = null;
+    const nextRange = document.createRange();
+    nextRange.selectNodeContents(span);
     const finalSel = window.getSelection();
-    if (finalSel) {
-      if (px !== revertPx) {
-        continueTypingAtFontSize(revertPx, span);
-      } else {
-        const afterRange = document.createRange();
-        afterRange.setStartAfter(span);
-        afterRange.collapse(true);
-        finalSel.removeAllRanges();
-        finalSel.addRange(afterRange);
-        savedRange.current = afterRange.cloneRange();
-        pendingFontSize.current = null;
-        setFontSize(px);
-      }
-      saveSel();
-    }
+    finalSel?.removeAllRanges();
+    finalSel?.addRange(nextRange);
+    saveSel();
     onChange(ed.innerHTML);
   };
 
@@ -854,114 +385,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   const changeSize = (d: number) => {
-    if (sizeEditingRef.current) {
-      sizeEditingRef.current = false;
-      setSizeEditing(false);
-      unwrapFormattingMark();
-    }
-    const beforeSize = fontSizeRef.current;
     const s = nextSz(fontSizeRef.current, d);
     const ed = editorRef.current;
-    const formattingRange = getFormattingRange();
-    if (formattingRange) {
-      previousFontSizeRef.current = beforeSize;
+    const sel = window.getSelection();
+    const hasLiveSelection = !!(ed && sel && sel.rangeCount > 0 && !sel.isCollapsed && ed.contains(sel.anchorNode));
+    const savedFmt = savedFormattingRange.current;
+    const hasSavedSelection = !!(savedFmt && !savedFmt.collapsed && ed?.contains(savedFmt.commonAncestorContainer));
+    if (hasLiveSelection || hasSavedSelection) {
       applyPx(s);
     } else {
-      if (!ed?.querySelector('[data-font-marker]')) {
-        previousFontSizeRef.current = beforeSize;
-      }
       setFutureFontSize(s);
     }
   };
-
-  const finishSizeEditing = () => {
-    sizeEditingRef.current = false;
-    setSizeEditing(false);
-  };
-
-  const cancelSizeEdit = () => {
-    if (!sizeEditingRef.current) return;
-    finishSizeEditing();
-    unwrapFormattingMark();
-    const cur = String(fontSizeRef.current);
-    sizeDraftRef.current = cur;
-    setSizeDraft(cur);
-    setSizeInput(cur);
-    restoreFormattingRange();
-  };
-
-  const commitSizeEdit = () => {
-    if (!sizeEditingRef.current) return;
-    finishSizeEditing();
-    const v = parseInt(sizeDraftRef.current, 10);
-    if (v > 0) {
-      setSizeInput(String(v));
-      setFontSize(v);
-      applyPx(v);
-    } else {
-      const cur = String(fontSizeRef.current);
-      sizeDraftRef.current = cur;
-      setSizeDraft(cur);
-      setSizeInput(cur);
-      unwrapFormattingMark();
-      restoreFormattingRange();
-    }
-  };
-
-  useEffect(() => {
-    if (!sizeEditing) return;
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!sizeEditingRef.current) return;
-
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        e.stopPropagation();
-        commitSizeEdit();
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        cancelSizeEdit();
-        return;
-      }
-      if (e.key === 'Backspace') {
-        e.preventDefault();
-        e.stopPropagation();
-        sizeDraftFresh.current = false;
-        setSizeDraft((cur) => {
-          const next = cur.slice(0, -1);
-          sizeDraftRef.current = next;
-          return next;
-        });
-        return;
-      }
-      if (/^\d$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        setSizeDraft((cur) => {
-          const next = sizeDraftFresh.current ? e.key : (cur + e.key).slice(0, 3);
-          sizeDraftFresh.current = false;
-          sizeDraftRef.current = next;
-          return next;
-        });
-      }
-    };
-
-    const onMouseDown = (e: MouseEvent) => {
-      if (!sizeEditingRef.current) return;
-      if ((e.target as Element).closest('[data-font-size-control]')) return;
-      commitSizeEdit();
-    };
-
-    document.addEventListener('keydown', onKeyDown, true);
-    document.addEventListener('mousedown', onMouseDown, true);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      document.removeEventListener('mousedown', onMouseDown, true);
-    };
-  }, [sizeEditing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Color / highlight ─────────────────────────────────────────────────
   // Color palette is a floating overlay so the editor may have lost focus.
@@ -1118,29 +553,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       >
         {/* Font size */}
         <div
-          data-font-size-control
           className="flex items-center overflow-hidden rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900"
-          onMouseDownCapture={() => { captureFormattingSelection(); }}
+          onMouseDownCapture={captureFormattingSelection}
         >
           <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); changeSize(-1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">−</button>
-          <button
-            type="button"
-            data-font-size-control
-            title="Font size"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              captureFormattingSelection();
-              markFormattingSelection();
-              if (!sizeEditingRef.current) startSizeEdit();
-            }}
-            className={
-              'flex h-[26px] min-w-8 items-center justify-center border-x border-app-border px-1 text-center text-xs font-semibold text-app-text dark:border-white/10 dark:text-gray-100 ' +
-              (sizeEditing ? 'bg-primary/10 ring-1 ring-inset ring-primary' : 'hover:bg-app-bg dark:hover:bg-white/10')
-            }
-          >
-            {sizeEditing ? (sizeDraft || '0') : sizeInput}
-          </button>
+          <input
+            value={sizeInput}
+            onChange={(e) => setSizeInput(e.target.value)}
+            onFocus={() => { captureFormattingSelection(); fontInputFocused.current = true; }}
+            onBlur={() => { fontInputFocused.current = false; const v = parseInt(sizeInput, 10); if (v > 0) { setFontSize(v); applyPx(v); } else { setSizeInput(String(fontSize)); } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); const v = parseInt(sizeInput, 10); (e.target as HTMLInputElement).blur(); if (v > 0) { setTimeout(() => { setFontSize(v); applyPx(v); }, 0); } } }}
+            className="h-[26px] w-8 border-x border-app-border bg-transparent text-center text-xs font-semibold text-app-text outline-none dark:border-white/10 dark:text-gray-100"
+          />
           <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); changeSize(1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">+</button>
         </div>
 
@@ -1222,17 +646,14 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       </div>
 
       {/* Editor area */}
-      <div className="relative">
       <div
         ref={editorRef}
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onMouseDown={() => { clearPendingFontMarker(); if (sizeEditingRef.current) commitSizeEdit(); }}
+        onMouseDown={() => { clearPendingFontMarker(); }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
-          handleEditorSpace(e);
-          handleEditorTypingFontReset(e);
           handleEditorEnter(e);
         }}
         onInput={() => {
@@ -1243,7 +664,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
                 node.setAttribute('dir', 'auto');
               }
             });
-            if (repairLockedSpanOverflow(ed)) saveSel();
           }
           onChange(ed?.innerHTML ?? '');
         }}
@@ -1266,7 +686,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5' + (resizable && editable ? ' resize-y' : '')}
         style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
-      </div>
 
       {/* Image hover buttons */}
       {editable && hoveredImg && (() => {
