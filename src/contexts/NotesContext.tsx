@@ -242,7 +242,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
   const [loaded, setLoaded] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingUiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savesInFlight = useRef(0);
 
   const nowStr = () =>
     new Date().toLocaleString(t.dateLocale, {
@@ -365,7 +366,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         draftCounter.current = 1;
         setDrafts([{ id: 'd1', title: '', html: '' }]);
       } finally {
-        if (!cancelled) setLoaded(true);
+        if (!cancelled) {
+          setLoaded(true);
+          if (user) setCloudStatus('saved');
+        }
       }
     })();
     return () => {
@@ -473,10 +477,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const qList = nextQuizzes ?? quizzes;
     localStorage.setItem('malacadhati_quiz', JSON.stringify(qList));
     if (!user) return;
-    setCloudStatus('saving');
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    clearTimeout(hideTimer.current ?? undefined);
     saveTimer.current = setTimeout(() => {
+      savesInFlight.current += 1;
+      if (!savingUiTimer.current) {
+        savingUiTimer.current = setTimeout(() => {
+          if (savesInFlight.current > 0) setCloudStatus('saving');
+        }, 700);
+      }
       const dList = nextDrafts ?? drafts;
       const chatList = nextChats ?? chats;
       const qsList = nextQuizSets ?? quizSets;
@@ -500,12 +508,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }),
         headers: { 'Content-Type': 'application/json' },
       })
-        .then(() => setCloudStatus('saved'))
-        .catch(() => setCloudStatus('saved'))
+        .catch(() => {})
         .finally(() => {
-          hideTimer.current = setTimeout(() => setCloudStatus('idle'), 2500);
+          savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+          if (savesInFlight.current === 0) {
+            if (savingUiTimer.current) {
+              clearTimeout(savingUiTimer.current);
+              savingUiTimer.current = null;
+            }
+            setCloudStatus('saved');
+          }
         });
-    }, 800);
+    }, 1200);
   };
 
   const mutateNotes = (fn: (prev: Note[]) => Note[]) => {

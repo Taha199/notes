@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
-import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { BrandedAlert } from '../common/BrandedAlert';
@@ -236,7 +235,6 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-app-border/40 bg-app-bg/30 px-5 py-1.5 dark:border-white/5 dark:bg-white/[0.015]">
-        <CloudSaveIndicator size="xs" />
         {item.createdAt && (
           <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
             Skapad: {new Date(item.createdAt).toLocaleString()}
@@ -359,17 +357,15 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
       <div className="flex items-center justify-between border-b border-app-border px-4 py-2 dark:border-white/10">
         <div className="flex min-w-0 items-center gap-3">
           <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? '☑ MCQ' : '✏️ Q/A'}</span>
-          {saveStatus !== 'empty' || persisted ? (
-            <span
-              className={
-                'inline-flex items-center gap-1 text-[10px] font-medium ' +
-                (saveStatus === 'pending'
-                  ? 'text-amber-500 dark:text-amber-400'
-                  : 'text-emerald-600 dark:text-emerald-400')
-              }
-            >
-              <span className={saveStatus === 'pending' ? 'animate-pulse' : ''} aria-hidden>☁</span>
-              <span>{saveStatus === 'pending' ? t.cloudSaving : t.cloudSavedMain}</span>
+          {persisted || saveStatus === 'saved' ? (
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+              <span aria-hidden>☁</span>
+              <span>{t.cloudSavedMain}</span>
+            </span>
+          ) : saveStatus === 'pending' ? (
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-500 dark:text-amber-400">
+              <span className="animate-pulse" aria-hidden>☁</span>
+              <span>{t.cloudSaving}</span>
             </span>
           ) : null}
         </div>
@@ -604,7 +600,7 @@ export function QuizPage() {
       prev.map((f) => {
         if (f.formId !== formId) return f;
         const next = { ...f, ...patch };
-        if (f.itemId !== null) return { ...next, saveStatus: 'pending' as const };
+        if (f.itemId !== null) return next;
         const complete = hasContent(next.question) && hasContent(next.answer);
         if (!complete) return { ...next, saveStatus: 'empty' as const };
         return { ...next, saveStatus: 'pending' as const };
@@ -717,7 +713,7 @@ export function QuizPage() {
         form.formId,
         setTimeout(() => {
           persistForm(form.formId);
-        }, 800),
+        }, 2000),
       );
     });
   }, [openForms, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1380,7 +1376,6 @@ export function QuizPage() {
         <div className="px-3 py-4 sm:px-5 sm:py-5">
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
-            <CloudSaveIndicator className="order-last w-full sm:order-none sm:w-auto" />
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
               {selectedSet
                 ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? 'fråga' : 'frågor'}`
