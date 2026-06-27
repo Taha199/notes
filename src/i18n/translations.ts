@@ -200,6 +200,10 @@ export interface Translation {
   settingsStorageQuiz: string;
   settingsStorageChat: string;
   settingsStorageTotal: string;
+  settingsFolderBackup: string;
+  settingsFolderBackupEmpty: string;
+  settingsFolderBackupRestore: string;
+  settingsFolderBackupRestored: string;
   settingsAIUsage: string;
   settingsTokensUsed: string;
   settingsResetTokens: string;
@@ -302,6 +306,10 @@ export const LANGS: Record<Lang, Translation> = {
     settingsStorageQuiz: 'Quiz',
     settingsStorageChat: 'AI Chat',
     settingsStorageTotal: 'Total used',
+    settingsFolderBackup: 'Quiz folder backups',
+    settingsFolderBackupEmpty: 'No backups yet. Backups are saved automatically from now on whenever folders change.',
+    settingsFolderBackupRestore: 'Restore',
+    settingsFolderBackupRestored: 'Folders restored from backup',
     settingsAIUsage: 'AI Token Usage',
     settingsTokensUsed: 'Total tokens used',
     settingsResetTokens: 'Reset counter',
@@ -400,6 +408,10 @@ export const LANGS: Record<Lang, Translation> = {
     settingsStorageQuiz: 'Quiz',
     settingsStorageChat: 'AI-chatt',
     settingsStorageTotal: 'Totalt använt',
+    settingsFolderBackup: 'Säkerhetskopior av quiz-mappar',
+    settingsFolderBackupEmpty: 'Inga säkerhetskopior ännu. Från och med nu sparas en kopia automatiskt varje gång mappar ändras.',
+    settingsFolderBackupRestore: 'Återställ',
+    settingsFolderBackupRestored: 'Mappar återställda från backup',
     settingsAIUsage: 'AI-tokenanvändning',
     settingsTokensUsed: 'Totalt använda tokens',
     settingsResetTokens: 'Nollställ räknare',

@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
+import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL } from '../../lib/firebase';
 
@@ -29,7 +30,10 @@ function SectionCard({ title, children }: { title: string; children: React.React
 export function SettingsPage() {
   const { user, hasPassword, updateDisplayName, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
-  const { notes, quizzes, quizSets, quizFolders, chats, tokenUsage, resetTokens } = useNotes();
+  const { show } = useToast();
+  const { notes, quizzes, quizSets, quizFolders, chats, tokenUsage, resetTokens, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
+  const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
+  const [loadingBackups, setLoadingBackups] = useState(true);
 
   // Profile
   const [nameInput, setNameInput] = useState(user?.displayName || '');
@@ -97,6 +101,15 @@ export function SettingsPage() {
 
   const pct = Math.min(100, (storage.total / STORAGE_CAP) * 100);
   const barColor = pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-primary';
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingBackups(true);
+    void listQuizFolderBackups()
+      .then((items) => { if (!cancelled) setFolderBackups(items); })
+      .finally(() => { if (!cancelled) setLoadingBackups(false); });
+    return () => { cancelled = true; };
+  }, [listQuizFolderBackups]);
 
   const avatar = (user?.displayName || user?.email || '?').charAt(0).toUpperCase();
 
@@ -225,6 +238,35 @@ export function SettingsPage() {
             ))}
           </div>
         </div>
+      </SectionCard>
+
+      <SectionCard title={t.settingsFolderBackup}>
+        {loadingBackups ? (
+          <p className="text-sm text-app-text-secondary dark:text-gray-400">…</p>
+        ) : folderBackups.length === 0 ? (
+          <p className="text-sm text-app-text-secondary dark:text-gray-400">{t.settingsFolderBackupEmpty}</p>
+        ) : (
+          <div className="space-y-2">
+            {folderBackups.map((backup) => (
+              <div key={backup.key} className="flex items-center justify-between gap-3 rounded-xl border border-app-border px-3 py-2 dark:border-white/10">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-app-text dark:text-gray-100">{backup.label}</p>
+                  <p className="text-[11px] text-app-text-secondary dark:text-gray-400">{backup.folderCount} {lang === 'sv' ? 'mappar' : 'folders'}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    void restoreQuizFolderBackup(backup.key).then((count) => {
+                      show(count > 0 ? `${t.settingsFolderBackupRestored} (${count})` : t.settingsFolderBackupRestored);
+                    });
+                  }}
+                  className="flex-shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+                >
+                  {t.settingsFolderBackupRestore}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </SectionCard>
 
       {/* AI Token Usage */}

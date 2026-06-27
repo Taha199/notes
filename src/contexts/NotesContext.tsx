@@ -45,6 +45,8 @@ interface NotesCtx {
   restoreQuizFolder: (id: string) => void;
   permDeleteQuizFolder: (id: string) => void;
   recoverQuizFolders: () => Promise<number>;
+  listQuizFolderBackups: () => Promise<{ key: string; label: string; folderCount: number }[]>;
+  restoreQuizFolderBackup: (key: string) => Promise<number>;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => void;
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
@@ -101,6 +103,7 @@ const AUTO_QUIZ_COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#10b981',
 const RESTORED_FOLDER_ID = 'system-restored-sets';
 export const FAVORITES_FOLDER_ID = 'system-favorites';
 export const FAVORITES_SET_ID = 'system-favorites-set';
+const MAX_FOLDER_HISTORY = 40;
 
 function ensureRestoredFolder(folders: QuizFolder[]) {
   const restored = folders.find((folder) => folder.id === RESTORED_FOLDER_ID || folder.system === 'restored');
@@ -384,7 +387,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify(nextFolders),
         headers: { 'Content-Type': 'application/json' },
       });
+      void appendFolderHistory(user.uid, nextFolders);
     }
+  };
+
+  const appendFolderHistory = async (uid: string, folders: QuizFolder[]) => {
+    const key = String(Date.now());
+    await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory/${key}.json`, {
+      method: 'PUT',
+      body: JSON.stringify(folders),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    try {
+      const res = await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory.json?shallow=true`);
+      const keys = Object.keys((await res.json()) || {}).sort();
+      const overflow = keys.length - MAX_FOLDER_HISTORY;
+      for (let i = 0; i < overflow; i += 1) {
+        await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory/${keys[i]}.json`, { method: 'DELETE' });
+      }
+    } catch { /* ignore */ }
   };
 
   useEffect(() => {
@@ -788,6 +809,45 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return after.filter((folder) => !before.has(folder.id)).length;
   };
 
+  const listQuizFolderBackups = async (): Promise<{ key: string; label: string; folderCount: number }[]> => {
+    if (!user) return [];
+    try {
+      const res = await fetch(`${FB_DB_URL}/users/${user.uid}/quizFoldersHistory.json?shallow=true`);
+      const keys = Object.keys((await res.json()) || {}).sort().reverse();
+      const snapshots = await Promise.all(keys.map(async (key) => {
+        const folders = firebaseToArray<QuizFolder>(await fetch(`${FB_DB_URL}/users/${user.uid}/quizFoldersHistory/${key}.json`).then((r) => r.json()));
+        const userFolders = folders.filter((folder) => !folder.system);
+        const names = userFolders.map((folder) => folder.name).slice(0, 3).join(', ');
+        return {
+          key,
+          label: new Date(Number(key)).toLocaleString(t.dateLocale),
+          folderCount: userFolders.length,
+          names,
+        };
+      }));
+      return snapshots.map(({ key, label, folderCount, names }) => ({
+        key,
+        label: names ? `${label} · ${names}` : label,
+        folderCount,
+      }));
+    } catch {
+      return [];
+    }
+  };
+
+  const restoreQuizFolderBackup = async (key: string): Promise<number> => {
+    if (!user) return 0;
+    const before = new Set(quizFolders.filter((folder) => !folder.system).map((folder) => folder.id));
+    const folders = firebaseToArray<QuizFolder>(
+      await fetch(`${FB_DB_URL}/users/${user.uid}/quizFoldersHistory/${key}.json`).then((r) => r.json()),
+    );
+    const nextFolders = ensureFavoritesFolder(finalizeQuizFolders(folders, quizSets));
+    setQuizFolders(nextFolders);
+    persistFolders(nextFolders);
+    const after = nextFolders.filter((folder) => !folder.system && !folder.trashed);
+    return after.filter((folder) => !before.has(folder.id)).length;
+  };
+
   const addItemToSet = (setId: string, item: Omit<QuizItem, 'id'>) => {
     const now = new Date().toISOString();
     const newItem: QuizItem = { ...item, id: Date.now(), createdAt: item.createdAt ?? now, updatedAt: now };
@@ -876,6 +936,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         restoreQuizFolder,
         permDeleteQuizFolder,
         recoverQuizFolders,
+        listQuizFolderBackups,
+        restoreQuizFolderBackup,
         addItemToSet,
         removeItemFromSet,
         updateItemInSet,
