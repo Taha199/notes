@@ -13,6 +13,14 @@ interface UserRow {
   bytes: number;
 }
 
+interface AuthUserRow {
+  uid: string;
+  email: string;
+  displayName: string;
+  lastLoginAt: number;
+  provider: string;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -31,6 +39,10 @@ function timeAgo(ts: number): string {
   return `${d} d sedan`;
 }
 
+function fallbackName(uid: string): string {
+  return `Användare ${uid.slice(0, 6)}`;
+}
+
 export function AdminPanel() {
   const { user } = useAuth();
   const isAdmin = user?.email === ADMIN_EMAIL;
@@ -42,18 +54,32 @@ export function AdminPanel() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${FB_DB_URL}/users.json`);
-      const data = (await res.json()) ?? {};
-      const list: UserRow[] = Object.entries<Record<string, unknown>>(data).map(([uid, blob]) => {
+      const [dbRes, authData] = await Promise.all([
+        fetch(`${FB_DB_URL}/users.json`),
+        user?.getIdToken()
+          .then((token) => fetch('/api/admin-users', { headers: { Authorization: `Bearer ${token}` } }))
+          .then((res) => (res.ok ? res.json() : { users: [] }))
+          .catch(() => ({ users: [] })),
+      ]);
+      const data = (await dbRes.json()) ?? {};
+      const authByUid = new Map<string, AuthUserRow>(
+        ((authData?.users ?? []) as AuthUserRow[]).map((authUser) => [authUser.uid, authUser])
+      );
+      const allUids = new Set([...Object.keys(data), ...authByUid.keys()]);
+      const list: UserRow[] = Array.from(allUids).map((uid) => {
+        const blob = (data[uid] ?? {}) as Record<string, unknown>;
         const profile = (blob?.profile ?? {}) as Record<string, unknown>;
         const bytes = new TextEncoder().encode(JSON.stringify(blob ?? {})).length;
+        const authUser = authByUid.get(uid);
+        const email = ((profile.email as string) || authUser?.email || '').trim();
+        const displayName = ((profile.displayName as string) || authUser?.displayName || '').trim();
         return {
           uid,
-          email: (profile.email as string) ?? '',
-          displayName: (profile.displayName as string) ?? '',
-          lastSeen: (profile.lastSeen as number) ?? 0,
+          email,
+          displayName: displayName || email.split('@')[0] || fallbackName(uid),
+          lastSeen: (profile.lastSeen as number) || authUser?.lastLoginAt || 0,
           ip: (profile.ip as string) ?? '',
-          provider: (profile.provider as string) ?? '',
+          provider: (profile.provider as string) || authUser?.provider || '',
           blocked: profile.blocked === true,
           bytes,
         };
@@ -146,11 +172,11 @@ export function AdminPanel() {
                       </div>
                       <div className="min-w-0">
                         <p className="flex items-center gap-2 truncate font-semibold text-app-text dark:text-gray-100">
-                          {row.displayName || row.email?.split('@')[0] || '—'}
+                          {row.displayName}
                           {row.blocked && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-600 dark:bg-red-500/15 dark:text-red-400">BLOCKERAD</span>}
                           {row.email === ADMIN_EMAIL && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">ADMIN</span>}
                         </p>
-                        <p className="truncate text-xs text-app-text-secondary dark:text-gray-400">{row.email || '—'}</p>
+                        <p className="truncate text-xs text-app-text-secondary dark:text-gray-400">{row.email || `ID: ${row.uid}`}</p>
                       </div>
                     </div>
                   </td>
