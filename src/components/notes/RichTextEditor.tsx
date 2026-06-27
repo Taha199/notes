@@ -7,6 +7,8 @@ const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48,
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const STATE_COMMANDS = [...TOGGLE_COMMANDS, 'justifyRight', 'justifyCenter', 'justifyLeft'];
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
+const DEFAULT_FONT_PX = 15;
+const FONT_LINE_HEIGHT = '1.35';
 
 interface Props {
   html: string;
@@ -94,6 +96,83 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   const clearPendingAll = () => {
     pendingFontSize.current = null;
+  };
+
+  const applyFontSizeStyle = (span: HTMLSpanElement, px: number) => {
+    span.style.fontSize = `${px}px`;
+    span.style.lineHeight = FONT_LINE_HEIGHT;
+  };
+
+  const getBlockParent = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
+    let el: Node | null = node;
+    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    while (el instanceof HTMLElement && el !== ed) {
+      if (['DIV', 'P', 'LI', 'H1', 'H2', 'H3'].includes(el.tagName)) return el;
+      el = el.parentElement;
+    }
+    return null;
+  };
+
+  const normalizeEmptyFontBlocks = (ed: HTMLElement) => {
+    ed.querySelectorAll<HTMLElement>('div, p').forEach((block) => {
+      block.querySelectorAll<HTMLElement>('span[style*="font-size"]').forEach((span) => {
+        const text = span.textContent?.replace(/\u200B/g, '').trim() ?? '';
+        if (!text) span.remove();
+      });
+      const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
+      if (!text) {
+        block.innerHTML = '<br>';
+        block.style.removeProperty('font-size');
+        block.style.removeProperty('line-height');
+      }
+    });
+
+    const topBlocks = Array.from(ed.children).filter((n): n is HTMLElement => n instanceof HTMLElement);
+    for (let i = 1; i < topBlocks.length - 1; i++) {
+      const block = topBlocks[i];
+      if (!['DIV', 'P'].includes(block.tagName)) continue;
+      const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
+      if (text) continue;
+      const prevText = topBlocks[i - 1].textContent?.replace(/\u200B/g, '').trim() ?? '';
+      const nextText = topBlocks[i + 1].textContent?.replace(/\u200B/g, '').trim() ?? '';
+      if (prevText && nextText) block.remove();
+    }
+  };
+
+  const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    e.preventDefault();
+    const ed = editorRef.current;
+    if (!ed) return;
+
+    clearPendingFontMarker();
+    document.execCommand('insertParagraph');
+
+    requestAnimationFrame(() => {
+      const sel = window.getSelection();
+      if (!sel?.rangeCount) return;
+
+      const block = getBlockParent(sel.anchorNode, ed);
+      if (block) {
+        const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
+        if (!text) {
+          block.innerHTML = '<br>';
+          block.style.removeProperty('font-size');
+          block.style.removeProperty('line-height');
+          const range = document.createRange();
+          range.setStart(block, 0);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+
+      normalizeEmptyFontBlocks(ed);
+      pendingFontSize.current = null;
+      setFontSize(DEFAULT_FONT_PX);
+      saveSel();
+      onChange(ed.innerHTML);
+    });
   };
 
   // ── Initial content ───────────────────────────────────────────────────
@@ -209,7 +288,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     // Insert a zero-width-space span at the caret so the browser types INTO it.
     const span = document.createElement('span');
     span.setAttribute('data-font-marker', 'true');
-    span.style.fontSize = `${px}px`;
+    applyFontSizeStyle(span, px);
     const zws = document.createTextNode('​');
     span.appendChild(zws);
     range.insertNode(span);
@@ -260,7 +339,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     });
     contents.querySelectorAll?.('font[size]').forEach((node) => node.removeAttribute('size'));
     const span = document.createElement('span');
-    span.style.fontSize = `${px}px`;
+    applyFontSizeStyle(span, px);
     span.appendChild(contents);
     range.insertNode(span);
     const nextRange = document.createRange();
@@ -542,6 +621,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         onMouseDown={() => { clearPendingFontMarker(); }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
+          handleEditorEnter(e);
         }}
         onInput={() => {
           const ed = editorRef.current;
@@ -570,8 +650,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); naturalSizeRef.current = null; }
         }}
         suppressContentEditableWarning
-        className={'overflow-y-auto px-4 py-3 leading-[1.75] text-app-text outline-none dark:text-gray-100 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5' + (resizable && editable ? ' resize-y' : '')}
-        style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: '15px', cursor: editable ? 'text' : 'default' }}
+        className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5' + (resizable && editable ? ' resize-y' : '')}
+        style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
 
       {/* Image hover buttons */}
