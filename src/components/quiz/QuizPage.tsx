@@ -258,6 +258,7 @@ interface OpenQuestionForm {
   itemId: number | null;
   question: string;
   answer: string;
+  saveStatus: 'empty' | 'pending' | 'saved';
 }
 
 function newFormId() {
@@ -271,14 +272,15 @@ interface EditPanelProps {
   initialCorrect?: number;
   initialCorrects?: number[];
   initialExplanation?: string;
+  saveStatus?: 'empty' | 'pending' | 'saved';
   onChangeQ: (v: string) => void;
   onChangeA: (v: string) => void;
   onSave: (override?: SavePayload) => void;
   onCancel: () => void;
 }
 
-function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
-  const { lang } = useLanguage();
+function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
+  const { lang, t } = useLanguage();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
@@ -344,7 +346,22 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   return (
     <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
       <div className="flex items-center justify-between border-b border-app-border px-4 py-2 dark:border-white/10">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? '☑ MCQ' : '✏️ Q/A'}</span>
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? '☑ MCQ' : '✏️ Q/A'}</span>
+          {saveStatus !== 'empty' && (
+            <span
+              className={
+                'inline-flex items-center gap-1 text-[10px] font-medium ' +
+                (saveStatus === 'pending'
+                  ? 'text-amber-500 dark:text-amber-400'
+                  : 'text-emerald-600 dark:text-emerald-400')
+              }
+            >
+              <span className={saveStatus === 'pending' ? 'animate-pulse' : ''} aria-hidden>☁</span>
+              <span>{saveStatus === 'pending' ? t.cloudSaving : t.cloudSavedMain}</span>
+            </span>
+          )}
+        </div>
         <button
           onClick={() => setMcq((v) => !v)}
           className={'flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-all ' +
@@ -566,8 +583,21 @@ export function QuizPage() {
   openFormsRef.current = openForms;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId'>>) => {
+  const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus'>>) => {
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
+  };
+
+  const updateFormContent = (formId: string, patch: Pick<OpenQuestionForm, 'question'> | Pick<OpenQuestionForm, 'answer'> | Pick<OpenQuestionForm, 'question' | 'answer'>) => {
+    setOpenForms((prev) =>
+      prev.map((f) => {
+        if (f.formId !== formId) return f;
+        const next = { ...f, ...patch };
+        const complete = hasContent(next.question) && hasContent(next.answer);
+        if (!complete) return { ...next, saveStatus: 'empty' as const };
+        if (f.saveStatus === 'saved') return { ...next, saveStatus: 'pending' as const };
+        return { ...next, saveStatus: 'pending' as const };
+      }),
+    );
   };
 
   const closeForm = (formId: string) => {
@@ -601,7 +631,7 @@ export function QuizPage() {
     if (form.itemId !== null) {
       if (selectedSetId) updateItemInSet(selectedSetId, form.itemId, patch);
       else updateQuiz(form.itemId, patch);
-      updateForm(formId, { question: q, answer: a });
+      updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
       return form.itemId;
     }
 
@@ -613,7 +643,7 @@ export function QuizPage() {
       createdAt: new Date().toISOString(),
     };
     const id = selectedSetId ? addItemToSet(selectedSetId, item) : addQuiz(item);
-    updateForm(formId, { itemId: id, question: q, answer: a });
+    updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved' });
     return id;
   };
 
@@ -627,6 +657,7 @@ export function QuizPage() {
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
+    const complete = initial?.question && initial?.answer && hasContent(initial.question) && hasContent(initial.answer);
     setOpenForms((prev) => [
       ...prev,
       {
@@ -634,6 +665,7 @@ export function QuizPage() {
         itemId: initial?.itemId ?? null,
         question: initial?.question ?? '',
         answer: initial?.answer ?? '',
+        saveStatus: initial?.itemId ? 'saved' : complete ? 'pending' : 'empty',
       },
     ]);
   };
@@ -887,12 +919,13 @@ export function QuizPage() {
         key={form.formId}
         question={form.question}
         answer={form.answer}
+        saveStatus={form.saveStatus}
         initialOptions={item?.options}
         initialCorrect={item?.correctIndex}
         initialCorrects={item?.correctIndexes}
         initialExplanation={item?.explanation}
-        onChangeQ={(v) => updateForm(form.formId, { question: v })}
-        onChangeA={(v) => updateForm(form.formId, { answer: v })}
+        onChangeQ={(v) => updateFormContent(form.formId, { question: v })}
+        onChangeA={(v) => updateFormContent(form.formId, { answer: v })}
         onSave={(override) => handleSaveForm(form.formId, override)}
         onCancel={() => handleCancelForm(form.formId)}
       />
