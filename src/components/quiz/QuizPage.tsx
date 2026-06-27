@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
+import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { BrandedAlert } from '../common/BrandedAlert';
@@ -220,24 +221,19 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
           <button onClick={onDelete} className="text-[13px] text-app-text-secondary/40 transition-all hover:scale-110 hover:text-red-500" title="Ta bort" aria-label="Ta bort">🗑️</button>
         </div>
       </div>
-      {/* Footer: timestamps */}
-      {(item.createdAt || item.updatedAt) && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-app-border/40 bg-app-bg/30 px-5 py-1.5 dark:border-white/5 dark:bg-white/[0.015]">
-          <span className="flex items-center gap-1 text-[10px] text-app-text-secondary/35 dark:text-gray-600">
-            <span>☁</span> Saved
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-app-border/40 bg-app-bg/30 px-5 py-1.5 dark:border-white/5 dark:bg-white/[0.015]">
+        <CloudSaveIndicator size="xs" />
+        {item.createdAt && (
+          <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
+            Skapad: {new Date(item.createdAt).toLocaleString()}
           </span>
-          {item.createdAt && (
-            <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
-              Skapad: {new Date(item.createdAt).toLocaleString()}
-            </span>
-          )}
-          {item.updatedAt && item.updatedAt !== item.createdAt && (
-            <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
-              Uppdaterad: {new Date(item.updatedAt).toLocaleString()}
-            </span>
-          )}
-        </div>
-      )}
+        )}
+        {item.updatedAt && item.updatedAt !== item.createdAt && (
+          <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
+            Uppdaterad: {new Date(item.updatedAt).toLocaleString()}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -1186,7 +1182,8 @@ export function QuizPage() {
         <div className="px-3 py-4 sm:px-5 sm:py-5">
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
-            <span className="flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
+            <CloudSaveIndicator className="order-last w-full sm:order-none sm:w-auto" />
+            <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
               {selectedSet
                 ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? 'fråga' : 'frågor'}`
                 : isFolderEmptyView

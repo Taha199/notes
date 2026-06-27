@@ -3,6 +3,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { RichTextEditor } from './RichTextEditor';
+import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini';
 import type { Page } from '../../types';
 
@@ -63,7 +64,6 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [mcqCorrect, setMcqCorrect] = useState(0);
   const [copied, setCopied] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(note?.lastEdited ?? null);
-  const [isSaving, setIsSaving] = useState(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -96,13 +96,11 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     const ts = nowStr();
     updateNote(note.id, { title: title.trim(), html, text: plainText, lastEdited: ts });
     setLastSavedAt(ts);
-    setIsSaving(false);
   };
 
   // Auto-save 1.5 s after the user stops typing (only in edit mode)
   useEffect(() => {
     if (locked) return;
-    setIsSaving(true);
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => { save(); }, 1500);
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
@@ -527,10 +525,12 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
               <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">{lang === 'sv' ? 'Skapad' : 'Created'}: {note.date}</span>
               {note.lastEdited && <span className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">{lang === 'sv' ? 'Uppdaterad' : 'Updated'}: {note.lastEdited}</span>}
             </div>
-            <div className={'flex items-center gap-1 text-[10px] font-medium ' + (isSaving ? 'text-amber-500 dark:text-amber-400' : lastSavedAt ? 'text-emerald-600 dark:text-emerald-400' : 'text-app-text-secondary/40')}>
-              <span className={isSaving ? 'animate-bounce' : ''}>☁</span>
-              <span>{isSaving ? (lang === 'sv' ? 'Sparar…' : 'Saving…') : lastSavedAt ? `${lang === 'sv' ? 'Sparad' : 'Saved'}: ${lastSavedAt}` : (lang === 'sv' ? 'Ej sparad' : 'Not saved')}</span>
-            </div>
+            <CloudSaveIndicator size="xs" />
+            {lastSavedAt && (
+              <span className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">
+                {lang === 'sv' ? 'Senast' : 'Last'}: {lastSavedAt}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap gap-1.5">
             <button onClick={() => { trash(note.id); show(t.tMoved); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10">

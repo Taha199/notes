@@ -1,20 +1,17 @@
-import { useState } from 'react';
 import type { Draft } from '../../contexts/NotesContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { RichTextEditor } from './RichTextEditor';
 
 export function DraftEditor({ draft, index, total }: { draft: Draft; index: number; total: number }) {
   const { t } = useLanguage();
   const { updateDraft, removeDraft, submitDraft } = useNotes();
-  const [saving, setSaving] = useState(false);
 
   const plainText = draft.html.replace(/<[^>]*>/g, '').trim();
 
   const onHtmlChange = (html: string) => {
     updateDraft(draft.id, { html });
-    setSaving(true);
-    setTimeout(() => setSaving(false), 700);
   };
 
   return (
@@ -43,7 +40,7 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
           >
             ✓ {t.saveDraft}
           </button>
-          {saving && <span className="text-[11px] text-primary">{t.cloudSaving}</span>}
+          <CloudSaveIndicator size="xs" />
         </div>
         <button onClick={() => removeDraft(draft.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10">
           🗑
