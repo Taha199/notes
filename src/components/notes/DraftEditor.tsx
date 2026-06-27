@@ -16,7 +16,7 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
 
   return (
     <div className="animate-fade-in relative">
-      <div className="flex flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-800/60">
+      <div className="flex flex-col rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-800/60">
       <div className="flex items-center rounded-t-2xl border-b border-app-border bg-app-bg px-4 py-2 dark:border-white/10 dark:bg-white/5">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-app-text-secondary dark:text-gray-400">
           ✏️ {t.draft}

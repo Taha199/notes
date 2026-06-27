@@ -18,9 +18,10 @@ interface Props {
   toolbarEnd?: ReactNode;
   onLockedTripleClick?: () => void;
   resizable?: boolean;
+  stickyToolbar?: boolean;
 }
 
-export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable }: Props) {
+export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
   const { t } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -435,7 +436,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     <div ref={editorWrapRef} className={'relative ' + (editable ? '' : '[&_img]:cursor-zoom-in')}>
       {/* Toolbar */}
       <div
-        className="flex flex-wrap items-center gap-0.5 border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5"
+        className={
+          'flex flex-wrap items-center gap-0.5 border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5 ' +
+          (stickyToolbar && editable ? 'sticky top-0 z-20 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95' : '')
+        }
         style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
       >
         {/* Font size */}
