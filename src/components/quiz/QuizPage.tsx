@@ -718,6 +718,7 @@ export function QuizPage() {
     setRenamingFolderId(folder.id);
     setFolderRenameVal(name);
     setSelectedFolderId(folder.id);
+    setSelectedSetId(null);
   };
 
   // Context menu
@@ -761,8 +762,11 @@ export function QuizPage() {
     handleSaveProgress(p);
   };
 
-  const selectedSet: QuizSet | undefined = quizSets.find((s) => s.id === selectedSetId);
-  const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : [...quizzes].reverse();
+  const isNotesView = !selectedFolderId && !selectedSetId;
+  const isFolderEmptyView = !!selectedFolderId && !selectedSetId;
+  const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
+  const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
+  const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : isNotesView ? [...quizzes].reverse() : [];
 
   const renderItem = (item: QuizItem) => (
     editingId === item.id ? (
@@ -986,7 +990,7 @@ export function QuizPage() {
         <button
           onClick={() => { setSelectedSetId(null); setSelectedFolderId(null); }}
           className={'mx-2 mb-1 flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-all ' +
-            (selectedSetId === null ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
+            (isNotesView ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
         >
           <span>🧠</span>
           <span className="flex-1 truncate">Questions from Notes</span>
@@ -1183,12 +1187,16 @@ export function QuizPage() {
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
             <span className="flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
-              {selectedSet ? `📂 ${selectedSet.name}` : '🧠 Questions from Notes'} — {displayItems.length} {displayItems.length === 1 ? 'fråga' : 'frågor'}
-              {knownCount > 0 && displayItems.length > 0 && (
+              {selectedSet
+                ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? 'fråga' : 'frågor'}`
+                : isFolderEmptyView
+                  ? `📁 ${selectedFolder?.system === 'favorites' ? 'Favoriter' : selectedFolder?.system ? (lang === 'sv' ? 'Återställda' : 'Restored') : selectedFolder?.name ?? (lang === 'sv' ? 'Mapp' : 'Folder')} — 0 set`
+                  : `🧠 Questions from Notes — ${displayItems.length} ${displayItems.length === 1 ? 'fråga' : 'frågor'}`}
+              {!isFolderEmptyView && knownCount > 0 && displayItems.length > 0 && (
                 <span className="ml-2 font-normal text-emerald-500">· {knownCount}/{displayItems.length} known</span>
               )}
             </span>
-            {displayItems.length > 0 && (
+            {!isFolderEmptyView && displayItems.length > 0 && (
               <div className="flex items-center gap-1.5">
                 {/* View filter: all / to-study / known */}
                 <select
@@ -1248,7 +1256,7 @@ export function QuizPage() {
                 </button>
               </div>
             )}
-            {displayItems.length === 0 && (
+            {!isFolderEmptyView && displayItems.length === 0 && (
               <div className="flex items-center gap-1.5">
                 {selectedSetId && (
                   <button
@@ -1269,6 +1277,27 @@ export function QuizPage() {
           </div>
 
 
+          {isFolderEmptyView ? (
+            <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-app-border bg-white/60 px-6 py-24 text-center dark:border-white/10 dark:bg-white/5">
+              <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 text-2xl font-serif italic text-gray-400 dark:bg-white/10 dark:text-gray-500">
+                i
+              </div>
+              <p className="text-base font-medium text-app-text dark:text-gray-100">
+                {lang === 'sv' ? 'Det finns inga set här.' : 'There are no sets here.'}
+              </p>
+              <p className="mt-1 text-sm text-app-text-secondary dark:text-gray-400">
+                {lang === 'sv' ? 'Lägg till ett set för att börja.' : 'Add a set to get started.'}
+              </p>
+              <button
+                onClick={handleQuickCreateSet}
+                className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition hover:bg-primary-dark"
+              >
+                <span className="text-base leading-none">+</span>
+                {lang === 'sv' ? 'Lägg till set' : 'Add set'}
+              </button>
+            </div>
+          ) : (
+          <>
           {/* Questions list */}
           <div className="flex flex-col gap-2">
             {orderedItems.map((item) => renderItem(item))}
@@ -1294,6 +1323,8 @@ export function QuizPage() {
               +
             </button>
           </div>
+          </>
+          )}
         </div>
       </div>
 
