@@ -1,0 +1,40 @@
+# Taha Note
+
+> Taha Note (https://tahanote.com) is a cloud-based web app for writing, organizing, studying, and syncing personal notes.
+
+## About
+
+Taha Note helps students and professionals capture ideas, study efficiently, and stay organized. The app supports Swedish and English and runs entirely in the browser at tahanote.com.
+
+Created by Abdullah Taha.
+
+## Key Features
+
+- Rich-text notes with formatting, colours, tables, and images
+- Cloud sync so notes are available across devices
+- Favourites, archive, trash, and note library
+- Quiz creation and practice from your notes
+- AI chat for questions about your notes and uploaded files
+- Secure file uploads (up to 20 MB per file)
+- Dark mode
+- Swedish (SV) and English (EN) interface
+
+## Main Pages
+
+- Home: https://tahanote.com/
+- Notes library: https://tahanote.com/library
+- File uploads: https://tahanote.com/files
+- Quiz: https://tahanote.com/quiz
+- AI chat: https://tahanote.com/chat
+- Notes to study: https://tahanote.com/unread
+- Studied notes: https://tahanote.com/read
+- Favourites: https://tahanote.com/favorites
+- Archive: https://tahanote.com/archive
+
+## Keywords
+
+Taha Note, anteckningar, notes app, study app, quiz app, AI chat, cloud notes, productivity, molnsynk, studieapp, Sverige, Abdullah Taha
+
+## Contact
+
+Website: https://tahanote.com

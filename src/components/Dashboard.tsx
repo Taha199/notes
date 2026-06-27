@@ -10,6 +10,7 @@ import { NoteCard } from './notes/NoteCard';
 import { DraftEditor } from './notes/DraftEditor';
 import { NoteEditorModal } from './notes/NoteEditorModal';
 import { SetPasswordModal } from './auth/SetPasswordModal';
+import { SeoHead } from './common/SeoHead';
 import { FilesPage } from './files/FilesPage';
 import { QuizPage } from './quiz/QuizPage';
 import { ChatPage } from './chat/ChatPage';
@@ -205,6 +206,7 @@ export function Dashboard() {
 
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-white dark:bg-gray-950">
+      <SeoHead page={page} />
       {mobileMenuOpen && <button aria-label="Close menu" onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 z-30 bg-gray-950/35 backdrop-blur-sm md:hidden" />}
       <Sidebar page={page} setPage={setPage} onOpenSetPassword={() => setShowSetPassword(true)} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 

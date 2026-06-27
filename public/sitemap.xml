@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://tahanote.com/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://tahanote.com/library</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://tahanote.com/files</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://tahanote.com/quiz</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://tahanote.com/chat</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://tahanote.com/unread</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://tahanote.com/read</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://tahanote.com/favorites</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://tahanote.com/archive</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://tahanote.com/settings</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+</urlset>

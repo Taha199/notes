@@ -8,6 +8,7 @@ import { FooterCredit } from './FooterCredit';
 import { GoogleIcon } from './GoogleIcon';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
 import { Logo } from '../common/Logo';
+import { SeoHead } from '../common/SeoHead';
 
 type Mode = 'login' | 'signup';
 
@@ -98,6 +99,7 @@ export function AuthPage() {
 
   return (
     <div dir="ltr" className="relative min-h-screen overflow-hidden">
+      <SeoHead page="home" />
       <AuthBackground />
       <LanguageSwitcher className="fixed top-5 left-5 z-20" />
 
