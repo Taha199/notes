@@ -70,6 +70,32 @@ interface NotesCtx {
 
 const NotesContext = createContext<NotesCtx | null>(null);
 
+function firebaseToArray<T>(data: T[] | Record<string, T> | null | undefined): T[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data.filter(Boolean);
+  if (typeof data === 'object') return Object.values(data).filter(Boolean);
+  return [];
+}
+
+function mergeById<T extends { id: string }>(...lists: T[][]): T[] {
+  const map = new Map<string, T>();
+  for (const list of lists) {
+    for (const item of list) {
+      if (item?.id) map.set(item.id, item);
+    }
+  }
+  return [...map.values()];
+}
+
+function readLocalJson<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 const AUTO_QUIZ_COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#10b981', '#ec4899', '#06b6d4', '#f97316'];
 const RESTORED_FOLDER_ID = 'system-restored-sets';
 export const FAVORITES_FOLDER_ID = 'system-favorites';
@@ -190,25 +216,35 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           setTokenUsage(cloud.tokenUsage);
         }
         if (cloud && cloud.notes) {
-          setNotes(cloud.notes);
-          localStorage.setItem('malacadhati', JSON.stringify(cloud.notes));
+          setNotes(firebaseToArray<Note>(cloud.notes));
+          localStorage.setItem('malacadhati', JSON.stringify(firebaseToArray<Note>(cloud.notes)));
           if (cloud.quizzes) {
-            setQuizzes(cloud.quizzes);
-            localStorage.setItem('malacadhati_quiz', JSON.stringify(cloud.quizzes));
+            const loadedQuizzes = firebaseToArray<QuizItem>(cloud.quizzes);
+            setQuizzes(loadedQuizzes);
+            localStorage.setItem('malacadhati_quiz', JSON.stringify(loadedQuizzes));
           }
           if (cloud.chats) {
             // Firebase strips empty arrays — normalize messages on load.
-            const normalizedChats = cloud.chats.map((c: ChatConversation) => ({ ...c, messages: c.messages ?? [] }));
+            const normalizedChats = firebaseToArray<ChatConversation>(cloud.chats).map((c) => ({ ...c, messages: c.messages ?? [] }));
             setChats(normalizedChats);
             localStorage.setItem('malacadhati_chats', JSON.stringify(normalizedChats));
           }
-          const rawFolders: QuizFolder[] = cloud.quizFolders?.filter(Boolean) ?? [];
+
+          let dedicatedFolders: QuizFolder[] = [];
+          try {
+            const folderRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`);
+            dedicatedFolders = firebaseToArray<QuizFolder>(await folderRes.json());
+          } catch { /* ignore */ }
+
+          const rawFolders = mergeById(
+            firebaseToArray<QuizFolder>(cloud.quizFolders),
+            dedicatedFolders,
+            firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []),
+          );
           const normalizedFolders = ensureRestoredFolder(initializeQuizColors(rawFolders));
           if (cloud.quizSets) {
             // Firebase strips empty arrays, so items can be missing — normalize.
-            const rawSets: QuizSet[] = cloud.quizSets
-              .filter(Boolean)
-              .map((s: QuizSet) => ({ ...s, items: s.items ?? [] }));
+            const rawSets: QuizSet[] = firebaseToArray<QuizSet>(cloud.quizSets).map((s) => ({ ...s, items: s.items ?? [] }));
             const normalizedSets = initializeQuizColors(rawSets, normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color));
             setQuizSets(normalizedSets);
             localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
@@ -260,6 +296,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           setDrafts([{ id: 'd1', title: '', html: '' }]);
         }
       } catch {
+        const localFolders = firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []);
+        if (localFolders.length) {
+          setQuizFolders(ensureRestoredFolder(initializeQuizColors(localFolders)));
+        }
         draftCounter.current = 1;
         setDrafts([{ id: 'd1', title: '', html: '' }]);
       } finally {
@@ -279,6 +319,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const persistFolders = (nextFolders: QuizFolder[]) => {
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     persist(notes, undefined, undefined, undefined, undefined, nextFolders);
+    if (user) {
+      void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
+        method: 'PUT',
+        body: JSON.stringify(nextFolders),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
   };
 
   useEffect(() => {
