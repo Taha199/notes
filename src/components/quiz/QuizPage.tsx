@@ -509,7 +509,7 @@ const SET_COLORS = [
 
 export function QuizPage() {
   const { lang } = useLanguage();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, addQuiz, deleteQuiz, updateQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -517,8 +517,10 @@ export function QuizPage() {
   const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const dragSetId = useRef<string | null>(null);
+  const dragFolderId = useRef<string | null>(null);
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [dragOverFolderSortId, setDragOverFolderSortId] = useState<string | null>(null);
   // Favorites are persisted as copies inside the system "Favoriter" set.
   // favs = the set of ORIGINAL item ids that have a copy there.
   const favItems = allQuizSets.find((s) => s.id === FAVORITES_SET_ID)?.items ?? [];
@@ -854,7 +856,7 @@ export function QuizPage() {
           dragSetId.current = null;
           setDragOverSetId(null);
         }}
-        onDragEnd={() => { dragSetId.current = null; setDragOverSetId(null); setDragOverFolderId(null); }}
+        onDragEnd={() => { dragSetId.current = null; setDragOverSetId(null); setDragOverFolderId(null); setDragOverFolderSortId(null); }}
         style={dragOverSetId === s.id ? { outline: '2px solid var(--color-primary)', outlineOffset: '-2px', borderRadius: '8px' } : undefined}
       >
         {renamingSetId === s.id ? (
@@ -972,6 +974,13 @@ export function QuizPage() {
                   </div>
                 ) : (
                   <button
+                    draggable={!f.system}
+                    onDragStart={(e) => {
+                      if (f.system) return;
+                      dragFolderId.current = f.id;
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('application/x-quiz-folder', f.id);
+                    }}
                     onClick={() => setSelectedFolderId(f.id)}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -982,6 +991,15 @@ export function QuizPage() {
                       }
                     }}
                     onDragOver={(e) => {
+                      const folderId = dragFolderId.current || e.dataTransfer.getData('application/x-quiz-folder');
+                      if (folderId) {
+                        if (f.system) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.dataTransfer.dropEffect = 'move';
+                        setDragOverFolderSortId(f.id);
+                        return;
+                      }
                       if (!dragSetId.current) return;
                       e.preventDefault();
                       e.stopPropagation();
@@ -989,11 +1007,21 @@ export function QuizPage() {
                       setDragOverFolderId(f.id);
                     }}
                     onDragLeave={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOverFolderId(null);
+                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                        setDragOverFolderId(null);
+                        setDragOverFolderSortId(null);
+                      }
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      const folderId = dragFolderId.current || e.dataTransfer.getData('application/x-quiz-folder');
+                      if (folderId) {
+                        reorderQuizFolders(folderId, f.id);
+                        dragFolderId.current = null;
+                        setDragOverFolderSortId(null);
+                        return;
+                      }
                       const setId = dragSetId.current || e.dataTransfer.getData('text/plain');
                       if (setId) {
                         setQuizSetFolder(setId, f.id);
@@ -1003,15 +1031,22 @@ export function QuizPage() {
                       dragSetId.current = null;
                       setDragOverSetId(null);
                       setDragOverFolderId(null);
+                      setDragOverFolderSortId(null);
                     }}
+                    onDragEnd={() => { dragFolderId.current = null; setDragOverFolderSortId(null); }}
                     className={'relative w-full py-2.5 pl-3 pr-1 text-left transition-all ' +
-                      (dragOverFolderId === f.id
-                        ? 'bg-primary/20 ring-2 ring-inset ring-primary dark:bg-primary/30'
-                        : selectedFolderId === f.id
-                          ? 'bg-primary/10 dark:bg-primary/20'
-                          : 'hover:bg-white dark:hover:bg-white/5')}
+                      (dragOverFolderSortId === f.id
+                        ? 'bg-primary/10 ring-2 ring-inset ring-primary/70 dark:bg-primary/20'
+                        : dragOverFolderId === f.id
+                          ? 'bg-primary/20 ring-2 ring-inset ring-primary dark:bg-primary/30'
+                          : selectedFolderId === f.id
+                            ? 'bg-primary/10 dark:bg-primary/20'
+                            : 'hover:bg-white dark:hover:bg-white/5')}
                   >
                     <span className="absolute inset-y-0 left-0 w-[3px]" style={{ backgroundColor: f.color || '#9ca3af' }} />
+                    {!f.system && (
+                      <span className="absolute right-1 bottom-1 select-none text-[12px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover/fl:opacity-100">⠿</span>
+                    )}
                     <span title={f.system === 'favorites' ? 'Favoriter' : f.system ? (lang === 'sv' ? 'Återställda set' : 'Restored Sets') : f.name} className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
                       {f.system === 'favorites' ? '⭐ Favoriter' : f.system ? `🔒 ${lang === 'sv' ? 'Återställda' : 'Restored'}` : f.name}
                     </span>
