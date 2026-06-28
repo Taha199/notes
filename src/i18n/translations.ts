@@ -224,6 +224,10 @@ export interface Translation {
   settingsDeleteConfirmSub: string;
   settingsDeleteConfirmBtn: string;
   settingsDeleting: string;
+  otterSearchTitle: string;
+  otterSearchPlaceholder: string;
+  otterSearchGo: string;
+  otterSearchToggle: string;
   // Email verification
   verifyTitle: string;
   verifySub: string;
@@ -331,6 +335,10 @@ export const LANGS: Record<Lang, Translation> = {
     settingsDeleteConfirmSub: 'This will permanently delete all your notes, quizzes, chats, and account data. This action cannot be undone.',
     settingsDeleteConfirmBtn: 'Yes, delete everything',
     settingsDeleting: 'Deleting...',
+    otterSearchTitle: 'Search',
+    otterSearchPlaceholder: 'Search Google…',
+    otterSearchGo: 'Search',
+    otterSearchToggle: 'Open Google search',
     verifyTitle: 'Verify your email',
     verifySub: 'We sent a verification link to',
     verifyResend: 'Resend email',
@@ -435,6 +443,10 @@ export const LANGS: Record<Lang, Translation> = {
     settingsDeleteConfirmSub: 'Detta raderar permanent alla dina anteckningar, quiz, chattar och kontodata. Åtgärden kan inte ångras.',
     settingsDeleteConfirmBtn: 'Ja, radera allt',
     settingsDeleting: 'Raderar...',
+    otterSearchTitle: 'Sök',
+    otterSearchPlaceholder: 'Sök på Google…',
+    otterSearchGo: 'Sök',
+    otterSearchToggle: 'Öppna Google-sök',
     verifyTitle: 'Verifiera din e-post',
     verifySub: 'Vi skickade en verifieringslänk till',
     verifyResend: 'Skicka igen',

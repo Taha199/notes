@@ -9,6 +9,7 @@ import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
 import { VerifyEmailPage } from './components/auth/VerifyEmailPage';
 import { BootLoader } from './components/common/BootLoader';
 import { ImageLightbox } from './components/common/ImageLightbox';
+import { FloatingOtterSearch } from './components/common/FloatingOtterSearch';
 import { Dashboard } from './components/Dashboard';
 
 function getUrlAction(): { mode: string | null; oobCode: string | null } {
@@ -77,6 +78,7 @@ function Root() {
   return (
     <NotesProvider>
       <Dashboard />
+      <FloatingOtterSearch />
     </NotesProvider>
   );
 }
