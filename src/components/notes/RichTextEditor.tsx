@@ -5,7 +5,8 @@ const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556'
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
 const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48, 56, 64, 72];
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
-const STATE_COMMANDS = [...TOGGLE_COMMANDS, 'justifyRight', 'justifyCenter', 'justifyLeft'];
+const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
+type BlockAlign = 'left' | 'center' | 'right';
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
@@ -185,10 +186,85 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     let el: Node | null = node;
     if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
     while (el instanceof HTMLElement && el !== ed) {
-      if (['DIV', 'P', 'LI', 'H1', 'H2', 'H3'].includes(el.tagName)) return el;
+      if (BLOCK_TAGS.has(el.tagName)) return el;
       el = el.parentElement;
     }
     return null;
+  };
+
+  const readBlockAlignment = (block: HTMLElement): BlockAlign => {
+    const inline = block.style.textAlign || block.getAttribute('align') || '';
+    if (inline === 'center') return 'center';
+    if (inline === 'right' || inline === 'end') return 'right';
+    const computed = getComputedStyle(block).textAlign;
+    if (computed === 'center') return 'center';
+    if (computed === 'right' || computed === 'end') return 'right';
+    return 'left';
+  };
+
+  const getBlocksInRange = (range: Range, ed: HTMLElement): HTMLElement[] => {
+    const blocks = new Set<HTMLElement>();
+    const addBlock = (node: Node | null) => {
+      const block = getBlockParent(node, ed);
+      if (block) blocks.add(block);
+    };
+    addBlock(range.startContainer);
+    addBlock(range.endContainer);
+    if (!range.collapsed) {
+      const root = range.commonAncestorContainer;
+      const walker = document.createTreeWalker(
+        root,
+        NodeFilter.SHOW_ELEMENT,
+        {
+          acceptNode: (node) => {
+            if (!(node instanceof HTMLElement) || !ed.contains(node)) return NodeFilter.FILTER_REJECT;
+            if (!range.intersectsNode(node) || !BLOCK_TAGS.has(node.tagName)) return NodeFilter.FILTER_SKIP;
+            return NodeFilter.FILTER_ACCEPT;
+          },
+        },
+      );
+      while (walker.nextNode()) blocks.add(walker.currentNode as HTMLElement);
+    }
+    return [...blocks];
+  };
+
+  const clearNestedAlignment = (block: HTMLElement) => {
+    block.querySelectorAll<HTMLElement>('[align], [style*="text-align"]').forEach((el) => {
+      el.style.textAlign = '';
+      el.removeAttribute('align');
+      if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+    });
+  };
+
+  const applyBlockAlignment = (align: BlockAlign) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    if (document.activeElement !== ed) {
+      ed.focus({ preventScroll: true });
+      restoreSel();
+    }
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const range = sel.getRangeAt(0);
+
+    let blocks = getBlocksInRange(range, ed);
+    if (blocks.length === 0) {
+      document.execCommand('styleWithCSS', false, 'true');
+      document.execCommand('formatBlock', false, 'div');
+      const block = getBlockParent(sel.anchorNode, ed);
+      if (block) blocks = [block];
+    }
+    if (blocks.length === 0) return;
+
+    blocks.forEach((block) => {
+      clearNestedAlignment(block);
+      block.style.textAlign = align;
+      block.removeAttribute('align');
+    });
+
+    saveSel();
+    readCommandState();
+    onChange(ed.innerHTML);
   };
 
   const normalizeEmptyFontBlocks = (ed: HTMLElement) => {
@@ -271,9 +347,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   // ── Command state ─────────────────────────────────────────────────────
   const readCommandState = () => {
     const active = new Set<string>();
-    STATE_COMMANDS.forEach((c) => {
+    TOGGLE_COMMANDS.forEach((c) => {
       try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
     });
+    const ed = editorRef.current;
+    const sel = window.getSelection();
+    const block = ed && sel?.rangeCount ? getBlockParent(sel.anchorNode, ed) : null;
+    if (block) {
+      const align = readBlockAlignment(block);
+      if (align === 'left') active.add('justifyLeft');
+      else if (align === 'center') active.add('justifyCenter');
+      else active.add('justifyRight');
+    }
     setActiveCmds(active);
     return active;
   };
@@ -726,13 +811,13 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
         {/* Alignment */}
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyLeft'); }} title="Align left" className={btnCls(activeCmds.has('justifyLeft'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); applyBlockAlignment('left'); }} title="Align left" className={btnCls(activeCmds.has('justifyLeft'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="3" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="3" y="20" width="12" height="2" rx="1"/></svg>
         </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyCenter'); }} title="Center" className={btnCls(activeCmds.has('justifyCenter'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); applyBlockAlignment('center'); }} title="Center" className={btnCls(activeCmds.has('justifyCenter'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="6" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="6" y="20" width="12" height="2" rx="1"/></svg>
         </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('justifyRight'); }} title="Align right" className={btnCls(activeCmds.has('justifyRight'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); applyBlockAlignment('right'); }} title="Align right" className={btnCls(activeCmds.has('justifyRight'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="9" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="9" y="20" width="12" height="2" rx="1"/></svg>
         </button>
 
