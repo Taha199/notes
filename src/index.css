@@ -154,51 +154,11 @@ body.otter-search-open .otter-search-panel {
 }
 
 .otter-launcher-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.375rem;
   transition: right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.otter-launcher-tab {
-  position: relative;
-  z-index: 3;
-  display: flex;
-  height: 1.5rem;
-  width: 1.5rem;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  border: 1.5px solid white;
-  background: #ea4335;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  line-height: 1;
-  color: white;
-  text-decoration: none;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(234, 67, 53, 0.45);
-  transition:
-    transform 0.2s cubic-bezier(0.34, 1.4, 0.64, 1),
-    background 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.otter-launcher-tab:hover {
-  transform: scale(1.12);
-  background: #d93025;
-  box-shadow: 0 4px 12px rgba(234, 67, 53, 0.55);
-}
-
-.otter-launcher-tab:active {
-  transform: scale(0.92);
 }
 
 .otter-launcher {
   position: relative;
-  z-index: 1;
   transition:
     transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1),
     box-shadow 0.25s ease;

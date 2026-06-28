@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -135,12 +135,6 @@ export function FloatingOtterSearch() {
     },
     [closeDockedGoogle],
   );
-
-  const openSeparateTab = (e: MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openInBrowserTab(googleSearchUrl(query));
-  };
 
   useEffect(() => {
     document.body.classList.toggle('otter-search-open', open);
@@ -314,15 +308,6 @@ export function FloatingOtterSearch() {
       </aside>
 
       <div className="otter-launcher-wrap fixed bottom-5 right-5 z-50 sm:bottom-6">
-        <button
-          type="button"
-          onClick={openSeparateTab}
-          title={t.otterSearchNewTab}
-          aria-label={t.otterSearchNewTab}
-          className="otter-launcher-tab"
-        >
-          +
-        </button>
         <button
           type="button"
           onClick={togglePanel}
