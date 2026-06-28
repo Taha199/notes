@@ -436,20 +436,30 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   const insertTabIndent = (ed: HTMLElement) => {
     ed.focus({ preventScroll: true });
-    restoreSel();
 
     const sel = window.getSelection();
     if (!sel) return;
 
-    if (!sel.rangeCount || !ed.contains(sel.getRangeAt(0).commonAncestorContainer)) {
-      const range = document.createRange();
-      range.selectNodeContents(ed);
-      range.collapse(false);
+    let range = liveRange();
+    if (!range) {
+      range = document.createRange();
+      if (ed.childNodes.length === 0) range.setStart(ed, 0);
+      else {
+        range.selectNodeContents(ed);
+        range.collapse(false);
+      }
       sel.removeAllRanges();
       sel.addRange(range);
     }
 
-    const range = sel.getRangeAt(0);
+    document.execCommand('styleWithCSS', false, 'true');
+    if (document.execCommand('insertText', false, TAB_INDENT)) {
+      saveSel();
+      emitHtml(ed.innerHTML);
+      return;
+    }
+
+    range = sel.getRangeAt(0);
     range.deleteContents();
     const text = document.createTextNode(TAB_INDENT);
     range.insertNode(text);
@@ -461,14 +471,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     emitHtml(ed.innerHTML);
   };
 
-  const handleEditorTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Tab' || e.shiftKey || !editable) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const ed = editorRef.current;
-    if (!ed) return;
-    insertTabIndent(ed);
-  };
+  const insertTabIndentRef = useRef(insertTabIndent);
+  insertTabIndentRef.current = insertTabIndent;
 
   const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
@@ -568,6 +572,20 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     document.addEventListener('selectionchange', handler);
     return () => document.removeEventListener('selectionchange', handler);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!editable) return;
+    const onDocKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.shiftKey) return;
+      const ed = editorRef.current;
+      if (!ed || document.activeElement !== ed) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      insertTabIndentRef.current(ed);
+    };
+    document.addEventListener('keydown', onDocKeyDown, true);
+    return () => document.removeEventListener('keydown', onDocKeyDown, true);
+  }, [editable]);
 
   // ── exec: apply a formatting command ─────────────────────────────────
   const exec = (cmd: string, value?: string) => {
@@ -1037,9 +1055,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         onFocus={() => {
           const ed = editorRef.current;
           if (ed) sanitizeCaretFontContext(ed);
-        }}
-        onKeyDownCapture={(e) => {
-          handleEditorTab(e);
         }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
