@@ -230,6 +230,7 @@ export interface Translation {
   otterSearchToggle: string;
   otterSearchClose: string;
   otterSearchExternal: string;
+  otterSearchNewTab: string;
   otterSearchPopupBlocked: string;
   otterSearchPopupRetry: string;
   otterSearchPopupDocked: string;
@@ -347,6 +348,7 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchToggle: 'Open Google search',
     otterSearchClose: 'Close search panel',
     otterSearchExternal: 'Open in new tab',
+    otterSearchNewTab: 'Open Google in a separate tab',
     otterSearchPopupBlocked:
       'Your browser blocked the Google panel. Allow popups for tahanote.com, or use the button below.',
     otterSearchPopupRetry: 'Open Google',
@@ -462,6 +464,7 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchToggle: 'Öppna Google-sök',
     otterSearchClose: 'Stäng sökpanelen',
     otterSearchExternal: 'Öppna i ny flik',
+    otterSearchNewTab: 'Öppna Google i en separat flik',
     otterSearchPopupBlocked:
       'Webbläsaren blockerade Google-panelen. Tillåt popup-fönster för tahanote.com, eller använd knappen nedan.',
     otterSearchPopupRetry: 'Öppna Google',

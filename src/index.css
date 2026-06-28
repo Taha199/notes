@@ -153,9 +153,48 @@ body.otter-search-open .otter-search-panel {
   transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.otter-launcher {
+.otter-launcher-wrap {
+  position: relative;
+  transition: right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.otter-launcher-tab {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  z-index: 2;
+  display: flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1.5px solid white;
+  background: #4285f4;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1;
+  color: white;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.45);
   transition:
-    right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 0.2s cubic-bezier(0.34, 1.4, 0.64, 1),
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.otter-launcher-tab:hover {
+  transform: scale(1.12);
+  background: #3367d6;
+  box-shadow: 0 4px 12px rgba(66, 133, 244, 0.55);
+}
+
+.otter-launcher-tab:active {
+  transform: scale(0.92);
+}
+
+.otter-launcher {
+  position: relative;
+  transition:
     transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1),
     box-shadow 0.25s ease;
 }
@@ -214,7 +253,7 @@ body.otter-search-open .otter-search-panel {
     0 8px 16px -8px rgba(234, 67, 53, 0.25);
 }
 
-body.otter-search-open .otter-launcher {
+body.otter-search-open .otter-launcher-wrap {
   right: calc(var(--otter-panel-width) + 12px);
 }
 
