@@ -50,6 +50,12 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const hlWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
+  const lastLocalHtmlRef = useRef(html);
+
+  const emitHtml = (next: string) => {
+    lastLocalHtmlRef.current = next;
+    onChange(next);
+  };
 
   // ── Helpers ──────────────────────────────────────────────────────────
   // Get the live selection inside the editor right now (returns null if focus is elsewhere).
@@ -262,33 +268,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return block ? readBlockAlignment(block) : 'left';
   };
 
-  const getBlocksForAlignment = (range: Range, ed: HTMLElement, align: BlockAlign): HTMLElement[] => {
-    const blocks = new Set<HTMLElement>();
-    const collectChain = (node: Node | null) => {
-      let el: Node | null = node;
-      if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
-      while (el instanceof HTMLElement && el !== ed) {
-        if (BLOCK_TAGS.has(el.tagName) || el.tagName === 'CENTER') blocks.add(el);
-        el = el.parentElement;
-      }
-    };
-
-    if (align === 'left' || align === 'right') {
-      collectChain(range.startContainer);
-      if (!range.collapsed) collectChain(range.endContainer);
-      if (blocks.size === 0) {
-        const target = getAlignmentTargetBlock(range.startContainer, ed);
-        if (target) blocks.add(target);
-      }
-      return [...blocks];
-    }
-
-    const target = getAlignmentTargetBlock(range.startContainer, ed);
-    if (target) return [target];
-    collectChain(range.startContainer);
-    return [...blocks];
-  };
-
   const placeCaretInBlock = (block: HTMLElement, atStart: boolean) => {
     const range = document.createRange();
     range.selectNodeContents(block);
@@ -321,10 +300,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const block = getAlignmentTargetBlock(targetNode, ed);
     if (!block || readBlockAlignment(block) === 'left') return;
 
-    const rect = block.getBoundingClientRect();
-    if (rect.width <= 0) return;
+    const edRect = ed.getBoundingClientRect();
+    if (edRect.width <= 0) return;
 
-    const relX = (x - rect.left) / rect.width;
+    const relX = (x - edRect.left) / edRect.width;
     const rtl = getComputedStyle(block).direction === 'rtl';
     const atStart = rtl ? relX > 0.65 : relX < 0.35;
     const atEnd = rtl ? relX < 0.35 : relX > 0.65;
@@ -386,38 +365,45 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     restoreSel();
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
-    const range = sel.getRangeAt(0);
 
-    let blocks = getBlocksForAlignment(range, ed, align);
-    if (blocks.length === 0) {
+    let block = getLineBlock(sel.anchorNode, ed);
+    if (!block) {
       document.execCommand('styleWithCSS', false, 'true');
       document.execCommand('formatBlock', false, 'div');
-      const block = getAlignmentTargetBlock(sel.anchorNode, ed);
-      if (block) blocks = [block];
+      block = getLineBlock(sel.anchorNode, ed);
     }
-    if (blocks.length === 0) return;
+    if (!block) return;
 
-    blocks.forEach((rawBlock) => {
-      let block = rawBlock;
-      if (block.tagName === 'CENTER') block = normalizeCenterElement(block, ed);
-      if (align !== 'center') clearParentCentering(block, ed);
-      clearNestedAlignment(block);
-      block.style.display = 'block';
-      block.style.width = '100%';
-      block.style.textAlign = align;
-      block.style.marginLeft = '0';
-      block.style.marginRight = '0';
-      block.removeAttribute('align');
+    if (block.tagName === 'CENTER') block = normalizeCenterElement(block, ed);
+
+    unwrapCenterTags(ed);
+    if (align !== 'center') clearParentCentering(block, ed);
+
+    ed.querySelectorAll<HTMLElement>('center, [align], [style*="text-align"]').forEach((el) => {
+      if (!block.contains(el) && el !== block) return;
+      el.style.removeProperty('text-align');
+      el.removeAttribute('align');
+      if (align !== 'center') {
+        el.style.removeProperty('margin-left');
+        el.style.removeProperty('margin-right');
+        el.style.removeProperty('width');
+        el.style.removeProperty('max-width');
+        if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+      }
     });
 
-    if (align === 'left') {
-      const line = getLineBlock(sel.anchorNode, ed) ?? blocks[blocks.length - 1];
-      placeCaretInBlock(line, true);
-    }
+    block.style.display = 'block';
+    block.style.width = '100%';
+    block.style.textAlign = align;
+    block.style.marginLeft = '0';
+    block.style.marginRight = '0';
+    block.removeAttribute('align');
+
+    if (align === 'left') placeCaretInBlock(block, true);
 
     saveSel();
     readCommandState();
-    onChange(ed.innerHTML);
+    emitHtml(ed.innerHTML);
     ed.focus({ preventScroll: true });
   };
 
@@ -480,7 +466,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       pendingFontSize.current = null;
       setFontSize(DEFAULT_FONT_PX);
       saveSel();
-      onChange(ed.innerHTML);
+      emitHtml(ed.innerHTML);
     });
   };
 
@@ -488,14 +474,23 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== html) {
       editorRef.current.innerHTML = html;
+      lastLocalHtmlRef.current = html;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (editorRef.current && document.activeElement !== editorRef.current && editorRef.current.innerHTML !== html) {
-      editorRef.current.innerHTML = html;
+    const ed = editorRef.current;
+    if (!ed) return;
+    if (document.activeElement === ed) return;
+    if (ed.innerHTML === html) {
+      lastLocalHtmlRef.current = html;
+      return;
     }
+    // Parent state may lag behind local toolbar edits — don't restore stale html.
+    if (ed.innerHTML === lastLocalHtmlRef.current && html !== lastLocalHtmlRef.current) return;
+    ed.innerHTML = html;
+    lastLocalHtmlRef.current = html;
   }, [html]);
 
   // ── Command state ─────────────────────────────────────────────────────
@@ -552,7 +547,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     document.execCommand(cmd, false, value);
     saveSel();
     readCommandState();
-    onChange(ed.innerHTML);
+    emitHtml(ed.innerHTML);
   };
 
   const applyFontSizeStyle = (span: HTMLSpanElement, px: number) => {
@@ -610,7 +605,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     pendingFontSize.current = px;
     setFontSize(px);
     saveSel();
-    onChange(ed.innerHTML);
+    emitHtml(ed.innerHTML);
   };
 
   const restoreSavedRange = (saved: Range | null, ed: HTMLElement): Range | null => {
@@ -700,7 +695,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       finalSel?.addRange(nextRange);
       setFontSize(px);
       saveSel();
-      onChange(ed.innerHTML);
+      emitHtml(ed.innerHTML);
       return;
     }
 
@@ -722,7 +717,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     finalSel?.addRange(nextRange);
     setFontSize(px);
     saveSel();
-    onChange(ed.innerHTML);
+    emitHtml(ed.innerHTML);
   };
 
   const nextSz = (cur: number, d: number) => {
@@ -763,7 +758,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     document.execCommand('foreColor', false, c);
     saveSel();
     setPalOpen(false);
-    onChange(ed.innerHTML);
+    emitHtml(ed.innerHTML);
   };
 
   // Remove explicit text color so the text follows the theme (white in dark, dark in light).
@@ -786,7 +781,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     });
     saveSel();
     setPalOpen(false);
-    onChange(ed.innerHTML);
+    emitHtml(ed.innerHTML);
   };
 
   const toggleHlPalette = (e: React.MouseEvent) => {
@@ -820,7 +815,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     }
     saveSel();
     setHlPalOpen(false);
-    onChange(ed.innerHTML);
+    emitHtml(ed.innerHTML);
   };
 
   // ── Image ─────────────────────────────────────────────────────────────
@@ -833,7 +828,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       ensureFocus(true);
       document.execCommand('insertHTML', false, `<img src="${url}" style="display:block;max-width:160px;max-height:160px;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;" /><br>`);
       saveSel();
-      onChange(ed.innerHTML);
+      emitHtml(ed.innerHTML);
     };
     reader.readAsDataURL(file);
   };
@@ -845,7 +840,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     ensureFocus(true);
     document.execCommand('insertHTML', false, '<hr style="border:0;border-top:1px solid currentColor;opacity:0.3;margin:10px 0" /><div dir="auto"><br></div>');
     saveSel();
-    onChange(ed.innerHTML);
+    emitHtml(ed.innerHTML);
   };
 
   // ── Close palette on outside click ────────────────────────────────────
@@ -893,6 +888,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           (stickyToolbar && editable ? 'sticky top-0 z-20 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95' : '')
         }
         style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
+        onMouseDownCapture={() => { saveSel(); }}
       >
         {/* Font size */}
         <div
@@ -1020,7 +1016,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             stripEmptyFontSpans(ed);
             syncFontSizeFromCaret();
           }
-          onChange(ed?.innerHTML ?? '');
+          emitHtml(ed?.innerHTML ?? '');
         }}
         onMouseMove={(event) => {
           if (!editable) return;
@@ -1052,7 +1048,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             style={{ position: 'fixed', left: r.right - 56, top: r.top + 4, zIndex: 9999, display: 'flex', gap: 4 }}
           >
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; }} className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900" title="Zoom">🔍</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); setHoveredImg(null); onChange(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700" title="Delete">✕</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); setHoveredImg(null); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700" title="Delete">✕</button>
           </div>
         );
       })()}
