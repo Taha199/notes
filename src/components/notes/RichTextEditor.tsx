@@ -30,7 +30,7 @@ interface Props {
 }
 
 export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
   const savedFormattingRange = useRef<Range | null>(null);
@@ -1122,6 +1122,58 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     emitHtml(ed.innerHTML);
   };
 
+  const formatTodayHeaderLabel = () => new Date().toLocaleDateString(lang === 'sv' ? 'sv-SE' : 'en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const insertTodayHeader = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.focus({ preventScroll: true });
+
+    const dateLabel = formatTodayHeaderLabel();
+    const header = document.createElement('div');
+    header.setAttribute('dir', 'auto');
+    header.style.fontWeight = '700';
+    header.style.fontSize = '18px';
+    header.style.lineHeight = FONT_LINE_HEIGHT;
+    header.style.margin = '0 0 8px';
+    header.textContent = dateLabel;
+
+    const isEmpty = !ed.textContent?.replace(/\u200B/g, '').trim();
+    if (isEmpty) {
+      ed.innerHTML = '';
+      ed.appendChild(header);
+      const body = document.createElement('div');
+      body.setAttribute('dir', 'auto');
+      body.innerHTML = '<br>';
+      ed.appendChild(body);
+      placeCaretInBlock(body, true);
+    } else {
+      ed.insertBefore(header, ed.firstChild);
+      const range = document.createRange();
+      const firstContent = header.nextSibling;
+      if (firstContent) {
+        range.setStartBefore(firstContent);
+        range.collapse(true);
+      } else {
+        range.selectNodeContents(ed);
+        range.collapse(false);
+      }
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      savedRange.current = range.cloneRange();
+    }
+
+    saveSel();
+    readCommandState();
+    syncCaretVisual();
+    emitHtml(ed.innerHTML);
+  };
+
   // ── Close palette on outside click ────────────────────────────────────
   useEffect(() => {
     if (!palOpen) return;
@@ -1291,6 +1343,16 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         </div>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
+
+        {/* Today's date header */}
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); saveSel(); insertTodayHeader(); }}
+          title={t.titleInsertDateHeader}
+          className={btnCls(false)}
+        >
+          📅
+        </button>
 
         {/* Image */}
         <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); imgInputRef.current?.click(); }} title="Insert image" className={btnCls(false)}>🖼</button>
