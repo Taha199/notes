@@ -228,6 +228,8 @@ export interface Translation {
   otterSearchPlaceholder: string;
   otterSearchGo: string;
   otterSearchToggle: string;
+  otterSearchClose: string;
+  otterSearchExternal: string;
   // Email verification
   verifyTitle: string;
   verifySub: string;
@@ -339,6 +341,8 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchPlaceholder: 'Search Google…',
     otterSearchGo: 'Search',
     otterSearchToggle: 'Open Google search',
+    otterSearchClose: 'Close search panel',
+    otterSearchExternal: 'Open in new tab',
     verifyTitle: 'Verify your email',
     verifySub: 'We sent a verification link to',
     verifyResend: 'Resend email',
@@ -447,6 +451,8 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchPlaceholder: 'Sök på Google…',
     otterSearchGo: 'Sök',
     otterSearchToggle: 'Öppna Google-sök',
+    otterSearchClose: 'Stäng sökpanelen',
+    otterSearchExternal: 'Öppna i ny flik',
     verifyTitle: 'Verifiera din e-post',
     verifySub: 'Vi skickade en verifieringslänk till',
     verifyResend: 'Skicka igen',
