@@ -90,11 +90,10 @@ interface QuizItemRowProps {
   onDragHandleStart?: (e: React.DragEvent) => void;
   onDragHandleEnd?: () => void;
   onRowDragOver?: (e: React.DragEvent) => void;
-  onRowDragLeave?: () => void;
   onRowDrop?: (e: React.DragEvent) => void;
 }
 
-function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, canMoveUp, canMoveDown, isDragOver, onMoveUp, onMoveDown, onDragHandleStart, onDragHandleEnd, onRowDragOver, onRowDragLeave, onRowDrop }: QuizItemRowProps) {
+function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, canMoveUp, canMoveDown, isDragOver, onMoveUp, onMoveDown, onDragHandleStart, onDragHandleEnd, onRowDragOver, onRowDrop }: QuizItemRowProps) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
@@ -113,23 +112,24 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
     <div
       className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-shadow dark:border-white/10 dark:bg-[#1e1e2e] ' + accent + (isDragOver ? ' ring-2 ring-primary ring-offset-1 dark:ring-offset-[#12121a]' : '')}
       onDragOver={canReorder ? onRowDragOver : undefined}
-      onDragLeave={canReorder ? onRowDragLeave : undefined}
       onDrop={canReorder ? onRowDrop : undefined}
     >
       <div className={'grid grid-cols-1 ' + (canReorder ? 'sm:grid-cols-[40px_minmax(0,0.8fr)_minmax(0,1.2fr)_44px]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]')}>
         {canReorder && (
           <div className="flex flex-row items-center justify-center gap-0.5 border-b border-app-border px-1.5 py-2 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
-            <span
+            <button
+              type="button"
               draggable
               onDragStart={onDragHandleStart}
               onDragEnd={onDragHandleEnd}
-              className="mb-0.5 cursor-grab select-none text-[16px] leading-none text-app-text-secondary/30 transition-colors active:cursor-grabbing group-hover:text-primary/50"
+              onMouseDown={(e) => e.stopPropagation()}
+              className="mb-0.5 flex h-7 w-7 cursor-grab items-center justify-center rounded-lg text-[16px] leading-none text-app-text-secondary/35 transition-colors hover:bg-app-bg hover:text-primary/60 active:cursor-grabbing dark:hover:bg-white/5"
               title="Dra för att flytta"
               aria-label="Dra för att flytta"
-            >⠿</span>
+            >⠿</button>
             <button
               type="button"
-              onClick={onMoveUp}
+              onClick={(e) => { e.stopPropagation(); onMoveUp?.(); }}
               disabled={!canMoveUp}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-sm text-app-text-secondary/50 transition-colors hover:bg-app-bg hover:text-primary disabled:opacity-25 dark:hover:bg-white/5"
               title={canMoveUp ? 'Flytta upp' : undefined}
@@ -137,7 +137,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
             >↑</button>
             <button
               type="button"
-              onClick={onMoveDown}
+              onClick={(e) => { e.stopPropagation(); onMoveDown?.(); }}
               disabled={!canMoveDown}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-sm text-app-text-secondary/50 transition-colors hover:bg-app-bg hover:text-primary disabled:opacity-25 dark:hover:bg-white/5"
               title={canMoveDown ? 'Flytta ner' : undefined}
@@ -536,7 +536,7 @@ const SET_COLORS = [
 export function QuizPage() {
   const { lang } = useLanguage();
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet, moveItemInSet, reorderItemInSet, moveQuiz, reorderQuiz } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -940,27 +940,49 @@ export function QuizPage() {
     [openForms],
   );
 
-  const canReorder = displayItems.length > 1 && (!!selectedSetId || isNotesView);
+  const orderedItems = useMemo(() => {
+    if (itemSort === 'manual') return displayItems;
+    if (itemSort === 'oldest') {
+      return [...displayItems].sort((a, b) => getItemCreatedTime(a) - getItemCreatedTime(b));
+    }
+    return [...displayItems].sort((a, b) => {
+      const aStudied = currentProgress[a.id] === 'known' ? 1 : 0;
+      const bStudied = currentProgress[b.id] === 'known' ? 1 : 0;
+      if (aStudied !== bStudied) return aStudied - bStudied;
+      return getItemCreatedTime(a) - getItemCreatedTime(b);
+    });
+  }, [displayItems, itemSort, currentProgress]);
 
-  const ensureManualSort = () => {
+  const canReorder = orderedItems.length > 1 && (!!selectedSetId || isNotesView);
+
+  const applyItemOrder = (ids: number[]) => {
     if (itemSort !== 'manual') changeItemSort('manual');
+    if (selectedSetId) setItemsOrderInSet(selectedSetId, ids);
+    else setQuizzesOrder(ids);
   };
 
   const handleMoveItem = (itemId: number, direction: 'up' | 'down') => {
-    ensureManualSort();
-    if (selectedSetId) moveItemInSet(selectedSetId, itemId, direction);
-    else moveQuiz(itemId, direction);
+    const list = [...orderedItems];
+    const idx = list.findIndex((i) => i.id === itemId);
+    if (idx < 0) return;
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= list.length) return;
+    [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
+    applyItemOrder(list.map((i) => i.id));
   };
 
   const handleReorderItem = (dragId: number, targetId: number) => {
-    ensureManualSort();
-    if (selectedSetId) reorderItemInSet(selectedSetId, dragId, targetId);
-    else reorderQuiz(dragId, targetId);
+    const list = [...orderedItems];
+    const from = list.findIndex((i) => i.id === dragId);
+    const to = list.findIndex((i) => i.id === targetId);
+    if (from < 0 || to < 0 || from === to) return;
+    const [item] = list.splice(from, 1);
+    list.splice(to, 0, item);
+    applyItemOrder(list.map((i) => i.id));
   };
 
-  const renderItem = (item: QuizItem) => {
+  const renderItem = (item: QuizItem, visualIndex: number) => {
     if (openItemIds.has(item.id)) return null;
-    const storageIndex = displayItems.findIndex((i) => i.id === item.id);
     return (
       <QuizItemRow
         key={item.id}
@@ -982,8 +1004,8 @@ export function QuizPage() {
           else deleteQuiz(item.id);
         }}
         canReorder={canReorder}
-        canMoveUp={storageIndex > 0}
-        canMoveDown={storageIndex >= 0 && storageIndex < displayItems.length - 1}
+        canMoveUp={visualIndex > 0}
+        canMoveDown={visualIndex < orderedItems.length - 1}
         isDragOver={dragOverQuestionId === item.id}
         onMoveUp={() => handleMoveItem(item.id, 'up')}
         onMoveDown={() => handleMoveItem(item.id, 'down')}
@@ -991,21 +1013,24 @@ export function QuizPage() {
           dragQuestionId.current = item.id;
           e.dataTransfer.effectAllowed = 'move';
           e.dataTransfer.setData('text/plain', String(item.id));
+          e.dataTransfer.setData('application/x-quiz-item', String(item.id));
         }}
         onDragHandleEnd={() => {
-          dragQuestionId.current = null;
-          setDragOverQuestionId(null);
+          window.setTimeout(() => {
+            dragQuestionId.current = null;
+            setDragOverQuestionId(null);
+          }, 0);
         }}
         onRowDragOver={(e) => {
           e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
           setDragOverQuestionId(item.id);
-        }}
-        onRowDragLeave={() => {
-          if (dragOverQuestionId === item.id) setDragOverQuestionId(null);
         }}
         onRowDrop={(e) => {
           e.preventDefault();
-          const dragId = dragQuestionId.current ?? Number(e.dataTransfer.getData('text/plain'));
+          e.stopPropagation();
+          const raw = e.dataTransfer.getData('application/x-quiz-item') || e.dataTransfer.getData('text/plain');
+          const dragId = dragQuestionId.current ?? Number(raw);
           if (dragId && dragId !== item.id) handleReorderItem(dragId, item.id);
           dragQuestionId.current = null;
           setDragOverQuestionId(null);
@@ -1034,19 +1059,6 @@ export function QuizPage() {
       />
     );
   };
-
-  const orderedItems = useMemo(() => {
-    if (itemSort === 'manual') return displayItems;
-    if (itemSort === 'oldest') {
-      return [...displayItems].sort((a, b) => getItemCreatedTime(a) - getItemCreatedTime(b));
-    }
-    return [...displayItems].sort((a, b) => {
-      const aStudied = currentProgress[a.id] === 'known' ? 1 : 0;
-      const bStudied = currentProgress[b.id] === 'known' ? 1 : 0;
-      if (aStudied !== bStudied) return aStudied - bStudied;
-      return getItemCreatedTime(a) - getItemCreatedTime(b);
-    });
-  }, [displayItems, itemSort, currentProgress]);
 
   const sortedSets = setSort === 'manual'
     ? quizSets
@@ -1517,7 +1529,7 @@ export function QuizPage() {
           <>
           {/* Questions list */}
           <div className="flex flex-col gap-2">
-            {orderedItems.map((item) => renderItem(item))}
+            {orderedItems.map((item, index) => renderItem(item, index))}
 
             {openForms.map((form) => renderOpenForm(form))}
 

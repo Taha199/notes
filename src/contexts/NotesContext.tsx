@@ -52,8 +52,10 @@ interface NotesCtx {
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
   moveItemInSet: (setId: string, itemId: number, direction: 'up' | 'down') => void;
   reorderItemInSet: (setId: string, dragId: number, targetId: number) => void;
+  setItemsOrderInSet: (setId: string, itemIds: number[]) => void;
   moveQuiz: (itemId: number, direction: 'up' | 'down') => void;
   reorderQuiz: (dragId: number, targetId: number) => void;
+  setQuizzesOrder: (itemIds: number[]) => void;
   tokenUsage: number;
   addTokens: (n: number) => void;
   resetTokens: () => void;
@@ -960,6 +962,32 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const orderItemsByIds = (items: QuizItem[], itemIds: number[]) => {
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const ordered = itemIds.map((id) => byId.get(id)).filter((i): i is QuizItem => !!i);
+    const rest = items.filter((i) => !itemIds.includes(i.id));
+    return [...ordered, ...rest];
+  };
+
+  const setItemsOrderInSet = (setId: string, itemIds: number[]) => {
+    setQuizSets((prev) => {
+      const next = prev.map((s) => {
+        if (s.id !== setId) return s;
+        return { ...s, items: orderItemsByIds(s.items, itemIds) };
+      });
+      persistSets(next);
+      return next;
+    });
+  };
+
+  const setQuizzesOrder = (itemIds: number[]) => {
+    setQuizzes((prev) => {
+      const next = orderItemsByIds(prev, itemIds);
+      persist(notes, undefined, next);
+      return next;
+    });
+  };
+
   const toggleRead = (id: number) => updateNote(id, { read: true });
   const toggleUnread = (id: number) => updateNote(id, { read: false });
   const toggleFav = (id: number) =>
@@ -1029,8 +1057,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         updateItemInSet,
         moveItemInSet,
         reorderItemInSet,
+        setItemsOrderInSet,
         moveQuiz,
         reorderQuiz,
+        setQuizzesOrder,
         addDraft,
         removeDraft,
         updateDraft,
