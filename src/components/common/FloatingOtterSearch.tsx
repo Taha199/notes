@@ -1,117 +1,24 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 
-const POPUP_NAME = 'tahanote-google-panel';
-const GOOGLE_HOME = 'https://www.google.com/';
-const googleSearchUrl = (q: string) =>
+const GOOGLE_HOME_TAB = 'https://www.google.com/';
+const GOOGLE_HOME_PANEL = 'https://www.google.com/webhp?igu=1';
+const googleTabUrl = (q: string) =>
   q.trim()
     ? `https://www.google.com/search?q=${encodeURIComponent(q.trim())}`
-    : GOOGLE_HOME;
-
-function getPanelWidth(): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue('--otter-panel-width').trim();
-  if (raw.endsWith('px')) return parseInt(raw, 10);
-  if (window.innerWidth <= 768) return Math.min(window.innerWidth * 0.92, 400);
-  return 540;
-}
-
-function screenLeft() {
-  return window.screenLeft ?? window.screenX ?? 0;
-}
-
-function screenTop() {
-  return window.screenTop ?? window.screenY ?? 0;
-}
-
-function popupFeatures(width: number, height: number, left: number, top: number) {
-  return [
-    `width=${width}`,
-    `height=${height}`,
-    `left=${left}`,
-    `top=${top}`,
-    'resizable=yes',
-    'scrollbars=yes',
-    'toolbar=yes',
-    'location=yes',
-    'menubar=no',
-    'status=no',
-  ].join(',');
-}
+    : GOOGLE_HOME_TAB;
+const googlePanelUrl = (q: string) =>
+  q.trim()
+    ? `https://www.google.com/search?igu=1&q=${encodeURIComponent(q.trim())}`
+    : GOOGLE_HOME_PANEL;
 
 export function FloatingOtterSearch() {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [currentUrl, setCurrentUrl] = useState(GOOGLE_HOME);
-  const [popupBlocked, setPopupBlocked] = useState(false);
-  const [popupReady, setPopupReady] = useState(false);
+  const [iframeSrc, setIframeSrc] = useState(GOOGLE_HOME_PANEL);
   const inputRef = useRef<HTMLInputElement>(null);
-  const headerRef = useRef<HTMLDivElement>(null);
-  const popupRef = useRef<Window | null>(null);
-
-  const positionPopup = useCallback((popup: Window) => {
-    const width = getPanelWidth();
-    const headerBottom = headerRef.current?.getBoundingClientRect().bottom ?? 0;
-    const left = Math.round(screenLeft() + window.outerWidth - width);
-    const top = Math.round(screenTop() + headerBottom);
-    const height = Math.max(320, Math.round(window.outerHeight - headerBottom));
-    try {
-      popup.resizeTo(width, height);
-      popup.moveTo(left, top);
-    } catch {
-      // Safari may block move/resize on cross-origin windows.
-    }
-  }, []);
-
-  const openGoogleWindow = useCallback(
-    (url: string) => {
-      const width = getPanelWidth();
-      const headerBottom = headerRef.current?.getBoundingClientRect().bottom ?? 120;
-      const left = Math.round(screenLeft() + window.outerWidth - width);
-      const top = Math.round(screenTop() + headerBottom);
-      const height = Math.max(320, Math.round(window.outerHeight - headerBottom));
-      const features = popupFeatures(width, height, left, top);
-
-      let popup = popupRef.current;
-      if (!popup || popup.closed) {
-        popup = window.open('', POPUP_NAME, features);
-        if (!popup) {
-          setPopupBlocked(true);
-          setPopupReady(false);
-          return null;
-        }
-        popupRef.current = popup;
-      }
-
-      try {
-        popup.location.href = url;
-      } catch {
-        popup = window.open(url, POPUP_NAME, features);
-        if (!popup) {
-          setPopupBlocked(true);
-          setPopupReady(false);
-          return null;
-        }
-        popupRef.current = popup;
-      }
-
-      setPopupBlocked(false);
-      setPopupReady(true);
-      setCurrentUrl(url);
-      requestAnimationFrame(() => positionPopup(popup!));
-      popup.focus();
-      return popup;
-    },
-    [positionPopup],
-  );
-
-  const closeGoogleWindow = useCallback(() => {
-    const popup = popupRef.current;
-    if (popup && !popup.closed) popup.close();
-    popupRef.current = null;
-    setPopupReady(false);
-  }, []);
 
   useEffect(() => {
     document.body.classList.toggle('otter-search-open', open);
@@ -119,53 +26,22 @@ export function FloatingOtterSearch() {
   }, [open]);
 
   useEffect(() => {
-    if (!open) {
-      closeGoogleWindow();
-      return;
-    }
-
-    const id = requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      const popup = popupRef.current;
-      if (popup && !popup.closed) positionPopup(popup);
-    });
-
+    if (!open) return;
+    const id = requestAnimationFrame(() => inputRef.current?.focus());
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
-    const onLayout = () => {
-      const popup = popupRef.current;
-      if (popup && !popup.closed) positionPopup(popup);
-    };
-
     document.addEventListener('keydown', onKey);
-    window.addEventListener('resize', onLayout);
-    window.visualViewport?.addEventListener('resize', onLayout);
-    window.visualViewport?.addEventListener('scroll', onLayout);
-
-    const poll = window.setInterval(() => {
-      if (popupRef.current?.closed) {
-        setOpen(false);
-        setPopupReady(false);
-      }
-    }, 500);
-
     return () => {
       cancelAnimationFrame(id);
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('resize', onLayout);
-      window.visualViewport?.removeEventListener('resize', onLayout);
-      window.visualViewport?.removeEventListener('scroll', onLayout);
-      window.clearInterval(poll);
     };
-  }, [open, closeGoogleWindow, positionPopup]);
+  }, [open]);
 
   const runSearch = (term?: string) => {
     const q = (term ?? query).trim();
-    const url = googleSearchUrl(q);
     if (q) setQuery(q);
-    setCurrentUrl(url);
-    if (open) openGoogleWindow(url);
+    setIframeSrc(googlePanelUrl(q));
   };
 
   const togglePanel = () => {
@@ -173,19 +49,19 @@ export function FloatingOtterSearch() {
       setOpen(false);
       return;
     }
-    const url = query.trim() ? googleSearchUrl(query) : GOOGLE_HOME;
-    openGoogleWindow(url);
+    setIframeSrc(googlePanelUrl(query));
     setOpen(true);
   };
 
-  const openExternal = () => {
-    window.open(currentUrl, '_blank', 'noopener,noreferrer');
+  const openInNewTab = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const url = googleTabUrl(query);
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const openInNewTab = (e: MouseEvent) => {
-    e.stopPropagation();
-    const url = query.trim() ? googleSearchUrl(query) : currentUrl;
-    window.open(url, '_blank', 'noopener,noreferrer');
+  const openExternal = () => {
+    window.open(googleTabUrl(query), '_blank', 'noopener,noreferrer');
   };
 
   return createPortal(
@@ -199,10 +75,7 @@ export function FloatingOtterSearch() {
           (open ? 'pointer-events-auto' : 'pointer-events-none')
         }
       >
-        <div
-          ref={headerRef}
-          className="shrink-0 border-b border-app-border bg-white px-4 py-3 dark:border-white/10 dark:bg-gray-900"
-        >
+        <div className="shrink-0 border-b border-app-border bg-white px-4 py-3 dark:border-white/10 dark:bg-gray-900">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="text-xl font-bold tracking-tight">
@@ -259,34 +132,15 @@ export function FloatingOtterSearch() {
           </form>
         </div>
 
-        <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-          {popupBlocked ? (
-            <>
-              <p className="text-sm leading-relaxed text-app-text-secondary dark:text-gray-400">
-                {t.otterSearchPopupBlocked}
-              </p>
-              <a
-                href={query.trim() ? googleSearchUrl(query) : GOOGLE_HOME}
-                target={POPUP_NAME}
-                rel="opener"
-                onClick={() => {
-                  setPopupBlocked(false);
-                  setPopupReady(true);
-                }}
-                className="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-primary-dark"
-              >
-                {t.otterSearchPopupRetry}
-              </a>
-            </>
-          ) : popupReady ? (
-            <p className="max-w-xs text-xs leading-relaxed text-app-text-secondary dark:text-gray-500">
-              {t.otterSearchPopupDocked}
-            </p>
-          ) : (
-            <p className="max-w-xs text-sm leading-relaxed text-app-text-secondary dark:text-gray-400">
-              {t.otterSearchPopupLoading}
-            </p>
-          )}
+        <div className="relative min-h-0 flex-1 bg-white dark:bg-gray-950">
+          <iframe
+            key={iframeSrc}
+            title={t.otterSearchTitle}
+            src={iframeSrc}
+            className="h-full w-full border-0 bg-white"
+            referrerPolicy="no-referrer-when-downgrade"
+            allow="fullscreen"
+          />
         </div>
       </aside>
 
