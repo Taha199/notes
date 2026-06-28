@@ -434,16 +434,40 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     }
   };
 
+  const insertTabIndent = (ed: HTMLElement) => {
+    ed.focus({ preventScroll: true });
+    restoreSel();
+
+    const sel = window.getSelection();
+    if (!sel) return;
+
+    if (!sel.rangeCount || !ed.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const text = document.createTextNode(TAB_INDENT);
+    range.insertNode(text);
+    range.setStartAfter(text);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    savedRange.current = range.cloneRange();
+    emitHtml(ed.innerHTML);
+  };
+
   const handleEditorTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Tab' || e.shiftKey) return;
+    if (e.key !== 'Tab' || e.shiftKey || !editable) return;
     e.preventDefault();
+    e.stopPropagation();
     const ed = editorRef.current;
     if (!ed) return;
-
-    document.execCommand('styleWithCSS', false, 'true');
-    document.execCommand('insertText', false, TAB_INDENT);
-    saveSel();
-    emitHtml(ed.innerHTML);
+    insertTabIndent(ed);
   };
 
   const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1014,9 +1038,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           const ed = editorRef.current;
           if (ed) sanitizeCaretFontContext(ed);
         }}
+        onKeyDownCapture={(e) => {
+          handleEditorTab(e);
+        }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
-          handleEditorTab(e);
           handleEditorEnter(e);
         }}
         onInput={() => {
