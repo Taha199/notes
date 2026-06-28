@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -8,6 +8,17 @@ const googleSearchUrl = (q: string) =>
   q.trim()
     ? `https://www.google.com/search?q=${encodeURIComponent(q.trim())}`
     : GOOGLE_HOME;
+
+function openTrueBrowserTab(url: string) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 
 function getPanelWidth(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue('--otter-panel-width').trim();
@@ -178,15 +189,11 @@ export function FloatingOtterSearch() {
     setOpen(true);
   };
 
-  const openInNewTab = (e: MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    window.open(googleSearchUrl(query), '_blank', 'noopener,noreferrer');
+  const openExternal = () => {
+    openTrueBrowserTab(currentUrl);
   };
 
-  const openExternal = () => {
-    window.open(currentUrl, '_blank', 'noopener,noreferrer');
-  };
+  const plusTabUrl = googleSearchUrl(query);
 
   return createPortal(
     <>
@@ -291,15 +298,17 @@ export function FloatingOtterSearch() {
       </aside>
 
       <div className="otter-launcher-wrap fixed bottom-5 right-5 z-50 sm:bottom-6">
-        <button
-          type="button"
-          onClick={openInNewTab}
+        <a
+          href={plusTabUrl}
+          target="_blank"
+          rel="noopener noreferrer"
           title={t.otterSearchNewTab}
           aria-label={t.otterSearchNewTab}
           className="otter-launcher-tab"
+          onClick={(e) => e.stopPropagation()}
         >
           +
-        </button>
+        </a>
         <button
           type="button"
           onClick={togglePanel}
