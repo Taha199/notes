@@ -394,6 +394,7 @@ export interface Translation {
   noteMcqCorrectHint: string;
   noteSaveQuestion: string;
   noteSavedQuiz: string;
+  noteQuizSavedCount: string;
   noteAiQuestion: string;
   noteShowAnswer: string;
   noteGenerateQuestion: string;
@@ -678,6 +679,7 @@ export const LANGS: Record<Lang, Translation> = {
     noteMcqCorrectHint: 'Circle = correct answer',
     noteSaveQuestion: '💾 Save question',
     noteSavedQuiz: 'Question saved to Quiz 🧠',
+    noteQuizSavedCount: '{n} questions saved to Quiz 🧠',
     noteAiQuestion: '🤖 AI Question',
     noteShowAnswer: '👁 Show answer',
     noteGenerateQuestion: 'Generate question',
@@ -960,6 +962,7 @@ export const LANGS: Record<Lang, Translation> = {
     noteMcqCorrectHint: 'Circle = rätt svar',
     noteSaveQuestion: '💾 Spara fråga',
     noteSavedQuiz: 'Fråga sparad i Quiz 🧠',
+    noteQuizSavedCount: '{n} frågor sparade i Quiz 🧠',
     noteAiQuestion: '🤖 AI Fråga',
     noteShowAnswer: '👁 Visa svar',
     noteGenerateQuestion: 'Generera fråga',

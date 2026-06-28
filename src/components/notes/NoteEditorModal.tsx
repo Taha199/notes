@@ -31,7 +31,7 @@ interface NoteEditorModalProps {
 
 export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNote, onClose, onNavigate }: NoteEditorModalProps) {
   const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz } = useNotes();
-  const { t, lang } = useLanguage();
+  const { t } = useLanguage();
   const { show } = useToast();
   const { hasAi } = useAuth();
   const note = notes.find((n) => n.id === noteId);
@@ -146,7 +146,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
       setQuizIndex((i) => i + 1);
       setShowAnswer(false);
     } else {
-      show(`${savedCount + (showAnswer ? 1 : 0)} frågor sparade i Quiz 🧠`);
+      show(t.noteQuizSavedCount.replace('{n}', String(savedCount + (showAnswer ? 1 : 0))));
       setQuizOpen(false);
     }
   };
