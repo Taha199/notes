@@ -192,23 +192,15 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return null;
   };
 
-  const getTopLevelBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
+  const getLineBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
     let el: Node | null = node;
     if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
-    let block: HTMLElement | null = null;
     while (el instanceof HTMLElement && el !== ed) {
-      if (BLOCK_TAGS.has(el.tagName) || el.tagName === 'CENTER') block = el;
+      if (el.tagName === 'CENTER') return el;
+      if (BLOCK_TAGS.has(el.tagName)) return el;
       el = el.parentElement;
     }
-    if (!block) return null;
-    while (
-      block.parentElement
-      && block.parentElement !== ed
-      && (BLOCK_TAGS.has(block.parentElement.tagName) || block.parentElement.tagName === 'CENTER')
-    ) {
-      block = block.parentElement;
-    }
-    return block;
+    return null;
   };
 
   const unwrapCenterTags = (root: HTMLElement) => {
@@ -225,34 +217,25 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const inline = block.style.textAlign || block.getAttribute('align') || '';
     if (inline === 'center') return 'center';
     if (inline === 'right' || inline === 'end') return 'right';
-    const computed = getComputedStyle(block).textAlign;
-    if (computed === 'center') return 'center';
-    if (computed === 'right' || computed === 'end') return 'right';
+    if (block.style.marginLeft === 'auto' && block.style.marginRight === 'auto') return 'center';
+    const computed = getComputedStyle(block);
+    if (computed.textAlign === 'center') return 'center';
+    if (computed.textAlign === 'right' || computed.textAlign === 'end') return 'right';
+    if (computed.marginLeft === 'auto' && computed.marginRight === 'auto' && block.style.width) return 'center';
     return 'left';
   };
 
   const readAlignmentAtCaret = (ed: HTMLElement): BlockAlign => {
     const sel = window.getSelection();
     if (!sel?.rangeCount) return 'left';
-    let el: Node | null = sel.anchorNode;
-    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
-    while (el instanceof HTMLElement && el !== ed) {
-      if (el.tagName === 'CENTER') return 'center';
-      const attr = el.getAttribute('align');
-      if (attr === 'center') return 'center';
-      if (attr === 'right') return 'right';
-      if (el.style.textAlign === 'center') return 'center';
-      if (el.style.textAlign === 'right' || el.style.textAlign === 'end') return 'right';
-      el = el.parentElement;
-    }
-    const block = getTopLevelBlock(sel.anchorNode, ed);
+    const block = getLineBlock(sel.anchorNode, ed);
     return block ? readBlockAlignment(block) : 'left';
   };
 
   const getBlocksInRange = (range: Range, ed: HTMLElement): HTMLElement[] => {
     const blocks = new Set<HTMLElement>();
     const addBlock = (node: Node | null) => {
-      const block = getTopLevelBlock(node, ed);
+      const block = getLineBlock(node, ed);
       if (block) blocks.add(block);
     };
     addBlock(range.startContainer);
@@ -272,29 +255,60 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         },
       );
       while (walker.nextNode()) {
-        const top = getTopLevelBlock(walker.currentNode, ed);
-        if (top) blocks.add(top);
+        const line = getLineBlock(walker.currentNode, ed);
+        if (line) blocks.add(line);
       }
     }
     return [...blocks];
   };
 
+  const stripBlockCenteringStyles = (block: HTMLElement) => {
+    const clean = (el: HTMLElement) => {
+      el.style.removeProperty('text-align');
+      el.removeAttribute('align');
+      el.style.removeProperty('margin-left');
+      el.style.removeProperty('margin-right');
+      el.style.removeProperty('margin-inline');
+      el.style.removeProperty('margin-inline-start');
+      el.style.removeProperty('margin-inline-end');
+      el.style.removeProperty('width');
+      el.style.removeProperty('max-width');
+      if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+    };
+    clean(block);
+    block.querySelectorAll<HTMLElement>('[align], [style]').forEach((el) => {
+      if (
+        el.hasAttribute('align')
+        || el.style.textAlign
+        || el.style.marginLeft === 'auto'
+        || el.style.marginRight === 'auto'
+        || el.style.width
+        || el.style.maxWidth
+      ) {
+        clean(el);
+      }
+    });
+  };
+
+  const normalizeCenterElement = (center: HTMLElement, ed: HTMLElement): HTMLDivElement => {
+    const parent = center.parentElement ?? ed;
+    const replacement = document.createElement('div');
+    replacement.setAttribute('dir', 'auto');
+    while (center.firstChild) replacement.appendChild(center.firstChild);
+    parent.replaceChild(replacement, center);
+    return replacement;
+  };
+
   const clearNestedAlignment = (block: HTMLElement) => {
     unwrapCenterTags(block);
-    block.querySelectorAll<HTMLElement>('[align], [style*="text-align"]').forEach((el) => {
-      el.style.textAlign = '';
-      el.removeAttribute('align');
-      if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
-    });
+    stripBlockCenteringStyles(block);
   };
 
   const applyBlockAlignment = (align: BlockAlign) => {
     const ed = editorRef.current;
     if (!ed) return;
-    if (document.activeElement !== ed) {
-      ed.focus({ preventScroll: true });
-      restoreSel();
-    }
+    ed.focus({ preventScroll: true });
+    restoreSel();
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
     const range = sel.getRangeAt(0);
@@ -303,30 +317,27 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (blocks.length === 0) {
       document.execCommand('styleWithCSS', false, 'true');
       document.execCommand('formatBlock', false, 'div');
-      const block = getTopLevelBlock(sel.anchorNode, ed);
+      const block = getLineBlock(sel.anchorNode, ed);
       if (block) blocks = [block];
     }
     if (blocks.length === 0) return;
 
-    blocks.forEach((block) => {
-      if (block.tagName === 'CENTER') {
-        const parent = block.parentElement ?? ed;
-        const frag = document.createDocumentFragment();
-        while (block.firstChild) frag.appendChild(block.firstChild);
-        const replacement = document.createElement('div');
-        replacement.setAttribute('dir', 'auto');
-        replacement.appendChild(frag);
-        parent.replaceChild(replacement, block);
-        block = replacement;
-      }
+    blocks.forEach((rawBlock) => {
+      let block = rawBlock;
+      if (block.tagName === 'CENTER') block = normalizeCenterElement(block, ed);
       clearNestedAlignment(block);
+      block.style.display = 'block';
+      block.style.width = '100%';
       block.style.textAlign = align;
+      block.style.marginLeft = '0';
+      block.style.marginRight = '0';
       block.removeAttribute('align');
     });
 
     saveSel();
     readCommandState();
     onChange(ed.innerHTML);
+    ed.focus({ preventScroll: true });
   };
 
   const normalizeEmptyFontBlocks = (ed: HTMLElement) => {
@@ -872,13 +883,13 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
         {/* Alignment */}
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); applyBlockAlignment('left'); }} title="Align left" className={btnCls(activeCmds.has('justifyLeft'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('left'); }} title="Align left" className={btnCls(activeCmds.has('justifyLeft'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="3" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="3" y="20" width="12" height="2" rx="1"/></svg>
         </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); applyBlockAlignment('center'); }} title="Center" className={btnCls(activeCmds.has('justifyCenter'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('center'); }} title="Center" className={btnCls(activeCmds.has('justifyCenter'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="6" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="6" y="20" width="12" height="2" rx="1"/></svg>
         </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); applyBlockAlignment('right'); }} title="Align right" className={btnCls(activeCmds.has('justifyRight'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('right'); }} title="Align right" className={btnCls(activeCmds.has('justifyRight'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="9" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="9" y="20" width="12" height="2" rx="1"/></svg>
         </button>
 
