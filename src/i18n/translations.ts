@@ -251,6 +251,165 @@ export interface Translation {
   verifyDone: string;
   verifyCheck: string;
   verifyCancel: string;
+  // Quiz
+  quizQuestionLabel: string;
+  quizAnswerLabel: string;
+  quizStudyMore: string;
+  quizRevealAnswer: string;
+  quizExplanationLabel: string;
+  quizMarkKnown: string;
+  quizMarkNotKnown: string;
+  quizFavorite: string;
+  quizStopSpeak: string;
+  quizSpeak: string;
+  quizEdit: string;
+  quizMoveToSet: string;
+  quizMoveToSetTitle: string;
+  quizNoSetsInFolder: string;
+  quizSetsWord: string;
+  quizItemsShort: string;
+  quizDelete: string;
+  quizCreated: string;
+  quizUpdated: string;
+  quizReorderHint: string;
+  quizReorderAria: string;
+  quizShowSidebar: string;
+  quizHideSidebar: string;
+  quizTitle: string;
+  quizQuestionsFromNotes: string;
+  quizQuestionOne: string;
+  quizQuestionMany: string;
+  quizKnownProgress: string;
+  quizHideAnswers: string;
+  quizShowAnswers: string;
+  quizHideAnswersShort: string;
+  quizShowAnswersShort: string;
+  quizSortQuestions: string;
+  quizFlashcards: string;
+  quizTypeAnswer: string;
+  quizAdd: string;
+  quizAddQuestion: string;
+  quizSetsLabel: string;
+  quizSortManualShort: string;
+  quizSortManual: string;
+  quizSortName: string;
+  quizSortCount: string;
+  quizSortAz: string;
+  quizSortHash: string;
+  quizFolderEmpty: string;
+  quizNoUngroupedSets: string;
+  quizFolder: string;
+  quizAddSet: string;
+  quizAddFolder: string;
+  quizRename: string;
+  quizColor: string;
+  quizMoveToFolder: string;
+  quizNoFoldersYet: string;
+  quizDeleteSet: string;
+  quizDeleteFolder: string;
+  quizFavorites: string;
+  quizRestored: string;
+  quizOptions: string;
+  quizNoFolders: string;
+  quizResizeFoldersHint: string;
+  quizNamelessSet: string;
+  quizNewFolder: string;
+  quizEmptySetMsg: string;
+  quizEmptyFolderMsg: string;
+  quizEmptySetTitle: string;
+  quizEditQaBadge: string;
+  quizEditMcqBadge: string;
+  quizAiAnswer: string;
+  quizAiSuggestion: string;
+  quizKeepCurrent: string;
+  quizReplaceAnswer: string;
+  quizMcq: string;
+  quizOptionsLabel: string;
+  quizAddOption: string;
+  quizCorrect: string;
+  quizOptionPh: string;
+  quizExplanationOptional: string;
+  quizExplanationPh: string;
+  quizColorDefault: string;
+  quizColorPurple: string;
+  quizColorBlue: string;
+  quizColorGreen: string;
+  quizColorYellow: string;
+  quizColorRed: string;
+  quizColorPink: string;
+  quizColorCyan: string;
+  quizSortManualFull: string;
+  quizSortOldest: string;
+  quizSortStudy: string;
+  quizSortDateShort: string;
+  quizSortStudyShort: string;
+  quizStudyAllDone: string;
+  quizStudyRoundComplete: string;
+  quizStudyPercentCorrect: string;
+  quizStudyKnownCount: string;
+  quizStudyLearningCount: string;
+  quizStudyMoreBtn: string;
+  quizStudyClose: string;
+  quizStudyPrevious: string;
+  quizStudyNext: string;
+  quizStudySkip: string;
+  quizStudyNextArrow: string;
+  quizStudyTapToReveal: string;
+  quizStudyFlipCard: string;
+  quizStudyDontKnow: string;
+  quizStudyKnowIt: string;
+  quizStudyTypeAnswerPh: string;
+  quizStudyCheckAnswer: string;
+  quizStudyYourAnswer: string;
+  quizStudyCorrectAnswer: string;
+  quizStudyIncorrect: string;
+  quizStudyCorrect: string;
+  quizStudyRemaining: string;
+  quizStudyChooseQuestions: string;
+  quizStudyPick: string;
+  quizStudyWhatToStudy: string;
+  quizStudyScopeAll: string;
+  quizStudyScopeNew: string;
+  quizStudyScopeLearning: string;
+  quizStudyScopeKnown: string;
+  quizMoveFolderTrash: string;
+  quizMoveSetTrash: string;
+  quizMoveToTrash: string;
+  quizDupFolderName: string;
+  quizDupSetName: string;
+  quizFolderInTrash: string;
+  quizMissingFoldersRestored: string;
+  quizNoMoreFoldersFound: string;
+  quizSearchMissingFolders: string;
+  quizMoveFolderTrashMsg: string;
+  quizMoveSetTrashMsg: string;
+  quizSetsCount: string;
+  quizRestoredSets: string;
+  noteCreateQuestion: string;
+  noteClose: string;
+  notePaste: string;
+  noteWriteQuestionPh: string;
+  noteWriteAnswerPh: string;
+  noteGenerateAnswerPh: string;
+  noteMcqCorrectHint: string;
+  noteSaveQuestion: string;
+  noteSavedQuiz: string;
+  noteAiQuestion: string;
+  noteShowAnswer: string;
+  noteGenerateQuestion: string;
+  noteGenerateQuestionPh: string;
+  noteGenerateMore: string;
+  noteGenerating: string;
+  noteEditBtn: string;
+  noteDone: string;
+  noteSkip: string;
+  noteFinish: string;
+  noteSaveNext: string;
+  noteQuizPanel: string;
+  noteWriteQuestionEditPh: string;
+  noteCreatedLabel: string;
+  noteUpdatedLabel: string;
+  noteLastSaved: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -377,6 +536,164 @@ export const LANGS: Record<Lang, Translation> = {
     verifyDone: 'I have verified',
     verifyCheck: 'Checking...',
     verifyCancel: 'Cancel registration & delete account',
+    quizQuestionLabel: 'Question',
+    quizAnswerLabel: 'Answer',
+    quizStudyMore: '📚 Study more',
+    quizRevealAnswer: '👁️ Show',
+    quizExplanationLabel: 'Explanation',
+    quizMarkKnown: 'Mark as studied (known)',
+    quizMarkNotKnown: 'Mark as not known (study more)',
+    quizFavorite: 'Favourite',
+    quizStopSpeak: 'Stop',
+    quizSpeak: 'Read aloud',
+    quizEdit: 'Edit',
+    quizMoveToSet: 'Move to set',
+    quizMoveToSetTitle: 'Move to set',
+    quizNoSetsInFolder: 'No sets in this folder',
+    quizSetsWord: 'sets',
+    quizItemsShort: 'items',
+    quizDelete: 'Delete',
+    quizCreated: 'Created:',
+    quizUpdated: 'Updated:',
+    quizReorderHint: 'Enter a number and press Enter — swaps with that position',
+    quizReorderAria: 'Swap with number',
+    quizShowSidebar: 'Show list',
+    quizHideSidebar: 'Hide list',
+    quizTitle: 'Quiz',
+    quizQuestionsFromNotes: 'Questions from Notes',
+    quizQuestionOne: 'question',
+    quizQuestionMany: 'questions',
+    quizKnownProgress: 'known',
+    quizHideAnswers: 'Hide answers',
+    quizShowAnswers: 'Show answers',
+    quizHideAnswersShort: 'Hide',
+    quizShowAnswersShort: 'Show',
+    quizSortQuestions: 'Sort questions',
+    quizFlashcards: '🃏 Flashcards',
+    quizTypeAnswer: '✏️ Type',
+    quizAdd: 'Add',
+    quizAddQuestion: 'Add Question',
+    quizSetsLabel: 'Sets',
+    quizSortManualShort: 'Manual',
+    quizSortManual: '✋ Manual order',
+    quizSortName: '🔤 Name (A–Z)',
+    quizSortCount: '🔢 Question count',
+    quizSortAz: 'A–Z',
+    quizSortHash: '#',
+    quizFolderEmpty: 'Empty',
+    quizNoUngroupedSets: 'No ungrouped sets',
+    quizFolder: 'Folder',
+    quizAddSet: 'Add set',
+    quizAddFolder: 'Add folder',
+    quizRename: '✏️ Rename',
+    quizColor: '🎨 Colour',
+    quizMoveToFolder: '📒 Move to folder',
+    quizNoFoldersYet: 'No folders yet',
+    quizDeleteSet: '🗑 Delete set',
+    quizDeleteFolder: '🗑 Delete folder',
+    quizFavorites: 'Favourites',
+    quizRestored: 'Restored',
+    quizOptions: 'Options',
+    quizNoFolders: 'No folders',
+    quizResizeFoldersHint: 'Drag to resize width',
+    quizNamelessSet: 'Nameless',
+    quizNewFolder: 'New folder',
+    quizEmptySetMsg: 'There are no sets here.',
+    quizEmptyFolderMsg: 'Add a set to get started.',
+    quizEmptySetTitle: 'There are no sets here.',
+    quizEditQaBadge: '✏️ Q/A',
+    quizEditMcqBadge: '☑ MCQ',
+    quizAiAnswer: 'AI Answer',
+    quizAiSuggestion: 'AI suggestion',
+    quizKeepCurrent: 'Keep current',
+    quizReplaceAnswer: 'Replace answer',
+    quizMcq: 'MCQ',
+    quizOptionsLabel: 'Options',
+    quizAddOption: 'Add option',
+    quizCorrect: 'Correct',
+    quizOptionPh: 'Option',
+    quizExplanationOptional: 'Explanation (optional)',
+    quizExplanationPh: 'Why is this the correct answer?',
+    quizColorDefault: 'Default',
+    quizColorPurple: 'Purple',
+    quizColorBlue: 'Blue',
+    quizColorGreen: 'Green',
+    quizColorYellow: 'Yellow',
+    quizColorRed: 'Red',
+    quizColorPink: 'Pink',
+    quizColorCyan: 'Cyan',
+    quizSortManualFull: '✋ Manual order',
+    quizSortOldest: '🕑 Oldest → newest',
+    quizSortStudy: '📚 Not studied / studied',
+    quizSortDateShort: 'Date',
+    quizSortStudyShort: 'Study',
+    quizStudyAllDone: 'All done!',
+    quizStudyRoundComplete: 'Round {n} complete',
+    quizStudyPercentCorrect: '{n}% correct',
+    quizStudyKnownCount: '✓ {n} known',
+    quizStudyLearningCount: '✗ {n} learning',
+    quizStudyMoreBtn: 'Study {n} more →',
+    quizStudyClose: 'Close',
+    quizStudyPrevious: 'Previous',
+    quizStudyNext: 'Next',
+    quizStudySkip: 'Skip',
+    quizStudyNextArrow: 'Next →',
+    quizStudyTapToReveal: 'Tap to reveal answer',
+    quizStudyFlipCard: 'Flip card',
+    quizStudyDontKnow: "Don't know",
+    quizStudyKnowIt: 'Know it',
+    quizStudyTypeAnswerPh: 'Type your answer... (Enter to check)',
+    quizStudyCheckAnswer: 'Check Answer',
+    quizStudyYourAnswer: 'Your Answer',
+    quizStudyCorrectAnswer: 'Correct Answer',
+    quizStudyIncorrect: 'Incorrect',
+    quizStudyCorrect: 'Correct',
+    quizStudyRemaining: '{n} remaining',
+    quizStudyChooseQuestions: 'Choose questions',
+    quizStudyPick: 'Pick',
+    quizStudyWhatToStudy: 'what to study?',
+    quizStudyScopeAll: 'All questions',
+    quizStudyScopeNew: 'Not studied',
+    quizStudyScopeLearning: "Don't know",
+    quizStudyScopeKnown: 'Known',
+    quizMoveFolderTrash: 'Move folder to trash',
+    quizMoveSetTrash: 'Move set to trash',
+    quizMoveToTrash: 'Move to trash',
+    quizDupFolderName: 'A folder with that name already exists. Try a different name.',
+    quizDupSetName: 'A set with that name already exists. Try a different name.',
+    quizFolderInTrash: 'Folder in trash',
+    quizMissingFoldersRestored: '↩ {n} missing folders restored',
+    quizNoMoreFoldersFound: 'No more folders found',
+    quizSearchMissingFolders: 'Search for missing folders',
+    quizMoveFolderTrashMsg: 'The folder "{name}" and its sets will be moved to trash.',
+    quizMoveSetTrashMsg: 'The set "{name}" will be moved to trash and can be restored later.',
+    quizSetsCount: '{n} set',
+    quizRestoredSets: 'Restored Sets',
+    noteCreateQuestion: '✏️ Create question',
+    noteClose: '✕ Close',
+    notePaste: '📋 Paste',
+    noteWriteQuestionPh: 'Write your question...',
+    noteWriteAnswerPh: 'Write the answer...',
+    noteGenerateAnswerPh: 'Generate or write the answer...',
+    noteMcqCorrectHint: 'Circle = correct answer',
+    noteSaveQuestion: '💾 Save question',
+    noteSavedQuiz: 'Question saved to Quiz 🧠',
+    noteAiQuestion: '🤖 AI Question',
+    noteShowAnswer: '👁 Show answer',
+    noteGenerateQuestion: '🎲 Generate question',
+    noteGenerateQuestionPh: 'Generate or write your question...',
+    noteGenerateMore: 'Generate more',
+    noteGenerating: 'Generating questions...',
+    noteEditBtn: '✏️ Edit',
+    noteDone: '✓ Done',
+    noteSkip: 'Skip →',
+    noteFinish: 'Finish',
+    noteSaveNext: '💾 Save & Next',
+    noteQuizPanel: '🧠 Quiz',
+    noteWriteQuestionEditPh: 'Write the question...',
+    noteCreatedLabel: 'Created',
+    noteUpdatedLabel: 'Updated',
+    noteLastSaved: 'Last',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -501,5 +818,163 @@ export const LANGS: Record<Lang, Translation> = {
     verifyDone: 'Jag har verifierat',
     verifyCheck: 'Kontrollerar...',
     verifyCancel: 'Avbryt registrering & radera konto',
+    quizQuestionLabel: 'Fråga',
+    quizAnswerLabel: 'Svar',
+    quizStudyMore: '📚 Plugga mer',
+    quizRevealAnswer: '👁️ Visa',
+    quizExplanationLabel: 'Förklaring',
+    quizMarkKnown: 'Markera som studerad (kan)',
+    quizMarkNotKnown: 'Markera som ej klar (plugga mer)',
+    quizFavorite: 'Favorit',
+    quizStopSpeak: 'Stoppa',
+    quizSpeak: 'Läs upp',
+    quizEdit: 'Redigera',
+    quizMoveToSet: 'Flytta till set',
+    quizMoveToSetTitle: 'Flytta till set',
+    quizNoSetsInFolder: 'Inga set i den här mappen',
+    quizSetsWord: 'set',
+    quizItemsShort: 'st',
+    quizDelete: 'Ta bort',
+    quizCreated: 'Skapad:',
+    quizUpdated: 'Uppdaterad:',
+    quizReorderHint: 'Skriv nummer och tryck Enter — byter plats med det numret',
+    quizReorderAria: 'Byt plats med nummer',
+    quizShowSidebar: 'Visa listan',
+    quizHideSidebar: 'Dölj listan',
+    quizTitle: 'Quiz',
+    quizQuestionsFromNotes: 'Frågor från anteckningar',
+    quizQuestionOne: 'fråga',
+    quizQuestionMany: 'frågor',
+    quizKnownProgress: 'kan',
+    quizHideAnswers: 'Dölj svar',
+    quizShowAnswers: 'Visa svar',
+    quizHideAnswersShort: 'Dölj',
+    quizShowAnswersShort: 'Visa',
+    quizSortQuestions: 'Sortera frågor',
+    quizFlashcards: '🃏 Flashcards',
+    quizTypeAnswer: '✏️ Skriv',
+    quizAdd: 'Lägg till',
+    quizAddQuestion: 'Lägg till fråga',
+    quizSetsLabel: 'Set',
+    quizSortManualShort: 'Egen',
+    quizSortManual: '✋ Egen ordning',
+    quizSortName: '🔤 Namn (A–Z)',
+    quizSortCount: '🔢 Antal frågor',
+    quizSortAz: 'A–Z',
+    quizSortHash: '#',
+    quizFolderEmpty: 'Tomt',
+    quizNoUngroupedSets: 'Inga lösa set',
+    quizFolder: 'Mapp',
+    quizAddSet: 'Lägg till set',
+    quizAddFolder: 'Lägg till mapp',
+    quizRename: '✏️ Byt namn',
+    quizColor: '🎨 Färg',
+    quizMoveToFolder: '📒 Flytta till mapp',
+    quizNoFoldersYet: 'Inga mappar än',
+    quizDeleteSet: '🗑 Ta bort set',
+    quizDeleteFolder: '🗑 Ta bort mapp',
+    quizFavorites: 'Favoriter',
+    quizRestored: 'Återställda',
+    quizOptions: 'Alternativ',
+    quizNoFolders: 'Inga mappar',
+    quizResizeFoldersHint: 'Dra för att ändra bredd',
+    quizNamelessSet: 'Namnlös',
+    quizNewFolder: 'Ny mapp',
+    quizEmptySetMsg: 'Det finns inga set här.',
+    quizEmptyFolderMsg: 'Lägg till ett set för att börja.',
+    quizEmptySetTitle: 'Det finns inga set här.',
+    quizEditQaBadge: '✏️ Q/A',
+    quizEditMcqBadge: '☑ MCQ',
+    quizAiAnswer: 'AI-svar',
+    quizAiSuggestion: 'AI-förslag',
+    quizKeepCurrent: 'Behåll nuvarande',
+    quizReplaceAnswer: 'Ersätt svaret',
+    quizMcq: 'Flerval',
+    quizOptionsLabel: 'Alternativ',
+    quizAddOption: 'Lägg till alternativ',
+    quizCorrect: 'Rätt',
+    quizOptionPh: 'Alternativ',
+    quizExplanationOptional: 'Förklaring (valfri)',
+    quizExplanationPh: 'Varför är detta rätt svar?',
+    quizColorDefault: 'Standard',
+    quizColorPurple: 'Lila',
+    quizColorBlue: 'Blå',
+    quizColorGreen: 'Grön',
+    quizColorYellow: 'Gul',
+    quizColorRed: 'Röd',
+    quizColorPink: 'Rosa',
+    quizColorCyan: 'Cyan',
+    quizSortManualFull: '✋ Egen ordning',
+    quizSortOldest: '🕑 Äldst → nyast',
+    quizSortStudy: '📚 Ej studerade / studerade',
+    quizSortDateShort: 'Datum',
+    quizSortStudyShort: 'Studie',
+    quizStudyAllDone: 'Klart!',
+    quizStudyRoundComplete: 'Runda {n} klar',
+    quizStudyPercentCorrect: '{n}% rätt',
+    quizStudyKnownCount: '✓ {n} kan',
+    quizStudyLearningCount: '✗ {n} att plugga',
+    quizStudyMoreBtn: 'Plugga {n} till →',
+    quizStudyClose: 'Stäng',
+    quizStudyPrevious: 'Föregående',
+    quizStudyNext: 'Nästa',
+    quizStudySkip: 'Hoppa över',
+    quizStudyNextArrow: 'Nästa →',
+    quizStudyTapToReveal: 'Tryck för att se svaret',
+    quizStudyFlipCard: 'Vänd kort',
+    quizStudyDontKnow: 'Kan inte',
+    quizStudyKnowIt: 'Kan',
+    quizStudyTypeAnswerPh: 'Skriv ditt svar... (Enter för att rätta)',
+    quizStudyCheckAnswer: 'Rätta svar',
+    quizStudyYourAnswer: 'Ditt svar',
+    quizStudyCorrectAnswer: 'Rätt svar',
+    quizStudyIncorrect: 'Fel',
+    quizStudyCorrect: 'Rätt',
+    quizStudyRemaining: '{n} kvar',
+    quizStudyChooseQuestions: 'Välj frågor',
+    quizStudyPick: 'Välj',
+    quizStudyWhatToStudy: 'vad vill du plugga?',
+    quizStudyScopeAll: 'Alla frågor',
+    quizStudyScopeNew: 'Ej studerade',
+    quizStudyScopeLearning: 'Kan inte (fel)',
+    quizStudyScopeKnown: 'Kan (rätt)',
+    quizMoveFolderTrash: 'Flytta mapp till papperskorgen',
+    quizMoveSetTrash: 'Flytta set till papperskorgen',
+    quizMoveToTrash: 'Flytta till papperskorgen',
+    quizDupFolderName: 'Det finns redan en mapp med det namnet. Försök med ett annat namn.',
+    quizDupSetName: 'Det finns redan ett set med det namnet. Försök med ett annat namn.',
+    quizFolderInTrash: 'Mapp i papperskorgen',
+    quizMissingFoldersRestored: '↩ {n} saknade mappar återställda',
+    quizNoMoreFoldersFound: 'Inga fler mappar hittades',
+    quizSearchMissingFolders: 'Sök efter saknade mappar',
+    quizMoveFolderTrashMsg: 'Mappen "{name}" och dess sets flyttas till papperskorgen.',
+    quizMoveSetTrashMsg: 'Setet "{name}" flyttas till papperskorgen och kan återställas senare.',
+    quizSetsCount: '{n} set',
+    quizRestoredSets: 'Återställda set',
+    noteCreateQuestion: '✏️ Skapa fråga',
+    noteClose: '✕ Stäng',
+    notePaste: '📋 Klistra in',
+    noteWriteQuestionPh: 'Skriv din fråga...',
+    noteWriteAnswerPh: 'Skriv svaret...',
+    noteGenerateAnswerPh: 'Generera eller skriv svaret...',
+    noteMcqCorrectHint: 'Circle = rätt svar',
+    noteSaveQuestion: '💾 Spara fråga',
+    noteSavedQuiz: 'Fråga sparad i Quiz 🧠',
+    noteAiQuestion: '🤖 AI Fråga',
+    noteShowAnswer: '👁 Visa svar',
+    noteGenerateQuestion: '🎲 Generera fråga',
+    noteGenerateQuestionPh: 'Generera eller skriv din fråga...',
+    noteGenerateMore: 'Generera fler',
+    noteGenerating: 'Genererar frågor...',
+    noteEditBtn: '✏️ Redigera',
+    noteDone: '✓ Klar',
+    noteSkip: 'Hoppa över →',
+    noteFinish: 'Avsluta',
+    noteSaveNext: '💾 Spara & Nästa',
+    noteQuizPanel: '🧠 Quiz',
+    noteWriteQuestionEditPh: 'Skriv frågan...',
+    noteCreatedLabel: 'Skapad',
+    noteUpdatedLabel: 'Uppdaterad',
+    noteLastSaved: 'Senast',
   },
 };

@@ -29,10 +29,10 @@ function saveQuizSelection(folderId: string | null, setId: string | null) {
 
 type ItemSort = 'manual' | 'oldest' | 'study';
 
-const ITEM_SORT_OPTIONS: { key: ItemSort; labelSv: string; labelEn: string; shortSv: string; shortEn: string }[] = [
-  { key: 'manual', labelSv: '✋ Egen ordning', labelEn: '✋ Manual order', shortSv: 'Egen', shortEn: 'Manual' },
-  { key: 'oldest', labelSv: '🕑 Äldst → nyast', labelEn: '🕑 Oldest → newest', shortSv: 'Datum', shortEn: 'Date' },
-  { key: 'study', labelSv: '📚 Ej studerade / studerade', labelEn: '📚 Not studied / studied', shortSv: 'Studie', shortEn: 'Study' },
+const ITEM_SORT_OPTIONS: { key: ItemSort; labelKey: 'quizSortManualFull' | 'quizSortOldest' | 'quizSortStudy'; shortKey: 'quizSortManualShort' | 'quizSortDateShort' | 'quizSortStudyShort' }[] = [
+  { key: 'manual', labelKey: 'quizSortManualFull', shortKey: 'quizSortManualShort' },
+  { key: 'oldest', labelKey: 'quizSortOldest', shortKey: 'quizSortDateShort' },
+  { key: 'study', labelKey: 'quizSortStudy', shortKey: 'quizSortStudyShort' },
 ];
 
 function getItemCreatedTime(item: QuizItem): number {
@@ -88,6 +88,7 @@ interface QuizItemRowProps {
 }
 
 function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, questionNumber, totalQuestions, onSwapToPosition }: QuizItemRowProps) {
+  const { t } = useLanguage();
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
@@ -136,8 +137,8 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
                 }}
                 onBlur={commitSwap}
                 placeholder="↔"
-                title="Skriv nummer och tryck Enter — byter plats med det numret"
-                aria-label="Byt plats med nummer"
+                title={t.quizReorderHint}
+                aria-label={t.quizReorderAria}
                 className="h-7 w-9 rounded-lg border border-app-border bg-white text-center text-[11px] font-semibold tabular-nums text-app-text outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-white/10 dark:bg-gray-900 dark:text-gray-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               />
             )}
@@ -145,10 +146,10 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
         )}
         <div className="flex min-w-0 flex-col items-start px-5 py-4">
           <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
-            Fråga
+            {t.quizQuestionLabel}
             {studyMore && (
               <span className={'rounded-full px-2 py-0.5 text-[8px] font-bold normal-case tracking-normal ' + (status === 'learning' ? 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400')}>
-                📚 Plugga mer
+                {t.quizStudyMore}
               </span>
             )}
           </span>
@@ -161,7 +162,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
         </div>
         <div className="flex min-w-0 flex-col items-start border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6">
           <span className="mb-2 flex items-center gap-1.5 text-[9px] font-bold uppercase text-primary/70">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary/70" /> Svar
+            <span className="h-1.5 w-1.5 rounded-full bg-primary/70" /> {t.quizAnswerLabel}
           </span>
           <div className="relative w-full min-w-0">
             <span
@@ -174,13 +175,13 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
                 onClick={() => setRevealed(true)}
                 className="absolute inset-0 flex items-center justify-center rounded-lg bg-app-bg/40 text-[11px] font-semibold text-app-text-secondary backdrop-blur-[2px] transition hover:text-primary dark:bg-white/[0.02]"
               >
-                👁️ Visa
+                {t.quizRevealAnswer}
               </button>
             )}
           </div>
           {item.explanation && (
             <div className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
-              <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Förklaring</p>
+              <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">{t.quizExplanationLabel}</p>
               <p dir="auto" className="text-[13px] leading-relaxed text-amber-900 dark:text-amber-200">{item.explanation}</p>
             </div>
           )}
@@ -191,39 +192,39 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
               <button
                 onClick={() => onSetStatus(item.id, 'learning')}
                 className="text-base text-emerald-500 transition-colors hover:text-red-500"
-                title="Markera som ej klar (plugga mer)"
+                title={t.quizMarkNotKnown}
               >✅</button>
             ) : (
               <button
                 onClick={() => onSetStatus(item.id, 'known')}
                 className="text-base text-app-text-secondary/40 transition-colors hover:text-emerald-500"
-                title="Markera som studerad (kan)"
+                title={t.quizMarkKnown}
               >☑️</button>
             )
           )}
-          <button onClick={() => onToggleFav(item)} className={'text-base transition-colors ' + ((favs.has(item.id) || item.favOf != null) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title="Favorit">★</button>
+          <button onClick={() => onToggleFav(item)} className={'text-base transition-colors ' + ((favs.has(item.id) || item.favOf != null) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title={t.quizFavorite}>★</button>
           <button
             onClick={() => onSpeak(item.id)}
             className={'transition-colors ' + (speakingId === item.id ? 'text-primary' : 'text-app-text-secondary/40 hover:text-primary')}
-            title={speakingId === item.id ? 'Stoppa' : 'Läs upp'}
+            title={speakingId === item.id ? t.quizStopSpeak : t.quizSpeak}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
               <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
             </svg>
           </button>
-          <button onClick={() => onEdit(item)} className="text-[11px] text-app-text-secondary/40 transition-colors hover:text-primary" title="Redigera">✏️</button>
+          <button onClick={() => onEdit(item)} className="text-[11px] text-app-text-secondary/40 transition-colors hover:text-primary" title={t.quizEdit}>✏️</button>
           {onMoveToSet && sets && sets.length > 0 && (
             <>
               <button
                 onClick={() => { setMoveOpen(true); setActiveFolderId(null); }}
-                title="Flytta till set"
+                title={t.quizMoveToSet}
                 className="text-[13px] text-app-text-secondary/40 transition-colors hover:text-primary"
               >📂</button>
               {moveOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setMoveOpen(false)}>
                   <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
-                      <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">Flytta till set</p>
+                      <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">{t.quizMoveToSetTitle}</p>
                       <button onClick={() => setMoveOpen(false)} className="text-app-text-secondary/50 hover:text-app-text">✕</button>
                     </div>
                     <div className="max-h-[420px] overflow-y-auto">
@@ -239,13 +240,13 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
                             >
                               <span className="text-base">📁</span>
                               <span className="flex-1 text-[12px] font-bold text-app-text dark:text-gray-100">{f.name}</span>
-                              <span className="text-[10px] text-app-text-secondary/40">{fSets.length} set</span>
+                              <span className="text-[10px] text-app-text-secondary/40">{fSets.length} {t.quizSetsWord}</span>
                               <span className="text-[10px] text-app-text-secondary/30">{open ? '▲' : '▼'}</span>
                             </button>
                             {open && (
                               <div className="border-b border-app-border/40 bg-app-bg/40 dark:border-white/5 dark:bg-white/[0.02]">
                                 {fSets.length === 0 ? (
-                                  <p className="px-6 py-3 text-[11px] italic text-app-text-secondary/40">Inga set i den här mappen</p>
+                                  <p className="px-6 py-3 text-[11px] italic text-app-text-secondary/40">{t.quizNoSetsInFolder}</p>
                                 ) : fSets.map((s) => (
                                   <button
                                     key={s.id}
@@ -254,7 +255,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
                                   >
                                     <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
                                     <span className="flex-1 truncate text-[13px] text-app-text dark:text-gray-100">{s.name}</span>
-                                    <span className="text-[11px] text-app-text-secondary/40">{s.items.length} st</span>
+                                    <span className="text-[11px] text-app-text-secondary/40">{s.items.length} {t.quizItemsShort}</span>
                                   </button>
                                 ))}
                               </div>
@@ -268,18 +269,18 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
               )}
             </>
           )}
-          <button onClick={onDelete} className="text-[13px] text-app-text-secondary/40 transition-all hover:scale-110 hover:text-red-500" title="Ta bort" aria-label="Ta bort">🗑️</button>
+          <button onClick={onDelete} className="text-[13px] text-app-text-secondary/40 transition-all hover:scale-110 hover:text-red-500" title={t.quizDelete} aria-label={t.quizDelete}>🗑️</button>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-app-border/40 bg-app-bg/30 px-5 py-1.5 dark:border-white/5 dark:bg-white/[0.015]">
         {item.createdAt && (
           <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
-            Skapad: {new Date(item.createdAt).toLocaleString()}
+            {t.quizCreated} {new Date(item.createdAt).toLocaleString()}
           </span>
         )}
         {item.updatedAt && item.updatedAt !== item.createdAt && (
           <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
-            Uppdaterad: {new Date(item.updatedAt).toLocaleString()}
+            {t.quizUpdated} {new Date(item.updatedAt).toLocaleString()}
           </span>
         )}
       </div>
@@ -326,7 +327,7 @@ interface EditPanelProps {
 }
 
 function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
-  const { lang, t } = useLanguage();
+  const { t } = useLanguage();
   const { hasAi } = useAuth();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
@@ -337,9 +338,6 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     : initialCorrect !== undefined ? new Set([initialCorrect]) : new Set([0]);
   const [correctSet, setCorrectSet] = useState<Set<number>>(initCorrectSet);
   const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');
-  const labels = lang === 'en'
-    ? { question: 'Question', answer: 'Answer', aiAnswer: 'AI Answer', aiSuggestion: 'AI suggestion', keep: 'Keep current', replace: 'Replace answer', cancel: 'Cancel', save: 'Save', mcq: 'MCQ', options: 'Options', addOption: 'Add option', correct: 'Correct', optionPh: 'Option' }
-    : { question: 'Fråga', answer: 'Svar', aiAnswer: 'AI-svar', aiSuggestion: 'AI-förslag', keep: 'Behåll nuvarande', replace: 'Ersätt svaret', cancel: 'Avbryt', save: 'Spara', mcq: 'Flerval', options: 'Alternativ', addOption: 'Lägg till alternativ', correct: 'Rätt', optionPh: 'Alternativ' };
 
   const handleAiAnswer = async () => {
     const plain = question.replace(/<[^>]*>/g, '').trim();
@@ -394,7 +392,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
       <div className="flex items-center justify-between border-b border-app-border px-4 py-2 dark:border-white/10">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? '☑ MCQ' : '✏️ Q/A'}</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? t.quizEditMcqBadge : t.quizEditQaBadge}</span>
           <SaveStatusBadge
             status={
               saveStatus === 'syncing'
@@ -412,7 +410,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           className={'flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-all ' +
             (mcq ? 'border-primary/40 bg-primary/10 text-primary' : 'border-app-border text-app-text-secondary hover:bg-app-bg dark:border-white/10')}
         >
-          ☑ {labels.mcq}
+          ☑ {t.quizMcq}
         </button>
       </div>
       <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 md:items-stretch">
@@ -421,7 +419,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             <RichTextEditor
               html={question}
               onChange={onChangeQ}
-              placeholder={`${labels.question}...`}
+              placeholder={`${t.quizQuestionLabel}...`}
               minHeight="140px"
             />
             {hasAi && !mcq && (
@@ -433,14 +431,14 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         </div>
         {mcq ? (
           <div>
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.options} · <span className="text-emerald-500">{labels.correct} ● {correctSet.size > 1 ? `(${correctSet.size})` : ''}</span></p>
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{t.quizOptionsLabel} · <span className="text-emerald-500">{t.quizCorrect} ● {correctSet.size > 1 ? `(${correctSet.size})` : ''}</span></p>
             <div className="flex flex-col gap-2 rounded-xl border border-app-border p-2.5 dark:border-white/10">
               {options.map((o, i) => (
                 <div key={i} className={'flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all ' + (correctSet.has(i) ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-app-border dark:border-white/10')}>
                   <button
                     type="button"
                     onClick={() => toggleCorrect(i)}
-                    title={labels.correct}
+                    title={t.quizCorrect}
                     className={'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border-2 transition-all ' + (correctSet.has(i) ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-app-border text-transparent hover:border-emerald-400 dark:border-white/20')}
                   >✓</button>
                   <span className="flex-shrink-0 text-[12px] font-bold text-app-text-secondary/60">{OPT_LETTERS[i]}</span>
@@ -448,7 +446,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
                     value={o}
                     dir="auto"
                     onChange={(e) => setOption(i, e.target.value)}
-                    placeholder={`${labels.optionPh} ${OPT_LETTERS[i]}`}
+                    placeholder={`${t.quizOptionPh} ${OPT_LETTERS[i]}`}
                     className="min-w-0 flex-1 bg-transparent text-[13px] text-app-text outline-none dark:text-gray-100"
                   />
                   {options.length > 2 && (
@@ -458,18 +456,18 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
               ))}
               {options.length < OPT_LETTERS.length && (
                 <button type="button" onClick={addOption} className="mt-0.5 rounded-lg border border-dashed border-app-border py-1.5 text-[12px] font-medium text-app-text-secondary/70 transition-all hover:border-primary hover:text-primary dark:border-white/10">
-                  + {labels.addOption}
+                  + {t.quizAddOption}
                 </button>
               )}
             </div>
             <div className="mt-3">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{lang === 'en' ? 'Explanation (optional)' : 'Förklaring (valfri)'}</p>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{t.quizExplanationOptional}</p>
               <textarea
                 value={explanation}
                 onChange={(e) => setExplanation(e.target.value)}
                 dir="auto"
                 rows={3}
-                placeholder={lang === 'en' ? 'Why is this the correct answer?' : 'Varför är detta rätt svar?'}
+                placeholder={t.quizExplanationPh}
                 className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
               />
             </div>
@@ -480,7 +478,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             <RichTextEditor
               html={answer}
               onChange={onChangeA}
-              placeholder={`${labels.answer}...`}
+              placeholder={`${t.quizAnswerLabel}...`}
               minHeight="140px"
             />
             {hasAi && (
@@ -491,7 +489,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
                   disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
                   className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                 >
-                  {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {labels.aiAnswer}
+                  {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
                 </button>
               </div>
             )}
@@ -499,40 +497,43 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           {aiSuggestion !== null && (
             <div className="mt-2 overflow-hidden rounded-xl border border-violet-300 bg-violet-50 dark:border-violet-500/30 dark:bg-violet-500/10">
               <div className="flex items-center justify-between border-b border-violet-200 px-3 py-1.5 dark:border-violet-500/20">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">🧠 {labels.aiSuggestion}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">🧠 {t.quizAiSuggestion}</span>
                 <button onClick={() => setAiSuggestion(null)} className="text-[12px] text-violet-500/70 hover:text-violet-700">✕</button>
               </div>
               <div dir="auto" className="px-3 py-2 text-[13px] leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(aiSuggestion) }} />
               <div className="flex justify-end gap-2 border-t border-violet-200 px-3 py-2 dark:border-violet-500/20">
-                <button onClick={() => setAiSuggestion(null)} className="rounded-lg border border-app-border px-3 py-1 text-[11px] text-app-text-secondary hover:bg-white/50 dark:border-white/10">{labels.keep}</button>
-                <button onClick={() => { onChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {labels.replace}</button>
+                <button onClick={() => setAiSuggestion(null)} className="rounded-lg border border-app-border px-3 py-1 text-[11px] text-app-text-secondary hover:bg-white/50 dark:border-white/10">{t.quizKeepCurrent}</button>
+                <button onClick={() => { onChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {t.quizReplaceAnswer}</button>
               </div>
             </div>
           )}
         </div>
         )}
         <div className="flex justify-end gap-2 md:col-span-2">
-          <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{labels.cancel}</button>
-          <button onClick={handleSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{labels.save}</button>
+          <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
+          <button onClick={handleSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{t.mSave}</button>
         </div>
       </div>
     </div>
   );
 }
 
-const SET_COLORS = [
-  { name: 'Default', value: '' },
-  { name: 'Lila', value: '#8b5cf6' },
-  { name: 'Blå', value: '#3b82f6' },
-  { name: 'Grön', value: '#10b981' },
-  { name: 'Gul', value: '#f59e0b' },
-  { name: 'Röd', value: '#ef4444' },
-  { name: 'Rosa', value: '#ec4899' },
-  { name: 'Cyan', value: '#06b6d4' },
-];
+function getSetColors(t: ReturnType<typeof useLanguage>['t']) {
+  return [
+    { name: t.quizColorDefault, value: '' },
+    { name: t.quizColorPurple, value: '#8b5cf6' },
+    { name: t.quizColorBlue, value: '#3b82f6' },
+    { name: t.quizColorGreen, value: '#10b981' },
+    { name: t.quizColorYellow, value: '#f59e0b' },
+    { name: t.quizColorRed, value: '#ef4444' },
+    { name: t.quizColorPink, value: '#ec4899' },
+    { name: t.quizColorCyan, value: '#06b6d4' },
+  ];
+}
 
 export function QuizPage() {
-  const { lang } = useLanguage();
+  const { t } = useLanguage();
+  const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
   const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
@@ -566,7 +567,7 @@ export function QuizPage() {
   const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
 
   // Study mode
-  const [studyMode, setStudyMode] = useState<'flashcard' | 'written' | null>(null);
+  const [studyMode, setStudyMode] = useState<'flashcard' | null>(null);
   // Optional filtered deck chosen from inside study mode (🎯 Välj)
   const [studyDeck, setStudyDeck] = useState<QuizItem[] | null>(null);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
@@ -878,7 +879,7 @@ export function QuizPage() {
   };
 
   const createFolder = () => {
-    const base = lang === 'sv' ? 'Ny mapp' : 'New folder';
+    const base = t.quizNewFolder;
     let name = base;
     let suffix = 2;
     while (allQuizFolders.some((folder) => normalizeQuizName(folder.name) === normalizeQuizName(name))) {
@@ -1104,7 +1105,7 @@ export function QuizPage() {
                 <button
                   onClick={(e) => openCtxMenu(e, s.id)}
                   className="mr-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover:opacity-100 dark:hover:bg-white/10"
-                  title="Options"
+                  title={t.quizOptions}
                 >···</button>
               )}
             </div>
@@ -1129,7 +1130,7 @@ export function QuizPage() {
         <div className="flex flex-shrink-0 flex-col items-center border-r border-app-border bg-app-bg px-1.5 pt-3 dark:border-white/10 dark:bg-gray-950">
           <button
             onClick={toggleSidebar}
-            title="Visa listan"
+            title={t.quizShowSidebar}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
           >
             ☰
@@ -1142,10 +1143,10 @@ export function QuizPage() {
       <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: folderColW + 184 }}>
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">Quiz</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">{t.quizTitle}</p>
           <button
             onClick={toggleSidebar}
-            title="Dölj listan"
+            title={t.quizHideSidebar}
             className="flex h-6 w-6 items-center justify-center rounded-lg text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
           >«</button>
         </div>
@@ -1154,12 +1155,12 @@ export function QuizPage() {
           <div className="mx-2 mb-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
             {trashedUserFolders.map((folder) => (
               <div key={folder.id} className="flex items-center justify-between gap-2">
-                <span className="truncate">{lang === 'sv' ? 'Mapp i papperskorgen' : 'Folder in trash'}: <strong>{folder.name}</strong></span>
+                <span className="truncate">{t.quizFolderInTrash}: <strong>{folder.name}</strong></span>
                 <button
-                  onClick={() => { restoreQuizFolder(folder.id); show(lang === 'sv' ? `↩ ${folder.name} återställd` : `↩ ${folder.name} restored`); }}
+                  onClick={() => { restoreQuizFolder(folder.id); show(`↩ ${folder.name} ${t.tRestored2.toLowerCase()}`); }}
                   className="flex-shrink-0 rounded-lg bg-amber-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-amber-700"
                 >
-                  {lang === 'sv' ? 'Återställ' : 'Restore'}
+                  {t.titleRestore}
                 </button>
               </div>
             ))}
@@ -1168,13 +1169,13 @@ export function QuizPage() {
                 onClick={() => {
                   void recoverQuizFolders().then((count) => {
                     show(count > 0
-                      ? (lang === 'sv' ? `↩ ${count} saknade mappar återställda` : `↩ ${count} missing folders restored`)
-                      : (lang === 'sv' ? 'Inga fler mappar hittades' : 'No more folders found'));
+                      ? t.quizMissingFoldersRestored.replace('{n}', String(count))
+                      : t.quizNoMoreFoldersFound);
                   });
                 }}
                 className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-[10px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-100"
               >
-                {lang === 'sv' ? 'Sök efter saknade mappar' : 'Search for missing folders'}
+                {t.quizSearchMissingFolders}
               </button>
             )}
           </div>
@@ -1187,7 +1188,7 @@ export function QuizPage() {
             (isNotesView ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
         >
           <span>🧠</span>
-          <span className="flex-1 truncate">Questions from Notes</span>
+          <span className="flex-1 truncate">{t.quizQuestionsFromNotes}</span>
           <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{quizzes.length}</span>
         </button>
 
@@ -1197,7 +1198,7 @@ export function QuizPage() {
           {/* Left column: Folders */}
           <div className="flex flex-shrink-0 flex-col overflow-y-auto py-1" style={{ width: folderColW }}>
             {quizFolders.length === 0 && (
-              <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">Inga<br/>mappar</p>
+              <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">{t.quizNoFolders}</p>
             )}
             {quizFolders.map((f) => (
               <div key={f.id} className="group/fl relative">
@@ -1290,10 +1291,10 @@ export function QuizPage() {
                     {!f.system && (
                       <span className="absolute right-1 bottom-1 select-none text-[12px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover/fl:opacity-100">⠿</span>
                     )}
-                    <span title={f.system === 'favorites' ? 'Favoriter' : f.system ? (lang === 'sv' ? 'Återställda set' : 'Restored Sets') : f.name} className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
-                      {f.system === 'favorites' ? '⭐ Favoriter' : f.system ? `🔒 ${lang === 'sv' ? 'Återställda' : 'Restored'}` : f.name}
+                    <span title={f.system === 'favorites' ? t.quizFavorites : f.system ? t.quizRestoredSets : f.name} className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
+                      {f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
                     </span>
-                    <span className="block text-[9px] text-app-text-secondary/50">{setsInFolder(f.id).length} set</span>
+                    <span className="block text-[9px] text-app-text-secondary/50">{t.quizSetsCount.replace('{n}', String(setsInFolder(f.id).length))}</span>
                     {!f.system && (
                       <span
                         onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY > window.innerHeight * 0.6 ? window.innerHeight - e.clientY : e.clientY, flip: e.clientY > window.innerHeight * 0.6 }); setFolderColorPicker(false); }}
@@ -1310,7 +1311,7 @@ export function QuizPage() {
           <div
             onMouseDown={startFolderResize}
             className="group/handle relative w-1 flex-shrink-0 cursor-col-resize border-r border-app-border bg-transparent transition-colors hover:bg-primary/30 dark:border-white/10"
-            title="Dra för att ändra bredd"
+            title={t.quizResizeFoldersHint}
           >
             <span className="absolute inset-y-0 -left-1 -right-1" />
           </div>
@@ -1319,20 +1320,20 @@ export function QuizPage() {
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Sort control */}
             <div className="relative flex items-center justify-between px-2 py-1.5">
-              <p className="text-[9px] font-bold uppercase tracking-widest text-app-text-secondary/50 dark:text-gray-600">Sets</p>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-app-text-secondary/50 dark:text-gray-600">{t.quizSetsLabel}</p>
               <button
                 onClick={() => setSortMenuOpen((v) => !v)}
                 className="flex h-5 items-center gap-1 rounded-md px-1 text-[9px] font-semibold text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
-              >⇅ {setSort === 'name' ? 'A–Z' : setSort === 'count' ? '#' : 'Egen'}</button>
+              >⇅ {setSort === 'name' ? t.quizSortAz : setSort === 'count' ? t.quizSortHash : t.quizSortManualShort}</button>
               {sortMenuOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
                   <div className="absolute right-1 top-7 z-50 w-36 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
                     {([
-                      { key: 'manual', label: '✋ Egen ordning' },
-                      { key: 'name', label: '🔤 Namn (A–Z)' },
-                      { key: 'count', label: '🔢 Antal frågor' },
-                    ] as const).map((o) => (
+                      { key: 'manual' as const, label: t.quizSortManual },
+                      { key: 'name' as const, label: t.quizSortName },
+                      { key: 'count' as const, label: t.quizSortCount },
+                    ]).map((o) => (
                       <button
                         key={o.key}
                         onClick={() => changeSort(o.key)}
@@ -1348,7 +1349,7 @@ export function QuizPage() {
             <div className="flex-1 overflow-y-auto px-1">
               {currentSets.length === 0 ? (
                 <p className="py-4 text-center text-[11px] italic text-app-text-secondary/40">
-                  {selectedFolderId ? 'Tomt' : 'Inga lösa set'}
+                  {selectedFolderId ? t.quizFolderEmpty : t.quizNoUngroupedSets}
                 </p>
               ) : (
                 currentSets.map((s) => renderSetRow(s))
@@ -1363,13 +1364,13 @@ export function QuizPage() {
             onClick={createFolder}
             className="flex w-[84px] flex-shrink-0 items-center justify-center gap-1 border-r border-app-border py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:border-white/10 dark:hover:bg-primary/10"
           >
-            <span className="text-base leading-none">+</span> Mapp
+            <span className="text-base leading-none">+</span> {t.quizFolder}
           </button>
           <button
             onClick={handleQuickCreateSet}
             className="flex flex-1 items-center justify-center gap-1 py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:hover:bg-primary/10"
           >
-            <span className="text-base leading-none">+</span> Lägg till set
+            <span className="text-base leading-none">+</span> {t.quizAddSet}
           </button>
         </div>
       </div>
@@ -1382,12 +1383,12 @@ export function QuizPage() {
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
               {selectedSet
-                ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? 'fråga' : 'frågor'}`
+                ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`
                 : isFolderEmptyView
-                  ? `📁 ${selectedFolder?.system === 'favorites' ? 'Favoriter' : selectedFolder?.system ? (lang === 'sv' ? 'Återställda' : 'Restored') : selectedFolder?.name ?? (lang === 'sv' ? 'Mapp' : 'Folder')} — 0 set`
-                  : `🧠 Questions from Notes — ${displayItems.length} ${displayItems.length === 1 ? 'fråga' : 'frågor'}`}
+                  ? `📁 ${selectedFolder?.system === 'favorites' ? t.quizFavorites : selectedFolder?.system ? t.quizRestored : selectedFolder?.name ?? t.quizFolder} — ${t.quizSetsCount.replace('{n}', '0')}`
+                  : `🧠 ${t.quizQuestionsFromNotes} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`}
               {!isFolderEmptyView && knownCount > 0 && displayItems.length > 0 && (
-                <span className="ml-2 font-normal text-emerald-500">· {knownCount}/{displayItems.length} known</span>
+                <span className="ml-2 font-normal text-emerald-500">· {knownCount}/{displayItems.length} {t.quizKnownProgress}</span>
               )}
             </span>
             {!isFolderEmptyView && displayItems.length > 0 && (
@@ -1396,9 +1397,9 @@ export function QuizPage() {
                 <button
                   onClick={() => setHideAnswers((v) => !v)}
                   className={'flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ' + (hideAnswers ? 'border-primary bg-primary text-white' : 'border-app-border bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:border-white/10 dark:text-gray-400')}
-                  title={hideAnswers ? (lang === 'sv' ? 'Visa svar' : 'Show answers') : (lang === 'sv' ? 'Dölj svar' : 'Hide answers')}
+                  title={hideAnswers ? t.quizShowAnswers : t.quizHideAnswers}
                 >
-                  {hideAnswers ? '👁️ ' : '🙈 '}{hideAnswers ? (lang === 'sv' ? 'Visa svar' : 'Show') : (lang === 'sv' ? 'Dölj svar' : 'Hide')}
+                  {hideAnswers ? '👁️ ' : '🙈 '}{hideAnswers ? t.quizShowAnswersShort : t.quizHideAnswersShort}
                 </button>
                 {/* Sort order */}
                 <div className="relative">
@@ -1406,9 +1407,12 @@ export function QuizPage() {
                     type="button"
                     onClick={() => setItemSortMenuOpen((v) => !v)}
                     className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-2.5 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
-                    title={lang === 'sv' ? 'Sortera frågor' : 'Sort questions'}
+                    title={t.quizSortQuestions}
                   >
-                    ⇅ {ITEM_SORT_OPTIONS.find((o) => o.key === itemSort)?.[lang === 'sv' ? 'shortSv' : 'shortEn'] ?? (lang === 'sv' ? 'Egen' : 'Manual')}
+                    ⇅ {(() => {
+                      const opt = ITEM_SORT_OPTIONS.find((o) => o.key === itemSort);
+                      return opt ? t[opt.shortKey] : t.quizSortManualShort;
+                    })()}
                   </button>
                   {itemSortMenuOpen && (
                     <>
@@ -1422,7 +1426,7 @@ export function QuizPage() {
                             className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-app-bg dark:hover:bg-white/5 ' +
                               (itemSort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')}
                           >
-                            {lang === 'sv' ? o.labelSv : o.labelEn}
+                            {t[o.labelKey]}
                             {itemSort === o.key && <span className="ml-auto text-[11px]">✓</span>}
                           </button>
                         ))}
@@ -1435,19 +1439,19 @@ export function QuizPage() {
                   onClick={() => { setStudyDeck(null); setStudyMode('flashcard'); }}
                   className="flex items-center gap-1 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                 >
-                  🃏 Flashcards
+                  {t.quizFlashcards}
                 </button>
                 <button
                   onClick={() => { setStudyDeck(null); setStudyMode('written'); }}
                   className="flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
                 >
-                  ✏️ {lang === 'sv' ? 'Skriv' : 'Type'}
+                  {t.quizTypeAnswer}
                 </button>
                 <button
                   onClick={handleAddQuestionClick}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
                 >
-                  + {lang === 'sv' ? 'Lägg till' : 'Add'}
+                  + {t.quizAdd}
                 </button>
               </div>
             )}
@@ -1457,7 +1461,7 @@ export function QuizPage() {
                   onClick={handleAddQuestionClick}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
                 >
-                  <span className="text-base leading-none">+</span> {lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
+                  <span className="text-base leading-none">+</span> {t.quizAddQuestion}
                 </button>
               </div>
             )}
@@ -1470,17 +1474,17 @@ export function QuizPage() {
                 i
               </div>
               <p className="text-base font-medium text-app-text dark:text-gray-100">
-                {lang === 'sv' ? 'Det finns inga set här.' : 'There are no sets here.'}
+                {t.quizEmptySetMsg}
               </p>
               <p className="mt-1 text-sm text-app-text-secondary dark:text-gray-400">
-                {lang === 'sv' ? 'Lägg till ett set för att börja.' : 'Add a set to get started.'}
+                {t.quizEmptyFolderMsg}
               </p>
               <button
                 onClick={handleQuickCreateSet}
                 className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition hover:bg-primary-dark"
               >
                 <span className="text-base leading-none">+</span>
-                {lang === 'sv' ? 'Lägg till set' : 'Add set'}
+                {t.quizAddSet}
               </button>
             </div>
           ) : (
@@ -1495,7 +1499,7 @@ export function QuizPage() {
             <button
               onClick={handleAddQuestionClick}
               className="flex min-h-[56px] w-full items-center justify-center rounded-2xl border-2 border-dashed border-app-border text-xl text-app-text-secondary/50 transition-all hover:border-primary hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:hover:border-primary/50 dark:hover:bg-primary/10"
-              title={lang === 'sv' ? 'Lägg till fråga' : 'Add Question'}
+              title={t.quizAddQuestion}
             >
               +
             </button>
@@ -1508,10 +1512,9 @@ export function QuizPage() {
       {/* Study mode overlay */}
       {studyMode && (studyDeck ?? studyItems).length > 0 && (
         <StudyMode
-          title={selectedSet?.name ?? 'Questions from Notes'}
+          title={selectedSet?.name ?? t.quizQuestionsFromNotes}
           items={studyDeck ?? studyItems}
           allItems={studyItems}
-          lang={lang}
           mode={studyMode}
           initialProgress={currentProgress}
           onClose={() => { setStudyMode(null); setStudyDeck(null); }}
@@ -1521,13 +1524,7 @@ export function QuizPage() {
 
       {nameAlert && (
         <BrandedAlert
-          message={lang === 'sv'
-            ? nameAlert === 'folder'
-              ? 'Det finns redan en mapp med det namnet. Försök med ett annat namn.'
-              : 'Det finns redan ett set med det namnet. Försök med ett annat namn.'
-            : nameAlert === 'folder'
-              ? 'A folder with that name already exists. Try a different name.'
-              : 'A set with that name already exists. Try a different name.'}
+          message={nameAlert === 'folder' ? t.quizDupFolderName : t.quizDupSetName}
           buttonLabel="OK"
           onClose={() => setNameAlert(null)}
         />
@@ -1549,18 +1546,18 @@ export function QuizPage() {
               }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
             >
-              ✏️ Byt namn
+              {t.quizRename}
             </button>
             <button
               onClick={() => setShowColorPicker((v) => !v)}
               className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
             >
-              <span className="flex items-center gap-3">🎨 Färg</span>
+              <span className="flex items-center gap-3">{t.quizColor}</span>
               <span className="text-app-text-secondary/50">{showColorPicker ? '▾' : '›'}</span>
             </button>
             {showColorPicker && (
               <div className="flex flex-wrap gap-1.5 px-4 py-2">
-                {SET_COLORS.map((c) => {
+                {setColors.map((c) => {
                   const active = (quizSets.find((x) => x.id === ctxMenu.setId)?.color ?? '') === c.value;
                   return (
                     <button
@@ -1581,22 +1578,23 @@ export function QuizPage() {
               onClick={() => setMoveMenuForSet((v) => (v === ctxMenu.setId ? null : ctxMenu.setId))}
               className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
             >
-              <span className="flex items-center gap-3">📒 Flytta till mapp</span>
+              <span className="flex items-center gap-3">{t.quizMoveToFolder}</span>
               <span className="text-app-text-secondary/50">{moveMenuForSet === ctxMenu.setId ? '▾' : '›'}</span>
             </button>
             {moveMenuForSet === ctxMenu.setId && (
               <div className="max-h-44 overflow-y-auto py-0.5">
                 {quizFolders.map((f) => {
                   const active = quizSets.find((x) => x.id === ctxMenu.setId)?.folderId === f.id;
+                  const folderLabel = f.system === 'favorites' ? t.quizFavorites : f.system ? t.quizRestored : f.name;
                   return (
                     <button
                       key={f.id}
                       onClick={() => { setQuizSetFolder(ctxMenu.setId, f.id); closeCtxMenu(); }}
                       className={'flex w-full items-center gap-2 px-6 py-1.5 text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' + (active ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')}
-                    >📒 {f.name}{active && ' ✓'}</button>
+                    >📒 {folderLabel}{active && ' ✓'}</button>
                   );
                 })}
-                {quizFolders.length === 0 && <p className="px-6 py-1.5 text-[11px] italic text-app-text-secondary/50">Inga mappar än</p>}
+                {quizFolders.length === 0 && <p className="px-6 py-1.5 text-[11px] italic text-app-text-secondary/50">{t.quizNoFoldersYet}</p>}
               </div>
             )}
             <div className="my-1 h-px bg-app-border dark:bg-white/10" />
@@ -1607,7 +1605,7 @@ export function QuizPage() {
               }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
             >
-              🗑 Ta bort set
+              {t.quizDeleteSet}
             </button>
           </div>
         </>
@@ -1621,17 +1619,17 @@ export function QuizPage() {
             <button
               onClick={() => { const f = quizFolders.find((x) => x.id === folderCtxMenu.folderId); if (f) { setRenamingFolderId(f.id); setFolderRenameVal(f.name); } setFolderCtxMenu(null); }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
-            >✏️ Byt namn</button>
+            >{t.quizRename}</button>
             <button
               onClick={() => setFolderColorPicker((v) => !v)}
               className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
             >
-              <span className="flex items-center gap-3">🎨 Färg</span>
+              <span className="flex items-center gap-3">{t.quizColor}</span>
               <span className="text-app-text-secondary/50">{folderColorPicker ? '▾' : '›'}</span>
             </button>
             {folderColorPicker && (
               <div className="flex flex-wrap gap-1.5 px-4 py-2">
-                {SET_COLORS.map((c) => {
+                {setColors.map((c) => {
                   const active = (quizFolders.find((x) => x.id === folderCtxMenu.folderId)?.color ?? '') === c.value;
                   return (
                     <button
@@ -1649,7 +1647,7 @@ export function QuizPage() {
             <button
               onClick={() => { setConfirmDeleteFolderId(folderCtxMenu.folderId); setFolderCtxMenu(null); }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-            >🗑 Ta bort mapp</button>
+            >{t.quizDeleteFolder}</button>
           </div>
         </>
       )}
@@ -1659,10 +1657,10 @@ export function QuizPage() {
         const f = quizFolders.find((x) => x.id === confirmDeleteFolderId);
         return (
           <ConfirmDialog
-            title={lang === 'sv' ? 'Flytta mapp till papperskorgen' : 'Move folder to trash'}
-            message={lang === 'sv' ? `Mappen "${f?.name ?? ''}" och dess sets flyttas till papperskorgen.` : `The folder "${f?.name ?? ''}" and its sets will be moved to trash.`}
-            confirmLabel={lang === 'sv' ? 'Flytta till papperskorgen' : 'Move to trash'}
-            cancelLabel={lang === 'sv' ? 'Avbryt' : 'Cancel'}
+            title={t.quizMoveFolderTrash}
+            message={t.quizMoveFolderTrashMsg.replace('{name}', f?.name ?? '')}
+            confirmLabel={t.quizMoveToTrash}
+            cancelLabel={t.setpassCancel}
             onConfirm={() => { deleteQuizFolder(confirmDeleteFolderId); setSelectedFolderId(null); setSelectedSetId(null); setConfirmDeleteFolderId(null); }}
             onCancel={() => setConfirmDeleteFolderId(null)}
           />
@@ -1674,10 +1672,10 @@ export function QuizPage() {
         const s = quizSets.find((x) => x.id === confirmDeleteSetId);
         return (
           <ConfirmDialog
-            title={lang === 'sv' ? 'Flytta set till papperskorgen' : 'Move set to trash'}
-            message={lang === 'sv' ? `Setet "${s?.name ?? ''}" flyttas till papperskorgen och kan återställas senare.` : `The set "${s?.name ?? ''}" will be moved to trash and can be restored later.`}
-            confirmLabel={lang === 'sv' ? 'Flytta till papperskorgen' : 'Move to trash'}
-            cancelLabel={lang === 'sv' ? 'Avbryt' : 'Cancel'}
+            title={t.quizMoveSetTrash}
+            message={t.quizMoveSetTrashMsg.replace('{name}', s?.name ?? '')}
+            confirmLabel={t.quizMoveToTrash}
+            cancelLabel={t.setpassCancel}
             onConfirm={() => {
               if (selectedSetId === confirmDeleteSetId) setSelectedSetId(null);
               deleteQuizSet(confirmDeleteSetId);
