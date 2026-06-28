@@ -154,7 +154,64 @@ body.otter-search-open .otter-search-panel {
 }
 
 .otter-launcher {
-  transition: right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition:
+    right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1),
+    box-shadow 0.25s ease;
+}
+
+.otter-launcher:hover,
+.otter-launcher:focus-visible {
+  transform: scale(1.08);
+}
+
+.otter-launcher:active {
+  transform: scale(0.95);
+}
+
+.otter-launcher-icon,
+.otter-launcher-google {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 0.38s cubic-bezier(0.34, 1.45, 0.64, 1),
+    opacity 0.28s ease;
+}
+
+.otter-launcher-icon {
+  font-size: 1.875rem;
+  line-height: 1;
+  transform: scale(1) rotate(0deg);
+  opacity: 1;
+}
+
+.otter-launcher-google {
+  transform: scale(0.35) rotate(-28deg);
+  opacity: 0;
+}
+
+.otter-launcher:hover .otter-launcher-icon,
+.otter-launcher:focus-visible .otter-launcher-icon,
+.otter-launcher--open .otter-launcher-icon {
+  transform: scale(0.35) rotate(24deg);
+  opacity: 0;
+}
+
+.otter-launcher:hover .otter-launcher-google,
+.otter-launcher:focus-visible .otter-launcher-google,
+.otter-launcher--open .otter-launcher-google {
+  transform: scale(1) rotate(0deg);
+  opacity: 1;
+}
+
+.otter-launcher:hover,
+.otter-launcher--open {
+  box-shadow:
+    0 20px 40px -12px rgba(66, 133, 244, 0.45),
+    0 8px 16px -8px rgba(234, 67, 53, 0.25);
 }
 
 body.otter-search-open .otter-launcher {
