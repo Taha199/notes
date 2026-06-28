@@ -29,6 +29,12 @@ function saveQuizSelection(folderId: string | null, setId: string | null) {
 
 type ItemSort = 'manual' | 'oldest' | 'study';
 
+const ITEM_SORT_OPTIONS: { key: ItemSort; labelSv: string; labelEn: string; shortSv: string; shortEn: string }[] = [
+  { key: 'manual', labelSv: '✋ Egen ordning', labelEn: '✋ Manual order', shortSv: 'Egen', shortEn: 'Manual' },
+  { key: 'oldest', labelSv: '🕑 Äldst → nyast', labelEn: '🕑 Oldest → newest', shortSv: 'Datum', shortEn: 'Date' },
+  { key: 'study', labelSv: '📚 Ej studerade / studerade', labelEn: '📚 Not studied / studied', shortSv: 'Studie', shortEn: 'Study' },
+];
+
 function getItemCreatedTime(item: QuizItem): number {
   if (item.createdAt) return new Date(item.createdAt).getTime();
   return item.id;
@@ -59,26 +65,6 @@ function mdToHtml(content: string): string {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/\n/g, '<br>');
-}
-
-function parseImportText(raw: string): { question: string; answer: string }[] {
-  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
-  const pairs: { question: string; answer: string }[] = [];
-  // Try tab-separated first
-  const tabPairs = lines.map((l) => l.split('\t'));
-  if (tabPairs.every((p) => p.length >= 2)) {
-    return tabPairs.map(([q, ...rest]) => ({ question: q.trim(), answer: rest.join('\t').trim() })).filter((p) => p.question && p.answer);
-  }
-  // Try pipe-separated
-  const pipePairs = lines.map((l) => l.split('|'));
-  if (pipePairs.every((p) => p.length >= 2)) {
-    return pipePairs.map(([q, ...rest]) => ({ question: q.trim(), answer: rest.join('|').trim() })).filter((p) => p.question && p.answer);
-  }
-  // Alternating lines: Q, A, Q, A ...
-  for (let i = 0; i + 1 < lines.length; i += 2) {
-    if (lines[i] && lines[i + 1]) pairs.push({ question: lines[i], answer: lines[i + 1] });
-  }
-  return pairs;
 }
 
 interface QuizItemRowProps {
@@ -517,57 +503,6 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   );
 }
 
-function ImportModal({ onImport, onClose }: { onImport: (pairs: { question: string; answer: string }[]) => void; onClose: () => void }) {
-  const [text, setText] = useState('');
-  const preview = parseImportText(text);
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-sm">
-      <div className="flex w-full max-w-lg flex-col gap-4 rounded-2xl border border-app-border bg-white p-5 shadow-2xl dark:border-white/10 dark:bg-gray-900">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-app-text dark:text-gray-100">📋 Import from text</h3>
-          <button onClick={onClose} className="text-app-text-secondary hover:text-app-text">✕</button>
-        </div>
-        <p className="text-[12px] text-app-text-secondary dark:text-gray-400">
-          Paste pairs separated by <strong>Tab</strong>, <strong>|</strong>, or <strong>alternating lines</strong> (question, answer, question, answer…)
-        </p>
-        <textarea
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={"Capital of France\tParis\nCapital of Japan\tTokyo"}
-          rows={6}
-          className="w-full resize-none rounded-xl border border-app-border bg-app-bg px-4 py-3 text-[13px] font-mono text-app-text outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
-        />
-        {text && (
-          <div className="rounded-xl border border-app-border bg-app-bg px-3 py-2 dark:border-white/10 dark:bg-gray-800">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Preview — {preview.length} pairs</p>
-            <div className="max-h-32 overflow-y-auto">
-              {preview.slice(0, 5).map((p, i) => (
-                <div key={i} className="flex gap-2 py-0.5 text-[11px]">
-                  <span className="font-semibold text-app-text dark:text-gray-200 truncate">{p.question}</span>
-                  <span className="flex-shrink-0 text-app-text-secondary/50">→</span>
-                  <span className="text-app-text-secondary dark:text-gray-400 truncate">{p.answer}</span>
-                </div>
-              ))}
-              {preview.length > 5 && <p className="text-[10px] text-app-text-secondary/50">+{preview.length - 5} more…</p>}
-            </div>
-          </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-xl border border-app-border px-4 py-2 text-[13px] text-app-text-secondary hover:bg-app-bg dark:border-white/10">Cancel</button>
-          <button
-            onClick={() => { if (preview.length > 0) { onImport(preview); onClose(); } }}
-            disabled={preview.length === 0}
-            className="rounded-xl bg-primary px-5 py-2 text-[13px] font-semibold text-white hover:bg-primary-dark disabled:opacity-40"
-          >
-            Import {preview.length > 0 ? `${preview.length} pairs` : ''}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 const SET_COLORS = [
   { name: 'Default', value: '' },
   { name: 'Lila', value: '#8b5cf6' },
@@ -621,9 +556,11 @@ export function QuizPage() {
   const [hideAnswers, setHideAnswers] = useState(false);
   // Question list ordering: manual / oldest-first / studied vs not studied
   const [itemSort, setItemSort] = useState<ItemSort>(() => (localStorage.getItem('malacadhati_quiz_itemsort') as ItemSort) || 'manual');
+  const [itemSortMenuOpen, setItemSortMenuOpen] = useState(false);
   const changeItemSort = (mode: ItemSort) => {
     setItemSort(mode);
     localStorage.setItem('malacadhati_quiz_itemsort', mode);
+    setItemSortMenuOpen(false);
   };
   // Multiple open question forms (new drafts + in-progress edits)
   const [openForms, setOpenForms] = useState<OpenQuestionForm[]>([]);
@@ -830,9 +767,6 @@ export function QuizPage() {
   const [moveMenuForSet, setMoveMenuForSet] = useState<string | null>(null);
   const [nameAlert, setNameAlert] = useState<'set' | 'folder' | null>(null);
 
-  // Import
-  const [showImport, setShowImport] = useState(false);
-
   // Show/hide the sets sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem('malacadhati_quiz_sidebar') !== 'closed');
   const toggleSidebar = () => setSidebarOpen((v) => { const n = !v; localStorage.setItem('malacadhati_quiz_sidebar', n ? 'open' : 'closed'); return n; });
@@ -956,14 +890,6 @@ export function QuizPage() {
   };
 
   const closeCtxMenu = () => { setCtxMenu(null); setShowColorPicker(false); setMoveMenuForSet(null); };
-
-  const handleImport = (pairs: { question: string; answer: string }[]) => {
-    pairs.forEach((p) => {
-      if (selectedSetId) {
-        addItemToSet(selectedSetId, { noteId: 0, noteTitle: '', question: p.question, answer: p.answer, date: new Date().toLocaleDateString() });
-      }
-    });
-  };
 
   const progressKey = selectedSetId ?? 'all';
   const currentProgress = allProgress[progressKey] ?? {};
@@ -1441,16 +1367,6 @@ export function QuizPage() {
             </span>
             {!isFolderEmptyView && displayItems.length > 0 && (
               <div className="flex items-center gap-1.5">
-                {/* Import - only for sets */}
-                {selectedSetId && (
-                  <button
-                    onClick={() => setShowImport(true)}
-                    className="flex items-center gap-1 rounded-xl border border-app-border px-2.5 py-1.5 text-[11px] font-medium text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
-                    title="Import from text"
-                  >
-                    📋 Import
-                  </button>
-                )}
                 {/* Hide/show answers toggle */}
                 <button
                   onClick={() => setHideAnswers((v) => !v)}
@@ -1460,16 +1376,35 @@ export function QuizPage() {
                   {hideAnswers ? '👁️ ' : '🙈 '}{hideAnswers ? (lang === 'sv' ? 'Visa svar' : 'Show') : (lang === 'sv' ? 'Dölj svar' : 'Hide')}
                 </button>
                 {/* Sort order */}
-                <select
-                  value={itemSort}
-                  onChange={(e) => changeItemSort(e.target.value as ItemSort)}
-                  className="rounded-xl border border-app-border bg-app-bg px-2.5 py-1.5 text-[11px] font-semibold text-app-text-secondary outline-none transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
-                  title={lang === 'sv' ? 'Sortera frågor' : 'Sort questions'}
-                >
-                  <option value="manual">{lang === 'sv' ? 'Egen ordning' : 'Manual order'}</option>
-                  <option value="oldest">{lang === 'sv' ? 'Äldst → nyast' : 'Oldest → newest'}</option>
-                  <option value="study">{lang === 'sv' ? 'Ej studerade / studerade' : 'Not studied / studied'}</option>
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setItemSortMenuOpen((v) => !v)}
+                    className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-2.5 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
+                    title={lang === 'sv' ? 'Sortera frågor' : 'Sort questions'}
+                  >
+                    ⇅ {ITEM_SORT_OPTIONS.find((o) => o.key === itemSort)?.[lang === 'sv' ? 'shortSv' : 'shortEn'] ?? (lang === 'sv' ? 'Egen' : 'Manual')}
+                  </button>
+                  {itemSortMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setItemSortMenuOpen(false)} />
+                      <div className="absolute right-0 top-full z-50 mt-1.5 w-56 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
+                        {ITEM_SORT_OPTIONS.map((o) => (
+                          <button
+                            key={o.key}
+                            type="button"
+                            onClick={() => changeItemSort(o.key)}
+                            className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors hover:bg-app-bg dark:hover:bg-white/5 ' +
+                              (itemSort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')}
+                          >
+                            {lang === 'sv' ? o.labelSv : o.labelEn}
+                            {itemSort === o.key && <span className="ml-auto text-[11px]">✓</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
                 {/* Study buttons */}
                 <button
                   onClick={() => { setStudyDeck(null); setStudyMode('flashcard'); }}
@@ -1493,14 +1428,6 @@ export function QuizPage() {
             )}
             {!isFolderEmptyView && displayItems.length === 0 && (
               <div className="flex items-center gap-1.5">
-                {selectedSetId && (
-                  <button
-                    onClick={() => setShowImport(true)}
-                    className="flex items-center gap-1 rounded-xl border border-app-border px-2.5 py-1.5 text-[11px] font-medium text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
-                  >
-                    📋 Import
-                  </button>
-                )}
                 <button
                   onClick={handleAddQuestionClick}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
@@ -1564,14 +1491,6 @@ export function QuizPage() {
           initialProgress={currentProgress}
           onClose={() => { setStudyMode(null); setStudyDeck(null); }}
           onSaveProgress={handleSaveProgress}
-        />
-      )}
-
-      {/* Import modal */}
-      {showImport && selectedSetId && (
-        <ImportModal
-          onImport={handleImport}
-          onClose={() => setShowImport(false)}
         />
       )}
 
