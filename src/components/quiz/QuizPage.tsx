@@ -412,16 +412,20 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           ☑ {labels.mcq}
         </button>
       </div>
-      <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
-        <div>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.question}</p>
-          <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+      <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 md:items-stretch">
+        <div className="flex min-h-0 flex-col">
+          <div className="flex min-h-[200px] flex-1 flex-col overflow-hidden rounded-xl border border-app-border dark:border-white/10">
             <RichTextEditor
               html={question}
               onChange={onChangeQ}
               placeholder={`${labels.question}...`}
-              minHeight="90px"
+              minHeight="140px"
             />
+            {hasAi && !mcq && (
+              <div className="shrink-0 border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
+                <div className="h-7" aria-hidden="true" />
+              </div>
+            )}
           </div>
         </div>
         {mcq ? (
@@ -468,17 +472,16 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             </div>
           </div>
         ) : (
-        <div>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
-          <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+        <div className="flex min-h-0 flex-col">
+          <div className="flex min-h-[200px] flex-1 flex-col overflow-hidden rounded-xl border border-app-border dark:border-white/10">
             <RichTextEditor
               html={answer}
               onChange={onChangeA}
               placeholder={`${labels.answer}...`}
-              minHeight="90px"
+              minHeight="140px"
             />
             {hasAi && (
-              <div className="flex justify-end border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
+              <div className="flex shrink-0 justify-end border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
                 <button
                   type="button"
                   onClick={handleAiAnswer}
@@ -622,9 +625,6 @@ export function QuizPage() {
     setItemSort(mode);
     localStorage.setItem('malacadhati_quiz_itemsort', mode);
   };
-  // Which questions to show: all / only to-study (not known) / only known
-  const [viewFilter, setViewFilter] = useState<'all' | 'study' | 'known'>('all');
-
   // Multiple open question forms (new drafts + in-progress edits)
   const [openForms, setOpenForms] = useState<OpenQuestionForm[]>([]);
   const openFormsRef = useRef(openForms);
@@ -993,7 +993,7 @@ export function QuizPage() {
     [openForms],
   );
 
-  const canReorder = itemSort === 'manual' && viewFilter === 'all';
+  const canReorder = itemSort === 'manual';
 
   const handleMoveItem = (itemId: number, direction: 'up' | 'down') => {
     if (itemSort !== 'manual') changeItemSort('manual');
@@ -1054,23 +1054,18 @@ export function QuizPage() {
     );
   };
 
-  const filteredItems = displayItems.filter((it) => {
-    if (viewFilter === 'known') return currentProgress[it.id] === 'known';
-    if (viewFilter === 'study') return currentProgress[it.id] !== 'known';
-    return true;
-  });
   const orderedItems = useMemo(() => {
-    if (itemSort === 'manual') return filteredItems;
+    if (itemSort === 'manual') return displayItems;
     if (itemSort === 'oldest') {
-      return [...filteredItems].sort((a, b) => getItemCreatedTime(a) - getItemCreatedTime(b));
+      return [...displayItems].sort((a, b) => getItemCreatedTime(a) - getItemCreatedTime(b));
     }
-    return [...filteredItems].sort((a, b) => {
+    return [...displayItems].sort((a, b) => {
       const aStudied = currentProgress[a.id] === 'known' ? 1 : 0;
       const bStudied = currentProgress[b.id] === 'known' ? 1 : 0;
       if (aStudied !== bStudied) return aStudied - bStudied;
       return getItemCreatedTime(a) - getItemCreatedTime(b);
     });
-  }, [filteredItems, itemSort, currentProgress]);
+  }, [displayItems, itemSort, currentProgress]);
 
   const sortedSets = setSort === 'manual'
     ? quizSets
@@ -1446,17 +1441,6 @@ export function QuizPage() {
             </span>
             {!isFolderEmptyView && displayItems.length > 0 && (
               <div className="flex items-center gap-1.5">
-                {/* View filter: all / to-study / known */}
-                <select
-                  value={viewFilter}
-                  onChange={(e) => setViewFilter(e.target.value as 'all' | 'study' | 'known')}
-                  className="rounded-xl border border-app-border bg-app-bg px-2.5 py-1.5 text-[11px] font-semibold text-app-text-secondary outline-none transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
-                  title={lang === 'sv' ? 'Visa frågor' : 'Show questions'}
-                >
-                  <option value="all">{lang === 'sv' ? 'Alla frågor' : 'All questions'}</option>
-                  <option value="study">{lang === 'sv' ? 'Att plugga' : 'To study'}</option>
-                  <option value="known">{lang === 'sv' ? 'Kan' : 'Known'}</option>
-                </select>
                 {/* Import - only for sets */}
                 {selectedSetId && (
                   <button
