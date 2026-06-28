@@ -14,7 +14,7 @@ const TAB_INDENT = '    ';
 const CARET_TRACK_POS = [8, 50, 92] as const;
 const mapToCaretTrack = (pct: number) => CARET_TRACK_POS[0] + (pct / 100) * (CARET_TRACK_POS[2] - CARET_TRACK_POS[0]);
 
-type CaretVisual = { start: number; end: number; caret: number; selected: boolean };
+type CaretVisual = { textStart: number; textEnd: number; caret: number; selected: boolean; hasText: boolean };
 
 interface Props {
   html: string;
@@ -293,35 +293,58 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (contentWidth <= 0) return null;
 
     const toPct = (x: number) => Math.max(0, Math.min(100, ((x - contentLeft) / contentWidth) * 100));
+    const sel = window.getSelection();
+    const anchorNode = sel?.anchorNode ?? range.startContainer;
 
-    const rects = [...range.getClientRects()].filter((r) => r.width > 0 || r.height > 0);
-    let left: number;
-    let right: number;
-    if (rects.length > 0) {
-      left = Math.min(...rects.map((r) => r.left));
-      right = Math.max(...rects.map((r) => r.right));
+    const boundsFromRange = (r: Range) => {
+      const rects = [...r.getClientRects()].filter((rect) => rect.width > 0 || rect.height > 0);
+      if (rects.length > 0) {
+        return {
+          left: Math.min(...rects.map((rect) => rect.left)),
+          right: Math.max(...rects.map((rect) => rect.right)),
+        };
+      }
+      const box = r.getBoundingClientRect();
+      return { left: box.left, right: Math.max(box.right, box.left + 1) };
+    };
+
+    let textLeft: number;
+    let textRight: number;
+    const selected = !range.collapsed;
+
+    if (selected) {
+      ({ left: textLeft, right: textRight } = boundsFromRange(range));
     } else {
-      const r = range.getBoundingClientRect();
-      left = r.left;
-      right = Math.max(r.right, r.left + 1);
+      const lineBlock = getLineBlock(anchorNode, ed);
+      if (lineBlock) {
+        const lineText = lineBlock.textContent?.replace(/\u200B/g, '').trim() ?? '';
+        if (lineText) {
+          const lineRange = document.createRange();
+          lineRange.selectNodeContents(lineBlock);
+          ({ left: textLeft, right: textRight } = boundsFromRange(lineRange));
+        } else {
+          ({ left: textLeft, right: textRight } = boundsFromRange(range));
+        }
+      } else {
+        ({ left: textLeft, right: textRight } = boundsFromRange(range));
+      }
     }
 
-    const sel = window.getSelection();
-    let caretX = right;
+    let caretX = textRight;
     if (sel?.focusNode && ed.contains(sel.focusNode)) {
       const focusRange = document.createRange();
       focusRange.setStart(sel.focusNode, sel.focusOffset);
       focusRange.collapse(true);
       const focusRect = focusRange.getClientRects()[0] ?? focusRange.getBoundingClientRect();
-      caretX = focusRect.left;
+      caretX = focusRect.left + Math.max(focusRect.width, 1) / 2;
     }
 
-    const startPct = mapToCaretTrack(toPct(left));
-    const endPct = mapToCaretTrack(toPct(right));
+    const textStartPct = mapToCaretTrack(toPct(textLeft));
+    const textEndPct = mapToCaretTrack(toPct(textRight));
     const caretPct = mapToCaretTrack(toPct(caretX));
-    const selected = !range.collapsed && Math.abs(endPct - startPct) > 1.5;
+    const hasText = Math.abs(textEndPct - textStartPct) > 1.5;
 
-    return { start: startPct, end: endPct, caret: caretPct, selected };
+    return { textStart: textStartPct, textEnd: textEndPct, caret: caretPct, selected, hasText };
   };
 
   const syncCaretVisual = () => {
@@ -544,6 +567,73 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const insertTabIndentRef = useRef(insertTabIndent);
   insertTabIndentRef.current = insertTabIndent;
 
+  const resetBlockToLeft = (block: HTMLElement) => {
+    block.style.display = 'block';
+    block.style.width = '100%';
+    block.style.textAlign = 'left';
+    block.style.marginLeft = '0';
+    block.style.marginRight = '0';
+    block.removeAttribute('align');
+  };
+
+  const splitAlignedBlockAtCaret = (ed: HTMLElement): HTMLElement | null => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    const block = getLineBlock(range.startContainer, ed);
+    if (!block || readBlockAlignment(block) === 'left') return block;
+
+    const tail = document.createRange();
+    tail.setStart(range.endContainer, range.endOffset);
+    tail.setEnd(block, block.childNodes.length);
+    const tailContents = tail.extractContents();
+    const tailHasContent =
+      (tailContents.textContent?.replace(/\u200B/g, '').trim() ?? '').length > 0
+      || tailContents.querySelector('br');
+
+    const newBlock = document.createElement('div');
+    newBlock.setAttribute('dir', 'auto');
+    resetBlockToLeft(newBlock);
+
+    if (tailHasContent) newBlock.appendChild(tailContents);
+    else newBlock.innerHTML = '<br>';
+
+    block.parentNode?.insertBefore(newBlock, block.nextSibling);
+    if (!block.textContent?.replace(/\u200B/g, '').trim()) block.innerHTML = '<br>';
+
+    placeCaretInBlock(newBlock, true);
+    return newBlock;
+  };
+
+  /** After Enter from a centered/right line, start the new line left-aligned. */
+  const ensureNewLineLeftAfterEnter = (ed: HTMLElement) => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const block = getLineBlock(sel.anchorNode, ed);
+    if (!block) return;
+
+    const prev = block.previousElementSibling;
+    const afterAlignedLine =
+      prev instanceof HTMLElement && BLOCK_TAGS.has(prev.tagName) && readBlockAlignment(prev) !== 'left';
+
+    const blockAlign = readBlockAlignment(block);
+    const textInBlock = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
+    const needsSplit = blockAlign !== 'left' && !!block.querySelector('br') && textInBlock.length > 0;
+
+    if (needsSplit) {
+      splitAlignedBlockAtCaret(ed);
+      return;
+    }
+
+    if (blockAlign !== 'left') {
+      resetBlockToLeft(block);
+      placeCaretInBlock(block, true);
+      return;
+    }
+
+    if (afterAlignedLine) placeCaretInBlock(block, true);
+  };
+
   const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
     e.preventDefault();
@@ -556,6 +646,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     requestAnimationFrame(() => {
       const sel = window.getSelection();
       if (!sel?.rangeCount) return;
+
+      ensureNewLineLeftAfterEnter(ed);
 
       const block = getBlockParent(sel.anchorNode, ed);
       if (block) {
@@ -577,6 +669,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       pendingFontSize.current = null;
       setFontSize(DEFAULT_FONT_PX);
       saveSel();
+      readCommandState();
+      syncCaretVisual();
       emitHtml(ed.innerHTML);
     });
   };
@@ -1120,17 +1214,22 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           ))}
           {caretVisual && (
             <>
-              {caretVisual.selected && (
+              {caretVisual.hasText && (
                 <div
-                  className="pointer-events-none absolute top-1/2 h-2.5 -translate-y-1/2 rounded-sm bg-amber-300/75 ring-1 ring-amber-400/50 dark:bg-amber-400/30 dark:ring-amber-300/35"
+                  className={
+                    'pointer-events-none absolute top-1/2 h-2.5 -translate-y-1/2 rounded-sm ' +
+                    (caretVisual.selected
+                      ? 'bg-amber-300/80 ring-1 ring-amber-400/60 dark:bg-amber-400/35 dark:ring-amber-300/40'
+                      : 'bg-primary/20 ring-1 ring-primary/35 dark:bg-primary/25 dark:ring-primary/40')
+                  }
                   style={{
-                    left: `${Math.min(caretVisual.start, caretVisual.end)}%`,
-                    width: `${Math.max(Math.abs(caretVisual.end - caretVisual.start), 2)}%`,
+                    left: `${Math.min(caretVisual.textStart, caretVisual.textEnd)}%`,
+                    width: `${Math.max(Math.abs(caretVisual.textEnd - caretVisual.textStart), 2.5)}%`,
                   }}
                 />
               )}
               <div
-                className="pointer-events-none absolute top-1/2 z-[1] h-3.5 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-sm"
+                className="pointer-events-none absolute top-1/2 z-[1] h-3.5 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-sm ring-1 ring-white/80 dark:ring-black/20"
                 style={{ left: `${caretVisual.caret}%` }}
               />
             </>
