@@ -7,11 +7,6 @@ const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48,
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
 type BlockAlign = 'left' | 'center' | 'right';
-const ALIGN_STOPS: BlockAlign[] = ['left', 'center', 'right'];
-const ALIGN_THUMB_POS = [8, 50, 92];
-const alignToIndex = (align: BlockAlign) => (align === 'right' ? 2 : align === 'center' ? 1 : 0);
-const percentToAlignIndex = (pct: number) => (pct < 33 ? 0 : pct > 66 ? 2 : 1);
-const cssAlignToPercent = (align: BlockAlign) => ALIGN_THUMB_POS[alignToIndex(align)];
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
@@ -55,11 +50,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const hlWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
-  const alignTrackRef = useRef<HTMLDivElement>(null);
-  const alignDraggingRef = useRef(false);
   const lastLocalHtmlRef = useRef(html);
-  const [alignDragIndex, setAlignDragIndex] = useState<number | null>(null);
-  const [alignSliderPos, setAlignSliderPos] = useState(ALIGN_THUMB_POS[0]);
 
   const emitHtml = (next: string) => {
     lastLocalHtmlRef.current = next;
@@ -277,53 +268,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return block ? readBlockAlignment(block) : 'left';
   };
 
-  const readAlignmentForRange = (ed: HTMLElement, range: Range): BlockAlign => {
-    const block = getAlignmentTargetBlock(range.startContainer, ed);
-    return block ? readBlockAlignment(block) : 'left';
-  };
-
-  const rangeForAlignMeasure = (ed: HTMLElement): Range | null => {
-    const live = liveRange();
-    if (live) return live.cloneRange();
-    const saved = savedRange.current;
-    if (saved && ed.contains(saved.commonAncestorContainer)) return saved.cloneRange();
-    return null;
-  };
-
-  /** Map selection/caret visual position to a continuous thumb position (8–92%). */
-  const readVisualAlignPercent = (ed: HTMLElement): number => {
-    const range = rangeForAlignMeasure(ed);
-    const cssFallback = () => cssAlignToPercent(range ? readAlignmentForRange(ed, range) : readAlignmentAtCaret(ed));
-    if (!range) return cssFallback();
-
-    const edRect = ed.getBoundingClientRect();
-    const style = getComputedStyle(ed);
-    const padL = parseFloat(style.paddingLeft) || 0;
-    const padR = parseFloat(style.paddingRight) || 0;
-    const contentLeft = edRect.left + padL;
-    const contentWidth = edRect.width - padL - padR;
-    if (contentWidth <= 0) return cssFallback();
-
-    const rects = [...range.getClientRects()].filter((r) => r.width > 0 || r.height > 0);
-    let textCenter: number;
-
-    if (rects.length > 0) {
-      const textLeft = Math.min(...rects.map((r) => r.left));
-      const textRight = Math.max(...rects.map((r) => r.right));
-      textCenter = (textLeft + textRight) / 2;
-    } else {
-      const r = range.getBoundingClientRect();
-      if (r.width > 1 || (!range.collapsed && r.height > 0)) {
-        textCenter = (r.left + r.right) / 2;
-      } else {
-        return cssFallback();
-      }
-    }
-
-    const relCenter = Math.max(0, Math.min(1, (textCenter - contentLeft) / contentWidth));
-    return ALIGN_THUMB_POS[0] + relCenter * (ALIGN_THUMB_POS[2] - ALIGN_THUMB_POS[0]);
-  };
-
   const placeCaretInBlock = (block: HTMLElement, atStart: boolean) => {
     const range = document.createRange();
     range.selectNodeContents(block);
@@ -459,44 +403,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
     saveSel();
     readCommandState();
-    setAlignSliderPos(ALIGN_THUMB_POS[alignToIndex(align)]);
     emitHtml(ed.innerHTML);
     ed.focus({ preventScroll: true });
-  };
-
-  const displayAlignPos = alignDragIndex !== null ? ALIGN_THUMB_POS[alignDragIndex] : alignSliderPos;
-  const displayAlignIndex = alignDragIndex ?? percentToAlignIndex(alignSliderPos);
-
-  const alignIndexFromClientX = (clientX: number): number => {
-    const track = alignTrackRef.current;
-    if (!track) return 1;
-    const rect = track.getBoundingClientRect();
-    const ratio = (clientX - rect.left) / rect.width;
-    if (ratio < 0.33) return 0;
-    if (ratio > 0.66) return 2;
-    return 1;
-  };
-
-  const onAlignTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    saveSel();
-    alignDraggingRef.current = true;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setAlignDragIndex(alignIndexFromClientX(e.clientX));
-  };
-
-  const onAlignTrackPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!alignDraggingRef.current) return;
-    setAlignDragIndex(alignIndexFromClientX(e.clientX));
-  };
-
-  const finishAlignDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!alignDraggingRef.current) return;
-    alignDraggingRef.current = false;
-    const idx = alignIndexFromClientX(e.clientX);
-    setAlignDragIndex(null);
-    applyBlockAlignment(ALIGN_STOPS[idx]);
-    e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const normalizeEmptyFontBlocks = (ed: HTMLElement) => {
@@ -592,12 +500,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
     });
     const ed = editorRef.current;
-    if (ed && !alignDraggingRef.current) {
-      const pct = readVisualAlignPercent(ed);
-      setAlignSliderPos(pct);
-      const idx = percentToAlignIndex(pct);
-      if (idx === 0) active.add('justifyLeft');
-      else if (idx === 1) active.add('justifyCenter');
+    const sel = window.getSelection();
+    if (ed && sel?.rangeCount) {
+      const align = readAlignmentAtCaret(ed);
+      if (align === 'left') active.add('justifyLeft');
+      else if (align === 'center') active.add('justifyCenter');
       else active.add('justifyRight');
     }
     setActiveCmds(active);
@@ -615,12 +522,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   useEffect(() => {
     const handler = () => {
       const ed = editorRef.current;
-      if (!ed) return;
-      const focusedInEditor = document.activeElement === ed || ed.contains(document.activeElement);
-      const sel = window.getSelection();
-      const selInEd = sel?.rangeCount && ed.contains(sel.getRangeAt(0).commonAncestorContainer);
-      const savedInEd = savedRange.current && ed.contains(savedRange.current.commonAncestorContainer);
-      if (focusedInEditor || selInEd || savedInEd) {
+      if (ed && (document.activeElement === ed || ed.contains(document.activeElement))) {
         saveSel();
         readCommandState();
         syncFontSizeFromCaret();
@@ -986,10 +888,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           (stickyToolbar && editable ? 'sticky top-0 z-20 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95' : '')
         }
         style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
-        onMouseDownCapture={() => {
-          saveSel();
-          requestAnimationFrame(() => readCommandState());
-        }}
+        onMouseDownCapture={() => { saveSel(); }}
       >
         {/* Font size */}
         <div
@@ -1060,61 +959,16 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
-        {/* Alignment slider */}
-        <div
-          ref={alignTrackRef}
-          role="slider"
-          aria-label="Text alignment"
-          aria-valuemin={0}
-          aria-valuemax={2}
-          aria-valuenow={displayAlignIndex}
-          title="Align left · center · right"
-          className="relative mx-0.5 h-7 w-[76px] shrink-0 cursor-pointer touch-none select-none rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900"
-          onPointerDown={onAlignTrackPointerDown}
-          onPointerMove={onAlignTrackPointerMove}
-          onPointerUp={finishAlignDrag}
-          onPointerCancel={finishAlignDrag}
-        >
-          <div className="pointer-events-none absolute inset-x-2.5 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-app-border/80 dark:bg-white/15" />
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              className="pointer-events-none absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-border/60 dark:bg-white/20"
-              style={{ left: `${ALIGN_THUMB_POS[i]}%` }}
-            />
-          ))}
-          <div
-            className={
-              'pointer-events-none absolute top-1/2 h-[22px] w-[22px] -translate-x-1/2 -translate-y-1/2 rounded-md border border-app-border/80 shadow-sm transition-[left] duration-150 ease-out dark:border-white/15 ' +
-              (alignDragIndex !== null ? 'bg-primary/20 dark:bg-primary/30' : 'bg-gray-900 dark:bg-primary')
-            }
-            style={{ left: `${displayAlignPos}%` }}
-          >
-            <svg className="absolute inset-0 m-auto text-white" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              {displayAlignIndex === 0 && (
-                <>
-                  <rect x="4" y="6" width="14" height="2" rx="1" />
-                  <rect x="4" y="11" width="9" height="2" rx="1" />
-                  <rect x="4" y="16" width="14" height="2" rx="1" />
-                </>
-              )}
-              {displayAlignIndex === 1 && (
-                <>
-                  <rect x="4" y="6" width="16" height="2" rx="1" />
-                  <rect x="7" y="11" width="10" height="2" rx="1" />
-                  <rect x="4" y="16" width="16" height="2" rx="1" />
-                </>
-              )}
-              {displayAlignIndex === 2 && (
-                <>
-                  <rect x="6" y="6" width="14" height="2" rx="1" />
-                  <rect x="11" y="11" width="9" height="2" rx="1" />
-                  <rect x="6" y="16" width="14" height="2" rx="1" />
-                </>
-              )}
-            </svg>
-          </div>
-        </div>
+        {/* Alignment */}
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('left'); }} title="Align left" className={btnCls(activeCmds.has('justifyLeft'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="3" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="3" y="20" width="12" height="2" rx="1"/></svg>
+        </button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('center'); }} title="Center" className={btnCls(activeCmds.has('justifyCenter'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="6" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="6" y="20" width="12" height="2" rx="1"/></svg>
+        </button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('right'); }} title="Align right" className={btnCls(activeCmds.has('justifyRight'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="9" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="9" y="20" width="12" height="2" rx="1"/></svg>
+        </button>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
@@ -1143,15 +997,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           clearPendingFontMarker();
           requestAnimationFrame(() => sanitizeCaretFontContext(ed));
         }}
-        onMouseUp={() => {
-          requestAnimationFrame(() => readCommandState());
-        }}
         onFocus={() => {
           const ed = editorRef.current;
-          if (ed) {
-            sanitizeCaretFontContext(ed);
-            requestAnimationFrame(() => readCommandState());
-          }
+          if (ed) sanitizeCaretFontContext(ed);
         }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
