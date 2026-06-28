@@ -192,7 +192,36 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return null;
   };
 
+  const getTopLevelBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
+    let el: Node | null = node;
+    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    let block: HTMLElement | null = null;
+    while (el instanceof HTMLElement && el !== ed) {
+      if (BLOCK_TAGS.has(el.tagName) || el.tagName === 'CENTER') block = el;
+      el = el.parentElement;
+    }
+    if (!block) return null;
+    while (
+      block.parentElement
+      && block.parentElement !== ed
+      && (BLOCK_TAGS.has(block.parentElement.tagName) || block.parentElement.tagName === 'CENTER')
+    ) {
+      block = block.parentElement;
+    }
+    return block;
+  };
+
+  const unwrapCenterTags = (root: HTMLElement) => {
+    root.querySelectorAll('center').forEach((center) => {
+      const parent = center.parentNode;
+      if (!parent) return;
+      while (center.firstChild) parent.insertBefore(center.firstChild, center);
+      parent.removeChild(center);
+    });
+  };
+
   const readBlockAlignment = (block: HTMLElement): BlockAlign => {
+    if (block.tagName === 'CENTER') return 'center';
     const inline = block.style.textAlign || block.getAttribute('align') || '';
     if (inline === 'center') return 'center';
     if (inline === 'right' || inline === 'end') return 'right';
@@ -202,10 +231,28 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return 'left';
   };
 
+  const readAlignmentAtCaret = (ed: HTMLElement): BlockAlign => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return 'left';
+    let el: Node | null = sel.anchorNode;
+    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    while (el instanceof HTMLElement && el !== ed) {
+      if (el.tagName === 'CENTER') return 'center';
+      const attr = el.getAttribute('align');
+      if (attr === 'center') return 'center';
+      if (attr === 'right') return 'right';
+      if (el.style.textAlign === 'center') return 'center';
+      if (el.style.textAlign === 'right' || el.style.textAlign === 'end') return 'right';
+      el = el.parentElement;
+    }
+    const block = getTopLevelBlock(sel.anchorNode, ed);
+    return block ? readBlockAlignment(block) : 'left';
+  };
+
   const getBlocksInRange = (range: Range, ed: HTMLElement): HTMLElement[] => {
     const blocks = new Set<HTMLElement>();
     const addBlock = (node: Node | null) => {
-      const block = getBlockParent(node, ed);
+      const block = getTopLevelBlock(node, ed);
       if (block) blocks.add(block);
     };
     addBlock(range.startContainer);
@@ -218,17 +265,22 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         {
           acceptNode: (node) => {
             if (!(node instanceof HTMLElement) || !ed.contains(node)) return NodeFilter.FILTER_REJECT;
-            if (!range.intersectsNode(node) || !BLOCK_TAGS.has(node.tagName)) return NodeFilter.FILTER_SKIP;
-            return NodeFilter.FILTER_ACCEPT;
+            if (!range.intersectsNode(node)) return NodeFilter.FILTER_SKIP;
+            if (BLOCK_TAGS.has(node.tagName) || node.tagName === 'CENTER') return NodeFilter.FILTER_ACCEPT;
+            return NodeFilter.FILTER_SKIP;
           },
         },
       );
-      while (walker.nextNode()) blocks.add(walker.currentNode as HTMLElement);
+      while (walker.nextNode()) {
+        const top = getTopLevelBlock(walker.currentNode, ed);
+        if (top) blocks.add(top);
+      }
     }
     return [...blocks];
   };
 
   const clearNestedAlignment = (block: HTMLElement) => {
+    unwrapCenterTags(block);
     block.querySelectorAll<HTMLElement>('[align], [style*="text-align"]').forEach((el) => {
       el.style.textAlign = '';
       el.removeAttribute('align');
@@ -251,12 +303,22 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (blocks.length === 0) {
       document.execCommand('styleWithCSS', false, 'true');
       document.execCommand('formatBlock', false, 'div');
-      const block = getBlockParent(sel.anchorNode, ed);
+      const block = getTopLevelBlock(sel.anchorNode, ed);
       if (block) blocks = [block];
     }
     if (blocks.length === 0) return;
 
     blocks.forEach((block) => {
+      if (block.tagName === 'CENTER') {
+        const parent = block.parentElement ?? ed;
+        const frag = document.createDocumentFragment();
+        while (block.firstChild) frag.appendChild(block.firstChild);
+        const replacement = document.createElement('div');
+        replacement.setAttribute('dir', 'auto');
+        replacement.appendChild(frag);
+        parent.replaceChild(replacement, block);
+        block = replacement;
+      }
       clearNestedAlignment(block);
       block.style.textAlign = align;
       block.removeAttribute('align');
@@ -352,9 +414,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     });
     const ed = editorRef.current;
     const sel = window.getSelection();
-    const block = ed && sel?.rangeCount ? getBlockParent(sel.anchorNode, ed) : null;
-    if (block) {
-      const align = readBlockAlignment(block);
+    if (ed && sel?.rangeCount) {
+      const align = readAlignmentAtCaret(ed);
       if (align === 'left') active.add('justifyLeft');
       else if (align === 'center') active.add('justifyCenter');
       else active.add('justifyRight');
