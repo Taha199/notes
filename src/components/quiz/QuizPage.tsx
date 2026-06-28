@@ -82,21 +82,25 @@ interface QuizItemRowProps {
   hideAnswers?: boolean;
   onSetStatus?: (id: number, status: 'known' | 'learning' | null) => void;
   canReorder?: boolean;
-  canMoveUp?: boolean;
-  canMoveDown?: boolean;
-  isDragOver?: boolean;
-  onMoveUp?: () => void;
-  onMoveDown?: () => void;
-  onDragHandleStart?: (e: React.DragEvent) => void;
-  onDragHandleEnd?: () => void;
-  onRowDragOver?: (e: React.DragEvent) => void;
-  onRowDrop?: (e: React.DragEvent) => void;
+  questionNumber?: number;
+  totalQuestions?: number;
+  onSwapToPosition?: (targetPosition: number) => void;
 }
 
-function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, canMoveUp, canMoveDown, isDragOver, onMoveUp, onMoveDown, onDragHandleStart, onDragHandleEnd, onRowDragOver, onRowDrop }: QuizItemRowProps) {
+function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, questionNumber, totalQuestions, onSwapToPosition }: QuizItemRowProps) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
+  const [targetPos, setTargetPos] = useState('');
+  const commitSwap = () => {
+    const n = parseInt(targetPos, 10);
+    if (!n || n === questionNumber || n < 1 || n > (totalQuestions ?? 0)) {
+      setTargetPos('');
+      return;
+    }
+    onSwapToPosition?.(n);
+    setTargetPos('');
+  };
   // Re-hide a revealed card whenever the global toggle flips
   useEffect(() => { setRevealed(false); }, [hideAnswers]);
   const status = progressMap?.[item.id];
@@ -109,40 +113,34 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
       : 'border-l-4 border-l-amber-400';
   const studyMore = status !== 'known';
   return (
-    <div
-      className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm transition-shadow dark:border-white/10 dark:bg-[#1e1e2e] ' + accent + (isDragOver ? ' ring-2 ring-primary ring-offset-1 dark:ring-offset-[#12121a]' : '')}
-      onDragOver={canReorder ? onRowDragOver : undefined}
-      onDrop={canReorder ? onRowDrop : undefined}
-    >
-      <div className={'grid grid-cols-1 ' + (canReorder ? 'sm:grid-cols-[40px_minmax(0,0.8fr)_minmax(0,1.2fr)_44px]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]')}>
-        {canReorder && (
-          <div className="flex flex-row items-center justify-center gap-0.5 border-b border-app-border px-1.5 py-2 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
-            <button
-              type="button"
-              draggable
-              onDragStart={onDragHandleStart}
-              onDragEnd={onDragHandleEnd}
-              onMouseDown={(e) => e.stopPropagation()}
-              className="mb-0.5 flex h-7 w-7 cursor-grab items-center justify-center rounded-lg text-[16px] leading-none text-app-text-secondary/35 transition-colors hover:bg-app-bg hover:text-primary/60 active:cursor-grabbing dark:hover:bg-white/5"
-              title="Dra för att flytta"
-              aria-label="Dra för att flytta"
-            >⠿</button>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onMoveUp?.(); }}
-              disabled={!canMoveUp}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-sm text-app-text-secondary/50 transition-colors hover:bg-app-bg hover:text-primary disabled:opacity-25 dark:hover:bg-white/5"
-              title={canMoveUp ? 'Flytta upp' : undefined}
-              aria-label="Flytta upp"
-            >↑</button>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onMoveDown?.(); }}
-              disabled={!canMoveDown}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-sm text-app-text-secondary/50 transition-colors hover:bg-app-bg hover:text-primary disabled:opacity-25 dark:hover:bg-white/5"
-              title={canMoveDown ? 'Flytta ner' : undefined}
-              aria-label="Flytta ner"
-            >↓</button>
+    <div className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
+      <div className={'grid grid-cols-1 ' + (questionNumber ? 'sm:grid-cols-[52px_minmax(0,0.8fr)_minmax(0,1.2fr)_44px]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]')}>
+        {questionNumber != null && (
+          <div className="flex flex-row items-center justify-center gap-1.5 border-b border-app-border px-1.5 py-3 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
+            <span className="flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
+              {questionNumber}
+            </span>
+            {canReorder && (
+              <input
+                type="number"
+                min={1}
+                max={totalQuestions}
+                value={targetPos}
+                onChange={(e) => setTargetPos(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitSwap();
+                  }
+                  if (e.key === 'Escape') setTargetPos('');
+                }}
+                onBlur={commitSwap}
+                placeholder="↔"
+                title="Skriv nummer och tryck Enter — byter plats med det numret"
+                aria-label="Byt plats med nummer"
+                className="h-7 w-9 rounded-lg border border-app-border bg-white text-center text-[11px] font-semibold tabular-nums text-app-text outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-white/10 dark:bg-gray-900 dark:text-gray-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+            )}
           </div>
         )}
         <div className="flex min-w-0 flex-col items-start px-5 py-4">
@@ -554,8 +552,6 @@ export function QuizPage() {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => savedSelection.folderId);
   const dragSetId = useRef<string | null>(null);
   const dragFolderId = useRef<string | null>(null);
-  const dragQuestionId = useRef<number | null>(null);
-  const [dragOverQuestionId, setDragOverQuestionId] = useState<number | null>(null);
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [dragOverFolderSortId, setDragOverFolderSortId] = useState<string | null>(null);
@@ -961,28 +957,18 @@ export function QuizPage() {
     else setQuizzesOrder(ids);
   };
 
-  const handleMoveItem = (itemId: number, direction: 'up' | 'down') => {
+  const handleSwapToPosition = (itemId: number, targetPosition: number) => {
     const list = [...orderedItems];
-    const idx = list.findIndex((i) => i.id === itemId);
-    if (idx < 0) return;
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= list.length) return;
-    [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
-    applyItemOrder(list.map((i) => i.id));
-  };
-
-  const handleReorderItem = (dragId: number, targetId: number) => {
-    const list = [...orderedItems];
-    const from = list.findIndex((i) => i.id === dragId);
-    const to = list.findIndex((i) => i.id === targetId);
-    if (from < 0 || to < 0 || from === to) return;
-    const [item] = list.splice(from, 1);
-    list.splice(to, 0, item);
+    const fromIdx = list.findIndex((i) => i.id === itemId);
+    const toIdx = targetPosition - 1;
+    if (fromIdx < 0 || toIdx < 0 || toIdx >= list.length || fromIdx === toIdx) return;
+    [list[fromIdx], list[toIdx]] = [list[toIdx], list[fromIdx]];
     applyItemOrder(list.map((i) => i.id));
   };
 
   const renderItem = (item: QuizItem, visualIndex: number) => {
     if (openItemIds.has(item.id)) return null;
+    const questionNumber = visualIndex + 1;
     return (
       <QuizItemRow
         key={item.id}
@@ -1004,37 +990,9 @@ export function QuizPage() {
           else deleteQuiz(item.id);
         }}
         canReorder={canReorder}
-        canMoveUp={visualIndex > 0}
-        canMoveDown={visualIndex < orderedItems.length - 1}
-        isDragOver={dragOverQuestionId === item.id}
-        onMoveUp={() => handleMoveItem(item.id, 'up')}
-        onMoveDown={() => handleMoveItem(item.id, 'down')}
-        onDragHandleStart={(e) => {
-          dragQuestionId.current = item.id;
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', String(item.id));
-          e.dataTransfer.setData('application/x-quiz-item', String(item.id));
-        }}
-        onDragHandleEnd={() => {
-          window.setTimeout(() => {
-            dragQuestionId.current = null;
-            setDragOverQuestionId(null);
-          }, 0);
-        }}
-        onRowDragOver={(e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          setDragOverQuestionId(item.id);
-        }}
-        onRowDrop={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const raw = e.dataTransfer.getData('application/x-quiz-item') || e.dataTransfer.getData('text/plain');
-          const dragId = dragQuestionId.current ?? Number(raw);
-          if (dragId && dragId !== item.id) handleReorderItem(dragId, item.id);
-          dragQuestionId.current = null;
-          setDragOverQuestionId(null);
-        }}
+        questionNumber={questionNumber}
+        totalQuestions={orderedItems.length}
+        onSwapToPosition={(targetPosition) => handleSwapToPosition(item.id, targetPosition)}
       />
     );
   };
