@@ -206,48 +206,48 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             <div className="flex w-[400px] flex-shrink-0 flex-col overflow-y-auto bg-emerald-50/40 dark:bg-emerald-500/5">
               {/* Form header */}
               <div className="flex items-center justify-between border-b border-emerald-200/70 px-4 py-2.5 dark:border-emerald-500/15">
-                <span className="text-[13px] font-bold text-emerald-700 dark:text-emerald-400">✏️ Skapa fråga</span>
-                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Stäng</button>
+                <span className="text-[13px] font-bold text-emerald-700 dark:text-emerald-400">{t.noteCreateQuestion}</span>
+                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
               </div>
 
               <div className="flex flex-1 flex-col gap-4 p-4">
                 {/* Question */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70 dark:text-emerald-400/70">Fråga</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70 dark:text-emerald-400/70">{t.quizQuestionLabel}</label>
                     <button
                       onClick={() => setManualQ(html)}
                       className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
-                    >📋 Klistra in</button>
+                    >{t.notePaste}</button>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-                    <RichTextEditor html={manualQ} onChange={setManualQ} placeholder="Skriv din fråga..." minHeight="110px" />
+                    <RichTextEditor html={manualQ} onChange={setManualQ} placeholder={t.noteWriteQuestionPh} minHeight="110px" />
                   </div>
                 </div>
 
                 {/* Answer */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70 dark:text-emerald-400/70">Svar</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70 dark:text-emerald-400/70">{t.quizAnswerLabel}</label>
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => { setMcqMode((m) => !m); setManualA(''); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }}
                         className={'flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] font-semibold transition-all ' + (mcqMode ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300' : 'border-app-border bg-white text-app-text-secondary hover:border-blue-300 hover:text-blue-700 dark:border-white/10 dark:bg-gray-800 dark:text-gray-400')}
-                      >☰ MCQ</button>
+                      >☑ {t.quizMcq}</button>
                       {!mcqMode && hasAi && (
                         <button
                           onClick={async () => { if (!hasContent(manualQ)) return; setManualAiLoading(true); try { setManualA(mdToHtml(await answerQuestion(manualQ.replace(/<[^>]*>/g, '')))); } finally { setManualAiLoading(false); } }}
                           disabled={manualAiLoading || !hasContent(manualQ)}
                           className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                         >
-                          {manualAiLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
+                          {manualAiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
                         </button>
                       )}
                       {!mcqMode && (
                         <button
                           onClick={() => setManualA(html)}
                           className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
-                        >📋 Klistra in</button>
+                        >{t.notePaste}</button>
                       )}
                     </div>
                   </div>
@@ -259,26 +259,26 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                           <button onClick={() => setMcqCorrect(i)} className={'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-bold transition-all ' + (mcqCorrect === i ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-app-border bg-white text-app-text-secondary dark:border-white/20 dark:bg-gray-800')}>
                             {mcqCorrect === i ? '✓' : String.fromCharCode(65 + i)}
                           </button>
-                          <input value={opt} dir="auto" onChange={(e) => { const o = [...mcqOptions]; o[i] = e.target.value; setMcqOptions(o); }} placeholder={`Option ${String.fromCharCode(65 + i)}...`} className={'flex-1 rounded-xl border px-3 py-2 text-[13px] text-app-text outline-none transition-all dark:bg-gray-800 dark:text-gray-100 ' + (mcqCorrect === i ? 'border-emerald-400 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-app-border bg-white dark:border-white/10')} />
+                          <input value={opt} dir="auto" onChange={(e) => { const o = [...mcqOptions]; o[i] = e.target.value; setMcqOptions(o); }} placeholder={`${t.quizOptionPh} ${String.fromCharCode(65 + i)}...`} className={'flex-1 rounded-xl border px-3 py-2 text-[13px] text-app-text outline-none transition-all dark:bg-gray-800 dark:text-gray-100 ' + (mcqCorrect === i ? 'border-emerald-400 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-app-border bg-white dark:border-white/10')} />
                           {mcqOptions.length > 2 && (
                             <button onClick={() => { const o = mcqOptions.filter((_, j) => j !== i); setMcqOptions(o); if (mcqCorrect >= o.length) setMcqCorrect(0); else if (mcqCorrect > i) setMcqCorrect(mcqCorrect - 1); }} className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[11px] text-app-text-secondary/40 hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-500/10">✕</button>
                           )}
                         </div>
                       ))}
                       <div className="flex items-center gap-2">
-                        {mcqOptions.length < 6 && <button onClick={() => setMcqOptions([...mcqOptions, ''])} className="flex items-center gap-1 rounded-lg border border-dashed border-app-border px-3 py-1.5 text-[11px] font-medium text-app-text-secondary/60 hover:border-primary/40 hover:text-primary dark:border-white/10">+ Alternativ</button>}
-                        <p className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">Circle = rätt svar</p>
+                        {mcqOptions.length < 6 && <button onClick={() => setMcqOptions([...mcqOptions, ''])} className="flex items-center gap-1 rounded-lg border border-dashed border-app-border px-3 py-1.5 text-[11px] font-medium text-app-text-secondary/60 hover:border-primary/40 hover:text-primary dark:border-white/10">+ {t.quizAddOption}</button>}
+                        <p className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">{t.noteMcqCorrectHint}</p>
                       </div>
                     </div>
                   ) : (
                     <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-                      <RichTextEditor html={manualA} onChange={setManualA} placeholder="Skriv svaret..." minHeight="110px" />
+                      <RichTextEditor html={manualA} onChange={setManualA} placeholder={t.noteWriteAnswerPh} minHeight="110px" />
                     </div>
                   )}
                 </div>
 
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">Avbryt</button>
+                  <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
                   <button
                     onClick={() => {
                       if (!hasContent(manualQ)) return;
@@ -289,12 +289,12 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         answer = mcqOptions.map((o, i) => `${String.fromCharCode(65 + i)}) ${o.trim()}${i === mcqCorrect ? ' ✓' : ''}`).filter((_, i) => mcqOptions[i].trim()).join('\n');
                       }
                       addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ, answer, date: nowStr() });
-                      show('Fråga sparad i Quiz 🧠');
+                      show(t.noteSavedQuiz);
                       setManualQ(''); setManualA(''); setMcqOptions(['', '', '', '']); setMcqCorrect(0);
                     }}
                     disabled={!hasContent(manualQ) || (mcqMode && mcqOptions.filter((o) => o.trim()).length < 2)}
                     className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
-                  >💾 Spara fråga</button>
+                  >{t.noteSaveQuestion}</button>
                 </div>
               </div>
             </div>
@@ -312,20 +312,20 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             <div className="flex w-[400px] flex-shrink-0 flex-col overflow-y-auto bg-violet-50/40 dark:bg-violet-500/5">
               {/* Form header */}
               <div className="flex items-center justify-between border-b border-violet-200/70 px-4 py-2.5 dark:border-violet-500/15">
-                <span className="text-[13px] font-bold text-violet-700 dark:text-violet-400">🤖 AI Fråga</span>
-                <button onClick={() => { setAiMode(false); setAiQ(''); setAiA(''); }} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Stäng</button>
+                <span className="text-[13px] font-bold text-violet-700 dark:text-violet-400">{t.noteAiQuestion}</span>
+                <button onClick={() => { setAiMode(false); setAiQ(''); setAiA(''); }} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
               </div>
 
               <div className="flex flex-1 flex-col gap-4 p-4">
                 {/* Question */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700/70 dark:text-violet-400/70">Fråga</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700/70 dark:text-violet-400/70">{t.quizQuestionLabel}</label>
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => setAiQ(html)}
                         className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
-                      >📋 Klistra in</button>
+                      >{t.notePaste}</button>
                       <button
                         onClick={async () => {
                           setAiGenQLoading(true);
@@ -337,19 +337,19 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         disabled={aiGenQLoading}
                         className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
                       >
-                        {aiGenQLoading ? <span className="animate-spin">⏳</span> : '🎲'} Generera fråga
+                        {aiGenQLoading ? <span className="animate-spin">⏳</span> : '🎲'} {t.noteGenerateQuestion}
                       </button>
                     </div>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-                    <RichTextEditor html={aiQ} onChange={setAiQ} placeholder="Generera eller skriv din fråga..." minHeight="110px" />
+                    <RichTextEditor html={aiQ} onChange={setAiQ} placeholder={t.noteGenerateQuestionPh} minHeight="110px" />
                   </div>
                 </div>
 
                 {/* Answer */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700/70 dark:text-violet-400/70">Svar</label>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700/70 dark:text-violet-400/70">{t.quizAnswerLabel}</label>
                     <button
                       onClick={async () => {
                         if (!hasContent(aiQ)) return;
@@ -360,26 +360,26 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       disabled={aiGenALoading || !hasContent(aiQ)}
                       className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
                     >
-                      {aiGenALoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
+                      {aiGenALoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
                     </button>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-                    <RichTextEditor html={aiA} onChange={setAiA} placeholder="Generera eller skriv svaret..." minHeight="110px" />
+                    <RichTextEditor html={aiA} onChange={setAiA} placeholder={t.noteGenerateAnswerPh} minHeight="110px" />
                   </div>
                 </div>
 
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => { setAiMode(false); setAiQ(''); setAiA(''); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">Avbryt</button>
+                  <button onClick={() => { setAiMode(false); setAiQ(''); setAiA(''); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
                   <button
                     onClick={() => {
                       if (!hasContent(aiQ)) return;
                       addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: aiQ, answer: aiA, date: nowStr() });
-                      show('Fråga sparad i Quiz 🧠');
+                      show(t.noteSavedQuiz);
                       setAiQ(''); setAiA('');
                     }}
                     disabled={!hasContent(aiQ)}
                     className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
-                  >💾 Spara fråga</button>
+                  >{t.noteSaveQuestion}</button>
                 </div>
               </div>
             </div>
@@ -397,7 +397,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             <div className="flex w-[400px] flex-shrink-0 flex-col overflow-y-auto bg-violet-50/40 dark:bg-violet-500/5">
               <div className="flex items-center justify-between border-b border-violet-200/70 px-4 py-2.5 dark:border-violet-500/15">
                 <span className="text-[13px] font-bold text-violet-700 dark:text-violet-400">
-                  🧠 Quiz
+                  {t.noteQuizPanel}
                   {quizItems.length > 0 && <span className="ml-2 text-[11px] font-normal opacity-60">{quizIndex + 1} / {quizItems.length}</span>}
                 </span>
                 <div className="flex items-center gap-2">
@@ -414,16 +414,16 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                     disabled={quizLoading}
                     className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
                   >
-                    {quizLoading ? <span className="animate-spin">⏳</span> : '+'} Generera fler
+                    {quizLoading ? <span className="animate-spin">⏳</span> : '+'} {t.noteGenerateMore}
                   </button>
-                  <button onClick={() => setQuizOpen(false)} className="text-[11px] text-app-text-secondary hover:text-app-text">✕ Stäng</button>
+                  <button onClick={() => setQuizOpen(false)} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
                 </div>
               </div>
 
               <div className="flex flex-1 flex-col gap-3 p-4">
                 {quizLoading && (
                   <div className="flex items-center gap-2 text-[13px] text-violet-600 dark:text-violet-400">
-                    <span className="animate-spin">⏳</span> Genererar frågor...
+                    <span className="animate-spin">⏳</span> {t.noteGenerating}
                   </div>
                 )}
                 {quizError && <p className="text-[13px] text-red-600">{quizError}</p>}
@@ -434,14 +434,14 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       /* ── Edit mode ── */
                       <div className="flex flex-col gap-3">
                         <div>
-                          <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Fråga</label>
+                          <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{t.quizQuestionLabel}</label>
                           <div className="rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
-                            <RichTextEditor html={editQ} onChange={setEditQ} placeholder="Skriv frågan..." editable={true} minHeight="80px" />
+                            <RichTextEditor html={editQ} onChange={setEditQ} placeholder={t.noteWriteQuestionEditPh} editable={true} minHeight="80px" />
                           </div>
                         </div>
                         <div>
                           <div className="mb-1 flex items-center justify-between">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Svar</label>
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{t.quizAnswerLabel}</label>
                             {hasAi && (
                             <button
                               onClick={async () => {
@@ -454,16 +454,16 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                               disabled={aiAnswerLoading || !editQ.replace(/<[^>]*>/g, '').trim()}
                               className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                             >
-                              {aiAnswerLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
+                              {aiAnswerLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
                             </button>
                             )}
                           </div>
                           <div className="rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
-                            <RichTextEditor html={editA} onChange={setEditA} placeholder="Skriv svaret..." editable={true} minHeight="100px" />
+                            <RichTextEditor html={editA} onChange={setEditA} placeholder={t.noteWriteAnswerPh} editable={true} minHeight="100px" />
                           </div>
                         </div>
                         <div className="flex justify-end gap-2">
-                          <button onClick={() => setEditingQuiz(false)} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">Avbryt</button>
+                          <button onClick={() => setEditingQuiz(false)} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
                           <button
                             onClick={() => {
                               const qText = editQ.replace(/<[^>]*>/g, '').trim();
@@ -474,7 +474,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                               setShowAnswer(true);
                             }}
                             className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
-                          >✓ Klar</button>
+                          >{t.noteDone}</button>
                         </div>
                       </div>
                     ) : (
@@ -485,24 +485,24 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                           <button
                             onClick={() => { setEditQ(mdToHtml(current.question)); setEditA(mdToHtml(current.answer)); setEditingQuiz(true); setShowAnswer(true); }}
                             className="flex-shrink-0 rounded-lg border border-app-border px-2 py-1 text-[11px] text-app-text-secondary hover:border-primary/40 hover:text-primary dark:border-white/10"
-                          >✏️ Redigera</button>
+                          >{t.noteEditBtn}</button>
                         </div>
                         {!showAnswer ? (
                           <button onClick={() => setShowAnswer(true)} className="self-start rounded-lg border border-violet-300 bg-white px-4 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300">
-                            👁 Visa svar
+                            {t.noteShowAnswer}
                           </button>
                         ) : (
                           <>
                             <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/20 dark:bg-emerald-500/10">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Svar</span>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">{t.quizAnswerLabel}</span>
                               <p className="mt-0.5 text-[13px] text-app-text dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
                             </div>
                             <div className="flex gap-2 justify-end">
                               <button onClick={goNext} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">
-                                {quizIndex + 1 < quizItems.length ? 'Hoppa över →' : 'Avsluta'}
+                                {quizIndex + 1 < quizItems.length ? t.noteSkip : t.noteFinish}
                               </button>
                               <button onClick={handleSaveCurrent} className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-violet-700">
-                                💾 Spara & Nästa {quizIndex + 1 < quizItems.length ? `(${quizIndex + 1}/${quizItems.length})` : ''}
+                                {t.noteSaveNext} {quizIndex + 1 < quizItems.length ? `(${quizIndex + 1}/${quizItems.length})` : ''}
                               </button>
                             </div>
                           </>
@@ -526,13 +526,13 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-3 py-2 dark:border-white/10 dark:bg-white/5 sm:px-4">
           <div className="flex items-center gap-3">
             <div className="flex flex-col gap-0">
-              <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">{lang === 'sv' ? 'Skapad' : 'Created'}: {note.date}</span>
-              {note.lastEdited && <span className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">{lang === 'sv' ? 'Uppdaterad' : 'Updated'}: {note.lastEdited}</span>}
+              <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">{t.noteCreatedLabel}: {note.date}</span>
+              {note.lastEdited && <span className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">{t.noteUpdatedLabel}: {note.lastEdited}</span>}
             </div>
             <CloudSaveIndicator size="xs" />
             {lastSavedAt && (
               <span className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">
-                {lang === 'sv' ? 'Senast' : 'Last'}: {lastSavedAt}
+                {t.noteLastSaved}: {lastSavedAt}
               </span>
             )}
           </div>
@@ -560,7 +560,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
               onClick={() => { setAiMode((o) => !o); setManualQuiz(false); setManualQ(''); setManualA(''); setQuizOpen(false); }}
               className={'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ' + (aiMode ? 'border-violet-400 bg-violet-100 text-violet-800 dark:border-violet-500/50 dark:bg-violet-500/20 dark:text-violet-300' : 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300')}
             >
-              🤖 AI Fråga
+              {t.noteAiQuestion}
             </button>
             )}
             {note.archived ? (

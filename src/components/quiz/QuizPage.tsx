@@ -567,7 +567,7 @@ export function QuizPage() {
   const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
 
   // Study mode
-  const [studyMode, setStudyMode] = useState<'flashcard' | null>(null);
+  const [studyMode, setStudyMode] = useState<'flashcard' | 'written' | null>(null);
   // Optional filtered deck chosen from inside study mode (🎯 Välj)
   const [studyDeck, setStudyDeck] = useState<QuizItem[] | null>(null);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
