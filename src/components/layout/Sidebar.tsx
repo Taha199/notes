@@ -23,7 +23,7 @@ export function Sidebar({
 }) {
   const { t } = useLanguage();
   const { notes, trashedQuizzes, quizSets, quizFolders } = useNotes();
-  const { user, hasPassword, hasAi, signOut } = useAuth();
+  const { user, hasPassword, hasAi, isPlus, signOut } = useAuth();
   const { show } = useToast();
   const { dark, toggleDark } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
@@ -53,6 +53,9 @@ export function Sidebar({
     { page: 'settings', icon: '⚙️', label: t.settingsTitle },
     ...(user?.email === ADMIN_EMAIL ? [{ page: 'admin' as Page, icon: '👑', label: t.adminTitle }] : []),
   ];
+
+  const isAdmin = user?.email === ADMIN_EMAIL;
+  const showPlusProfile = isPlus || isAdmin;
 
   const NavBtn = ({ it }: { it: (typeof items)[number] }) => (
     <button
@@ -135,18 +138,64 @@ export function Sidebar({
           {(!collapsed || mobileOpen) && <span>{dark ? 'Light mode' : 'Dark mode'}</span>}
         </button>
         {(!collapsed || mobileOpen) && (
-          <div className="mb-1.5 flex items-center gap-2.5 rounded-xl border border-app-border bg-white px-3 py-2.5 dark:border-white/10 dark:bg-white/5">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#8A82FF] text-xs font-bold text-white shadow-md shadow-primary/30">
-              {name.charAt(0).toUpperCase()}
+          <div
+            className={
+              'mb-1.5 flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition-all ' +
+              (showPlusProfile
+                ? 'border border-violet-300/80 bg-gradient-to-br from-violet-50 via-white to-amber-50/80 shadow-sm shadow-violet-200/40 dark:border-violet-400/30 dark:from-violet-500/10 dark:via-white/5 dark:to-amber-500/5 dark:shadow-violet-900/20'
+                : 'border border-app-border bg-white dark:border-white/10 dark:bg-white/5')
+            }
+          >
+            <div className="relative flex-shrink-0">
+              <div
+                className={
+                  'flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shadow-md ' +
+                  (showPlusProfile
+                    ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 shadow-violet-400/40'
+                    : 'bg-gradient-to-br from-primary to-[#8A82FF] shadow-primary/30')
+                }
+              >
+                {name.charAt(0).toUpperCase()}
+              </div>
+              {showPlusProfile && (
+                <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white bg-amber-400 text-[8px] leading-none dark:border-gray-900">
+                  ✦
+                </span>
+              )}
             </div>
-            <div className="min-w-0 overflow-hidden">
-              <div className="flex items-center gap-1.5 truncate text-[13px] font-semibold text-app-text dark:text-gray-100">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="flex flex-wrap items-center gap-1 truncate text-[13px] font-semibold text-app-text dark:text-gray-100">
                 <span className="truncate">{name}</span>
-                {hasAi && user?.email !== ADMIN_EMAIL && (
-                  <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[8px] font-bold text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">PLUS</span>
+                {isAdmin && (
+                  <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">ADMIN</span>
+                )}
+                {showPlusProfile && (
+                  <span className="rounded-full bg-gradient-to-r from-violet-600 to-primary px-1.5 py-0.5 text-[8px] font-bold text-white shadow-sm">PLUS</span>
                 )}
               </div>
               <div className="truncate text-[11px] text-app-text-secondary/80 dark:text-gray-500">{user?.email}</div>
+              {showPlusProfile && (
+                <p className="mt-0.5 truncate text-[10px] font-medium text-violet-600/90 dark:text-violet-300/90">{t.settingsPlanPlus}</p>
+              )}
+            </div>
+          </div>
+        )}
+        {(collapsed && !mobileOpen) && (
+          <div className="mb-1.5 flex justify-center">
+            <div className="relative">
+              <div
+                className={
+                  'flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white ' +
+                  (showPlusProfile
+                    ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 ring-2 ring-amber-300/80'
+                    : 'bg-gradient-to-br from-primary to-[#8A82FF]')
+                }
+              >
+                {name.charAt(0).toUpperCase()}
+              </div>
+              {showPlusProfile && (
+                <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-violet-600 px-1 py-px text-[7px] font-bold text-white">+</span>
+              )}
             </div>
           </div>
         )}

@@ -4,7 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
-import { FB_DB_URL } from '../../lib/firebase';
+import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
 import { getStorageLimitMB, mbToBytes } from '../../lib/storageQuota';
 
 function formatBytes(bytes: number): string {
@@ -140,6 +140,8 @@ export function SettingsPage() {
   }, [listQuizFolderBackups]);
 
   const avatar = (user?.displayName || user?.email || '?').charAt(0).toUpperCase();
+  const isAdmin = user?.email === ADMIN_EMAIL;
+  const showPlusProfile = isPlus || isAdmin;
 
   return (
     <div className="mx-auto max-w-xl space-y-5 px-4 py-6 sm:px-6">
@@ -147,15 +149,31 @@ export function SettingsPage() {
 
       {/* Profile */}
       <SectionCard title={t.settingsProfile}>
-        <div className="flex items-center gap-4 mb-5">
-          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#8A82FF] text-xl font-bold text-white shadow-lg shadow-primary/30">
-            {avatar}
+        <div className={'mb-5 flex items-center gap-4 rounded-2xl p-3 ' + (showPlusProfile ? 'bg-gradient-to-r from-violet-50 to-amber-50/60 dark:from-violet-500/10 dark:to-amber-500/5' : '')}>
+          <div className="relative flex-shrink-0">
+            <div className={'flex h-14 w-14 items-center justify-center rounded-full text-xl font-bold text-white shadow-lg ' + (showPlusProfile ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 shadow-violet-400/30' : 'bg-gradient-to-br from-primary to-[#8A82FF] shadow-primary/30')}>
+              {avatar}
+            </div>
+            {showPlusProfile && (
+              <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-amber-400 text-[10px] dark:border-gray-900">✦</span>
+            )}
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-app-text dark:text-gray-100">
-              {user?.displayName || user?.email?.split('@')[0]}
-            </p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <p className="truncate text-sm font-semibold text-app-text dark:text-gray-100">
+                {user?.displayName || user?.email?.split('@')[0]}
+              </p>
+              {isAdmin && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">ADMIN</span>
+              )}
+              {showPlusProfile && (
+                <span className="rounded-full bg-gradient-to-r from-violet-600 to-primary px-2 py-0.5 text-[9px] font-bold text-white">PLUS</span>
+              )}
+            </div>
             <p className="truncate text-xs text-app-text-secondary dark:text-gray-400">{user?.email}</p>
+            {showPlusProfile && (
+              <p className="mt-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-300">{t.settingsPlanPlus}</p>
+            )}
           </div>
         </div>
         <div className="space-y-3">
