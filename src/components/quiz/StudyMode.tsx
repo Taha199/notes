@@ -127,8 +127,10 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
       <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
         <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">✕</button>
         <div className="text-center">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-primary">{mode === 'flashcard' ? '🃏 Flashcards' : '✏️ Written'}</p>
-          <p className="text-[11px] text-app-text-secondary dark:text-gray-500 truncate max-w-[180px]">{title}</p>
+          {mode === 'flashcard' && (
+            <p className="text-[11px] font-bold uppercase tracking-wider text-primary">🃏 Flashcards</p>
+          )}
+          <p className={'truncate max-w-[180px] text-app-text dark:text-gray-100 ' + (mode === 'flashcard' ? 'text-[11px] text-app-text-secondary dark:text-gray-500' : 'text-[13px] font-semibold')}>{title}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -330,7 +332,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
             <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between border-b border-app-border px-5 py-3.5 dark:border-white/10">
                 <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">
-                  {mode === 'flashcard' ? '🃏 Flashcards' : '✏️ Written'} — {lang === 'sv' ? 'vad vill du plugga?' : 'what to study?'}
+                  {mode === 'flashcard' ? '🃏 Flashcards' : title} — {lang === 'sv' ? 'vad vill du plugga?' : 'what to study?'}
                 </p>
                 <button onClick={() => setChooserOpen(false)} className="text-app-text-secondary/50 hover:text-app-text">✕</button>
               </div>
