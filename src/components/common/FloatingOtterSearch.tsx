@@ -1,24 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 
-const POPUP_NAME = 'tahanote-google-panel';
+const DOCKED_NAME = 'tahanote-google-docked';
 const GOOGLE_HOME = 'https://www.google.com/';
 const googleSearchUrl = (q: string) =>
   q.trim()
     ? `https://www.google.com/search?q=${encodeURIComponent(q.trim())}`
     : GOOGLE_HOME;
-
-function openTrueBrowserTab(url: string) {
-  const link = document.createElement('a');
-  link.href = url;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  link.style.display = 'none';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-}
 
 function getPanelWidth(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue('--otter-panel-width').trim();
@@ -35,7 +24,7 @@ function screenTop() {
   return window.screenTop ?? window.screenY ?? 0;
 }
 
-function popupFeatures(width: number, height: number, left: number, top: number) {
+function dockedPopupFeatures(width: number, height: number, left: number, top: number) {
   return [
     `width=${width}`,
     `height=${height}`,
@@ -50,6 +39,28 @@ function popupFeatures(width: number, height: number, left: number, top: number)
   ].join(',');
 }
 
+function separateWindowFeatures() {
+  const width = Math.min(1280, window.screen.availWidth - 48);
+  const height = Math.min(900, window.screen.availHeight - 48);
+  const left = Math.round((window.screen.availWidth - width) / 2);
+  const top = Math.round((window.screen.availHeight - height) / 2);
+  return {
+    features: [
+      `width=${width}`,
+      `height=${height}`,
+      `left=${left}`,
+      `top=${top}`,
+      'resizable=yes',
+      'scrollbars=yes',
+      'toolbar=yes',
+      'location=yes',
+      'menubar=yes',
+      'status=no',
+    ].join(','),
+    name: `tahanote-google-tab-${Date.now()}`,
+  };
+}
+
 export function FloatingOtterSearch() {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
@@ -59,9 +70,9 @@ export function FloatingOtterSearch() {
   const [popupReady, setPopupReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
-  const popupRef = useRef<Window | null>(null);
+  const dockedRef = useRef<Window | null>(null);
 
-  const positionPopup = useCallback((popup: Window) => {
+  const positionDocked = useCallback((popup: Window) => {
     const width = getPanelWidth();
     const headerBottom = headerRef.current?.getBoundingClientRect().bottom ?? 0;
     const left = Math.round(screenLeft() + window.outerWidth - width);
@@ -82,47 +93,60 @@ export function FloatingOtterSearch() {
       const left = Math.round(screenLeft() + window.outerWidth - width);
       const top = Math.round(screenTop() + headerBottom);
       const height = Math.max(320, Math.round(window.outerHeight - headerBottom));
-      const features = popupFeatures(width, height, left, top);
+      const features = dockedPopupFeatures(width, height, left, top);
 
-      let popup = popupRef.current;
+      let popup = dockedRef.current;
       if (!popup || popup.closed) {
-        popup = window.open('', POPUP_NAME, features);
+        popup = window.open('', DOCKED_NAME, features);
         if (!popup) {
           setPopupBlocked(true);
           setPopupReady(false);
           return null;
         }
-        popupRef.current = popup;
+        dockedRef.current = popup;
       }
 
       try {
         popup.location.href = url;
       } catch {
-        popup = window.open(url, POPUP_NAME, features);
+        popup = window.open(url, DOCKED_NAME, features);
         if (!popup) {
           setPopupBlocked(true);
           setPopupReady(false);
           return null;
         }
-        popupRef.current = popup;
+        dockedRef.current = popup;
       }
 
       setPopupBlocked(false);
       setPopupReady(true);
       setCurrentUrl(url);
-      requestAnimationFrame(() => positionPopup(popup!));
+      requestAnimationFrame(() => positionDocked(popup!));
       popup.focus();
       return popup;
     },
-    [positionPopup],
+    [positionDocked],
   );
 
-  const closeGoogleBesideSite = useCallback(() => {
-    const popup = popupRef.current;
+  const closeDockedGoogle = useCallback(() => {
+    const popup = dockedRef.current;
     if (popup && !popup.closed) popup.close();
-    popupRef.current = null;
+    dockedRef.current = null;
     setPopupReady(false);
   }, []);
+
+  const openGoogleSeparate = useCallback(
+    (url: string) => {
+      closeDockedGoogle();
+      setOpen(false);
+      const { features, name } = separateWindowFeatures();
+      const tab = window.open(url, name, features);
+      if (!tab) {
+        window.open(url, '_blank');
+      }
+    },
+    [closeDockedGoogle],
+  );
 
   useEffect(() => {
     document.body.classList.toggle('otter-search-open', open);
@@ -131,22 +155,22 @@ export function FloatingOtterSearch() {
 
   useEffect(() => {
     if (!open) {
-      closeGoogleBesideSite();
+      closeDockedGoogle();
       return;
     }
 
     const id = requestAnimationFrame(() => {
       inputRef.current?.focus();
-      const popup = popupRef.current;
-      if (popup && !popup.closed) positionPopup(popup);
+      const popup = dockedRef.current;
+      if (popup && !popup.closed) positionDocked(popup);
     });
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
     const onLayout = () => {
-      const popup = popupRef.current;
-      if (popup && !popup.closed) positionPopup(popup);
+      const popup = dockedRef.current;
+      if (popup && !popup.closed) positionDocked(popup);
     };
 
     document.addEventListener('keydown', onKey);
@@ -155,7 +179,7 @@ export function FloatingOtterSearch() {
     window.visualViewport?.addEventListener('scroll', onLayout);
 
     const poll = window.setInterval(() => {
-      if (popupRef.current?.closed) {
+      if (dockedRef.current?.closed) {
         setOpen(false);
         setPopupReady(false);
       }
@@ -169,7 +193,7 @@ export function FloatingOtterSearch() {
       window.visualViewport?.removeEventListener('scroll', onLayout);
       window.clearInterval(poll);
     };
-  }, [open, closeGoogleBesideSite, positionPopup]);
+  }, [open, closeDockedGoogle, positionDocked]);
 
   const runSearch = (term?: string) => {
     const q = (term ?? query).trim();
@@ -189,11 +213,15 @@ export function FloatingOtterSearch() {
     setOpen(true);
   };
 
-  const openExternal = () => {
-    openTrueBrowserTab(currentUrl);
+  const openSeparateTab = (e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openGoogleSeparate(googleSearchUrl(query));
   };
 
-  const plusTabUrl = googleSearchUrl(query);
+  const openExternal = () => {
+    openGoogleSeparate(currentUrl);
+  };
 
   return createPortal(
     <>
@@ -272,18 +300,18 @@ export function FloatingOtterSearch() {
               <p className="text-sm leading-relaxed text-app-text-secondary dark:text-gray-400">
                 {t.otterSearchPopupBlocked}
               </p>
-              <a
-                href={query.trim() ? googleSearchUrl(query) : GOOGLE_HOME}
-                target={POPUP_NAME}
-                rel="opener"
+              <button
+                type="button"
                 onClick={() => {
-                  setPopupBlocked(false);
-                  setPopupReady(true);
+                  const url = query.trim() ? googleSearchUrl(query) : GOOGLE_HOME;
+                  if (openGoogleBesideSite(url)) {
+                    setOpen(true);
+                  }
                 }}
                 className="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-primary-dark"
               >
                 {t.otterSearchPopupRetry}
-              </a>
+              </button>
             </>
           ) : popupReady ? (
             <p className="max-w-xs text-xs leading-relaxed text-app-text-secondary dark:text-gray-500">
@@ -298,17 +326,15 @@ export function FloatingOtterSearch() {
       </aside>
 
       <div className="otter-launcher-wrap fixed bottom-5 right-5 z-50 sm:bottom-6">
-        <a
-          href={plusTabUrl}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="button"
+          onClick={openSeparateTab}
           title={t.otterSearchNewTab}
           aria-label={t.otterSearchNewTab}
           className="otter-launcher-tab"
-          onClick={(e) => e.stopPropagation()}
         >
           +
-        </a>
+        </button>
         <button
           type="button"
           onClick={togglePanel}
