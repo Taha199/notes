@@ -28,13 +28,13 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 export function SettingsPage() {
-  const { user, hasPassword, updateDisplayName, resetPassword, deleteAccount } = useAuth();
+  const { user, hasPassword, isPlus, hasAi, updateDisplayName, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
   const { notes, quizzes, quizSets, quizFolders, chats, tokenUsage, resetTokens, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
   const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(true);
-  const [storageLimitMB, setStorageLimitMB] = useState(50);
+  const [storageLimitMB, setStorageLimitMB] = useState(100);
   const [filesBytes, setFilesBytes] = useState(0);
 
   // Profile
@@ -117,18 +117,18 @@ export function SettingsPage() {
         let filePayload = 0;
         if (filesData) filePayload = new TextEncoder().encode(JSON.stringify(filesData)).length;
         if (!cancelled) {
-          setStorageLimitMB(getStorageLimitMB(profile));
+          setStorageLimitMB(getStorageLimitMB(profile, user.email));
           setFilesBytes(filePayload);
         }
       } catch {
         if (!cancelled) {
-          setStorageLimitMB(50);
+          setStorageLimitMB(100);
           setFilesBytes(0);
         }
       }
     })();
     return () => { cancelled = true; };
-  }, [user?.uid]);
+  }, [user?.uid, user?.email]);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,6 +229,27 @@ export function SettingsPage() {
               {t.settingsSetPass}
             </button>
           </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title={t.settingsPlan}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-app-text dark:text-gray-100">
+              {isPlus ? t.settingsPlanPlus : t.settingsPlanFree}
+            </p>
+            <p className="mt-1 text-[13px] text-app-text-secondary dark:text-gray-400">
+              {isPlus ? t.plusFeatureAi : t.settingsPlanFreeSub}
+            </p>
+          </div>
+          {isPlus && (
+            <span className="rounded-full bg-violet-100 px-3 py-1 text-[11px] font-bold text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">PLUS</span>
+          )}
+        </div>
+        {!hasAi && (
+          <p className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-[12px] text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300">
+            {t.plusAiLocked}
+          </p>
         )}
       </SectionCard>
 

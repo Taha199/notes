@@ -277,7 +277,7 @@ export function FilesPage({ search }: { search: string }) {
       const userData = (await userRes.json()) ?? {};
       const profile = (userData.profile ?? {}) as Record<string, unknown>;
       const usedBytes = calculateUserStorageBytes(userData);
-      const limitBytes = getStorageLimitBytes(profile);
+      const limitBytes = getStorageLimitBytes(profile, user.email);
       const incomingBytes = selected.reduce((sum, file) => sum + file.size, 0);
       if (usedBytes + incomingBytes > limitBytes) {
         setError(t.filesQuotaExceeded);

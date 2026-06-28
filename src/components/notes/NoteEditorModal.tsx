@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { RichTextEditor } from './RichTextEditor';
 import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini';
@@ -32,6 +33,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz } = useNotes();
   const { t, lang } = useLanguage();
   const { show } = useToast();
+  const { hasAi } = useAuth();
   const note = notes.find((n) => n.id === noteId);
   const [locked, setLocked] = useState(() => !!note?.read);
   const [title, setTitle] = useState(note?.title ?? '');
@@ -232,7 +234,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         onClick={() => { setMcqMode((m) => !m); setManualA(''); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }}
                         className={'flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] font-semibold transition-all ' + (mcqMode ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300' : 'border-app-border bg-white text-app-text-secondary hover:border-blue-300 hover:text-blue-700 dark:border-white/10 dark:bg-gray-800 dark:text-gray-400')}
                       >☰ MCQ</button>
-                      {!mcqMode && (
+                      {!mcqMode && hasAi && (
                         <button
                           onClick={async () => { if (!hasContent(manualQ)) return; setManualAiLoading(true); try { setManualA(mdToHtml(await answerQuestion(manualQ.replace(/<[^>]*>/g, '')))); } finally { setManualAiLoading(false); } }}
                           disabled={manualAiLoading || !hasContent(manualQ)}
@@ -440,6 +442,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         <div>
                           <div className="mb-1 flex items-center justify-between">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">Svar</label>
+                            {hasAi && (
                             <button
                               onClick={async () => {
                                 const qText = editQ.replace(/<[^>]*>/g, '').trim();
@@ -453,6 +456,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                             >
                               {aiAnswerLoading ? <span className="animate-spin">⏳</span> : '🧠'} AI-svar
                             </button>
+                            )}
                           </div>
                           <div className="rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
                             <RichTextEditor html={editA} onChange={setEditA} placeholder="Skriv svaret..." editable={true} minHeight="100px" />
@@ -551,12 +555,14 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             >
               ✏️ {t.mAddQ}
             </button>
+            {hasAi && (
             <button
               onClick={() => { setAiMode((o) => !o); setManualQuiz(false); setManualQ(''); setManualA(''); setQuizOpen(false); }}
               className={'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ' + (aiMode ? 'border-violet-400 bg-violet-100 text-violet-800 dark:border-violet-500/50 dark:bg-violet-500/20 dark:text-violet-300' : 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300')}
             >
               🤖 AI Fråga
             </button>
+            )}
             {note.archived ? (
               <button onClick={() => { unarchive(note.id); show(t.tUnarch); onClose(); }} className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
                 ↩ {t.mUnarch}

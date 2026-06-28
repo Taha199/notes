@@ -14,6 +14,7 @@ import {
   type User,
 } from 'firebase/auth';
 import { auth, googleProvider, EmailAuthProvider, FB_DB_URL } from '../lib/firebase';
+import { hasAiAccess, isPlusUser } from '../lib/userPlan';
 
 async function sendVerificationEmailDirect(email: string): Promise<void> {
   const lang = document.documentElement.lang === 'en' ? 'en' : 'sv';
@@ -55,6 +56,9 @@ interface AuthCtx {
   applyVerifyCode: (code: string) => Promise<void>;
   deleteAccount: () => Promise<void>;
   blocked: boolean;
+  isPlus: boolean;
+  hasAi: boolean;
+  profileLoading: boolean;
   setPasswordForAccount: (pass: string) => Promise<void>;
   updateDisplayName: (name: string) => Promise<void>;
   sendVerification: () => Promise<void>;
@@ -68,6 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [hasPassword, setHasPassword] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -78,35 +84,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, []);
 
-  // Record a profile for the admin panel + check if this account is blocked.
   useEffect(() => {
-    if (!user?.uid) { setBlocked(false); return; }
+    if (!user?.uid) {
+      setBlocked(false);
+      setProfile(null);
+      setProfileLoading(false);
+      return;
+    }
     let cancelled = false;
+    setProfileLoading(true);
     (async () => {
-      // Has the admin blocked this account?
       try {
-        const r = await fetch(`${FB_DB_URL}/users/${user.uid}/profile/blocked.json`);
-        const isBlocked = await r.json();
-        if (!cancelled) setBlocked(isBlocked === true);
-      } catch { /* ignore */ }
+        const r = await fetch(`${FB_DB_URL}/users/${user.uid}/profile.json`);
+        const profileData = ((await r.json()) ?? {}) as Record<string, unknown>;
+        if (!cancelled) {
+          setProfile(profileData);
+          setBlocked(profileData.blocked === true);
+        }
+      } catch {
+        if (!cancelled) {
+          setProfile({});
+          setBlocked(false);
+        }
+      } finally {
+        if (!cancelled) setProfileLoading(false);
+      }
       // Best-effort client IP.
       let ip = '';
       try {
         const ipRes = await fetch('https://api.ipify.org?format=json');
         ip = (await ipRes.json())?.ip ?? '';
       } catch { /* ignore */ }
-      const profile: Record<string, unknown> = {
+      const patch: Record<string, unknown> = {
         email: user.email ?? '',
         displayName: user.displayName ?? '',
         lastSeen: Date.now(),
         provider: user.providerData[0]?.providerId ?? '',
       };
-      if (ip) profile.ip = ip;
+      if (ip) patch.ip = ip;
       try {
         await fetch(`${FB_DB_URL}/users/${user.uid}/profile.json`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(profile),
+          body: JSON.stringify(patch),
         });
       } catch { /* ignore */ }
     })();
@@ -118,6 +138,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     hasPassword,
     blocked,
+    isPlus: isPlusUser(profile, user?.email),
+    hasAi: hasAiAccess(profile, user?.email),
+    profileLoading,
     signIn: async (email, pass) => {
       const cred = await signInWithEmailAndPassword(auth, email, pass);
       // Unverified accounts are treated as "not registered" — resend a fresh

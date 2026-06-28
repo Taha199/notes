@@ -5,6 +5,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { ADMIN_EMAIL } from '../../lib/firebase';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useToast } from '../../contexts/ToastContext';
 import { Logo } from '../common/Logo';
 
 export function Sidebar({
@@ -22,7 +23,8 @@ export function Sidebar({
 }) {
   const { t } = useLanguage();
   const { notes, trashedQuizzes, quizSets, quizFolders } = useNotes();
-  const { user, hasPassword, signOut } = useAuth();
+  const { user, hasPassword, hasAi, signOut } = useAuth();
+  const { show } = useToast();
   const { dark, toggleDark } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -55,15 +57,21 @@ export function Sidebar({
   const NavBtn = ({ it }: { it: (typeof items)[number] }) => (
     <button
       onClick={() => {
+        if (it.page === 'chat' && !hasAi) {
+          show(t.plusAiLocked);
+          onMobileClose?.();
+          return;
+        }
         setPage(it.page);
         onMobileClose?.();
       }}
       className={
         'group relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13.5px] font-medium transition-all ' +
-        (page === it.page ? 'bg-primary/10 text-primary' : 'text-app-text-secondary hover:bg-white hover:text-app-text dark:hover:bg-white/5 dark:hover:text-gray-100')
+        (page === it.page ? 'bg-primary/10 text-primary' : 'text-app-text-secondary hover:bg-white hover:text-app-text dark:hover:bg-white/5 dark:hover:text-gray-100') +
+        (it.page === 'chat' && !hasAi ? ' opacity-70' : '')
       }
     >
-      <span className="text-base opacity-90">{it.icon}</span>
+      <span className="text-base opacity-90">{it.page === 'chat' && !hasAi ? '🔒' : it.icon}</span>
       {(!collapsed || mobileOpen) && <span className="overflow-hidden whitespace-nowrap">{it.label}</span>}
       {(!collapsed || mobileOpen) && !!it.badge && (
         <span className={'mr-0 ml-auto rounded-full px-2 py-0.5 text-[10.5px] font-bold ' + it.badgeClass}>{it.badge}</span>
@@ -132,7 +140,12 @@ export function Sidebar({
               {name.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0 overflow-hidden">
-              <div className="truncate text-[13px] font-semibold text-app-text dark:text-gray-100">{name}</div>
+              <div className="flex items-center gap-1.5 truncate text-[13px] font-semibold text-app-text dark:text-gray-100">
+                <span className="truncate">{name}</span>
+                {hasAi && user?.email !== ADMIN_EMAIL && (
+                  <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[8px] font-bold text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">PLUS</span>
+                )}
+              </div>
               <div className="truncate text-[11px] text-app-text-secondary/80 dark:text-gray-500">{user?.email}</div>
             </div>
           </div>

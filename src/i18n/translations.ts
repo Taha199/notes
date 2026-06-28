@@ -234,6 +234,15 @@ export interface Translation {
   otterSearchPopupRetry: string;
   otterSearchPopupDocked: string;
   otterSearchPopupLoading: string;
+  settingsPlan: string;
+  settingsPlanFree: string;
+  settingsPlanPlus: string;
+  settingsPlanFreeSub: string;
+  plusTitle: string;
+  plusSub: string;
+  plusFeatureStorage: string;
+  plusFeatureAi: string;
+  plusAiLocked: string;
   // Email verification
   verifyTitle: string;
   verifySub: string;
@@ -352,6 +361,15 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchPopupRetry: 'Open Google',
     otterSearchPopupDocked: 'Google is open in the panel beside the site — use your normal browser session.',
     otterSearchPopupLoading: 'Opening Google…',
+    settingsPlan: 'Plan',
+    settingsPlanFree: 'Free',
+    settingsPlanPlus: 'Taha Note Plus',
+    settingsPlanFreeSub: '100 MB storage · no AI features',
+    plusTitle: 'Taha Note Plus',
+    plusSub: 'Upgrade to Plus for more storage and full AI access.',
+    plusFeatureStorage: '✓ 1000 MB cloud storage',
+    plusFeatureAi: '✓ AI Chat, AI answers, and AI quiz generation',
+    plusAiLocked: 'AI features are available with Taha Note Plus. Contact the admin to upgrade.',
     verifyTitle: 'Verify your email',
     verifySub: 'We sent a verification link to',
     verifyResend: 'Resend email',
@@ -467,6 +485,15 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchPopupRetry: 'Öppna Google',
     otterSearchPopupDocked: 'Google är öppet i panelen bredvid sidan — med din vanliga webbläsarsession.',
     otterSearchPopupLoading: 'Öppnar Google…',
+    settingsPlan: 'Abonnemang',
+    settingsPlanFree: 'Gratis',
+    settingsPlanPlus: 'Taha Note Plus',
+    settingsPlanFreeSub: '100 MB lagring · inga AI-funktioner',
+    plusTitle: 'Taha Note Plus',
+    plusSub: 'Uppgradera till Plus för mer lagring och full AI-åtkomst.',
+    plusFeatureStorage: '✓ 1000 MB molnlagring',
+    plusFeatureAi: '✓ AI-chatt, AI-svar och AI-quiz',
+    plusAiLocked: 'AI-funktioner ingår i Taha Note Plus. Kontakta administratören för att uppgradera.',
     verifyTitle: 'Verifiera din e-post',
     verifySub: 'Vi skickade en verifieringslänk till',
     verifyResend: 'Skicka igen',

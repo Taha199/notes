@@ -3,6 +3,8 @@ import type { ChatAttachment, ChatConversation, ChatMessage } from '../../types'
 import { sendChatMessageStream } from '../../lib/gemini';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { PlusUpgradePrompt } from '../common/PlusUpgradePrompt';
 function newId() { return `c${Date.now()}-${Math.random().toString(36).slice(2, 6)}`; }
 function nowStr(locale: string) {
   return new Date().toLocaleString(locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -90,6 +92,7 @@ function readFileAsBase64(file: File): Promise<{ dataUrl: string; base64: string
 }
 
 export function ChatPage() {
+  const { hasAi, profileLoading } = useAuth();
   const { t } = useLanguage();
   const { chats, saveChats } = useNotes();
   const locale = t.dateLocale;
@@ -216,6 +219,17 @@ export function ChatPage() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
+
+  if (profileLoading) {
+    return <div className="flex h-full items-center justify-center text-sm text-app-text-secondary">…</div>;
+  }
+  if (!hasAi) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <PlusUpgradePrompt />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full overflow-hidden" onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
-import { getStorageLimitMB, MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, storageLimitPresetsMB } from '../../lib/storageQuota';
+import { getStorageLimitMB, MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
+import { isPlusUser } from '../../lib/userPlan';
 
 interface UserRow {
   uid: string;
@@ -11,6 +12,7 @@ interface UserRow {
   ip: string;
   provider: string;
   blocked: boolean;
+  isPlus: boolean;
   bytes: number;
   storageLimitMB: number;
 }
@@ -85,8 +87,9 @@ export function AdminPanel() {
           ip: (profile.ip as string) ?? '',
           provider: (profile.provider as string) || authUser?.provider || '',
           blocked: profile.blocked === true,
+          isPlus: isPlusUser(profile, email),
           bytes,
-          storageLimitMB: getStorageLimitMB(profile),
+          storageLimitMB: getStorageLimitMB(profile, email),
         };
       });
       list.sort((a, b) => b.lastSeen - a.lastSeen);
@@ -163,6 +166,27 @@ export function AdminPanel() {
     }
   };
 
+  const togglePlus = async (row: UserRow) => {
+    if (row.email === ADMIN_EMAIL) return;
+    const next = !row.isPlus;
+    setBusy(row.uid);
+    try {
+      const storageLimitMB = plusStorageLimitForToggle(next);
+      await fetch(`${FB_DB_URL}/users/${row.uid}/profile.json`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPlus: next, storageLimitMB }),
+      });
+      setRows((prev) =>
+        prev.map((r) =>
+          r.uid === row.uid ? { ...r, isPlus: next, storageLimitMB } : r,
+        ),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const usagePct = (row: UserRow) => Math.min(100, (row.bytes / (row.storageLimitMB * 1024 * 1024)) * 100);
 
   return (
@@ -209,6 +233,7 @@ export function AdminPanel() {
                         <p className="flex items-center gap-2 truncate font-semibold text-app-text dark:text-gray-100">
                           {row.displayName}
                           {row.blocked && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-600 dark:bg-red-500/15 dark:text-red-400">BLOCKERAD</span>}
+                          {row.isPlus && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-bold text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">PLUS</span>}
                           {row.email === ADMIN_EMAIL && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">ADMIN</span>}
                         </p>
                         <p className="truncate text-xs text-app-text-secondary dark:text-gray-400">{row.email || `ID: ${row.uid}`}</p>
@@ -285,6 +310,15 @@ export function AdminPanel() {
                     <div className="flex items-center justify-end gap-2">
                       {row.email !== ADMIN_EMAIL && (
                         <>
+                          <button
+                            onClick={() => togglePlus(row)}
+                            disabled={busy === row.uid}
+                            className={'rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition disabled:opacity-50 ' + (row.isPlus
+                              ? 'border-violet-300 text-violet-600 hover:bg-violet-50 dark:border-violet-500/30 dark:hover:bg-violet-500/10'
+                              : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-white/15 dark:text-gray-300 dark:hover:bg-white/5')}
+                          >
+                            {row.isPlus ? 'Ta bort Plus' : 'Aktivera Plus'}
+                          </button>
                           <button
                             onClick={() => toggleBlock(row)}
                             disabled={busy === row.uid}

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
+import { useAuth } from '../../contexts/AuthContext';
 import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { BrandedAlert } from '../common/BrandedAlert';
@@ -291,6 +292,7 @@ interface EditPanelProps {
 
 function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
   const { lang, t } = useLanguage();
+  const { hasAi } = useAuth();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
@@ -442,7 +444,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
               onChange={onChangeA}
               placeholder={`${labels.answer}...`}
               minHeight="90px"
-              toolbarEnd={(
+              toolbarEnd={hasAi ? (
                 <button
                   type="button"
                   onClick={handleAiAnswer}
@@ -451,7 +453,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
                 >
                   {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {labels.aiAnswer}
                 </button>
-              )}
+              ) : undefined}
             />
           </div>
           {aiSuggestion !== null && (
