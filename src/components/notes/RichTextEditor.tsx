@@ -203,6 +203,36 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return null;
   };
 
+  const getAlignmentTargetBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
+    let el: Node | null = node;
+    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    let innermost: HTMLElement | null = null;
+    let outermostAligned: HTMLElement | null = null;
+    while (el instanceof HTMLElement && el !== ed) {
+      if (el.tagName === 'CENTER') outermostAligned = el;
+      if (BLOCK_TAGS.has(el.tagName)) {
+        if (!innermost) innermost = el;
+        if (readBlockAlignment(el) !== 'left' || el.style.textAlign || el.getAttribute('align')) {
+          outermostAligned = el;
+        }
+      }
+      el = el.parentElement;
+    }
+    return outermostAligned ?? innermost;
+  };
+
+  const clearParentCentering = (block: HTMLElement, ed: HTMLElement) => {
+    let parent = block.parentElement;
+    while (parent && parent !== ed) {
+      if (parent.tagName === 'CENTER') {
+        normalizeCenterElement(parent, ed);
+      } else if (BLOCK_TAGS.has(parent.tagName) || parent.hasAttribute('dir')) {
+        stripBlockCenteringStyles(parent);
+      }
+      parent = parent.parentElement;
+    }
+  };
+
   const unwrapCenterTags = (root: HTMLElement) => {
     root.querySelectorAll('center').forEach((center) => {
       const parent = center.parentNode;
@@ -228,14 +258,14 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const readAlignmentAtCaret = (ed: HTMLElement): BlockAlign => {
     const sel = window.getSelection();
     if (!sel?.rangeCount) return 'left';
-    const block = getLineBlock(sel.anchorNode, ed);
+    const block = getAlignmentTargetBlock(sel.anchorNode, ed);
     return block ? readBlockAlignment(block) : 'left';
   };
 
   const getBlocksInRange = (range: Range, ed: HTMLElement): HTMLElement[] => {
     const blocks = new Set<HTMLElement>();
     const addBlock = (node: Node | null) => {
-      const block = getLineBlock(node, ed);
+      const block = getAlignmentTargetBlock(node, ed);
       if (block) blocks.add(block);
     };
     addBlock(range.startContainer);
@@ -255,7 +285,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         },
       );
       while (walker.nextNode()) {
-        const line = getLineBlock(walker.currentNode, ed);
+        const line = getAlignmentTargetBlock(walker.currentNode, ed);
         if (line) blocks.add(line);
       }
     }
@@ -317,7 +347,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (blocks.length === 0) {
       document.execCommand('styleWithCSS', false, 'true');
       document.execCommand('formatBlock', false, 'div');
-      const block = getLineBlock(sel.anchorNode, ed);
+      const block = getAlignmentTargetBlock(sel.anchorNode, ed);
       if (block) blocks = [block];
     }
     if (blocks.length === 0) return;
@@ -325,6 +355,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     blocks.forEach((rawBlock) => {
       let block = rawBlock;
       if (block.tagName === 'CENTER') block = normalizeCenterElement(block, ed);
+      if (align !== 'center') clearParentCentering(block, ed);
       clearNestedAlignment(block);
       block.style.display = 'block';
       block.style.width = '100%';
