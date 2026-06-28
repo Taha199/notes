@@ -7,6 +7,7 @@ const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48,
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
 type BlockAlign = 'left' | 'center' | 'right';
+const ALIGN_STOPS: BlockAlign[] = ['left', 'center', 'right'];
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
@@ -50,7 +51,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const hlWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
+  const alignTrackRef = useRef<HTMLDivElement>(null);
+  const alignDraggingRef = useRef(false);
   const lastLocalHtmlRef = useRef(html);
+  const [alignDragIndex, setAlignDragIndex] = useState<number | null>(null);
 
   const emitHtml = (next: string) => {
     lastLocalHtmlRef.current = next;
@@ -405,6 +409,45 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     readCommandState();
     emitHtml(ed.innerHTML);
     ed.focus({ preventScroll: true });
+  };
+
+  const currentAlignIndex = activeCmds.has('justifyRight')
+    ? 2
+    : activeCmds.has('justifyCenter')
+      ? 1
+      : 0;
+  const displayAlignIndex = alignDragIndex ?? currentAlignIndex;
+
+  const alignIndexFromClientX = (clientX: number): number => {
+    const track = alignTrackRef.current;
+    if (!track) return 1;
+    const rect = track.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / rect.width;
+    if (ratio < 0.33) return 0;
+    if (ratio > 0.66) return 2;
+    return 1;
+  };
+
+  const onAlignTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    saveSel();
+    alignDraggingRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setAlignDragIndex(alignIndexFromClientX(e.clientX));
+  };
+
+  const onAlignTrackPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!alignDraggingRef.current) return;
+    setAlignDragIndex(alignIndexFromClientX(e.clientX));
+  };
+
+  const finishAlignDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!alignDraggingRef.current) return;
+    alignDraggingRef.current = false;
+    const idx = alignIndexFromClientX(e.clientX);
+    setAlignDragIndex(null);
+    applyBlockAlignment(ALIGN_STOPS[idx]);
+    e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const normalizeEmptyFontBlocks = (ed: HTMLElement) => {
@@ -959,16 +1002,61 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
-        {/* Alignment */}
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('left'); }} title="Align left" className={btnCls(activeCmds.has('justifyLeft'))}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="3" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="3" y="20" width="12" height="2" rx="1"/></svg>
-        </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('center'); }} title="Center" className={btnCls(activeCmds.has('justifyCenter'))}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="6" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="6" y="20" width="12" height="2" rx="1"/></svg>
-        </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('right'); }} title="Align right" className={btnCls(activeCmds.has('justifyRight'))}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="9" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="9" y="20" width="12" height="2" rx="1"/></svg>
-        </button>
+        {/* Alignment slider */}
+        <div
+          ref={alignTrackRef}
+          role="slider"
+          aria-label="Text alignment"
+          aria-valuemin={0}
+          aria-valuemax={2}
+          aria-valuenow={displayAlignIndex}
+          title="Align left · center · right"
+          className="relative mx-0.5 h-7 w-[76px] shrink-0 cursor-pointer touch-none select-none rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900"
+          onPointerDown={onAlignTrackPointerDown}
+          onPointerMove={onAlignTrackPointerMove}
+          onPointerUp={finishAlignDrag}
+          onPointerCancel={finishAlignDrag}
+        >
+          <div className="pointer-events-none absolute inset-x-2.5 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-app-border/80 dark:bg-white/15" />
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="pointer-events-none absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-border/60 dark:bg-white/20"
+              style={{ left: `${i * 50}%` }}
+            />
+          ))}
+          <div
+            className={
+              'pointer-events-none absolute top-1/2 h-[22px] w-[22px] -translate-x-1/2 -translate-y-1/2 rounded-md border border-app-border/80 shadow-sm transition-[left] duration-150 ease-out dark:border-white/15 ' +
+              (alignDragIndex !== null ? 'bg-primary/20 dark:bg-primary/30' : 'bg-gray-900 dark:bg-primary')
+            }
+            style={{ left: `${displayAlignIndex * 50}%` }}
+          >
+            <svg className="absolute inset-0 m-auto text-white" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              {displayAlignIndex === 0 && (
+                <>
+                  <rect x="4" y="6" width="14" height="2" rx="1" />
+                  <rect x="4" y="11" width="9" height="2" rx="1" />
+                  <rect x="4" y="16" width="14" height="2" rx="1" />
+                </>
+              )}
+              {displayAlignIndex === 1 && (
+                <>
+                  <rect x="4" y="6" width="16" height="2" rx="1" />
+                  <rect x="7" y="11" width="10" height="2" rx="1" />
+                  <rect x="4" y="16" width="16" height="2" rx="1" />
+                </>
+              )}
+              {displayAlignIndex === 2 && (
+                <>
+                  <rect x="6" y="6" width="14" height="2" rx="1" />
+                  <rect x="11" y="11" width="9" height="2" rx="1" />
+                  <rect x="6" y="16" width="14" height="2" rx="1" />
+                </>
+              )}
+            </svg>
+          </div>
+        </div>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
