@@ -8,6 +8,10 @@ const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as cons
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
 type BlockAlign = 'left' | 'center' | 'right';
 const ALIGN_STOPS: BlockAlign[] = ['left', 'center', 'right'];
+const ALIGN_THUMB_POS = [8, 50, 92];
+const alignToIndex = (align: BlockAlign) => (align === 'right' ? 2 : align === 'center' ? 1 : 0);
+const percentToAlignIndex = (pct: number) => (pct < 33 ? 0 : pct > 66 ? 2 : 1);
+const cssAlignToPercent = (align: BlockAlign) => ALIGN_THUMB_POS[alignToIndex(align)];
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
@@ -55,6 +59,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const alignDraggingRef = useRef(false);
   const lastLocalHtmlRef = useRef(html);
   const [alignDragIndex, setAlignDragIndex] = useState<number | null>(null);
+  const [alignSliderPos, setAlignSliderPos] = useState(ALIGN_THUMB_POS[0]);
 
   const emitHtml = (next: string) => {
     lastLocalHtmlRef.current = next;
@@ -272,6 +277,53 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return block ? readBlockAlignment(block) : 'left';
   };
 
+  const readAlignmentForRange = (ed: HTMLElement, range: Range): BlockAlign => {
+    const block = getAlignmentTargetBlock(range.startContainer, ed);
+    return block ? readBlockAlignment(block) : 'left';
+  };
+
+  const rangeForAlignMeasure = (ed: HTMLElement): Range | null => {
+    const live = liveRange();
+    if (live) return live.cloneRange();
+    const saved = savedRange.current;
+    if (saved && ed.contains(saved.commonAncestorContainer)) return saved.cloneRange();
+    return null;
+  };
+
+  /** Map selection/caret visual position to a continuous thumb position (8–92%). */
+  const readVisualAlignPercent = (ed: HTMLElement): number => {
+    const range = rangeForAlignMeasure(ed);
+    const cssFallback = () => cssAlignToPercent(range ? readAlignmentForRange(ed, range) : readAlignmentAtCaret(ed));
+    if (!range) return cssFallback();
+
+    const edRect = ed.getBoundingClientRect();
+    const style = getComputedStyle(ed);
+    const padL = parseFloat(style.paddingLeft) || 0;
+    const padR = parseFloat(style.paddingRight) || 0;
+    const contentLeft = edRect.left + padL;
+    const contentWidth = edRect.width - padL - padR;
+    if (contentWidth <= 0) return cssFallback();
+
+    const rects = [...range.getClientRects()].filter((r) => r.width > 0 || r.height > 0);
+    let textCenter: number;
+
+    if (rects.length > 0) {
+      const textLeft = Math.min(...rects.map((r) => r.left));
+      const textRight = Math.max(...rects.map((r) => r.right));
+      textCenter = (textLeft + textRight) / 2;
+    } else {
+      const r = range.getBoundingClientRect();
+      if (r.width > 1 || (!range.collapsed && r.height > 0)) {
+        textCenter = (r.left + r.right) / 2;
+      } else {
+        return cssFallback();
+      }
+    }
+
+    const relCenter = Math.max(0, Math.min(1, (textCenter - contentLeft) / contentWidth));
+    return ALIGN_THUMB_POS[0] + relCenter * (ALIGN_THUMB_POS[2] - ALIGN_THUMB_POS[0]);
+  };
+
   const placeCaretInBlock = (block: HTMLElement, atStart: boolean) => {
     const range = document.createRange();
     range.selectNodeContents(block);
@@ -407,16 +459,13 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
     saveSel();
     readCommandState();
+    setAlignSliderPos(ALIGN_THUMB_POS[alignToIndex(align)]);
     emitHtml(ed.innerHTML);
     ed.focus({ preventScroll: true });
   };
 
-  const currentAlignIndex = activeCmds.has('justifyRight')
-    ? 2
-    : activeCmds.has('justifyCenter')
-      ? 1
-      : 0;
-  const displayAlignIndex = alignDragIndex ?? currentAlignIndex;
+  const displayAlignPos = alignDragIndex !== null ? ALIGN_THUMB_POS[alignDragIndex] : alignSliderPos;
+  const displayAlignIndex = alignDragIndex ?? percentToAlignIndex(alignSliderPos);
 
   const alignIndexFromClientX = (clientX: number): number => {
     const track = alignTrackRef.current;
@@ -543,11 +592,12 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
     });
     const ed = editorRef.current;
-    const sel = window.getSelection();
-    if (ed && sel?.rangeCount) {
-      const align = readAlignmentAtCaret(ed);
-      if (align === 'left') active.add('justifyLeft');
-      else if (align === 'center') active.add('justifyCenter');
+    if (ed && !alignDraggingRef.current) {
+      const pct = readVisualAlignPercent(ed);
+      setAlignSliderPos(pct);
+      const idx = percentToAlignIndex(pct);
+      if (idx === 0) active.add('justifyLeft');
+      else if (idx === 1) active.add('justifyCenter');
       else active.add('justifyRight');
     }
     setActiveCmds(active);
@@ -565,7 +615,12 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   useEffect(() => {
     const handler = () => {
       const ed = editorRef.current;
-      if (ed && (document.activeElement === ed || ed.contains(document.activeElement))) {
+      if (!ed) return;
+      const focusedInEditor = document.activeElement === ed || ed.contains(document.activeElement);
+      const sel = window.getSelection();
+      const selInEd = sel?.rangeCount && ed.contains(sel.getRangeAt(0).commonAncestorContainer);
+      const savedInEd = savedRange.current && ed.contains(savedRange.current.commonAncestorContainer);
+      if (focusedInEditor || selInEd || savedInEd) {
         saveSel();
         readCommandState();
         syncFontSizeFromCaret();
@@ -931,7 +986,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           (stickyToolbar && editable ? 'sticky top-0 z-20 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95' : '')
         }
         style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
-        onMouseDownCapture={() => { saveSel(); }}
+        onMouseDownCapture={() => {
+          saveSel();
+          requestAnimationFrame(() => readCommandState());
+        }}
       >
         {/* Font size */}
         <div
@@ -1022,7 +1080,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             <div
               key={i}
               className="pointer-events-none absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-border/60 dark:bg-white/20"
-              style={{ left: `${i * 50}%` }}
+              style={{ left: `${ALIGN_THUMB_POS[i]}%` }}
             />
           ))}
           <div
@@ -1030,7 +1088,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
               'pointer-events-none absolute top-1/2 h-[22px] w-[22px] -translate-x-1/2 -translate-y-1/2 rounded-md border border-app-border/80 shadow-sm transition-[left] duration-150 ease-out dark:border-white/15 ' +
               (alignDragIndex !== null ? 'bg-primary/20 dark:bg-primary/30' : 'bg-gray-900 dark:bg-primary')
             }
-            style={{ left: `${displayAlignIndex * 50}%` }}
+            style={{ left: `${displayAlignPos}%` }}
           >
             <svg className="absolute inset-0 m-auto text-white" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               {displayAlignIndex === 0 && (
@@ -1085,9 +1143,15 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           clearPendingFontMarker();
           requestAnimationFrame(() => sanitizeCaretFontContext(ed));
         }}
+        onMouseUp={() => {
+          requestAnimationFrame(() => readCommandState());
+        }}
         onFocus={() => {
           const ed = editorRef.current;
-          if (ed) sanitizeCaretFontContext(ed);
+          if (ed) {
+            sanitizeCaretFontContext(ed);
+            requestAnimationFrame(() => readCommandState());
+          }
         }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
