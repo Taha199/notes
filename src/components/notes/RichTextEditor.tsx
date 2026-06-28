@@ -262,34 +262,79 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return block ? readBlockAlignment(block) : 'left';
   };
 
-  const getBlocksInRange = (range: Range, ed: HTMLElement): HTMLElement[] => {
+  const getBlocksForAlignment = (range: Range, ed: HTMLElement, align: BlockAlign): HTMLElement[] => {
     const blocks = new Set<HTMLElement>();
-    const addBlock = (node: Node | null) => {
-      const block = getAlignmentTargetBlock(node, ed);
-      if (block) blocks.add(block);
-    };
-    addBlock(range.startContainer);
-    addBlock(range.endContainer);
-    if (!range.collapsed) {
-      const root = range.commonAncestorContainer;
-      const walker = document.createTreeWalker(
-        root,
-        NodeFilter.SHOW_ELEMENT,
-        {
-          acceptNode: (node) => {
-            if (!(node instanceof HTMLElement) || !ed.contains(node)) return NodeFilter.FILTER_REJECT;
-            if (!range.intersectsNode(node)) return NodeFilter.FILTER_SKIP;
-            if (BLOCK_TAGS.has(node.tagName) || node.tagName === 'CENTER') return NodeFilter.FILTER_ACCEPT;
-            return NodeFilter.FILTER_SKIP;
-          },
-        },
-      );
-      while (walker.nextNode()) {
-        const line = getAlignmentTargetBlock(walker.currentNode, ed);
-        if (line) blocks.add(line);
+    const collectChain = (node: Node | null) => {
+      let el: Node | null = node;
+      if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+      while (el instanceof HTMLElement && el !== ed) {
+        if (BLOCK_TAGS.has(el.tagName) || el.tagName === 'CENTER') blocks.add(el);
+        el = el.parentElement;
       }
+    };
+
+    if (align === 'left' || align === 'right') {
+      collectChain(range.startContainer);
+      if (!range.collapsed) collectChain(range.endContainer);
+      if (blocks.size === 0) {
+        const target = getAlignmentTargetBlock(range.startContainer, ed);
+        if (target) blocks.add(target);
+      }
+      return [...blocks];
     }
+
+    const target = getAlignmentTargetBlock(range.startContainer, ed);
+    if (target) return [target];
+    collectChain(range.startContainer);
     return [...blocks];
+  };
+
+  const placeCaretInBlock = (block: HTMLElement, atStart: boolean) => {
+    const range = document.createRange();
+    range.selectNodeContents(block);
+    range.collapse(atStart);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    savedRange.current = range.cloneRange();
+  };
+
+  const handleCenteredLineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const ed = editorRef.current;
+    if (!ed || !editable || e.button !== 0) return;
+
+    const x = e.clientX;
+    const y = e.clientY;
+    let targetNode: Node | null = null;
+    if (document.caretRangeFromPoint) {
+      targetNode = document.caretRangeFromPoint(x, y)?.startContainer ?? null;
+    } else {
+      const pos = (document as Document & { caretPositionFromPoint?(x: number, y: number): { offsetNode: Node } | null }).caretPositionFromPoint?.(x, y);
+      targetNode = pos?.offsetNode ?? null;
+    }
+    if (!targetNode) {
+      const el = document.elementFromPoint(x, y);
+      if (el instanceof Node && ed.contains(el)) targetNode = el;
+    }
+    if (!targetNode || !ed.contains(targetNode)) return;
+
+    const block = getAlignmentTargetBlock(targetNode, ed);
+    if (!block || readBlockAlignment(block) === 'left') return;
+
+    const rect = block.getBoundingClientRect();
+    if (rect.width <= 0) return;
+
+    const relX = (x - rect.left) / rect.width;
+    const rtl = getComputedStyle(block).direction === 'rtl';
+    const atStart = rtl ? relX > 0.65 : relX < 0.35;
+    const atEnd = rtl ? relX < 0.35 : relX > 0.65;
+    if (!atStart && !atEnd) return;
+
+    e.preventDefault();
+    ed.focus({ preventScroll: true });
+    placeCaretInBlock(block, atStart);
+    readCommandState();
+    syncFontSizeFromCaret();
   };
 
   const stripBlockCenteringStyles = (block: HTMLElement) => {
@@ -343,7 +388,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!sel?.rangeCount) return;
     const range = sel.getRangeAt(0);
 
-    let blocks = getBlocksInRange(range, ed);
+    let blocks = getBlocksForAlignment(range, ed, align);
     if (blocks.length === 0) {
       document.execCommand('styleWithCSS', false, 'true');
       document.execCommand('formatBlock', false, 'div');
@@ -364,6 +409,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       block.style.marginRight = '0';
       block.removeAttribute('align');
     });
+
+    if (align === 'left') {
+      const line = getLineBlock(sel.anchorNode, ed) ?? blocks[blocks.length - 1];
+      placeCaretInBlock(line, true);
+    }
 
     saveSel();
     readCommandState();
@@ -944,9 +994,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onMouseDown={() => {
+        onMouseDown={(e) => {
           const ed = editorRef.current;
           if (!ed) return;
+          handleCenteredLineClick(e);
           clearPendingFontMarker();
           requestAnimationFrame(() => sanitizeCaretFontContext(ed));
         }}
