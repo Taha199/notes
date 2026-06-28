@@ -27,6 +27,13 @@ function saveQuizSelection(folderId: string | null, setId: string | null) {
   localStorage.setItem(QUIZ_SELECTION_KEY, JSON.stringify({ folderId, setId }));
 }
 
+type ItemSort = 'manual' | 'oldest' | 'study';
+
+function getItemCreatedTime(item: QuizItem): number {
+  if (item.createdAt) return new Date(item.createdAt).getTime();
+  return item.id;
+}
+
 function loadProgress(): Record<string, Record<number, 'known' | 'learning'>> {
   try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; }
 }
@@ -88,9 +95,14 @@ interface QuizItemRowProps {
   onMoveToSet?: (setId: string) => void;
   hideAnswers?: boolean;
   onSetStatus?: (id: number, status: 'known' | 'learning' | null) => void;
+  canReorder?: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }
 
-function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus }: QuizItemRowProps) {
+function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, canMoveUp, canMoveDown, onMoveUp, onMoveDown }: QuizItemRowProps) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
@@ -107,7 +119,27 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
   const studyMore = status !== 'known';
   return (
     <div className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
-      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]">
+      <div className={'grid grid-cols-1 ' + (canReorder ? 'sm:grid-cols-[36px_minmax(0,0.8fr)_minmax(0,1.2fr)_44px]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]')}>
+        {canReorder && (
+          <div className="flex flex-row items-center justify-center gap-1 border-b border-app-border px-2 py-2 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
+            <button
+              type="button"
+              onClick={onMoveUp}
+              disabled={!canMoveUp}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-sm text-app-text-secondary/50 transition-colors hover:bg-app-bg hover:text-primary disabled:opacity-25 dark:hover:bg-white/5"
+              title={canMoveUp ? 'Flytta upp' : undefined}
+              aria-label="Flytta upp"
+            >↑</button>
+            <button
+              type="button"
+              onClick={onMoveDown}
+              disabled={!canMoveDown}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-sm text-app-text-secondary/50 transition-colors hover:bg-app-bg hover:text-primary disabled:opacity-25 dark:hover:bg-white/5"
+              title={canMoveDown ? 'Flytta ner' : undefined}
+              aria-label="Flytta ner"
+            >↓</button>
+          </div>
+        )}
         <div className="flex min-w-0 flex-col items-start px-5 py-4">
           <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
             Fråga
@@ -437,19 +469,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           </div>
         ) : (
         <div>
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
-            {hasAi && (
-              <button
-                type="button"
-                onClick={handleAiAnswer}
-                disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
-                className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
-              >
-                {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {labels.aiAnswer}
-              </button>
-            )}
-          </div>
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
           <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
             <RichTextEditor
               html={answer}
@@ -457,6 +477,18 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
               placeholder={`${labels.answer}...`}
               minHeight="90px"
             />
+            {hasAi && (
+              <div className="flex justify-end border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
+                <button
+                  type="button"
+                  onClick={handleAiAnswer}
+                  disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
+                  className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                >
+                  {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {labels.aiAnswer}
+                </button>
+              </div>
+            )}
           </div>
           {aiSuggestion !== null && (
             <div className="mt-2 overflow-hidden rounded-xl border border-violet-300 bg-violet-50 dark:border-violet-500/30 dark:bg-violet-500/10">
@@ -547,7 +579,7 @@ const SET_COLORS = [
 export function QuizPage() {
   const { lang } = useLanguage();
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet, moveItemInSet, moveQuiz } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -584,9 +616,12 @@ export function QuizPage() {
   const [studyDeck, setStudyDeck] = useState<QuizItem[] | null>(null);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
   const [hideAnswers, setHideAnswers] = useState(false);
-  // Ordering: default = study priority (not-known/not-studied first, known last).
-  // Toggle to chronological (original) order.
-  const [chronological, setChronological] = useState(false);
+  // Question list ordering: manual / oldest-first / studied vs not studied
+  const [itemSort, setItemSort] = useState<ItemSort>(() => (localStorage.getItem('malacadhati_quiz_itemsort') as ItemSort) || 'manual');
+  const changeItemSort = (mode: ItemSort) => {
+    setItemSort(mode);
+    localStorage.setItem('malacadhati_quiz_itemsort', mode);
+  };
   // Which questions to show: all / only to-study (not known) / only known
   const [viewFilter, setViewFilter] = useState<'all' | 'study' | 'known'>('all');
 
@@ -951,15 +986,24 @@ export function QuizPage() {
   const isFolderEmptyView = !!selectedFolderId && !selectedSetId;
   const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
-  const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : isNotesView ? [...quizzes].reverse() : [];
+  const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : isNotesView ? quizzes : [];
   const studyItems = useMemo(() => displayItems.filter((item) => !item.draft), [displayItems]);
   const openItemIds = useMemo(
     () => new Set(openForms.map((f) => f.itemId).filter((id): id is number => id !== null)),
     [openForms],
   );
 
+  const canReorder = itemSort === 'manual' && viewFilter === 'all';
+
+  const handleMoveItem = (itemId: number, direction: 'up' | 'down') => {
+    if (itemSort !== 'manual') changeItemSort('manual');
+    if (selectedSetId) moveItemInSet(selectedSetId, itemId, direction);
+    else moveQuiz(itemId, direction);
+  };
+
   const renderItem = (item: QuizItem) => {
     if (openItemIds.has(item.id)) return null;
+    const storageIndex = displayItems.findIndex((i) => i.id === item.id);
     return (
       <QuizItemRow
         key={item.id}
@@ -980,6 +1024,11 @@ export function QuizPage() {
           if (selectedSetId) removeItemFromSet(selectedSetId, item.id);
           else deleteQuiz(item.id);
         }}
+        canReorder={canReorder}
+        canMoveUp={storageIndex > 0}
+        canMoveDown={storageIndex >= 0 && storageIndex < displayItems.length - 1}
+        onMoveUp={() => handleMoveItem(item.id, 'up')}
+        onMoveDown={() => handleMoveItem(item.id, 'down')}
       />
     );
   };
@@ -1005,22 +1054,23 @@ export function QuizPage() {
     );
   };
 
-  // Study-priority order: learning (got wrong) first, then not-studied, then known last.
-  // Stable sort preserves original order within each tier.
-  const priorityRank = (it: QuizItem) => {
-    const s = currentProgress[it.id];
-    if (s === 'learning') return 0;
-    if (!s) return 1;
-    return 2; // known
-  };
   const filteredItems = displayItems.filter((it) => {
     if (viewFilter === 'known') return currentProgress[it.id] === 'known';
     if (viewFilter === 'study') return currentProgress[it.id] !== 'known';
     return true;
   });
-  const orderedItems = chronological
-    ? filteredItems
-    : filteredItems.map((it, i) => ({ it, i })).sort((a, b) => priorityRank(a.it) - priorityRank(b.it) || a.i - b.i).map((x) => x.it);
+  const orderedItems = useMemo(() => {
+    if (itemSort === 'manual') return filteredItems;
+    if (itemSort === 'oldest') {
+      return [...filteredItems].sort((a, b) => getItemCreatedTime(a) - getItemCreatedTime(b));
+    }
+    return [...filteredItems].sort((a, b) => {
+      const aStudied = currentProgress[a.id] === 'known' ? 1 : 0;
+      const bStudied = currentProgress[b.id] === 'known' ? 1 : 0;
+      if (aStudied !== bStudied) return aStudied - bStudied;
+      return getItemCreatedTime(a) - getItemCreatedTime(b);
+    });
+  }, [filteredItems, itemSort, currentProgress]);
 
   const sortedSets = setSort === 'manual'
     ? quizSets
@@ -1425,14 +1475,17 @@ export function QuizPage() {
                 >
                   {hideAnswers ? '👁️ ' : '🙈 '}{hideAnswers ? (lang === 'sv' ? 'Visa svar' : 'Show') : (lang === 'sv' ? 'Dölj svar' : 'Hide')}
                 </button>
-                {/* Order toggle: study priority vs chronological */}
-                <button
-                  onClick={() => setChronological((v) => !v)}
-                  className={'flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ' + (chronological ? 'border-primary bg-primary text-white' : 'border-app-border bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:border-white/10 dark:text-gray-400')}
-                  title={chronological ? (lang === 'sv' ? 'Visa studieordning (att plugga först)' : 'Show study order') : (lang === 'sv' ? 'Ordna i kronologisk ordning' : 'Chronological order')}
+                {/* Sort order */}
+                <select
+                  value={itemSort}
+                  onChange={(e) => changeItemSort(e.target.value as ItemSort)}
+                  className="rounded-xl border border-app-border bg-app-bg px-2.5 py-1.5 text-[11px] font-semibold text-app-text-secondary outline-none transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
+                  title={lang === 'sv' ? 'Sortera frågor' : 'Sort questions'}
                 >
-                  {chronological ? '🎯 ' : '🕑 '}{chronological ? (lang === 'sv' ? 'Studieordning' : 'Study order') : (lang === 'sv' ? 'Kronologisk' : 'Chronological')}
-                </button>
+                  <option value="manual">{lang === 'sv' ? 'Egen ordning' : 'Manual order'}</option>
+                  <option value="oldest">{lang === 'sv' ? 'Äldst → nyast' : 'Oldest → newest'}</option>
+                  <option value="study">{lang === 'sv' ? 'Ej studerade / studerade' : 'Not studied / studied'}</option>
+                </select>
                 {/* Study buttons */}
                 <button
                   onClick={() => { setStudyDeck(null); setStudyMode('flashcard'); }}

@@ -50,6 +50,8 @@ interface NotesCtx {
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => number;
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
+  moveItemInSet: (setId: string, itemId: number, direction: 'up' | 'down') => void;
+  moveQuiz: (itemId: number, direction: 'up' | 'down') => void;
   tokenUsage: number;
   addTokens: (n: number) => void;
   resetTokens: () => void;
@@ -890,6 +892,39 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const moveItemInSet = (setId: string, itemId: number, direction: 'up' | 'down') => {
+    setQuizSets((prev) => {
+      let changed = false;
+      const next = prev.map((s) => {
+        if (s.id !== setId) return s;
+        const items = [...s.items];
+        const idx = items.findIndex((i) => i.id === itemId);
+        if (idx < 0) return s;
+        const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+        if (swapIdx < 0 || swapIdx >= items.length) return s;
+        [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
+        changed = true;
+        return { ...s, items };
+      });
+      if (!changed) return prev;
+      persistSets(next);
+      return next;
+    });
+  };
+
+  const moveQuiz = (itemId: number, direction: 'up' | 'down') => {
+    setQuizzes((prev) => {
+      const next = [...prev];
+      const idx = next.findIndex((q) => q.id === itemId);
+      if (idx < 0) return prev;
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= next.length) return prev;
+      [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+      persist(notes, undefined, next);
+      return next;
+    });
+  };
+
   const toggleRead = (id: number) => updateNote(id, { read: true });
   const toggleUnread = (id: number) => updateNote(id, { read: false });
   const toggleFav = (id: number) =>
@@ -957,6 +992,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         addItemToSet,
         removeItemFromSet,
         updateItemInSet,
+        moveItemInSet,
+        moveQuiz,
         addDraft,
         removeDraft,
         updateDraft,
