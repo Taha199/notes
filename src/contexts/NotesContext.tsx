@@ -51,7 +51,9 @@ interface NotesCtx {
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
   moveItemInSet: (setId: string, itemId: number, direction: 'up' | 'down') => void;
+  reorderItemInSet: (setId: string, dragId: number, targetId: number) => void;
   moveQuiz: (itemId: number, direction: 'up' | 'down') => void;
+  reorderQuiz: (dragId: number, targetId: number) => void;
   tokenUsage: number;
   addTokens: (n: number) => void;
   resetTokens: () => void;
@@ -925,6 +927,39 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const reorderItemInSet = (setId: string, dragId: number, targetId: number) => {
+    setQuizSets((prev) => {
+      let changed = false;
+      const next = prev.map((s) => {
+        if (s.id !== setId) return s;
+        const items = [...s.items];
+        const from = items.findIndex((i) => i.id === dragId);
+        const to = items.findIndex((i) => i.id === targetId);
+        if (from < 0 || to < 0 || from === to) return s;
+        const [item] = items.splice(from, 1);
+        items.splice(to, 0, item);
+        changed = true;
+        return { ...s, items };
+      });
+      if (!changed) return prev;
+      persistSets(next);
+      return next;
+    });
+  };
+
+  const reorderQuiz = (dragId: number, targetId: number) => {
+    setQuizzes((prev) => {
+      const next = [...prev];
+      const from = next.findIndex((q) => q.id === dragId);
+      const to = next.findIndex((q) => q.id === targetId);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      persist(notes, undefined, next);
+      return next;
+    });
+  };
+
   const toggleRead = (id: number) => updateNote(id, { read: true });
   const toggleUnread = (id: number) => updateNote(id, { read: false });
   const toggleFav = (id: number) =>
@@ -993,7 +1028,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         removeItemFromSet,
         updateItemInSet,
         moveItemInSet,
+        reorderItemInSet,
         moveQuiz,
+        reorderQuiz,
         addDraft,
         removeDraft,
         updateDraft,
