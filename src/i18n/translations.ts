@@ -86,6 +86,7 @@ export interface Translation {
   titleRight: string;
   titleCenter: string;
   titleLeft: string;
+  titleCaretPos: string;
   titleClr: string;
   titleColor: string;
   titleUnarch: string;
@@ -248,7 +249,7 @@ export const LANGS: Record<Lang, Translation> = {
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough',
-    titleRight: 'Align Right', titleCenter: 'Center', titleLeft: 'Align Left', titleClr: 'Clear Formatting', titleColor: 'Text Color',
+    titleRight: 'Align Right', titleCenter: 'Center', titleLeft: 'Align Left', titleCaretPos: 'Cursor and selection position on the line', titleClr: 'Clear Formatting', titleColor: 'Text Color',
     titleUnarch: 'Unarchive', titleDone: 'Mark as Read', titleUnread: 'Move to Unread', titleArch: 'Archive',
     titleDel: 'Delete', titleRestore: 'Restore', titlePermDel: 'Delete Permanently', titleFavAdd: 'Add to Favourites', titleFavRem: 'Remove from Favourites',
     tAddNote: 'Note added', tMoved: 'Moved to trash', tArched: 'Moved to archive', tRestored: 'Restored to active',
@@ -350,7 +351,7 @@ export const LANGS: Record<Lang, Translation> = {
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken',
-    titleRight: 'Höger', titleCenter: 'Centrera', titleLeft: 'Vänster', titleClr: 'Ta bort formatering', titleColor: 'Textfärg',
+    titleRight: 'Höger', titleCenter: 'Centrera', titleLeft: 'Vänster', titleCaretPos: 'Markör och markering på raden', titleClr: 'Ta bort formatering', titleColor: 'Textfärg',
     titleUnarch: 'Avarkivera', titleDone: 'Markera som Läst', titleUnread: 'Flytta till Olästa', titleArch: 'Arkivera',
     titleDel: 'Radera', titleRestore: 'Återställ', titlePermDel: 'Radera Permanent', titleFavAdd: 'Lägg till Favoriter', titleFavRem: 'Ta bort från Favoriter',
     tAddNote: 'Anteckning tillagd', tMoved: 'Flyttad till papperskorg', tArched: 'Flyttad till arkiv', tRestored: 'Återställd till aktiva',
