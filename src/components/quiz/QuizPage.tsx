@@ -567,7 +567,7 @@ export function QuizPage() {
   const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
 
   // Study mode
-  const [studyMode, setStudyMode] = useState<'flashcard' | 'written' | null>(null);
+  const [studyMode, setStudyMode] = useState<'flashcard' | null>(null);
   // Optional filtered deck chosen from inside study mode (🎯 Välj)
   const [studyDeck, setStudyDeck] = useState<QuizItem[] | null>(null);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
@@ -1440,12 +1440,6 @@ export function QuizPage() {
                   className="flex items-center gap-1 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                 >
                   {t.quizFlashcards}
-                </button>
-                <button
-                  onClick={() => { setStudyDeck(null); setStudyMode('written'); }}
-                  className="flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
-                >
-                  {t.quizTypeAnswer}
                 </button>
                 <button
                   onClick={handleAddQuestionClick}
