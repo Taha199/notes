@@ -437,23 +437,25 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           </div>
         ) : (
         <div>
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{labels.answer}</p>
+            {hasAi && (
+              <button
+                type="button"
+                onClick={handleAiAnswer}
+                disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
+                className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+              >
+                {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {labels.aiAnswer}
+              </button>
+            )}
+          </div>
           <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
             <RichTextEditor
               html={answer}
               onChange={onChangeA}
               placeholder={`${labels.answer}...`}
               minHeight="90px"
-              toolbarEnd={hasAi ? (
-                <button
-                  type="button"
-                  onClick={handleAiAnswer}
-                  disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
-                  className="flex h-7 items-center gap-1 whitespace-nowrap rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
-                >
-                  {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {labels.aiAnswer}
-                </button>
-              ) : undefined}
             />
           </div>
           {aiSuggestion !== null && (
