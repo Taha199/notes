@@ -10,6 +10,7 @@ type BlockAlign = 'left' | 'center' | 'right';
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
+const TAB_INDENT = '    ';
 
 interface Props {
   html: string;
@@ -431,6 +432,18 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       const nextText = topBlocks[i + 1].textContent?.replace(/\u200B/g, '').trim() ?? '';
       if (prevText && nextText) block.remove();
     }
+  };
+
+  const handleEditorTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Tab' || e.shiftKey) return;
+    e.preventDefault();
+    const ed = editorRef.current;
+    if (!ed) return;
+
+    document.execCommand('styleWithCSS', false, 'true');
+    document.execCommand('insertText', false, TAB_INDENT);
+    saveSel();
+    emitHtml(ed.innerHTML);
   };
 
   const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1003,6 +1016,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
+          handleEditorTab(e);
           handleEditorEnter(e);
         }}
         onInput={() => {
