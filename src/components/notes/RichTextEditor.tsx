@@ -67,6 +67,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!r) return;
     savedRange.current = r.cloneRange();
     if (!r.collapsed) savedFormattingRange.current = r.cloneRange();
+    else savedFormattingRange.current = null;
   };
 
   const captureFormattingSelection = () => {
@@ -78,6 +79,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!ed.contains(range.commonAncestorContainer)) return;
     savedRange.current = range.cloneRange();
     if (!range.collapsed) savedFormattingRange.current = range.cloneRange();
+    else savedFormattingRange.current = null;
   };
 
   const selectEditorEnd = () => {
@@ -112,9 +114,71 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     pendingFontSize.current = null;
   };
 
-  const applyFontSizeStyle = (span: HTMLSpanElement, px: number) => {
-    span.style.fontSize = `${px}px`;
-    span.style.lineHeight = FONT_LINE_HEIGHT;
+  const stripEmptyFontSpans = (ed: HTMLElement) => {
+    ed.querySelectorAll<HTMLElement>('span[style*="font-size"]').forEach((span) => {
+      const text = span.textContent?.replace(/\u200B/g, '').trim() ?? '';
+      if (!text) span.remove();
+    });
+  };
+
+  const finalizePendingFontMarkers = (ed: HTMLElement) => {
+    ed.querySelectorAll<HTMLElement>('[data-font-marker]').forEach((s) => {
+      s.innerHTML = s.innerHTML.replace(/\u200B/g, '');
+      if (!s.textContent?.trim()) s.remove();
+      else s.removeAttribute('data-font-marker');
+    });
+    pendingFontSize.current = null;
+  };
+
+  const readFontSizeAtCaret = (ed: HTMLElement): number => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return DEFAULT_FONT_PX;
+    let node: Node | null = sel.anchorNode;
+    if (node?.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    while (node instanceof HTMLElement && node !== ed) {
+      if (node.tagName === 'SPAN' && node.style.fontSize) {
+        const px = parseInt(node.style.fontSize, 10);
+        if (px) return px;
+      }
+      node = node.parentElement;
+    }
+    if (node === ed) return DEFAULT_FONT_PX;
+    if (node instanceof Element && ed.contains(node)) {
+      const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
+      if (px) return px;
+    }
+    return DEFAULT_FONT_PX;
+  };
+
+  const sanitizeCaretFontContext = (ed: HTMLElement) => {
+    stripEmptyFontSpans(ed);
+    pendingFontSize.current = null;
+
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed) return;
+
+    let node: Node | null = range.startContainer;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    while (node instanceof HTMLElement && node !== ed) {
+      if (node.tagName === 'SPAN' && node.style.fontSize) {
+        const visible = node.textContent?.replace(/\u200B/g, '').trim() ?? '';
+        if (!visible) {
+          const pos = document.createRange();
+          pos.setStartBefore(node);
+          pos.collapse(true);
+          node.remove();
+          sel.removeAllRanges();
+          sel.addRange(pos);
+          savedRange.current = pos.cloneRange();
+        }
+        break;
+      }
+      node = node.parentElement;
+    }
+
+    setFontSize(readFontSizeAtCaret(ed));
   };
 
   const getBlockParent = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
@@ -182,6 +246,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       }
 
       normalizeEmptyFontBlocks(ed);
+      stripEmptyFontSpans(ed);
       pendingFontSize.current = null;
       setFontSize(DEFAULT_FONT_PX);
       saveSel();
@@ -216,16 +281,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   // ── Font size indicator in sync with caret ────────────────────────────
   const syncFontSizeFromCaret = () => {
     const ed = editorRef.current;
-    const sel = window.getSelection();
-    if (!ed || !sel || sel.rangeCount === 0) return;
-    let node: Node | null = sel.anchorNode;
-    if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-    if (node === ed) {
-      if (fontSizeRef.current !== 15) setFontSize(15);
-    } else if (node instanceof Element && ed.contains(node)) {
-      const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
-      if (px && px !== fontSizeRef.current) setFontSize(px);
-    }
+    if (!ed) return;
+    const px = readFontSizeAtCaret(ed);
+    if (px !== fontSizeRef.current) setFontSize(px);
   };
 
   useEffect(() => {
@@ -259,18 +317,17 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     onChange(ed.innerHTML);
   };
 
+  const applyFontSizeStyle = (span: HTMLSpanElement, px: number) => {
+    span.style.fontSize = `${px}px`;
+    span.style.lineHeight = FONT_LINE_HEIGHT;
+  };
+
   // ── Font size ─────────────────────────────────────────────────────────
   const clearPendingFontMarker = () => {
     const ed = editorRef.current;
-    if (ed) {
-      ed.querySelectorAll<HTMLElement>('[data-font-marker]').forEach((s) => {
-        // Remove the zero-width space; if span is now empty, remove it entirely.
-        s.innerHTML = s.innerHTML.replace(/​/g, '');
-        if (!s.textContent?.trim()) s.remove();
-        else s.removeAttribute('data-font-marker');
-      });
-    }
-    pendingFontSize.current = null;
+    if (!ed) return;
+    finalizePendingFontMarkers(ed);
+    stripEmptyFontSpans(ed);
   };
 
   const setFutureFontSize = (px: number) => {
@@ -297,8 +354,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       }
     }
 
-    // Finalize any previous marker (keep its text, just stop tracking it).
-    ed.querySelectorAll<HTMLElement>('[data-font-marker]').forEach((s) => s.removeAttribute('data-font-marker'));
+    // Finalize any previous marker instead of leaving orphan styled spans behind.
+    finalizePendingFontMarkers(ed);
+    stripEmptyFontSpans(ed);
     // Insert a zero-width-space span at the caret so the browser types INTO it.
     const span = document.createElement('span');
     span.setAttribute('data-font-marker', 'true');
@@ -317,48 +375,97 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     onChange(ed.innerHTML);
   };
 
+  const restoreSavedRange = (saved: Range | null, ed: HTMLElement): Range | null => {
+    if (!saved || saved.collapsed || !ed.contains(saved.commonAncestorContainer)) return null;
+    ed.focus({ preventScroll: true });
+    const s = window.getSelection();
+    s?.removeAllRanges();
+    s?.addRange(saved);
+    return s?.getRangeAt(0) ?? saved;
+  };
+
+  const resolveFormatRange = (): Range | null => {
+    const ed = editorRef.current;
+    if (!ed) return null;
+
+    if (document.activeElement === ed) {
+      const s = window.getSelection();
+      if (s && s.rangeCount > 0 && !s.isCollapsed && ed.contains(s.anchorNode)) {
+        return s.getRangeAt(0);
+      }
+    }
+
+    return (
+      restoreSavedRange(savedFormattingRange.current?.cloneRange() ?? null, ed)
+      ?? restoreSavedRange(savedRange.current?.cloneRange() ?? null, ed)
+    );
+  };
+
+  const getStylingSpanForRange = (range: Range, ed: HTMLElement): HTMLSpanElement | null => {
+    const ancestor = range.commonAncestorContainer;
+    let span: HTMLSpanElement | null = null;
+    if (ancestor instanceof HTMLSpanElement && ancestor.style.fontSize && ed.contains(ancestor)) {
+      span = ancestor;
+    } else if (
+      ancestor.nodeType === Node.TEXT_NODE
+      && ancestor.parentElement instanceof HTMLSpanElement
+      && ancestor.parentElement.style.fontSize
+      && ed.contains(ancestor.parentElement)
+    ) {
+      span = ancestor.parentElement;
+    }
+    if (!span) return null;
+
+    const spanRange = document.createRange();
+    spanRange.selectNodeContents(span);
+    if (
+      range.compareBoundaryPoints(Range.START_TO_START, spanRange) === 0
+      && range.compareBoundaryPoints(Range.END_TO_END, spanRange) === 0
+    ) {
+      return span;
+    }
+    return null;
+  };
+
+  const readFontSizeFromRange = (range: Range, ed: HTMLElement): number => {
+    const styled = getStylingSpanForRange(range, ed);
+    if (styled) {
+      const px = parseInt(styled.style.fontSize, 10);
+      if (px) return px;
+    }
+    let node: Node | null = range.startContainer;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    if (!(node instanceof Element) || !ed.contains(node)) return fontSizeRef.current;
+    const px = Math.round(parseFloat(getComputedStyle(node).fontSize));
+    return px || fontSizeRef.current;
+  };
+
   const applyPx = (px: number) => {
     const ed = editorRef.current;
     if (!ed) return;
 
-    let range: Range | null = null;
-    if (document.activeElement === ed) {
-      // Editor has focus: trust the live selection (e.g. +/− buttons with e.preventDefault).
-      const s = window.getSelection();
-      if (s && s.rangeCount > 0 && !s.isCollapsed && ed.contains(s.anchorNode)) {
-        range = s.getRangeAt(0);
-      }
-    }
-
-    if (!range) {
-      const savedFmt = savedFormattingRange.current?.cloneRange() ?? null;
-      if (savedFmt && !savedFmt.collapsed && ed.contains(savedFmt.commonAncestorContainer)) {
-        ed.focus({ preventScroll: true });
-        const s = window.getSelection();
-        s?.removeAllRanges();
-        s?.addRange(savedFmt);
-        range = s?.getRangeAt(0) ?? savedFmt;
-      }
-    }
-
-    if (!range && document.activeElement !== ed) {
-      // Editor blurred (e.g. typed a value in the font-size input): restore savedRange.
-      const saved = savedRange.current?.cloneRange() ?? null;
-      if (saved && !saved.collapsed) {
-        ed.focus({ preventScroll: true });
-        const s = window.getSelection();
-        s?.removeAllRanges();
-        s?.addRange(saved);
-        range = s?.getRangeAt(0) ?? null;
-      }
-    }
-
-    if (!range) {
+    const range = resolveFormatRange();
+    if (!range || range.collapsed) {
       setFutureFontSize(px);
       return;
     }
 
     savedFormattingRange.current = null;
+
+    const existingSpan = getStylingSpanForRange(range, ed);
+    if (existingSpan) {
+      applyFontSizeStyle(existingSpan, px);
+      const nextRange = document.createRange();
+      nextRange.selectNodeContents(existingSpan);
+      const finalSel = window.getSelection();
+      finalSel?.removeAllRanges();
+      finalSel?.addRange(nextRange);
+      setFontSize(px);
+      saveSel();
+      onChange(ed.innerHTML);
+      return;
+    }
+
     const contents = range.extractContents();
     contents.querySelectorAll?.('[style]').forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
@@ -375,6 +482,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const finalSel = window.getSelection();
     finalSel?.removeAllRanges();
     finalSel?.addRange(nextRange);
+    setFontSize(px);
     saveSel();
     onChange(ed.innerHTML);
   };
@@ -385,16 +493,13 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   const changeSize = (d: number) => {
-    const s = nextSz(fontSizeRef.current, d);
     const ed = editorRef.current;
-    const sel = window.getSelection();
-    const hasLiveSelection = !!(ed && sel && sel.rangeCount > 0 && !sel.isCollapsed && ed.contains(sel.anchorNode));
-    const savedFmt = savedFormattingRange.current;
-    const hasSavedSelection = !!(savedFmt && !savedFmt.collapsed && ed?.contains(savedFmt.commonAncestorContainer));
-    if (hasLiveSelection || hasSavedSelection) {
-      applyPx(s);
+    if (!ed) return;
+    const range = resolveFormatRange();
+    if (range && !range.collapsed) {
+      applyPx(nextSz(readFontSizeFromRange(range, ed), d));
     } else {
-      setFutureFontSize(s);
+      setFutureFontSize(nextSz(fontSizeRef.current, d));
     }
   };
 
@@ -651,7 +756,16 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         contentEditable={editable}
         data-placeholder={placeholder}
         dir="auto"
-        onMouseDown={() => { clearPendingFontMarker(); }}
+        onMouseDown={() => {
+          const ed = editorRef.current;
+          if (!ed) return;
+          clearPendingFontMarker();
+          requestAnimationFrame(() => sanitizeCaretFontContext(ed));
+        }}
+        onFocus={() => {
+          const ed = editorRef.current;
+          if (ed) sanitizeCaretFontContext(ed);
+        }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
           handleEditorEnter(e);
@@ -664,6 +778,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
                 node.setAttribute('dir', 'auto');
               }
             });
+            stripEmptyFontSpans(ed);
+            syncFontSizeFromCaret();
           }
           onChange(ed?.innerHTML ?? '');
         }}
