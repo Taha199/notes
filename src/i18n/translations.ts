@@ -68,7 +68,11 @@ export interface Translation {
   filesSizeLimit: string;
   filesUpload: string;
   filesEmpty: string;
-  filesOpen: string;
+  filesDownload: string;
+  filesPreview: string;
+  filesRename: string;
+  filesRenameSuccess: string;
+  filesPreviewUnavailable: string;
   filesDelete: string;
   filesStored: string;
   filesTooLarge: string;
@@ -245,7 +249,7 @@ export const LANGS: Record<Lang, Translation> = {
     tagFav: '⭐ Favourite', tagRead: '✓ Read', tagUnread: '📖 Unread', tagArch: '🗄 Archived',
     emptyNotes: 'No notes here', emptySearch: 'No results', emptyTrash: 'Trash is empty',
     filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesSizeLimit: 'Maximum file size: 20 MB per file.', filesUpload: 'Choose files',
-    filesEmpty: 'No files uploaded yet', filesOpen: 'Open', filesDelete: 'Delete', filesStored: 'Saved in cloud',
+    filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewUnavailable: 'Preview is not available for this file type.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough',
@@ -347,7 +351,7 @@ export const LANGS: Record<Lang, Translation> = {
     tagFav: '⭐ Favorit', tagRead: '✓ Läst', tagUnread: '📖 Oläst', tagArch: '🗄 Arkiverad',
     emptyNotes: 'Inga anteckningar här', emptySearch: 'Inga resultat', emptyTrash: 'Papperskorgen är tom',
     filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesSizeLimit: 'Maximal filstorlek: 20 MB per fil.', filesUpload: 'Välj filer',
-    filesEmpty: 'Inga filer uppladdade ännu', filesOpen: 'Öppna', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
+    filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewUnavailable: 'Förhandsgranskning finns inte för den här filtypen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken',

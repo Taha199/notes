@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -16,6 +17,8 @@ interface StoredFile {
   /** Legacy uploads stored inline in Realtime Database */
   dataUrl?: string;
 }
+
+type PreviewMode = 'image' | 'pdf' | 'text' | 'unsupported';
 
 const FILE_INPUT_ID = 'files-upload-input';
 
@@ -42,6 +45,19 @@ function fileHref(file: StoredFile) {
   return file.downloadUrl || file.dataUrl || '#';
 }
 
+function previewModeFor(file: StoredFile): PreviewMode {
+  const type = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+  if (type.startsWith('image/')) return 'image';
+  if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+  if (type.startsWith('text/') || /\.(txt|md|json|csv|log|xml|html?)$/i.test(name)) return 'text';
+  return 'unsupported';
+}
+
+function canPreview(file: StoredFile) {
+  return previewModeFor(file) !== 'unsupported';
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -51,16 +67,115 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+async function loadTextPreview(file: StoredFile, href: string): Promise<string> {
+  if (file.dataUrl?.startsWith('data:')) {
+    const match = file.dataUrl.match(/^data:([^,]*),(.*)$/s);
+    if (!match) return '';
+    const [, meta, payload] = match;
+    if (meta.includes('base64')) return atob(payload);
+    return decodeURIComponent(payload);
+  }
+  const res = await fetch(href);
+  return res.text();
+}
+
+function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () => void; t: { filesDownload: string; filesPreviewUnavailable: string } }) {
+  const href = fileHref(file);
+  const mode = previewModeFor(file);
+  const [textContent, setTextContent] = useState('');
+  const [loadingText, setLoadingText] = useState(mode === 'text');
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (mode !== 'text') return;
+    let cancelled = false;
+    setLoadingText(true);
+    (async () => {
+      try {
+        const body = await loadTextPreview(file, href);
+        if (!cancelled) setTextContent(body);
+      } catch {
+        if (!cancelled) setTextContent(t.filesPreviewUnavailable);
+      } finally {
+        if (!cancelled) setLoadingText(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [file, href, mode, t.filesPreviewUnavailable]);
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={file.name}
+      className="fixed inset-0 z-[10000] flex flex-col bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+        <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
+        <div className="flex shrink-0 items-center gap-2">
+          <a
+            href={href}
+            download={file.name}
+            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {t.filesDownload}
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
+        {mode === 'image' && (
+          <img src={href} alt={file.name} className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl" />
+        )}
+        {mode === 'pdf' && (
+          <iframe title={file.name} src={href} className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl" />
+        )}
+        {mode === 'text' && (
+          <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
+            {loadingText ? '…' : textContent}
+          </pre>
+        )}
+        {mode === 'unsupported' && (
+          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewUnavailable}</p>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function FilesPage({ search }: { search: string }) {
   const { t } = useLanguage();
   const { user } = useAuth();
   const { show } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
+
+  useEffect(() => {
+    if (renamingId) renameInputRef.current?.focus();
+  }, [renamingId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,11 +294,49 @@ export function FilesPage({ search }: { search: string }) {
     setError('');
     const previous = files;
     setFiles((prev) => prev.filter((item) => item.id !== file.id));
+    if (previewFile?.id === file.id) setPreviewFile(null);
+    if (renamingId === file.id) setRenamingId(null);
     try {
       if (file.storagePath) {
         await deleteObject(ref(storage, file.storagePath));
       }
       await deleteFileMeta(file.id);
+    } catch {
+      setFiles(previous);
+      setError(t.filesSaveFailed);
+    }
+  };
+
+  const startRename = (file: StoredFile) => {
+    setRenamingId(file.id);
+    setRenameValue(file.name);
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
+    setRenameValue('');
+  };
+
+  const commitRename = async (file: StoredFile) => {
+    const next = renameValue.trim();
+    if (!next) {
+      cancelRename();
+      return;
+    }
+    if (next === file.name) {
+      cancelRename();
+      return;
+    }
+
+    const updated = { ...file, name: next };
+    const previous = files;
+    setFiles((prev) => prev.map((item) => (item.id === file.id ? updated : item)));
+    if (previewFile?.id === file.id) setPreviewFile(updated);
+    cancelRename();
+
+    try {
+      await saveFileMeta(updated);
+      show(t.filesRenameSuccess);
     } catch {
       setFiles(previous);
       setError(t.filesSaveFailed);
@@ -275,21 +428,56 @@ export function FilesPage({ search }: { search: string }) {
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">📄</div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-bold text-app-text dark:text-gray-100">{file.name}</div>
+                  {renamingId === file.id ? (
+                    <form
+                      className="flex items-center gap-1.5"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void commitRename(file);
+                      }}
+                    >
+                      <input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Escape') cancelRename(); }}
+                        maxLength={200}
+                        className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-bg px-2 py-1 text-sm font-semibold text-app-text outline-none focus:border-primary dark:border-white/15 dark:bg-white/5 dark:text-gray-100"
+                      />
+                      <button type="submit" className="rounded-lg bg-primary px-2 py-1 text-xs font-semibold text-white hover:bg-primary-dark">✓</button>
+                      <button type="button" onClick={cancelRename} className="rounded-lg border border-app-border px-2 py-1 text-xs text-app-text-secondary hover:bg-app-bg dark:border-white/15">✕</button>
+                    </form>
+                  ) : (
+                    <div className="truncate text-sm font-bold text-app-text dark:text-gray-100" title={file.name}>{file.name}</div>
+                  )}
                   <div className="mt-1 text-xs text-app-text-secondary dark:text-gray-400">{formatSize(file.size)} · {t.filesStored}</div>
                   <div className="mt-0.5 truncate text-[11px] text-app-text-secondary/70 dark:text-gray-500">{file.addedAt}</div>
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
+                {canPreview(file) && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewFile(file)}
+                    className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:hover:bg-white/10"
+                  >
+                    {t.filesPreview}
+                  </button>
+                )}
                 <a
                   href={fileHref(file)}
                   download={file.name}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
                 >
-                  {t.filesOpen}
+                  {t.filesDownload}
                 </a>
+                <button
+                  type="button"
+                  onClick={() => startRename(file)}
+                  className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:hover:bg-white/10"
+                >
+                  {t.filesRename}
+                </button>
                 <button onClick={() => void removeFile(file)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
                   {t.filesDelete}
                 </button>
@@ -297,6 +485,10 @@ export function FilesPage({ search }: { search: string }) {
             </div>
           ))}
         </div>
+      )}
+
+      {previewFile && (
+        <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} t={t} />
       )}
     </div>
   );
