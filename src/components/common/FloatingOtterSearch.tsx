@@ -39,26 +39,18 @@ function dockedPopupFeatures(width: number, height: number, left: number, top: n
   ].join(',');
 }
 
-function separateWindowFeatures() {
-  const width = Math.min(1280, window.screen.availWidth - 48);
-  const height = Math.min(900, window.screen.availHeight - 48);
-  const left = Math.round((window.screen.availWidth - width) / 2);
-  const top = Math.round((window.screen.availHeight - height) / 2);
-  return {
-    features: [
-      `width=${width}`,
-      `height=${height}`,
-      `left=${left}`,
-      `top=${top}`,
-      'resizable=yes',
-      'scrollbars=yes',
-      'toolbar=yes',
-      'location=yes',
-      'menubar=yes',
-      'status=no',
-    ].join(','),
-    name: `tahanote-google-tab-${Date.now()}`,
-  };
+function openBrowserTab(url: string) {
+  // Only two arguments — no window features — so the browser opens a real tab.
+  const tab = window.open(url, '_blank');
+  if (tab) return;
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 export function FloatingOtterSearch() {
@@ -135,18 +127,20 @@ export function FloatingOtterSearch() {
     setPopupReady(false);
   }, []);
 
-  const openGoogleSeparate = useCallback(
+  const openInBrowserTab = useCallback(
     (url: string) => {
       closeDockedGoogle();
       setOpen(false);
-      const { features, name } = separateWindowFeatures();
-      const tab = window.open(url, name, features);
-      if (!tab) {
-        window.open(url, '_blank');
-      }
+      openBrowserTab(url);
     },
     [closeDockedGoogle],
   );
+
+  const openSeparateTab = (e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openInBrowserTab(googleSearchUrl(query));
+  };
 
   useEffect(() => {
     document.body.classList.toggle('otter-search-open', open);
@@ -213,14 +207,8 @@ export function FloatingOtterSearch() {
     setOpen(true);
   };
 
-  const openSeparateTab = (e: MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openGoogleSeparate(googleSearchUrl(query));
-  };
-
   const openExternal = () => {
-    openGoogleSeparate(currentUrl);
+    openInBrowserTab(currentUrl);
   };
 
   return createPortal(
