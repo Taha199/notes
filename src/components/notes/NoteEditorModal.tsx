@@ -4,7 +4,6 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { RichTextEditor } from './RichTextEditor';
-import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini';
 import type { Page } from '../../types';
 
@@ -529,7 +528,6 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
               <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">{t.noteCreatedLabel}: {note.date}</span>
               {note.lastEdited && <span className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">{t.noteUpdatedLabel}: {note.lastEdited}</span>}
             </div>
-            <CloudSaveIndicator size="xs" />
             {lastSavedAt && (
               <span className="text-[10px] text-app-text-secondary/50 dark:text-gray-600">
                 {t.noteLastSaved}: {lastSavedAt}

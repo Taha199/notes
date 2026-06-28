@@ -1,7 +1,6 @@
 import type { Draft } from '../../contexts/NotesContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { RichTextEditor } from './RichTextEditor';
 
 export function DraftEditor({ draft, index, total }: { draft: Draft; index: number; total: number }) {
@@ -40,7 +39,6 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
           >
             ✓ {t.saveDraft}
           </button>
-          <CloudSaveIndicator size="xs" />
         </div>
         <button onClick={() => removeDraft(draft.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10">
           🗑
