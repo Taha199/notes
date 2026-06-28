@@ -128,3 +128,36 @@ body {
   flex: 1 1 0;
 }
 
+:root {
+  --otter-panel-width: 540px;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --otter-panel-width: min(92vw, 400px);
+  }
+}
+
+body.otter-search-open #root {
+  margin-right: var(--otter-panel-width);
+  transition: margin-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body.otter-search-open .otter-search-panel {
+  transform: translateX(0);
+}
+
+.otter-search-panel {
+  width: var(--otter-panel-width);
+  transform: translateX(100%);
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.otter-launcher {
+  transition: right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body.otter-search-open .otter-launcher {
+  right: calc(var(--otter-panel-width) + 12px);
+}
+

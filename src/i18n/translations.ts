@@ -230,6 +230,10 @@ export interface Translation {
   otterSearchToggle: string;
   otterSearchClose: string;
   otterSearchExternal: string;
+  otterSearchPopupBlocked: string;
+  otterSearchPopupRetry: string;
+  otterSearchPopupDocked: string;
+  otterSearchPopupLoading: string;
   // Email verification
   verifyTitle: string;
   verifySub: string;
@@ -343,6 +347,11 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchToggle: 'Open Google search',
     otterSearchClose: 'Close search panel',
     otterSearchExternal: 'Open in new tab',
+    otterSearchPopupBlocked:
+      'Your browser blocked the Google panel. Allow popups for tahanote.com, or use the button below.',
+    otterSearchPopupRetry: 'Open Google',
+    otterSearchPopupDocked: 'Google is open in the panel beside the site — use your normal browser session.',
+    otterSearchPopupLoading: 'Opening Google…',
     verifyTitle: 'Verify your email',
     verifySub: 'We sent a verification link to',
     verifyResend: 'Resend email',
@@ -453,6 +462,11 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchToggle: 'Öppna Google-sök',
     otterSearchClose: 'Stäng sökpanelen',
     otterSearchExternal: 'Öppna i ny flik',
+    otterSearchPopupBlocked:
+      'Webbläsaren blockerade Google-panelen. Tillåt popup-fönster för tahanote.com, eller använd knappen nedan.',
+    otterSearchPopupRetry: 'Öppna Google',
+    otterSearchPopupDocked: 'Google är öppet i panelen bredvid sidan — med din vanliga webbläsarsession.',
+    otterSearchPopupLoading: 'Öppnar Google…',
     verifyTitle: 'Verifiera din e-post',
     verifySub: 'Vi skickade en verifieringslänk till',
     verifyResend: 'Skicka igen',
