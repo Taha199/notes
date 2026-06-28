@@ -5,6 +5,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL } from '../../lib/firebase';
+import { getStorageLimitMB, mbToBytes } from '../../lib/storageQuota';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
@@ -12,7 +13,6 @@ function formatBytes(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
-const STORAGE_CAP = 50 * 1024 * 1024; // 50 MB display cap
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -34,6 +34,8 @@ export function SettingsPage() {
   const { notes, quizzes, quizSets, quizFolders, chats, tokenUsage, resetTokens, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
   const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(true);
+  const [storageLimitMB, setStorageLimitMB] = useState(50);
+  const [filesBytes, setFilesBytes] = useState(0);
 
   // Profile
   const [nameInput, setNameInput] = useState(user?.displayName || '');
@@ -95,12 +97,38 @@ export function SettingsPage() {
     const notesBytes = new TextEncoder().encode(JSON.stringify(notes)).length;
     const quizBytes = new TextEncoder().encode(JSON.stringify([...quizzes, ...quizSets, ...quizFolders])).length;
     const chatBytes = new TextEncoder().encode(JSON.stringify(chats)).length;
-    const total = notesBytes + quizBytes + chatBytes;
-    return { notesBytes, quizBytes, chatBytes, total };
-  }, [notes, quizzes, quizSets, quizFolders, chats]);
+    const total = notesBytes + quizBytes + chatBytes + filesBytes;
+    return { notesBytes, quizBytes, chatBytes, filesBytes, total };
+  }, [notes, quizzes, quizSets, quizFolders, chats, filesBytes]);
 
-  const pct = Math.min(100, (storage.total / STORAGE_CAP) * 100);
+  const storageCapBytes = mbToBytes(storageLimitMB);
+  const pct = Math.min(100, (storage.total / storageCapBytes) * 100);
   const barColor = pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-amber-500' : 'bg-primary';
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user?.uid) return;
+    (async () => {
+      try {
+        const res = await fetch(`${FB_DB_URL}/users/${user.uid}.json`);
+        const data = (await res.json()) ?? {};
+        const profile = (data.profile ?? {}) as Record<string, unknown>;
+        const filesData = data.files;
+        let filePayload = 0;
+        if (filesData) filePayload = new TextEncoder().encode(JSON.stringify(filesData)).length;
+        if (!cancelled) {
+          setStorageLimitMB(getStorageLimitMB(profile));
+          setFilesBytes(filePayload);
+        }
+      } catch {
+        if (!cancelled) {
+          setStorageLimitMB(50);
+          setFilesBytes(0);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.uid]);
 
   useEffect(() => {
     let cancelled = false;
@@ -220,13 +248,14 @@ export function SettingsPage() {
             />
           </div>
           <p className="text-right text-[11px] text-app-text-secondary/60 dark:text-gray-500">
-            {formatBytes(storage.total)} / {formatBytes(STORAGE_CAP)}
+            {formatBytes(storage.total)} / {storageLimitMB} MB
           </p>
           <div className="mt-1 space-y-2 border-t border-app-border pt-3 dark:border-white/10">
             {[
               { label: t.settingsStorageNotes, bytes: storage.notesBytes, icon: '📝' },
               { label: t.settingsStorageQuiz, bytes: storage.quizBytes, icon: '🧠' },
               { label: t.settingsStorageChat, bytes: storage.chatBytes, icon: '💬' },
+              { label: t.settingsStorageFiles, bytes: storage.filesBytes, icon: '📎' },
             ].map(({ label, bytes, icon }) => (
               <div key={label} className="flex items-center justify-between text-[13px]">
                 <span className="flex items-center gap-2 text-app-text-secondary dark:text-gray-400">

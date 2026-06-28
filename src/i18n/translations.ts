@@ -79,6 +79,7 @@ export interface Translation {
   filesSaveFailed: string;
   filesUploadFailed: string;
   filesUploadSuccess: string;
+  filesQuotaExceeded: string;
   selDel: string;
   cancelSel: string;
   emptyTrashBtn: string;
@@ -204,7 +205,9 @@ export interface Translation {
   settingsStorageNotes: string;
   settingsStorageQuiz: string;
   settingsStorageChat: string;
+  settingsStorageFiles: string;
   settingsStorageTotal: string;
+  settingsStorageLimit: string;
   settingsFolderBackup: string;
   settingsFolderBackupEmpty: string;
   settingsFolderBackupRestore: string;
@@ -250,7 +253,7 @@ export const LANGS: Record<Lang, Translation> = {
     emptyNotes: 'No notes here', emptySearch: 'No results', emptyTrash: 'Trash is empty',
     filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesSizeLimit: 'Maximum file size: 20 MB per file.', filesUpload: 'Choose files',
     filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewUnavailable: 'Preview is not available for this file type.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
-    filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded',
+    filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough',
     titleRight: 'Align Right', titleCenter: 'Center', titleLeft: 'Align Left', titleCaretPos: 'Shows where text and the cursor sit on the line', titleClr: 'Clear Formatting', titleColor: 'Text Color',
@@ -310,7 +313,9 @@ export const LANGS: Record<Lang, Translation> = {
     settingsStorageNotes: 'Notes',
     settingsStorageQuiz: 'Quiz',
     settingsStorageChat: 'AI Chat',
+    settingsStorageFiles: 'Files',
     settingsStorageTotal: 'Total used',
+    settingsStorageLimit: 'Storage limit',
     settingsFolderBackup: 'Quiz folder backups',
     settingsFolderBackupEmpty: 'No backups yet. Backups are saved automatically from now on whenever folders change.',
     settingsFolderBackupRestore: 'Restore',
@@ -352,7 +357,7 @@ export const LANGS: Record<Lang, Translation> = {
     emptyNotes: 'Inga anteckningar här', emptySearch: 'Inga resultat', emptyTrash: 'Papperskorgen är tom',
     filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesSizeLimit: 'Maximal filstorlek: 20 MB per fil.', filesUpload: 'Välj filer',
     filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewUnavailable: 'Förhandsgranskning finns inte för den här filtypen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
-    filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad',
+    filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken',
     titleRight: 'Höger', titleCenter: 'Centrera', titleLeft: 'Vänster', titleCaretPos: 'Visar var text och markör finns på raden', titleClr: 'Ta bort formatering', titleColor: 'Textfärg',
@@ -412,7 +417,9 @@ export const LANGS: Record<Lang, Translation> = {
     settingsStorageNotes: 'Anteckningar',
     settingsStorageQuiz: 'Quiz',
     settingsStorageChat: 'AI-chatt',
+    settingsStorageFiles: 'Filer',
     settingsStorageTotal: 'Totalt använt',
+    settingsStorageLimit: 'Lagringsgräns',
     settingsFolderBackup: 'Säkerhetskopior av quiz-mappar',
     settingsFolderBackupEmpty: 'Inga säkerhetskopior ännu. Från och med nu sparas en kopia automatiskt varje gång mappar ändras.',
     settingsFolderBackupRestore: 'Återställ',

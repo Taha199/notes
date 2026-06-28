@@ -5,6 +5,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { FB_DB_URL, storage } from '../../lib/firebase';
+import { calculateUserStorageBytes, getStorageLimitBytes } from '../../lib/storageQuota';
 
 interface StoredFile {
   id: string;
@@ -272,6 +273,17 @@ export function FilesPage({ search }: { search: string }) {
     setUploading(true);
     const uploaded: StoredFile[] = [];
     try {
+      const userRes = await fetch(`${FB_DB_URL}/users/${user.uid}.json`);
+      const userData = (await userRes.json()) ?? {};
+      const profile = (userData.profile ?? {}) as Record<string, unknown>;
+      const usedBytes = calculateUserStorageBytes(userData);
+      const limitBytes = getStorageLimitBytes(profile);
+      const incomingBytes = selected.reduce((sum, file) => sum + file.size, 0);
+      if (usedBytes + incomingBytes > limitBytes) {
+        setError(t.filesQuotaExceeded);
+        return;
+      }
+
       for (const file of selected) {
         const stored = await uploadOneFile(file);
         await saveFileMeta(stored);

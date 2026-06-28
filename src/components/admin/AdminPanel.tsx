@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
+import { getStorageLimitMB, MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, storageLimitPresetsMB } from '../../lib/storageQuota';
 
 interface UserRow {
   uid: string;
@@ -11,6 +12,7 @@ interface UserRow {
   provider: string;
   blocked: boolean;
   bytes: number;
+  storageLimitMB: number;
 }
 
 interface AuthUserRow {
@@ -50,6 +52,8 @@ export function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<UserRow | null>(null);
+  const [editingLimitUid, setEditingLimitUid] = useState<string | null>(null);
+  const [limitInput, setLimitInput] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -82,6 +86,7 @@ export function AdminPanel() {
           provider: (profile.provider as string) || authUser?.provider || '',
           blocked: profile.blocked === true,
           bytes,
+          storageLimitMB: getStorageLimitMB(profile),
         };
       });
       list.sort((a, b) => b.lastSeen - a.lastSeen);
@@ -131,6 +136,35 @@ export function AdminPanel() {
     }
   };
 
+  const startEditLimit = (row: UserRow) => {
+    setEditingLimitUid(row.uid);
+    setLimitInput(String(row.storageLimitMB));
+  };
+
+  const cancelEditLimit = () => {
+    setEditingLimitUid(null);
+    setLimitInput('');
+  };
+
+  const saveStorageLimit = async (row: UserRow) => {
+    const mb = Math.round(Number(limitInput));
+    if (!Number.isFinite(mb) || mb < MIN_STORAGE_LIMIT_MB || mb > MAX_STORAGE_LIMIT_MB) return;
+    setBusy(row.uid);
+    try {
+      await fetch(`${FB_DB_URL}/users/${row.uid}/profile/storageLimitMB.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mb),
+      });
+      setRows((prev) => prev.map((r) => (r.uid === row.uid ? { ...r, storageLimitMB: mb } : r)));
+      cancelEditLimit();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const usagePct = (row: UserRow) => Math.min(100, (row.bytes / (row.storageLimitMB * 1024 * 1024)) * 100);
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
       <div className="mb-5 flex items-center justify-between">
@@ -152,13 +186,14 @@ export function AdminPanel() {
         <p className="py-10 text-center text-sm text-app-text-secondary">Laddar…</p>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-900">
-          <table className="w-full min-w-[760px] text-left text-[13px]">
+          <table className="w-full min-w-[920px] text-left text-[13px]">
             <thead>
               <tr className="border-b border-app-border text-[11px] uppercase tracking-wider text-app-text-secondary/70 dark:border-white/10">
                 <th className="px-4 py-3 font-semibold">Användare</th>
                 <th className="px-4 py-3 font-semibold">Senast sedd</th>
                 <th className="px-4 py-3 font-semibold">IP-adress</th>
                 <th className="px-4 py-3 font-semibold">Lagring</th>
+                <th className="px-4 py-3 font-semibold">Gräns</th>
                 <th className="px-4 py-3 text-right font-semibold">Åtgärder</th>
               </tr>
             </thead>
@@ -182,7 +217,70 @@ export function AdminPanel() {
                   </td>
                   <td className="px-4 py-3 text-app-text-secondary dark:text-gray-400">{timeAgo(row.lastSeen)}</td>
                   <td className="px-4 py-3 font-mono text-[12px] text-app-text-secondary dark:text-gray-400">{row.ip || '—'}</td>
-                  <td className="px-4 py-3 text-app-text-secondary dark:text-gray-400">{formatBytes(row.bytes)}</td>
+                  <td className="px-4 py-3">
+                    <div className="min-w-[110px]">
+                      <div className="font-medium text-app-text dark:text-gray-200">{formatBytes(row.bytes)}</div>
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-white/10">
+                        <div
+                          className={'h-full rounded-full ' + (usagePct(row) > 90 ? 'bg-red-500' : usagePct(row) > 70 ? 'bg-amber-500' : 'bg-primary')}
+                          style={{ width: `${usagePct(row).toFixed(1)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {editingLimitUid === row.uid ? (
+                      <div className="flex min-w-[150px] flex-col gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            min={MIN_STORAGE_LIMIT_MB}
+                            max={MAX_STORAGE_LIMIT_MB}
+                            value={limitInput}
+                            onChange={(e) => setLimitInput(e.target.value)}
+                            className="w-20 rounded-lg border border-app-border bg-app-bg px-2 py-1 text-[12px] outline-none focus:border-primary dark:border-white/15 dark:bg-white/5"
+                          />
+                          <span className="text-[12px] text-app-text-secondary">MB</span>
+                          <button
+                            type="button"
+                            onClick={() => void saveStorageLimit(row)}
+                            disabled={busy === row.uid}
+                            className="rounded-md bg-primary px-2 py-1 text-[11px] font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditLimit}
+                            className="rounded-md border border-app-border px-2 py-1 text-[11px] text-app-text-secondary dark:border-white/15"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {storageLimitPresetsMB().map((mb) => (
+                            <button
+                              key={mb}
+                              type="button"
+                              onClick={() => setLimitInput(String(mb))}
+                              className="rounded-md border border-app-border px-1.5 py-0.5 text-[10px] text-app-text-secondary hover:bg-app-bg dark:border-white/15"
+                            >
+                              {mb}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => startEditLimit(row)}
+                        className="rounded-lg border border-app-border px-2.5 py-1.5 text-[12px] font-semibold text-app-text transition hover:bg-app-bg dark:border-white/15 dark:text-gray-200 dark:hover:bg-white/5"
+                        title="Ändra lagringsgräns"
+                      >
+                        {row.storageLimitMB} MB ✏️
+                      </button>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
                       {row.email !== ADMIN_EMAIL && (
