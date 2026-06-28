@@ -605,33 +605,101 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     return newBlock;
   };
 
-  /** After Enter from a centered/right line, start the new line left-aligned. */
-  const ensureNewLineLeftAfterEnter = (ed: HTMLElement) => {
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
-    const block = getLineBlock(sel.anchorNode, ed);
-    if (!block) return;
+  const caretFollowsLineBreakInBlock = (block: HTMLElement, range: Range): boolean => {
+    const pre = document.createRange();
+    pre.selectNodeContents(block);
+    pre.setEnd(range.startContainer, range.startOffset);
+    return !!pre.cloneContents().querySelector('br');
+  };
 
+  const createLeftLineFromCaret = (block: HTMLElement, range: Range): HTMLElement => {
+    const newBlock = document.createElement('div');
+    newBlock.setAttribute('dir', 'auto');
+    resetBlockToLeft(newBlock);
+
+    const tail = document.createRange();
+    tail.setStart(range.endContainer, range.endOffset);
+    tail.setEnd(block, block.childNodes.length);
+    const tailContents = tail.extractContents();
+    const tailHasContent =
+      (tailContents.textContent?.replace(/\u200B/g, '').trim() ?? '').length > 0
+      || tailContents.querySelector('br');
+
+    if (tailHasContent) newBlock.appendChild(tailContents);
+    else newBlock.innerHTML = '<br>';
+
+    block.parentNode?.insertBefore(newBlock, block.nextSibling);
+    if (!block.textContent?.replace(/\u200B/g, '').trim()) block.innerHTML = '<br>';
+    placeCaretInBlock(newBlock, true);
+    return newBlock;
+  };
+
+  /** Keep the caret on a left-aligned line when moving below centered/right text. */
+  const ensureCaretOnOwnLeftLine = (ed: HTMLElement): boolean => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return false;
+    const range = sel.getRangeAt(0);
+    const block = getLineBlock(range.startContainer, ed);
+    if (!block) return false;
+
+    const align = readBlockAlignment(block);
+    const blockText = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
     const prev = block.previousElementSibling;
     const afterAlignedLine =
       prev instanceof HTMLElement && BLOCK_TAGS.has(prev.tagName) && readBlockAlignment(prev) !== 'left';
 
-    const blockAlign = readBlockAlignment(block);
-    const textInBlock = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
-    const needsSplit = blockAlign !== 'left' && !!block.querySelector('br') && textInBlock.length > 0;
-
-    if (needsSplit) {
+    if (align !== 'left' && caretFollowsLineBreakInBlock(block, range)) {
       splitAlignedBlockAtCaret(ed);
-      return;
+      return true;
     }
 
-    if (blockAlign !== 'left') {
+    if (align !== 'left' && afterAlignedLine) {
+      resetBlockToLeft(block);
+      if (!blockText) placeCaretInBlock(block, true);
+      return true;
+    }
+
+    if (align !== 'left' && !blockText) {
       resetBlockToLeft(block);
       placeCaretInBlock(block, true);
-      return;
+      return true;
     }
 
-    if (afterAlignedLine) placeCaretInBlock(block, true);
+    if (align === 'left' && afterAlignedLine && !blockText) {
+      placeCaretInBlock(block, true);
+      return true;
+    }
+
+    return false;
+  };
+
+  const finishNewLineEditing = (ed: HTMLElement) => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+
+    const block = getBlockParent(sel.anchorNode, ed);
+    if (block) {
+      const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
+      if (!text) {
+        block.innerHTML = '<br>';
+        block.style.removeProperty('font-size');
+        block.style.removeProperty('line-height');
+        const range = document.createRange();
+        range.setStart(block, 0);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+
+    normalizeEmptyFontBlocks(ed);
+    stripEmptyFontSpans(ed);
+    pendingFontSize.current = null;
+    setFontSize(DEFAULT_FONT_PX);
+    saveSel();
+    readCommandState();
+    syncCaretVisual();
+    emitHtml(ed.innerHTML);
   };
 
   const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -641,37 +709,23 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!ed) return;
 
     clearPendingFontMarker();
+
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const block = getLineBlock(sel.anchorNode, ed);
+    const range = sel.getRangeAt(0);
+
+    if (block && readBlockAlignment(block) !== 'left') {
+      createLeftLineFromCaret(block, range);
+      finishNewLineEditing(ed);
+      return;
+    }
+
     document.execCommand('insertParagraph');
 
     requestAnimationFrame(() => {
-      const sel = window.getSelection();
-      if (!sel?.rangeCount) return;
-
-      ensureNewLineLeftAfterEnter(ed);
-
-      const block = getBlockParent(sel.anchorNode, ed);
-      if (block) {
-        const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
-        if (!text) {
-          block.innerHTML = '<br>';
-          block.style.removeProperty('font-size');
-          block.style.removeProperty('line-height');
-          const range = document.createRange();
-          range.setStart(block, 0);
-          range.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      }
-
-      normalizeEmptyFontBlocks(ed);
-      stripEmptyFontSpans(ed);
-      pendingFontSize.current = null;
-      setFontSize(DEFAULT_FONT_PX);
-      saveSel();
-      readCommandState();
-      syncCaretVisual();
-      emitHtml(ed.innerHTML);
+      ensureCaretOnOwnLeftLine(ed);
+      finishNewLineEditing(ed);
     });
   };
 
@@ -1263,7 +1317,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           clearPendingFontMarker();
           requestAnimationFrame(() => sanitizeCaretFontContext(ed));
         }}
-        onMouseUp={() => syncCaretVisual()}
+        onMouseUp={() => {
+          const ed = editorRef.current;
+          if (ed && ensureCaretOnOwnLeftLine(ed)) finishNewLineEditing(ed);
+          else syncCaretVisual();
+        }}
         onFocus={() => {
           const ed = editorRef.current;
           if (ed) {
@@ -1275,6 +1333,12 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
           handleEditorEnter(e);
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            requestAnimationFrame(() => {
+              const ed = editorRef.current;
+              if (ed && ensureCaretOnOwnLeftLine(ed)) finishNewLineEditing(ed);
+            });
+          }
         }}
         onInput={() => {
           const ed = editorRef.current;
@@ -1286,6 +1350,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             });
             stripEmptyFontSpans(ed);
             syncFontSizeFromCaret();
+            if (ensureCaretOnOwnLeftLine(ed)) readCommandState();
           }
           emitHtml(ed?.innerHTML ?? '');
         }}
