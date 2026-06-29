@@ -23,7 +23,7 @@ export function Sidebar({
 }) {
   const { t } = useLanguage();
   const { notes, trashedQuizzes, quizSets, quizFolders } = useNotes();
-  const { user, hasPassword, hasAi, isPlus, signOut } = useAuth();
+  const { user, hasPassword, hasAi, isPlus, profilePhotoURL, signOut } = useAuth();
   const { show } = useToast();
   const { dark, toggleDark } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
@@ -83,6 +83,7 @@ export function Sidebar({
   );
 
   const name = user?.displayName || user?.email?.split('@')[0] || t.userName;
+  const avatarInitial = name.charAt(0).toUpperCase();
 
   return (
     <aside className={
@@ -157,13 +158,19 @@ export function Sidebar({
             <div className="relative flex-shrink-0">
               <div
                 className={
-                  'flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shadow-md ' +
-                  (showPlusProfile
-                    ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 shadow-violet-400/40'
-                    : 'bg-gradient-to-br from-primary to-[#8A82FF] shadow-primary/30')
+                  'relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-xs font-bold text-white shadow-md ' +
+                  (profilePhotoURL
+                    ? ''
+                    : showPlusProfile
+                      ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 shadow-violet-400/40'
+                      : 'bg-gradient-to-br from-primary to-[#8A82FF] shadow-primary/30')
                 }
               >
-                {name.charAt(0).toUpperCase()}
+                {profilePhotoURL ? (
+                  <img src={profilePhotoURL} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                ) : (
+                  avatarInitial
+                )}
               </div>
               {showPlusProfile && (
                 <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white bg-amber-400 text-[8px] leading-none dark:border-gray-900">
@@ -193,13 +200,19 @@ export function Sidebar({
             <div className="relative">
               <div
                 className={
-                  'flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white ' +
-                  (showPlusProfile
-                    ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 ring-2 ring-amber-300/80'
-                    : 'bg-gradient-to-br from-primary to-[#8A82FF]')
+                  'relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white ' +
+                  (profilePhotoURL
+                    ? ''
+                    : showPlusProfile
+                      ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 ring-2 ring-amber-300/80'
+                      : 'bg-gradient-to-br from-primary to-[#8A82FF]')
                 }
               >
-                {name.charAt(0).toUpperCase()}
+                {profilePhotoURL ? (
+                  <img src={profilePhotoURL} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                ) : (
+                  avatarInitial
+                )}
               </div>
               {showPlusProfile && (
                 <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-violet-600 px-1 py-px text-[7px] font-bold text-white">+</span>

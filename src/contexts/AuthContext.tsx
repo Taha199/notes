@@ -63,6 +63,7 @@ interface AuthCtx {
   setPasswordForAccount: (pass: string) => Promise<void>;
   updateDisplayName: (name: string) => Promise<void>;
   updateProfilePhoto: (file: File) => Promise<void>;
+  profilePhotoURL: string | null;
   sendVerification: () => Promise<void>;
   reloadUser: () => Promise<void>;
 }
@@ -135,6 +136,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [user?.uid, user?.email, user?.displayName]);
 
+  const profilePhotoURL =
+    user?.photoURL ||
+    (typeof profile?.photoURL === 'string' ? profile.photoURL : null) ||
+    null;
+
   const value: AuthCtx = {
     user,
     loading,
@@ -143,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isPlus: isPlusUser(profile, user?.email),
     hasAi: hasAiAccess(profile, user?.email),
     profileLoading,
+    profilePhotoURL,
     signIn: async (email, pass) => {
       const cred = await signInWithEmailAndPassword(auth, email, pass);
       // Unverified accounts are treated as "not registered" — resend a fresh

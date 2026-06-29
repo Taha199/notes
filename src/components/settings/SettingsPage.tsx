@@ -28,7 +28,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 export function SettingsPage() {
-  const { user, hasPassword, isPlus, hasAi, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
+  const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
   const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
@@ -161,7 +161,7 @@ export function SettingsPage() {
   }, [listQuizFolderBackups]);
 
   const avatar = (user?.displayName || user?.email || '?').charAt(0).toUpperCase();
-  const photoUrl = photoPreview || user?.photoURL || null;
+  const photoUrl = photoPreview || profilePhotoURL;
   const isAdmin = user?.email === ADMIN_EMAIL;
   const showPlusProfile = isPlus || isAdmin;
 
