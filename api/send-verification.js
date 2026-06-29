@@ -80,7 +80,7 @@ function buildEmail({ verifyUrl, lang }) {
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #e7e3ff;border-radius:16px;overflow:hidden">
       <tr><td style="padding:30px 34px 24px;background:#fbfaff;border-bottom:1px solid #ece9ff">
         <table role="presentation" cellspacing="0" cellpadding="0"><tr>
-          <td style="width:42px;height:42px;border-radius:10px;background:#6c63ff;text-align:center;font-size:24px;line-height:42px">T</td>
+          <td style="width:42px;height:42px"><img src="${APP_URL}/logo.png" alt="Taha Note" width="42" height="42" style="display:block;border:0;border-radius:10px" /></td>
           <td style="padding-left:12px;font-size:22px;font-weight:800;color:#5148c9">Taha Note</td>
         </tr></table>
       </td></tr>
