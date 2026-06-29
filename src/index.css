@@ -113,6 +113,21 @@ body {
   -webkit-background-clip: text;
 }
 
+.brand-wordmark-plus-suffix {
+  background: linear-gradient(135deg, #b45309 0%, #d97706 35%, #fbbf24 70%, #fde68a 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 8px 22px rgba(217, 119, 6, 0.32);
+}
+
+.dark .brand-wordmark-plus-suffix {
+  background: linear-gradient(135deg, #fbbf24 0%, #fde68a 45%, #fef3c7 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 .logo-plus-wrap {
   filter: drop-shadow(0 6px 14px rgba(108, 99, 255, 0.22));
 }
