@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { QuizItem } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -48,6 +49,8 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
   const [selectedOpt, setSelectedOpt] = useState<number | null>(null);
   const [scopeKey, setScopeKey] = useState('all');
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const scopeBtnRef = useRef<HTMLButtonElement>(null);
   const scopeMenuRef = useRef<HTMLDivElement>(null);
 
   const pool = allItems ?? items;
@@ -80,13 +83,46 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
   useEffect(() => {
     if (!scopeMenuOpen) return;
     const close = (e: MouseEvent) => {
-      if (scopeMenuRef.current && !scopeMenuRef.current.contains(e.target as Node)) {
-        setScopeMenuOpen(false);
-      }
+      const target = e.target as Node;
+      if (scopeMenuRef.current?.contains(target) || scopeBtnRef.current?.contains(target)) return;
+      setScopeMenuOpen(false);
+      setMenuPos(null);
     };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [scopeMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!scopeMenuOpen) return;
+    const updatePos = () => {
+      const btn = scopeBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setMenuPos({ top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) });
+    };
+    updatePos();
+    window.addEventListener('resize', updatePos);
+    window.addEventListener('scroll', updatePos, true);
+    return () => {
+      window.removeEventListener('resize', updatePos);
+      window.removeEventListener('scroll', updatePos, true);
+    };
+  }, [scopeMenuOpen]);
+
+  const toggleScopeMenu = () => {
+    setScopeMenuOpen((open) => {
+      if (open) {
+        setMenuPos(null);
+        return false;
+      }
+      const btn = scopeBtnRef.current;
+      if (btn) {
+        const r = btn.getBoundingClientRect();
+        setMenuPos({ top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) });
+      }
+      return true;
+    });
+  };
 
   const saveAndNext = (isKnown: boolean) => {
     if (!current) return;
@@ -157,10 +193,11 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
           <p className={'truncate max-w-[180px] text-app-text dark:text-gray-100 ' + (mode === 'flashcard' ? 'text-[11px] text-app-text-secondary dark:text-gray-500' : 'text-[13px] font-semibold')}>{title}</p>
         </div>
         <div className="flex items-center gap-2">
-          <div ref={scopeMenuRef} className="relative">
+          <div className="relative">
             <button
+              ref={scopeBtnRef}
               type="button"
-              onClick={() => setScopeMenuOpen((o) => !o)}
+              onClick={toggleScopeMenu}
               title={t.quizStudyChooseQuestions}
               aria-expanded={scopeMenuOpen}
               className="flex max-w-[148px] items-center gap-1.5 rounded-xl border border-app-border bg-white/90 px-2.5 py-1.5 text-[11px] font-semibold text-app-text shadow-sm backdrop-blur-sm transition hover:border-primary/35 hover:shadow-md dark:border-white/10 dark:bg-gray-900/90 dark:text-gray-200 sm:max-w-[176px]"
@@ -171,34 +208,6 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                 <path d="M6 9l6 6 6-6" />
               </svg>
             </button>
-            {scopeMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-[110]" onClick={() => setScopeMenuOpen(false)} aria-hidden />
-                <div className="animate-menu-pop absolute top-full right-0 z-[120] mt-1.5 w-[228px] origin-top-right overflow-hidden rounded-2xl border border-app-border bg-white p-1.5 shadow-2xl ring-1 ring-black/5 dark:border-white/10 dark:bg-gray-900 dark:ring-white/10">
-                  <p className="px-3 pb-1 pt-1.5 text-[9px] font-bold uppercase tracking-wider text-app-text-secondary/50">{t.quizStudyWhatToStudy}</p>
-                  {scopes.map((s) => {
-                    const active = scopeKey === s.key;
-                    return (
-                      <button
-                        key={s.key}
-                        type="button"
-                        disabled={s.items.length === 0}
-                        onClick={() => { pickScope(s.items, s.key); setScopeMenuOpen(false); }}
-                        className={'flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ' +
-                          (active ? 'bg-primary/10 font-semibold text-primary' : 'hover:bg-app-bg dark:hover:bg-white/5')}
-                      >
-                        <span className={'min-w-0 flex-1 truncate ' + (active ? '' : scopeLabelCls(s.key))}>{s.label}</span>
-                        <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ' +
-                          (active ? 'bg-primary/15 text-primary' : 'bg-app-bg text-app-text-secondary/70 dark:bg-white/10')}>
-                          {s.items.length}
-                        </span>
-                        {active && <span className="shrink-0 text-[11px] text-primary">✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
           </div>
           <span className="text-[12px] font-semibold text-app-text-secondary dark:text-gray-400">{index + 1}/{deck.length}</span>
         </div>
@@ -389,6 +398,36 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
         <span className="text-[11px] text-app-text-secondary/40">{fmt(t.quizStudyRemaining, deck.length - index - 1)}</span>
         <span className="text-[12px] font-semibold text-emerald-500">✓ {sessionKnown.size}</span>
       </div>
+      {scopeMenuOpen && menuPos && createPortal(
+        <div
+          ref={scopeMenuRef}
+          className="animate-menu-pop fixed z-[300] w-[228px] origin-top-right overflow-hidden rounded-2xl border border-app-border bg-white p-1.5 shadow-2xl ring-1 ring-black/5 dark:border-white/10 dark:bg-gray-900 dark:ring-white/10"
+          style={{ top: menuPos.top, right: menuPos.right }}
+        >
+          <p className="px-3 pb-1 pt-1.5 text-[9px] font-bold uppercase tracking-wider text-app-text-secondary/50">{t.quizStudyWhatToStudy}</p>
+          {scopes.map((s) => {
+            const active = scopeKey === s.key;
+            return (
+              <button
+                key={s.key}
+                type="button"
+                disabled={s.items.length === 0}
+                onClick={() => { pickScope(s.items, s.key); setScopeMenuOpen(false); setMenuPos(null); }}
+                className={'flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ' +
+                  (active ? 'bg-primary/10 font-semibold text-primary' : 'hover:bg-app-bg dark:hover:bg-white/5')}
+              >
+                <span className={'min-w-0 flex-1 truncate ' + (active ? '' : scopeLabelCls(s.key))}>{s.label}</span>
+                <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ' +
+                  (active ? 'bg-primary/15 text-primary' : 'bg-app-bg text-app-text-secondary/70 dark:bg-white/10')}>
+                  {s.items.length}
+                </span>
+                {active && <span className="shrink-0 text-[11px] text-primary">✓</span>}
+              </button>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
