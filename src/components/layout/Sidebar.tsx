@@ -94,10 +94,13 @@ export function Sidebar({
         {(!collapsed || mobileOpen) && (
           <div className="flex items-center gap-2.5">
             <Logo size={38} plus={showPlusProfile} />
-            <span className="inline-flex items-baseline">
+            <span
+              className="inline-flex items-baseline"
+              aria-label={showPlusProfile ? `${t.appName} Plus` : t.appName}
+            >
               <span className={'brand-wordmark brand-wordmark-sidebar' + (showPlusProfile ? ' brand-wordmark-plus' : '')}>{t.appName}</span>
               {showPlusProfile && (
-                <span className="brand-wordmark brand-wordmark-sidebar brand-wordmark-plus-suffix"> Plus</span>
+                <span className="brand-wordmark brand-wordmark-sidebar brand-wordmark-plus-suffix" aria-hidden="true">+</span>
               )}
             </span>
           </div>

@@ -114,6 +114,12 @@ body {
 }
 
 .brand-wordmark-plus-suffix {
+  margin-inline-start: 0.28em;
+  font-size: 0.82em;
+  font-weight: 900;
+  line-height: 1;
+  position: relative;
+  top: -0.42em;
   background: linear-gradient(135deg, #b45309 0%, #d97706 35%, #fbbf24 70%, #fde68a 100%);
   background-clip: text;
   -webkit-background-clip: text;
