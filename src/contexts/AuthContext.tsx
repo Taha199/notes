@@ -187,7 +187,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!auth.currentUser?.email) throw new Error('no-email');
       const cred = EmailAuthProvider.credential(auth.currentUser.email, pass);
       await linkWithCredential(auth.currentUser, cred);
-      setHasPassword(true);
+      await auth.currentUser.reload();
+      setUser({ ...auth.currentUser });
+      setHasPassword(auth.currentUser.providerData.some((p) => p.providerId === 'password'));
     },
     updateDisplayName: async (name) => {
       if (!auth.currentUser) throw new Error('no-user');

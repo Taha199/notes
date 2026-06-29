@@ -274,7 +274,7 @@ export function SettingsPage() {
             <div>
               <p className="text-sm font-medium text-app-text dark:text-gray-100">••••••••</p>
               <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
-                {lang === 'sv' ? 'Lösenord är aktiverat' : 'Password is set'}
+                {t.settingsPasswordSet}
               </p>
             </div>
             <button
@@ -288,19 +288,17 @@ export function SettingsPage() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-app-text dark:text-gray-100">
-                {lang === 'sv' ? 'Inget lösenord inställt' : 'No password set'}
+                {t.settingsNoPassword}
               </p>
               <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
-                {lang === 'sv'
-                  ? 'Kontot använder endast Google-inloggning'
-                  : 'Account uses Google sign-in only'}
+                {t.settingsNoPasswordSub}
               </p>
             </div>
             <button
               onClick={() => setShowSetPass(true)}
               className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90"
             >
-              {t.settingsSetPass}
+              {t.settingsCreatePassword}
             </button>
           </div>
         )}

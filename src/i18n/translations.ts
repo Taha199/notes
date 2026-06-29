@@ -202,6 +202,10 @@ export interface Translation {
   settingsSave: string;
   settingsSaved: string;
   settingsPassword: string;
+  settingsPasswordSet: string;
+  settingsNoPassword: string;
+  settingsNoPasswordSub: string;
+  settingsCreatePassword: string;
   settingsChangePass: string;
   settingsSetPass: string;
   settingsPassEmailSent: string;
@@ -494,6 +498,10 @@ export const LANGS: Record<Lang, Translation> = {
     settingsSave: 'Save',
     settingsSaved: '✓ Saved',
     settingsPassword: 'Password',
+    settingsPasswordSet: 'Password is set',
+    settingsNoPassword: 'No password set',
+    settingsNoPasswordSub: 'Account uses Google sign-in only',
+    settingsCreatePassword: 'Create a password',
     settingsChangePass: 'Send password reset email',
     settingsSetPass: 'Set a password',
     settingsPassEmailSent: '✓ Reset email sent',
@@ -782,6 +790,10 @@ export const LANGS: Record<Lang, Translation> = {
     settingsSave: 'Spara',
     settingsSaved: '✓ Sparad',
     settingsPassword: 'Lösenord',
+    settingsPasswordSet: 'Lösenord är aktiverat',
+    settingsNoPassword: 'Inget lösenord inställt',
+    settingsNoPasswordSub: 'Kontot använder endast Google-inloggning',
+    settingsCreatePassword: 'Skapa lösenord',
     settingsChangePass: 'Skicka e-post för återställning',
     settingsSetPass: 'Skapa ett lösenord',
     settingsPassEmailSent: '✓ Återställningsmail skickat',
