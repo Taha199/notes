@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { QuizItem } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -47,6 +47,8 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
   const [round, setRound] = useState(1);
   const [selectedOpt, setSelectedOpt] = useState<number | null>(null);
   const [scopeKey, setScopeKey] = useState('all');
+  const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  const scopeMenuRef = useRef<HTMLDivElement>(null);
 
   const pool = allItems ?? items;
   const scopes = [
@@ -74,6 +76,17 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
     setRevealed(false);
     setSelectedOpt(null);
   }, [index]);
+
+  useEffect(() => {
+    if (!scopeMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (scopeMenuRef.current && !scopeMenuRef.current.contains(e.target as Node)) {
+        setScopeMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [scopeMenuOpen]);
 
   const saveAndNext = (isKnown: boolean) => {
     if (!current) return;
@@ -129,9 +142,13 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
 
   if (!current) return null;
 
+  const activeScope = scopes.find((s) => s.key === scopeKey) ?? scopes[0];
+  const scopeLabelCls = (key: string) =>
+    key === 'learning' ? 'text-red-500' : key === 'known' ? 'text-emerald-600' : key === 'new' ? 'text-app-text-secondary dark:text-gray-400' : 'text-app-text dark:text-gray-100';
+
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-white dark:bg-gray-950">
-      <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
+      <div className="relative z-30 flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
         <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">✕</button>
         <div className="text-center">
           {mode === 'flashcard' && (
@@ -140,22 +157,46 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
           <p className={'truncate max-w-[180px] text-app-text dark:text-gray-100 ' + (mode === 'flashcard' ? 'text-[11px] text-app-text-secondary dark:text-gray-500' : 'text-[13px] font-semibold')}>{title}</p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={scopeKey}
-            onChange={(e) => {
-              const key = e.target.value;
-              const scope = scopes.find((s) => s.key === key);
-              if (scope) pickScope(scope.items, key);
-            }}
-            title={t.quizStudyChooseQuestions}
-            className="max-w-[148px] truncate rounded-lg border border-app-border bg-white py-1.5 pl-2 pr-7 text-[11px] font-semibold text-app-text-secondary outline-none transition hover:bg-app-bg focus:border-primary/40 dark:border-white/10 dark:bg-gray-900 dark:text-gray-300 sm:max-w-[180px]"
-          >
-            {scopes.map((s) => (
-              <option key={s.key} value={s.key} disabled={s.items.length === 0}>
-                {s.label} ({s.items.length})
-              </option>
-            ))}
-          </select>
+          <div ref={scopeMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setScopeMenuOpen((o) => !o)}
+              title={t.quizStudyChooseQuestions}
+              aria-expanded={scopeMenuOpen}
+              className="flex max-w-[148px] items-center gap-1.5 rounded-xl border border-app-border bg-white/90 px-2.5 py-1.5 text-[11px] font-semibold text-app-text shadow-sm backdrop-blur-sm transition hover:border-primary/35 hover:shadow-md dark:border-white/10 dark:bg-gray-900/90 dark:text-gray-200 sm:max-w-[176px]"
+            >
+              <span className="min-w-0 truncate">{activeScope.label}</span>
+              <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-primary">{activeScope.items.length}</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={'shrink-0 text-app-text-secondary/60 transition-transform duration-200 ' + (scopeMenuOpen ? 'rotate-180' : '')}>
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            {scopeMenuOpen && (
+              <div className="animate-menu-pop absolute bottom-full right-0 z-[120] mb-2 w-[228px] origin-bottom-right overflow-hidden rounded-2xl border border-app-border bg-white p-1.5 shadow-2xl ring-1 ring-black/5 dark:border-white/10 dark:bg-gray-900 dark:ring-white/10">
+                <p className="px-3 pb-1 pt-1.5 text-[9px] font-bold uppercase tracking-wider text-app-text-secondary/50">{t.quizStudyWhatToStudy}</p>
+                {scopes.map((s) => {
+                  const active = scopeKey === s.key;
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      disabled={s.items.length === 0}
+                      onClick={() => { pickScope(s.items, s.key); setScopeMenuOpen(false); }}
+                      className={'flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ' +
+                        (active ? 'bg-primary/10 font-semibold text-primary' : 'hover:bg-app-bg dark:hover:bg-white/5')}
+                    >
+                      <span className={'min-w-0 flex-1 truncate ' + (active ? '' : scopeLabelCls(s.key))}>{s.label}</span>
+                      <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ' +
+                        (active ? 'bg-primary/15 text-primary' : 'bg-app-bg text-app-text-secondary/70 dark:bg-white/10')}>
+                        {s.items.length}
+                      </span>
+                      {active && <span className="shrink-0 text-[11px] text-primary">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <span className="text-[12px] font-semibold text-app-text-secondary dark:text-gray-400">{index + 1}/{deck.length}</span>
         </div>
       </div>

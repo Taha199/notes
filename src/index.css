@@ -42,6 +42,10 @@ body {
   from { opacity: 0; transform: translateY(24px); }
   to { opacity: 1; transform: translateY(0); }
 }
+@keyframes menuPop {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 @keyframes floatSlow {
   0%, 100% { transform: translateY(0) translateX(0); }
   50% { transform: translateY(-20px) translateX(10px); }
@@ -59,6 +63,7 @@ body {
 }
 
 .animate-fade-in { animation: fadeIn .4s ease both; }
+.animate-menu-pop { animation: menuPop .2s cubic-bezier(.22,1,.36,1) both; }
 .animate-slide-up { animation: slideUp .5s cubic-bezier(.22,1,.36,1) both; }
 .animate-float-slow { animation: floatSlow 9s ease-in-out infinite; }
 .animate-float-slower { animation: floatSlower 12s ease-in-out infinite; }
