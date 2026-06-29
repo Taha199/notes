@@ -11,6 +11,7 @@ import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
+import { SITE_URL } from '../../lib/seo';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
@@ -1445,6 +1446,8 @@ export function QuizPage() {
                       answer: t.quizAnswerLabel,
                       explanation: t.quizExplanationLabel,
                       generatedOn: t.quizPdfGeneratedOn,
+                      brandName: t.appName,
+                      website: new URL(SITE_URL).host,
                     });
                   }}
                   className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-3 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
