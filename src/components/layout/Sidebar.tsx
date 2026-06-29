@@ -93,8 +93,8 @@ export function Sidebar({
       <div className="flex min-h-[68px] items-center justify-between border-b border-app-border px-3.5 dark:border-white/10">
         {(!collapsed || mobileOpen) && (
           <div className="flex items-center gap-2.5">
-            <Logo size={38} />
-            <span className="brand-wordmark brand-wordmark-sidebar">{t.appName}</span>
+            <Logo size={38} plus={showPlusProfile} />
+            <span className={'brand-wordmark brand-wordmark-sidebar' + (showPlusProfile ? ' brand-wordmark-plus' : '')}>{t.appName}</span>
           </div>
         )}
         <button

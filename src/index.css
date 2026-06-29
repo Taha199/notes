@@ -100,6 +100,27 @@ body {
   font-size: 1.25rem;
 }
 
+.brand-wordmark-plus {
+  background: linear-gradient(135deg, #6d28d9 0%, #6c63ff 38%, #d97706 72%, #fbbf24 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  text-shadow: 0 10px 28px rgba(124, 58, 237, 0.28);
+}
+
+.dark .brand-wordmark-plus {
+  background: linear-gradient(135deg, #e9d5ff 0%, #c4b5fd 30%, #fbbf24 68%, #fde68a 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+.logo-plus-wrap {
+  filter: drop-shadow(0 6px 14px rgba(108, 99, 255, 0.22));
+}
+
+.logo-plus-img {
+  object-fit: cover;
+}
+
 [contenteditable]:empty:before {
   content: attr(data-placeholder);
   color: #A8A8C0;
