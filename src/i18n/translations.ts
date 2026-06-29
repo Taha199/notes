@@ -513,7 +513,7 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchTitle: 'Search',
     otterSearchPlaceholder: 'Search Google…',
     otterSearchGo: 'Search',
-    otterSearchToggle: 'Open Google search',
+    otterSearchToggle: 'Open Google in new tab',
     otterSearchClose: 'Close search panel',
     otterSearchExternal: 'Open in new tab',
     otterSearchPopupBlocked:
@@ -798,7 +798,7 @@ export const LANGS: Record<Lang, Translation> = {
     otterSearchTitle: 'Sök',
     otterSearchPlaceholder: 'Sök på Google…',
     otterSearchGo: 'Sök',
-    otterSearchToggle: 'Öppna Google-sök',
+    otterSearchToggle: 'Öppna Google i ny flik',
     otterSearchClose: 'Stäng sökpanelen',
     otterSearchExternal: 'Öppna i ny flik',
     otterSearchPopupBlocked:
