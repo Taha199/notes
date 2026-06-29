@@ -354,6 +354,8 @@ export interface Translation {
   quizStudyNextArrow: string;
   quizStudyTapToReveal: string;
   quizStudyFlipCard: string;
+  quizStudyFlipBack: string;
+  quizStudyNoAnswer: string;
   quizStudyDontKnow: string;
   quizStudyKnowIt: string;
   quizStudyTypeAnswerPh: string;
@@ -639,6 +641,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizStudyNextArrow: 'Next →',
     quizStudyTapToReveal: 'Tap to reveal answer',
     quizStudyFlipCard: 'Flip card',
+    quizStudyFlipBack: 'Flip back',
+    quizStudyNoAnswer: 'No answer written',
     quizStudyDontKnow: "Don't know",
     quizStudyKnowIt: 'Know it',
     quizStudyTypeAnswerPh: 'Type your answer... (Enter to check)',
@@ -922,6 +926,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizStudyNextArrow: 'Nästa →',
     quizStudyTapToReveal: 'Tryck för att se svaret',
     quizStudyFlipCard: 'Vänd kort',
+    quizStudyFlipBack: 'Vänd tillbaka',
+    quizStudyNoAnswer: 'Inget svar skrivet',
     quizStudyDontKnow: 'Kan inte',
     quizStudyKnowIt: 'Kan',
     quizStudyTypeAnswerPh: 'Skriv ditt svar... (Enter för att rätta)',

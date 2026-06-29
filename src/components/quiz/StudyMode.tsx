@@ -221,9 +221,9 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
               </div>
             </div>
           ) : (
-          <div className="w-full max-w-3xl flex flex-col items-center">
+          <div className="w-full max-w-4xl flex flex-col items-center">
             <div className="w-full" style={{ perspective: '1600px' }}>
-              <div style={{ transformStyle: 'preserve-3d', transition: 'transform 0.55s cubic-bezier(.4,0,.2,1)', transform: flipped ? 'rotateY(180deg)' : 'none', position: 'relative', minHeight: flipped ? '380px' : '420px' }}>
+              <div style={{ transformStyle: 'preserve-3d', transition: 'transform 0.55s cubic-bezier(.4,0,.2,1)', transform: flipped ? 'rotateY(180deg)' : 'none', position: 'relative', minHeight: flipped ? '460px' : '420px' }}>
                 <div
                   style={{ backfaceVisibility: 'hidden', background: 'linear-gradient(160deg,#26304f 0%,#1b2440 60%,#161d36 100%)' }}
                   className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-8 shadow-2xl ring-1 ring-white/10 sm:p-10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
@@ -235,32 +235,40 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); setFlipped(true); } }}
                     placeholder={t.quizStudyTypeAnswerPh}
-                    rows={3}
+                    rows={4}
                     className="mt-6 w-full max-w-xl resize-none rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-[14px] leading-relaxed text-white placeholder:text-white/30 outline-none focus:border-indigo-400/50 focus:ring-2 focus:ring-indigo-400/20"
                   />
                 </div>
                 <div
                   style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)', background: 'linear-gradient(160deg,#1f3a36 0%,#17312f 55%,#13262a 100%)' }}
-                  className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-8 shadow-2xl ring-1 ring-white/10 sm:p-10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
+                  className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-6 shadow-2xl ring-1 ring-white/10 sm:p-8 [&_img]:my-2 [&_img]:max-h-40 [&_img]:rounded-xl"
                 >
-                  {input.trim() && (
-                    <div className="mb-5 w-full max-w-xl rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-left">
-                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/80">{t.quizStudyYourAnswer}</p>
-                      <p dir="auto" className="text-[15px] leading-relaxed text-white [overflow-wrap:anywhere]">{input}</p>
+                  <div className="grid w-full max-w-3xl gap-4 md:grid-cols-2">
+                    <div className="flex min-h-[140px] flex-col rounded-2xl border border-blue-400/35 bg-blue-500/10 p-4 text-left">
+                      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-blue-300/90">{t.quizStudyYourAnswer}</p>
+                      <p dir="auto" className={'flex-1 text-[15px] leading-relaxed [overflow-wrap:anywhere] ' + (input.trim() ? 'text-white' : 'italic text-white/40')}>
+                        {input.trim() || t.quizStudyNoAnswer}
+                      </p>
                     </div>
-                  )}
-                  <p className="mb-4 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300/70">{t.quizAnswerLabel}</p>
-                  <div dir="auto" className="mx-auto w-full max-w-xl px-2 text-center text-[20px] leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
+                    <div className="flex min-h-[140px] flex-col rounded-2xl border border-emerald-400/35 bg-emerald-500/10 p-4 text-left">
+                      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-emerald-300/90">{t.quizStudyCorrectAnswer}</p>
+                      <div dir="auto" className="flex-1 text-[15px] leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-8 flex gap-4">
-              {!flipped ? (
-                <button onClick={() => setFlipped(true)} className="rounded-xl bg-primary px-10 py-3 text-sm font-semibold text-white hover:bg-primary-dark">
-                  {t.quizStudyFlipCard}
-                </button>
-              ) : (
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <button
+                onClick={() => setFlipped((f) => !f)}
+                className={'rounded-xl px-8 py-3 text-sm font-semibold shadow-sm transition ' + (flipped
+                  ? 'border border-app-border bg-white text-app-text hover:bg-app-bg dark:border-white/10 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-white/10'
+                  : 'bg-primary text-white hover:bg-primary-dark')}
+              >
+                {flipped ? `↩ ${t.quizStudyFlipBack}` : t.quizStudyFlipCard}
+              </button>
+              {flipped && (
                 <>
                   <button onClick={() => saveAndNext(false)} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-8 py-3 text-sm font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
                     ✗ {t.quizStudyDontKnow}
