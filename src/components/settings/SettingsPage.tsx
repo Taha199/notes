@@ -31,7 +31,7 @@ export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, updateDisplayName, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
-  const { notes, quizzes, quizSets, quizFolders, chats, tokenUsage, resetTokens, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
+  const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
   const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(true);
   const [storageLimitMB, setStorageLimitMB] = useState(100);
@@ -45,9 +45,6 @@ export function SettingsPage() {
   // Password
   const [passEmailSent, setPassEmailSent] = useState(false);
   const [showSetPass, setShowSetPass] = useState(false);
-
-  // Tokens reset
-  const [tokensReset, setTokensReset] = useState(false);
 
   // Delete account
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -84,12 +81,6 @@ export function SettingsPage() {
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
-  };
-
-  const handleResetTokens = () => {
-    resetTokens();
-    setTokensReset(true);
-    setTimeout(() => setTokensReset(false), 2500);
   };
 
   // Storage estimate
@@ -335,24 +326,6 @@ export function SettingsPage() {
             ))}
           </div>
         )}
-      </SectionCard>
-
-      {/* AI Token Usage */}
-      <SectionCard title={t.settingsAIUsage}>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[13px] text-app-text-secondary dark:text-gray-400">{t.settingsTokensUsed}</p>
-            <p className="mt-0.5 text-2xl font-bold text-app-text dark:text-gray-100">
-              {tokenUsage.toLocaleString()}
-            </p>
-          </div>
-          <button
-            onClick={handleResetTokens}
-            className="rounded-xl border border-app-border px-4 py-2 text-sm font-medium text-app-text-secondary transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10 dark:text-gray-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-          >
-            {tokensReset ? t.settingsTokensReset : t.settingsResetTokens}
-          </button>
-        </div>
       </SectionCard>
 
       {/* Danger Zone */}

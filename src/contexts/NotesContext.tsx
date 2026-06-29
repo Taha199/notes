@@ -56,9 +56,6 @@ interface NotesCtx {
   moveQuiz: (itemId: number, direction: 'up' | 'down') => void;
   reorderQuiz: (dragId: number, targetId: number) => void;
   setQuizzesOrder: (itemIds: number[]) => void;
-  tokenUsage: number;
-  addTokens: (n: number) => void;
-  resetTokens: () => void;
   addDraft: () => void;
   removeDraft: (id: string) => void;
   updateDraft: (id: string, patch: Partial<Draft>) => void;
@@ -467,17 +464,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setTokenSink(addTokens);
     return () => setTokenSink(() => {});
   }, [addTokens]);
-
-  const resetTokens = () => {
-    setTokenUsage(0);
-    if (user) {
-      fetch(`${FB_DB_URL}/users/${user.uid}/tokenUsage.json`, {
-        method: 'PUT',
-        body: JSON.stringify(0),
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-  };
 
   const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[], nextQuizSets?: QuizSet[], nextQuizFolders?: QuizFolder[]) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
@@ -1079,9 +1065,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         nowStr,
         chats,
         saveChats,
-        tokenUsage,
-        addTokens,
-        resetTokens,
       }}
     >
       {children}

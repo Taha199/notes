@@ -211,10 +211,6 @@ export interface Translation {
   settingsFolderBackupEmpty: string;
   settingsFolderBackupRestore: string;
   settingsFolderBackupRestored: string;
-  settingsAIUsage: string;
-  settingsTokensUsed: string;
-  settingsResetTokens: string;
-  settingsTokensReset: string;
   // Danger zone
   settingsDanger: string;
   settingsDeleteAccount: string;
@@ -502,10 +498,6 @@ export const LANGS: Record<Lang, Translation> = {
     settingsFolderBackupEmpty: 'No backups yet. Backups are saved automatically from now on whenever folders change.',
     settingsFolderBackupRestore: 'Restore',
     settingsFolderBackupRestored: 'Folders restored from backup',
-    settingsAIUsage: 'AI Token Usage',
-    settingsTokensUsed: 'Total tokens used',
-    settingsResetTokens: 'Reset counter',
-    settingsTokensReset: '✓ Counter reset',
     settingsDanger: 'Danger Zone',
     settingsDeleteAccount: 'Delete Account',
     settingsDeleteConfirmTitle: 'Delete your account?',
@@ -789,10 +781,6 @@ export const LANGS: Record<Lang, Translation> = {
     settingsFolderBackupEmpty: 'Inga säkerhetskopior ännu. Från och med nu sparas en kopia automatiskt varje gång mappar ändras.',
     settingsFolderBackupRestore: 'Återställ',
     settingsFolderBackupRestored: 'Mappar återställda från backup',
-    settingsAIUsage: 'AI-tokenanvändning',
-    settingsTokensUsed: 'Totalt använda tokens',
-    settingsResetTokens: 'Nollställ räknare',
-    settingsTokensReset: '✓ Räknare nollställd',
     settingsDanger: 'Farlig zon',
     settingsDeleteAccount: 'Radera konto',
     settingsDeleteConfirmTitle: 'Radera ditt konto?',
