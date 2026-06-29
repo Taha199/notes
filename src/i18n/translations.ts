@@ -90,9 +90,7 @@ export interface Translation {
   titleStrike: string;
   titleInsertDateHeader: string;
   titleRight: string;
-  titleCenter: string;
   titleLeft: string;
-  titleCaretPos: string;
   titleClr: string;
   titleColor: string;
   titleUnarch: string;
@@ -436,7 +434,7 @@ export const LANGS: Record<Lang, Translation> = {
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header",
-    titleRight: 'Align Right', titleCenter: 'Center', titleLeft: 'Align Left', titleCaretPos: 'Shows where text and the cursor sit on the line', titleClr: 'Clear Formatting', titleColor: 'Text Color',
+    titleRight: 'Align Right', titleLeft: 'Align Left', titleClr: 'Clear Formatting', titleColor: 'Text Color',
     titleUnarch: 'Unarchive', titleDone: 'Mark as Read', titleUnread: 'Move to Unread', titleArch: 'Archive',
     titleDel: 'Delete', titleRestore: 'Restore', titlePermDel: 'Delete Permanently', titleFavAdd: 'Add to Favourites', titleFavRem: 'Remove from Favourites',
     tAddNote: 'Note added', tMoved: 'Moved to trash', tArched: 'Moved to archive', tRestored: 'Restored to active',
@@ -719,7 +717,7 @@ export const LANGS: Record<Lang, Translation> = {
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik',
-    titleRight: 'Höger', titleCenter: 'Centrera', titleLeft: 'Vänster', titleCaretPos: 'Visar var text och markör finns på raden', titleClr: 'Ta bort formatering', titleColor: 'Textfärg',
+    titleRight: 'Höger', titleLeft: 'Vänster', titleClr: 'Ta bort formatering', titleColor: 'Textfärg',
     titleUnarch: 'Avarkivera', titleDone: 'Markera som Läst', titleUnread: 'Flytta till Olästa', titleArch: 'Arkivera',
     titleDel: 'Radera', titleRestore: 'Återställ', titlePermDel: 'Radera Permanent', titleFavAdd: 'Lägg till Favoriter', titleFavRem: 'Ta bort från Favoriter',
     tAddNote: 'Anteckning tillagd', tMoved: 'Flyttad till papperskorg', tArched: 'Flyttad till arkiv', tRestored: 'Återställd till aktiva',

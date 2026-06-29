@@ -11,11 +11,6 @@ const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Ho
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
 const TAB_INDENT = '    ';
-const CARET_TRACK_POS = [8, 50, 92] as const;
-const mapToCaretTrack = (pct: number) => CARET_TRACK_POS[0] + (pct / 100) * (CARET_TRACK_POS[2] - CARET_TRACK_POS[0]);
-
-type CaretVisual = { textStart: number; textEnd: number; caret: number; selected: boolean; hasText: boolean };
-
 interface Props {
   html: string;
   onChange: (html: string) => void;
@@ -56,8 +51,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const imgInputRef = useRef<HTMLInputElement>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const lastLocalHtmlRef = useRef(html);
-  const [caretVisual, setCaretVisual] = useState<CaretVisual | null>(null);
-  const caretVisualRaf = useRef<number | null>(null);
 
   const emitHtml = (next: string) => {
     lastLocalHtmlRef.current = next;
@@ -273,93 +266,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (!sel?.rangeCount) return 'left';
     const block = getAlignmentTargetBlock(sel.anchorNode, ed);
     return block ? readBlockAlignment(block) : 'left';
-  };
-
-  const rangeForCaretMeasure = (ed: HTMLElement): Range | null => {
-    const live = liveRange();
-    if (live) return live.cloneRange();
-    const saved = savedRange.current;
-    if (saved && ed.contains(saved.commonAncestorContainer)) return saved.cloneRange();
-    return null;
-  };
-
-  const readVisualCaretRange = (ed: HTMLElement, range: Range): CaretVisual | null => {
-    const edRect = ed.getBoundingClientRect();
-    const style = getComputedStyle(ed);
-    const padL = parseFloat(style.paddingLeft) || 0;
-    const padR = parseFloat(style.paddingRight) || 0;
-    const contentLeft = edRect.left + padL;
-    const contentWidth = edRect.width - padL - padR;
-    if (contentWidth <= 0) return null;
-
-    const toPct = (x: number) => Math.max(0, Math.min(100, ((x - contentLeft) / contentWidth) * 100));
-    const sel = window.getSelection();
-    const anchorNode = sel?.anchorNode ?? range.startContainer;
-
-    const boundsFromRange = (r: Range) => {
-      const rects = [...r.getClientRects()].filter((rect) => rect.width > 0 || rect.height > 0);
-      if (rects.length > 0) {
-        return {
-          left: Math.min(...rects.map((rect) => rect.left)),
-          right: Math.max(...rects.map((rect) => rect.right)),
-        };
-      }
-      const box = r.getBoundingClientRect();
-      return { left: box.left, right: Math.max(box.right, box.left + 1) };
-    };
-
-    let textLeft: number;
-    let textRight: number;
-    const selected = !range.collapsed;
-
-    if (selected) {
-      ({ left: textLeft, right: textRight } = boundsFromRange(range));
-    } else {
-      const lineBlock = getLineBlock(anchorNode, ed);
-      if (lineBlock) {
-        const lineText = lineBlock.textContent?.replace(/\u200B/g, '').trim() ?? '';
-        if (lineText) {
-          const lineRange = document.createRange();
-          lineRange.selectNodeContents(lineBlock);
-          ({ left: textLeft, right: textRight } = boundsFromRange(lineRange));
-        } else {
-          ({ left: textLeft, right: textRight } = boundsFromRange(range));
-        }
-      } else {
-        ({ left: textLeft, right: textRight } = boundsFromRange(range));
-      }
-    }
-
-    let caretX = textRight;
-    if (sel?.focusNode && ed.contains(sel.focusNode)) {
-      const focusRange = document.createRange();
-      focusRange.setStart(sel.focusNode, sel.focusOffset);
-      focusRange.collapse(true);
-      const focusRect = focusRange.getClientRects()[0] ?? focusRange.getBoundingClientRect();
-      caretX = focusRect.left + Math.max(focusRect.width, 1) / 2;
-    }
-
-    const textStartPct = mapToCaretTrack(toPct(textLeft));
-    const textEndPct = mapToCaretTrack(toPct(textRight));
-    const caretPct = mapToCaretTrack(toPct(caretX));
-    const hasText = Math.abs(textEndPct - textStartPct) > 1.5;
-
-    return { textStart: textStartPct, textEnd: textEndPct, caret: caretPct, selected, hasText };
-  };
-
-  const syncCaretVisual = () => {
-    if (caretVisualRaf.current !== null) cancelAnimationFrame(caretVisualRaf.current);
-    caretVisualRaf.current = requestAnimationFrame(() => {
-      caretVisualRaf.current = null;
-      const ed = editorRef.current;
-      if (!ed) return;
-      const range = rangeForCaretMeasure(ed);
-      if (!range) {
-        setCaretVisual(null);
-        return;
-      }
-      setCaretVisual(readVisualCaretRange(ed, range));
-    });
   };
 
   const placeCaretInBlock = (block: HTMLElement, atStart: boolean) => {
@@ -698,7 +604,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     setFontSize(DEFAULT_FONT_PX);
     saveSel();
     readCommandState();
-    syncCaretVisual();
     emitHtml(ed.innerHTML);
   };
 
@@ -763,11 +668,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (ed && sel?.rangeCount) {
       const align = readAlignmentAtCaret(ed);
       if (align === 'left') active.add('justifyLeft');
-      else if (align === 'center') active.add('justifyCenter');
-      else active.add('justifyRight');
+      else if (align !== 'center') active.add('justifyRight');
     }
     setActiveCmds(active);
-    syncCaretVisual();
     return active;
   };
 
@@ -1170,7 +1073,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
     saveSel();
     readCommandState();
-    syncCaretVisual();
     emitHtml(ed.innerHTML);
   };
 
@@ -1221,7 +1123,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
         onMouseDownCapture={() => {
           saveSel();
-          requestAnimationFrame(() => syncCaretVisual());
         }}
       >
         {/* Font size */}
@@ -1297,50 +1198,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('left'); }} title={t.titleLeft} className={btnCls(activeCmds.has('justifyLeft'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="3" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="3" y="20" width="12" height="2" rx="1"/></svg>
         </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('center'); }} title={t.titleCenter} className={btnCls(activeCmds.has('justifyCenter'))}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="6" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="6" y="20" width="12" height="2" rx="1"/></svg>
-        </button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('right'); }} title={t.titleRight} className={btnCls(activeCmds.has('justifyRight'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="9" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="9" y="20" width="12" height="2" rx="1"/></svg>
         </button>
-
-        {/* Caret / selection position on the line */}
-        <div
-          title={t.titleCaretPos}
-          aria-label={t.titleCaretPos}
-          className="relative mx-0.5 h-7 w-[72px] shrink-0 rounded-lg border border-app-border bg-white dark:border-white/10 dark:bg-gray-900"
-        >
-          <div className="pointer-events-none absolute inset-x-2 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-app-border/70 dark:bg-white/15" />
-          {CARET_TRACK_POS.map((p) => (
-            <div
-              key={p}
-              className="pointer-events-none absolute top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-border/45 dark:bg-white/20"
-              style={{ left: `${p}%` }}
-            />
-          ))}
-          {caretVisual && (
-            <>
-              {caretVisual.hasText && (
-                <div
-                  className={
-                    'pointer-events-none absolute top-1/2 h-2.5 -translate-y-1/2 rounded-sm ' +
-                    (caretVisual.selected
-                      ? 'bg-amber-300/80 ring-1 ring-amber-400/60 dark:bg-amber-400/35 dark:ring-amber-300/40'
-                      : 'bg-primary/20 ring-1 ring-primary/35 dark:bg-primary/25 dark:ring-primary/40')
-                  }
-                  style={{
-                    left: `${Math.min(caretVisual.textStart, caretVisual.textEnd)}%`,
-                    width: `${Math.max(Math.abs(caretVisual.textEnd - caretVisual.textStart), 2.5)}%`,
-                  }}
-                />
-              )}
-              <div
-                className="pointer-events-none absolute top-1/2 z-[1] h-3.5 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-sm ring-1 ring-white/80 dark:ring-black/20"
-                style={{ left: `${caretVisual.caret}%` }}
-              />
-            </>
-          )}
-        </div>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
@@ -1382,16 +1242,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         onMouseUp={() => {
           const ed = editorRef.current;
           if (ed && ensureCaretOnOwnLeftLine(ed)) finishNewLineEditing(ed);
-          else syncCaretVisual();
         }}
         onFocus={() => {
           const ed = editorRef.current;
-          if (ed) {
-            sanitizeCaretFontContext(ed);
-            syncCaretVisual();
-          }
+          if (ed) sanitizeCaretFontContext(ed);
         }}
-        onKeyUp={() => syncCaretVisual()}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
           handleEditorEnter(e);
