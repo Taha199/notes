@@ -27,6 +27,7 @@ async function sendVerificationEmailDirect(email: string): Promise<void> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     console.error('Verification email failed', err);
+    throw new Error(typeof err?.error === 'string' ? err.error : 'send-failed');
   }
 }
 
@@ -39,7 +40,8 @@ async function sendResetEmailDirect(email: string): Promise<void> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || 'send-failed');
+    console.error('Password reset email failed', err);
+    throw new Error(typeof err?.error === 'string' ? err.error : 'send-failed');
   }
 }
 

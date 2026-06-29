@@ -9,15 +9,19 @@ export function VerifyEmailPage() {
   const { user, signOut, sendVerification, reloadUser, deleteAccount } = useAuth();
   const { t } = useLanguage();
   const [resent, setResent] = useState(false);
+  const [sendError, setSendError] = useState(false);
   const [checking, setChecking] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
   const handleResend = async () => {
+    setSendError(false);
     try {
       await sendVerification();
       setResent(true);
       setTimeout(() => setResent(false), 3000);
-    } catch { /* ignore */ }
+    } catch {
+      setSendError(true);
+    }
   };
 
   const handleCheck = async () => {
@@ -62,6 +66,9 @@ export function VerifyEmailPage() {
           >
             {checking ? t.verifyCheck : t.verifyDone}
           </button>
+          {sendError && (
+            <p className="text-center text-sm text-red-500">{t.verifySendFail}</p>
+          )}
           <button
             onClick={handleResend}
             className="w-full rounded-xl border border-app-border py-3 text-sm font-semibold text-app-text transition hover:border-primary/40 hover:bg-primary/5 hover:text-primary dark:border-white/10 dark:text-gray-200"

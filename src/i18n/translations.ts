@@ -252,6 +252,7 @@ export interface Translation {
   verifySub: string;
   verifyResend: string;
   verifyResent: string;
+  verifySendFail: string;
   verifyDone: string;
   verifyCheck: string;
   verifyCancel: string;
@@ -548,6 +549,7 @@ export const LANGS: Record<Lang, Translation> = {
     verifySub: 'We sent a verification link to',
     verifyResend: 'Resend email',
     verifyResent: '✓ Email sent',
+    verifySendFail: 'Could not send email. Try again in a moment.',
     verifyDone: 'I have verified',
     verifyCheck: 'Checking...',
     verifyCancel: 'Cancel registration & delete account',
@@ -841,6 +843,7 @@ export const LANGS: Record<Lang, Translation> = {
     verifySub: 'Vi skickade en verifieringslänk till',
     verifyResend: 'Skicka igen',
     verifyResent: '✓ E-post skickad',
+    verifySendFail: 'Kunde inte skicka e-post. Försök igen om en stund.',
     verifyDone: 'Jag har verifierat',
     verifyCheck: 'Kontrollerar...',
     verifyCancel: 'Avbryt registrering & radera konto',

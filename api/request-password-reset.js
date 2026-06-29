@@ -173,11 +173,20 @@ export default async function handler(request, response) {
     resetUrl.searchParams.set('lang', lang);
 
     const emailContent = buildEmail({ resetUrl: resetUrl.toString(), lang });
-    await sendEmail({
-      to: email,
-      subject: emailContent.subject,
-      html: emailContent.html,
-    });
+    try {
+      await sendEmail({
+        to: email,
+        subject: emailContent.subject,
+        html: emailContent.html,
+      });
+    } catch (error) {
+      if (error.message === 'missing-resend-api-key') {
+        console.error('RESEND_API_KEY is not configured');
+        return response.status(500).json({ error: 'email-config-missing' });
+      }
+      console.error('Resend send failed', error.detail);
+      return response.status(502).json({ error: 'email-send-failed', detail: error.detail });
+    }
     return response.status(200).json({ ok: true });
   } catch (error) {
     console.error('Password reset request failed', error);
