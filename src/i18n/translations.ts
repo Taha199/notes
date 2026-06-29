@@ -218,6 +218,7 @@ export interface Translation {
   settingsStorageLimit: string;
   settingsFolderBackup: string;
   settingsFolderBackupEmpty: string;
+  settingsFolderBackupLast: string;
   settingsFolderBackupRestore: string;
   settingsFolderBackupRestored: string;
   // Danger zone
@@ -514,6 +515,7 @@ export const LANGS: Record<Lang, Translation> = {
     settingsStorageLimit: 'Storage limit',
     settingsFolderBackup: 'Quiz folder backups',
     settingsFolderBackupEmpty: 'No backups yet. Backups are saved automatically from now on whenever folders change.',
+    settingsFolderBackupLast: 'Last backup',
     settingsFolderBackupRestore: 'Restore',
     settingsFolderBackupRestored: 'Folders restored from backup',
     settingsDanger: 'Danger Zone',
@@ -806,6 +808,7 @@ export const LANGS: Record<Lang, Translation> = {
     settingsStorageLimit: 'Lagringsgräns',
     settingsFolderBackup: 'Säkerhetskopior av quiz-mappar',
     settingsFolderBackupEmpty: 'Inga säkerhetskopior ännu. Från och med nu sparas en kopia automatiskt varje gång mappar ändras.',
+    settingsFolderBackupLast: 'Senaste säkerhetskopia',
     settingsFolderBackupRestore: 'Återställ',
     settingsFolderBackupRestored: 'Mappar återställda från backup',
     settingsDanger: 'Farlig zon',
