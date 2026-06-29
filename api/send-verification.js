@@ -1,4 +1,5 @@
 import { createSign } from 'node:crypto';
+import { sendEmail } from './lib/resend.js';
 
 const APP_URL = 'https://tahanote.com';
 const ALLOWED_ORIGINS = new Set([APP_URL, 'https://notes-woad-pi.vercel.app']);
@@ -172,23 +173,19 @@ export default async function handler(request, response) {
     verifyUrl.searchParams.set('lang', lang);
 
     const emailContent = buildEmail({ verifyUrl: verifyUrl.toString(), lang });
-    const mailResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: process.env.RESEND_FROM || 'Taha Note <onboarding@resend.dev>',
-        to: [email],
+    try {
+      await sendEmail({
+        to: email,
         subject: emailContent.subject,
         html: emailContent.html,
-      }),
-    });
-    if (!mailResponse.ok) {
-      const resendError = await mailResponse.json().catch(() => ({}));
-      console.error('Resend send failed', resendError);
-      return response.status(502).json({ error: 'email-send-failed', detail: resendError });
+      });
+    } catch (error) {
+      if (error.message === 'missing-resend-api-key') {
+        console.error('RESEND_API_KEY is not configured');
+        return response.status(500).json({ error: 'email-config-missing' });
+      }
+      console.error('Resend send failed', error.detail);
+      return response.status(502).json({ error: 'email-send-failed', detail: error.detail });
     }
     return response.status(200).json({ ok: true });
   } catch (error) {

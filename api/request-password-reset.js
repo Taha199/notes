@@ -1,4 +1,5 @@
 import { createSign } from 'node:crypto';
+import { sendEmail } from './lib/resend.js';
 
 const APP_URL = 'https://tahanote.com';
 const ALLOWED_ORIGINS = new Set([APP_URL, 'https://notes-woad-pi.vercel.app']);
@@ -172,20 +173,11 @@ export default async function handler(request, response) {
     resetUrl.searchParams.set('lang', lang);
 
     const emailContent = buildEmail({ resetUrl: resetUrl.toString(), lang });
-    const mailResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: process.env.RESEND_FROM || 'Taha Note <onboarding@resend.dev>',
-        to: [email],
-        subject: emailContent.subject,
-        html: emailContent.html,
-      }),
+    await sendEmail({
+      to: email,
+      subject: emailContent.subject,
+      html: emailContent.html,
     });
-    if (!mailResponse.ok) throw new Error('email-send-failed');
     return response.status(200).json({ ok: true });
   } catch (error) {
     console.error('Password reset request failed', error);
