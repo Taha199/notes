@@ -10,6 +10,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
+import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
@@ -1435,6 +1436,22 @@ export function QuizPage() {
                   )}
                 </div>
                 {/* Study buttons */}
+                <button
+                  onClick={() => {
+                    const title = selectedSet?.name ?? t.quizQuestionsFromNotes;
+                    const items = orderedItems.filter((item) => !item.draft);
+                    exportQuizSetToPdf(title, items, {
+                      question: t.quizQuestionLabel,
+                      answer: t.quizAnswerLabel,
+                      explanation: t.quizExplanationLabel,
+                      generatedOn: t.quizPdfGeneratedOn,
+                    });
+                  }}
+                  className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-3 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
+                  title={t.quizDownloadPdf}
+                >
+                  {t.quizDownloadPdf}
+                </button>
                 <button
                   onClick={() => { setStudyDeck(null); setStudyMode('flashcard'); }}
                   className="flex items-center gap-1 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"

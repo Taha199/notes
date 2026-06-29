@@ -284,6 +284,8 @@ export interface Translation {
   quizShowAnswersShort: string;
   quizSortQuestions: string;
   quizFlashcards: string;
+  quizDownloadPdf: string;
+  quizPdfGeneratedOn: string;
   quizTypeAnswer: string;
   quizAdd: string;
   quizAddQuestion: string;
@@ -571,6 +573,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizShowAnswersShort: 'Show',
     quizSortQuestions: 'Sort questions',
     quizFlashcards: '🃏 Flashcards',
+    quizDownloadPdf: '📄 Download PDF',
+    quizPdfGeneratedOn: 'Generated on',
     quizTypeAnswer: '✏️ Type',
     quizAdd: 'Add',
     quizAddQuestion: 'Add Question',
@@ -856,6 +860,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizShowAnswersShort: 'Visa',
     quizSortQuestions: 'Sortera frågor',
     quizFlashcards: '🃏 Flashcards',
+    quizDownloadPdf: '📄 Ladda ner PDF',
+    quizPdfGeneratedOn: 'Genererad',
     quizTypeAnswer: '✏️ Skriv',
     quizAdd: 'Lägg till',
     quizAddQuestion: 'Lägg till fråga',
