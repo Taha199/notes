@@ -222,22 +222,35 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
             </div>
           ) : (
           <div className="w-full max-w-3xl flex flex-col items-center">
-            <div className="w-full cursor-pointer select-none" style={{ perspective: '1600px' }} onClick={() => setFlipped((f) => !f)}>
-              <div style={{ transformStyle: 'preserve-3d', transition: 'transform 0.55s cubic-bezier(.4,0,.2,1)', transform: flipped ? 'rotateY(180deg)' : 'none', position: 'relative', minHeight: '380px' }}>
+            <div className="w-full" style={{ perspective: '1600px' }}>
+              <div style={{ transformStyle: 'preserve-3d', transition: 'transform 0.55s cubic-bezier(.4,0,.2,1)', transform: flipped ? 'rotateY(180deg)' : 'none', position: 'relative', minHeight: flipped ? '380px' : '420px' }}>
                 <div
                   style={{ backfaceVisibility: 'hidden', background: 'linear-gradient(160deg,#26304f 0%,#1b2440 60%,#161d36 100%)' }}
-                  className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-10 shadow-2xl ring-1 ring-white/10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
+                  className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-8 shadow-2xl ring-1 ring-white/10 sm:p-10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
                 >
-                  <p className="mb-6 text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-300/70">{t.quizQuestionLabel}</p>
-                  <div dir="auto" className="mx-auto w-full max-w-xl px-4 text-center text-[22px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
-                  <p className="mt-8 text-[12px] text-white/35">{t.quizStudyTapToReveal}</p>
+                  <p className="mb-4 text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-300/70">{t.quizQuestionLabel}</p>
+                  <div dir="auto" className="mx-auto w-full max-w-xl px-2 text-center text-[22px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); setFlipped(true); } }}
+                    placeholder={t.quizStudyTypeAnswerPh}
+                    rows={3}
+                    className="mt-6 w-full max-w-xl resize-none rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-[14px] leading-relaxed text-white placeholder:text-white/30 outline-none focus:border-indigo-400/50 focus:ring-2 focus:ring-indigo-400/20"
+                  />
                 </div>
                 <div
                   style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)', background: 'linear-gradient(160deg,#1f3a36 0%,#17312f 55%,#13262a 100%)' }}
-                  className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-10 shadow-2xl ring-1 ring-white/10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
+                  className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-8 shadow-2xl ring-1 ring-white/10 sm:p-10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
                 >
-                  <p className="mb-6 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300/70">{t.quizAnswerLabel}</p>
-                  <div dir="auto" className="mx-auto w-full max-w-xl px-4 text-center text-[20px] leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
+                  {input.trim() && (
+                    <div className="mb-5 w-full max-w-xl rounded-2xl border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-left">
+                      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/80">{t.quizStudyYourAnswer}</p>
+                      <p dir="auto" className="text-[15px] leading-relaxed text-white [overflow-wrap:anywhere]">{input}</p>
+                    </div>
+                  )}
+                  <p className="mb-4 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300/70">{t.quizAnswerLabel}</p>
+                  <div dir="auto" className="mx-auto w-full max-w-xl px-2 text-center text-[20px] leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
                 </div>
               </div>
             </div>
