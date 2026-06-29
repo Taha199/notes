@@ -13,7 +13,8 @@ import {
   updateProfile,
   type User,
 } from 'firebase/auth';
-import { auth, googleProvider, EmailAuthProvider, FB_DB_URL } from '../lib/firebase';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { auth, googleProvider, EmailAuthProvider, FB_DB_URL, storage } from '../lib/firebase';
 import { hasAiAccess, isPlusUser } from '../lib/userPlan';
 
 async function sendVerificationEmailDirect(email: string): Promise<void> {
@@ -61,6 +62,7 @@ interface AuthCtx {
   profileLoading: boolean;
   setPasswordForAccount: (pass: string) => Promise<void>;
   updateDisplayName: (name: string) => Promise<void>;
+  updateProfilePhoto: (file: File) => Promise<void>;
   sendVerification: () => Promise<void>;
   reloadUser: () => Promise<void>;
 }
@@ -191,6 +193,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!auth.currentUser) throw new Error('no-user');
       await updateProfile(auth.currentUser, { displayName: name });
       setUser({ ...auth.currentUser });
+    },
+    updateProfilePhoto: async (file) => {
+      if (!auth.currentUser) throw new Error('no-user');
+      const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!allowed.includes(file.type)) throw new Error('invalid-type');
+      const uid = auth.currentUser.uid;
+      const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+      const storagePath = `users/${uid}/profile/avatar.${ext}`;
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, file, { contentType: file.type });
+      const photoURL = await getDownloadURL(storageRef);
+      await updateProfile(auth.currentUser, { photoURL });
+      try {
+        await fetch(`${FB_DB_URL}/users/${uid}/profile.json`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ photoURL }),
+        });
+      } catch { /* ignore */ }
+      await auth.currentUser.reload();
+      setUser({ ...auth.currentUser });
+      setProfile((prev) => ({ ...(prev ?? {}), photoURL }));
     },
     sendVerification: async () => {
       if (!auth.currentUser?.email) throw new Error('no-user');

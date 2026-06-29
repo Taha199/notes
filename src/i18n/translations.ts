@@ -194,6 +194,11 @@ export interface Translation {
   settingsProfile: string;
   settingsProfileName: string;
   settingsProfileEmail: string;
+  settingsProfilePhotoUpload: string;
+  settingsProfilePhotoChange: string;
+  settingsProfilePhotoUploading: string;
+  settingsProfilePhotoError: string;
+  settingsProfilePhotoInvalidType: string;
   settingsSave: string;
   settingsSaved: string;
   settingsPassword: string;
@@ -481,6 +486,11 @@ export const LANGS: Record<Lang, Translation> = {
     settingsProfile: 'Profile',
     settingsProfileName: 'Display name',
     settingsProfileEmail: 'Email address',
+    settingsProfilePhotoUpload: 'Upload profile photo',
+    settingsProfilePhotoChange: 'Change photo',
+    settingsProfilePhotoUploading: 'Uploading…',
+    settingsProfilePhotoError: 'Could not upload photo. Try again.',
+    settingsProfilePhotoInvalidType: 'Use JPG, PNG, or WebP.',
     settingsSave: 'Save',
     settingsSaved: '✓ Saved',
     settingsPassword: 'Password',
@@ -764,6 +774,11 @@ export const LANGS: Record<Lang, Translation> = {
     settingsProfile: 'Profil',
     settingsProfileName: 'Visningsnamn',
     settingsProfileEmail: 'E-postadress',
+    settingsProfilePhotoUpload: 'Ladda upp profilbild',
+    settingsProfilePhotoChange: 'Byt bild',
+    settingsProfilePhotoUploading: 'Laddar upp…',
+    settingsProfilePhotoError: 'Kunde inte ladda upp bilden. Försök igen.',
+    settingsProfilePhotoInvalidType: 'Använd JPG, PNG eller WebP.',
     settingsSave: 'Spara',
     settingsSaved: '✓ Sparad',
     settingsPassword: 'Lösenord',

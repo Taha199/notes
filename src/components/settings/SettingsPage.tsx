@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
@@ -28,7 +28,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 export function SettingsPage() {
-  const { user, hasPassword, isPlus, hasAi, updateDisplayName, resetPassword, deleteAccount } = useAuth();
+  const { user, hasPassword, isPlus, hasAi, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
   const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
@@ -41,6 +41,11 @@ export function SettingsPage() {
   const [nameInput, setNameInput] = useState(user?.displayName || '');
   const [nameSaved, setNameSaved] = useState(false);
   const [nameSaving, setNameSaving] = useState(false);
+
+  // Profile photo
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   // Password
   const [passEmailSent, setPassEmailSent] = useState(false);
@@ -60,6 +65,31 @@ export function SettingsPage() {
       setTimeout(() => setNameSaved(false), 2500);
     } finally {
       setNameSaving(false);
+    }
+  };
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || photoUploading) return;
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      show(t.settingsProfilePhotoInvalidType);
+      return;
+    }
+    const preview = URL.createObjectURL(file);
+    setPhotoPreview(preview);
+    setPhotoUploading(true);
+    try {
+      await updateProfilePhoto(file);
+      show(t.settingsSaved);
+    } catch {
+      setPhotoPreview(null);
+      show(t.settingsProfilePhotoError);
+    } finally {
+      URL.revokeObjectURL(preview);
+      setPhotoPreview(null);
+      setPhotoUploading(false);
     }
   };
 
@@ -131,6 +161,7 @@ export function SettingsPage() {
   }, [listQuizFolderBackups]);
 
   const avatar = (user?.displayName || user?.email || '?').charAt(0).toUpperCase();
+  const photoUrl = photoPreview || user?.photoURL || null;
   const isAdmin = user?.email === ADMIN_EMAIL;
   const showPlusProfile = isPlus || isAdmin;
 
@@ -142,11 +173,45 @@ export function SettingsPage() {
       <SectionCard title={t.settingsProfile}>
         <div className={'mb-5 flex items-center gap-4 rounded-2xl p-3 ' + (showPlusProfile ? 'bg-gradient-to-r from-violet-50 to-amber-50/60 dark:from-violet-500/10 dark:to-amber-500/5' : '')}>
           <div className="relative flex-shrink-0">
-            <div className={'flex h-14 w-14 items-center justify-center rounded-full text-xl font-bold text-white shadow-lg ' + (showPlusProfile ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 shadow-violet-400/30' : 'bg-gradient-to-br from-primary to-[#8A82FF] shadow-primary/30')}>
-              {avatar}
-            </div>
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={photoUploading}
+              title={photoUrl ? t.settingsProfilePhotoChange : t.settingsProfilePhotoUpload}
+              aria-label={photoUrl ? t.settingsProfilePhotoChange : t.settingsProfilePhotoUpload}
+              className={
+                'group relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-full text-xl font-bold text-white shadow-lg transition hover:ring-2 hover:ring-primary/40 disabled:opacity-70 ' +
+                (showPlusProfile ? 'bg-gradient-to-br from-violet-500 via-primary to-amber-400 shadow-violet-400/30' : 'bg-gradient-to-br from-primary to-[#8A82FF] shadow-primary/30')
+              }
+            >
+              {photoUrl ? (
+                <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              ) : (
+                avatar
+              )}
+              {photoUploading && (
+                <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-semibold">
+                  …
+                </span>
+              )}
+              <span className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/30">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/90 text-primary opacity-0 shadow-sm transition group-hover:opacity-100">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </span>
+              </span>
+            </button>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+              className="hidden"
+              onChange={(e) => { void handlePhotoSelect(e); }}
+            />
             {showPlusProfile && (
-              <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-amber-400 text-[10px] dark:border-gray-900">✦</span>
+              <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-amber-400 text-[10px] dark:border-gray-900">✦</span>
             )}
           </div>
           <div className="min-w-0">
