@@ -46,17 +46,24 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
   const [done, setDone] = useState(false);
   const [round, setRound] = useState(1);
   const [selectedOpt, setSelectedOpt] = useState<number | null>(null);
-  const [chooserOpen, setChooserOpen] = useState(false);
+  const [scopeKey, setScopeKey] = useState('all');
 
   const pool = allItems ?? items;
-  const pickScope = (subset: QuizItem[]) => {
+  const scopes = [
+    { key: 'all', label: t.quizStudyScopeAll, items: pool },
+    { key: 'new', label: t.quizStudyScopeNew, items: pool.filter((it) => !progress[it.id]) },
+    { key: 'learning', label: t.quizStudyScopeLearning, items: pool.filter((it) => progress[it.id] === 'learning') },
+    { key: 'known', label: t.quizStudyScopeKnown, items: pool.filter((it) => progress[it.id] === 'known') },
+  ];
+
+  const pickScope = (subset: QuizItem[], key: string) => {
     if (!subset.length) return;
+    setScopeKey(key);
     setDeck(shuffleArr(subset));
     setIndex(0);
     setDone(false);
     setSessionKnown(new Set());
     setSessionLearning(new Set());
-    setChooserOpen(false);
   };
 
   const current = deck[index];
@@ -122,13 +129,6 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
 
   if (!current) return null;
 
-  const scopes = [
-    { key: 'all', label: t.quizStudyScopeAll, items: pool, cls: 'text-app-text dark:text-gray-100' },
-    { key: 'new', label: t.quizStudyScopeNew, items: pool.filter((it) => !progress[it.id]), cls: 'text-app-text-secondary' },
-    { key: 'learning', label: t.quizStudyScopeLearning, items: pool.filter((it) => progress[it.id] === 'learning'), cls: 'text-red-500' },
-    { key: 'known', label: t.quizStudyScopeKnown, items: pool.filter((it) => progress[it.id] === 'known'), cls: 'text-emerald-500' },
-  ];
-
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-white dark:bg-gray-950">
       <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
@@ -140,11 +140,22 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
           <p className={'truncate max-w-[180px] text-app-text dark:text-gray-100 ' + (mode === 'flashcard' ? 'text-[11px] text-app-text-secondary dark:text-gray-500' : 'text-[13px] font-semibold')}>{title}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setChooserOpen(true)}
-            className="flex items-center gap-1 rounded-lg border border-app-border px-2.5 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-bg dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10"
+          <select
+            value={scopeKey}
+            onChange={(e) => {
+              const key = e.target.value;
+              const scope = scopes.find((s) => s.key === key);
+              if (scope) pickScope(scope.items, key);
+            }}
             title={t.quizStudyChooseQuestions}
-          >🎯 {t.quizStudyPick}</button>
+            className="max-w-[148px] truncate rounded-lg border border-app-border bg-white py-1.5 pl-2 pr-7 text-[11px] font-semibold text-app-text-secondary outline-none transition hover:bg-app-bg focus:border-primary/40 dark:border-white/10 dark:bg-gray-900 dark:text-gray-300 sm:max-w-[180px]"
+          >
+            {scopes.map((s) => (
+              <option key={s.key} value={s.key} disabled={s.items.length === 0}>
+                {s.label} ({s.items.length})
+              </option>
+            ))}
+          </select>
           <span className="text-[12px] font-semibold text-app-text-secondary dark:text-gray-400">{index + 1}/{deck.length}</span>
         </div>
       </div>
@@ -334,32 +345,6 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
         <span className="text-[11px] text-app-text-secondary/40">{fmt(t.quizStudyRemaining, deck.length - index - 1)}</span>
         <span className="text-[12px] font-semibold text-emerald-500">✓ {sessionKnown.size}</span>
       </div>
-
-      {chooserOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm" onClick={() => setChooserOpen(false)}>
-          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-app-border px-5 py-3.5 dark:border-white/10">
-              <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">
-                {mode === 'flashcard' ? t.quizFlashcards : title} — {t.quizStudyWhatToStudy}
-              </p>
-              <button onClick={() => setChooserOpen(false)} className="text-app-text-secondary/50 hover:text-app-text">✕</button>
-            </div>
-            <div className="flex flex-col p-2">
-              {scopes.map((s) => (
-                <button
-                  key={s.key}
-                  disabled={s.items.length === 0}
-                  onClick={() => pickScope(s.items)}
-                  className="flex items-center justify-between rounded-xl px-4 py-3 text-left transition-colors hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-35 dark:hover:bg-white/5"
-                >
-                  <span className={'text-[14px] font-medium ' + s.cls}>{s.label}</span>
-                  <span className="rounded-full bg-app-bg px-2.5 py-0.5 text-[11px] font-semibold text-app-text-secondary/70 dark:bg-white/10">{s.items.length}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
