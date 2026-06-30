@@ -15,13 +15,21 @@ interface StoredFile {
   addedAt: string;
   downloadUrl?: string;
   storagePath?: string;
+  folderId?: string | null;
   /** Legacy uploads stored inline in Realtime Database */
   dataUrl?: string;
+}
+
+interface FileFolder {
+  id: string;
+  name: string;
+  createdAt: string;
 }
 
 type PreviewMode = 'image' | 'pdf' | 'text' | 'unsupported';
 
 const FILE_INPUT_ID = 'files-upload-input';
+const FILES_FOLDER_KEY = 'malacadhati_files_folder';
 
 function formatSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -29,14 +37,14 @@ function formatSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function normalizeFiles(data: unknown): StoredFile[] {
+function normalizeList<T extends { id: string }>(data: unknown): T[] {
   if (!data) return [];
   if (Array.isArray(data)) {
-    return data.filter((file): file is StoredFile => !!file && typeof file === 'object' && 'id' in file);
+    return data.filter((item): item is T => !!item && typeof item === 'object' && 'id' in item);
   }
   if (typeof data === 'object') {
-    return Object.values(data as Record<string, StoredFile>).filter(
-      (file) => !!file && typeof file === 'object' && 'id' in file,
+    return Object.values(data as Record<string, T>).filter(
+      (item) => !!item && typeof item === 'object' && 'id' in item,
     );
   }
   return [];
@@ -165,40 +173,76 @@ export function FilesPage({ search }: { search: string }) {
   const { show } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const folderRenameRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<StoredFile[]>([]);
+  const [folders, setFolders] = useState<FileFolder[]>([]);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(() => {
+    try {
+      const raw = localStorage.getItem(FILES_FOLDER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [folderRenameValue, setFolderRenameValue] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
+  }, [currentFolderId]);
 
   useEffect(() => {
     if (renamingId) renameInputRef.current?.focus();
   }, [renamingId]);
 
   useEffect(() => {
+    if (renamingFolderId) folderRenameRef.current?.focus();
+  }, [renamingFolderId]);
+
+  useEffect(() => {
     let cancelled = false;
     if (!user) {
       setFiles([]);
+      setFolders([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     (async () => {
       try {
-        const res = await fetch(`${FB_DB_URL}/users/${user.uid}/files.json`);
-        const cloudFiles = await res.json();
+        const [filesRes, foldersRes] = await Promise.all([
+          fetch(`${FB_DB_URL}/users/${user.uid}/files.json`),
+          fetch(`${FB_DB_URL}/users/${user.uid}/fileFolders.json`),
+        ]);
+        const cloudFiles = await filesRes.json();
+        const cloudFolders = await foldersRes.json();
         if (!cancelled) {
           setFiles(
-            normalizeFiles(cloudFiles).sort(
+            normalizeList<StoredFile>(cloudFiles).sort(
               (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
+            ),
+          );
+          setFolders(
+            normalizeList<FileFolder>(cloudFolders).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
             ),
           );
         }
       } catch {
-        if (!cancelled) setFiles([]);
+        if (!cancelled) {
+          setFiles([]);
+          setFolders([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -207,6 +251,17 @@ export function FilesPage({ search }: { search: string }) {
       cancelled = true;
     };
   }, [user]);
+
+  useEffect(() => {
+    if (currentFolderId && !folders.some((f) => f.id === currentFolderId)) {
+      setCurrentFolderId(null);
+    }
+  }, [currentFolderId, folders]);
+
+  const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
+
+  const fileCountInFolder = (folderId: string) =>
+    files.filter((f) => f.folderId === folderId).length;
 
   const saveFileMeta = async (file: StoredFile) => {
     if (!user) throw new Error('no-user');
@@ -218,24 +273,54 @@ export function FilesPage({ search }: { search: string }) {
     if (!res.ok) throw new Error('save-failed');
   };
 
+  const saveFolderMeta = async (folder: FileFolder) => {
+    if (!user) throw new Error('no-user');
+    const res = await fetch(`${FB_DB_URL}/users/${user.uid}/fileFolders/${folder.id}.json`, {
+      method: 'PUT',
+      body: JSON.stringify(folder),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error('save-failed');
+  };
+
   const deleteFileMeta = async (fileId: string) => {
     if (!user) return;
     await fetch(`${FB_DB_URL}/users/${user.uid}/files/${fileId}.json`, { method: 'DELETE' });
   };
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return files;
-    return files.filter((file) => file.name.toLowerCase().includes(q) || file.type.toLowerCase().includes(q));
-  }, [files, search]);
+  const deleteFolderMeta = async (folderId: string) => {
+    if (!user) return;
+    await fetch(`${FB_DB_URL}/users/${user.uid}/fileFolders/${folderId}.json`, { method: 'DELETE' });
+  };
+
+  const q = search.trim().toLowerCase();
+
+  const visibleFolders = useMemo(() => {
+    if (currentFolderId) return [];
+    const list = folders;
+    if (!q) return list;
+    return list.filter((f) => f.name.toLowerCase().includes(q));
+  }, [folders, currentFolderId, q]);
+
+  const visibleFiles = useMemo(() => {
+    let list = files.filter((file) =>
+      currentFolderId ? file.folderId === currentFolderId : !file.folderId,
+    );
+    if (q) {
+      list = files.filter(
+        (file) => file.name.toLowerCase().includes(q) || file.type.toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [files, currentFolderId, q]);
 
   const MAX_FILE_SIZE = 20 * 1024 * 1024;
   const MAX_RTDB_FILE_SIZE = 7 * 1024 * 1024;
 
-  const uploadOneFile = async (file: File): Promise<StoredFile> => {
+  const uploadOneFile = async (file: File, folderId: string | null): Promise<StoredFile> => {
     if (!user) throw new Error('no-user');
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const base: Omit<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl'> = {
+    const base: Omit<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl' | 'folderId'> = {
       id,
       name: file.name,
       type: file.type || 'application/octet-stream',
@@ -243,16 +328,18 @@ export function FilesPage({ search }: { search: string }) {
       addedAt: new Date().toLocaleString(),
     };
 
+    const withFolder = folderId ? { ...base, folderId } : base;
+
     if (file.size <= MAX_RTDB_FILE_SIZE) {
       const dataUrl = await readFileAsDataUrl(file);
-      return { ...base, dataUrl };
+      return { ...withFolder, dataUrl };
     }
 
     const storagePath = `users/${user.uid}/files/${id}/${file.name}`;
     const storageRef = ref(storage, storagePath);
     await uploadBytes(storageRef, file, { contentType: base.type });
     const downloadUrl = await getDownloadURL(storageRef);
-    return { ...base, downloadUrl, storagePath };
+    return { ...withFolder, downloadUrl, storagePath };
   };
 
   const handleFiles = async (list: FileList | null) => {
@@ -285,7 +372,7 @@ export function FilesPage({ search }: { search: string }) {
       }
 
       for (const file of selected) {
-        const stored = await uploadOneFile(file);
+        const stored = await uploadOneFile(file, currentFolderId);
         await saveFileMeta(stored);
         uploaded.push(stored);
       }
@@ -308,6 +395,7 @@ export function FilesPage({ search }: { search: string }) {
     setFiles((prev) => prev.filter((item) => item.id !== file.id));
     if (previewFile?.id === file.id) setPreviewFile(null);
     if (renamingId === file.id) setRenamingId(null);
+    if (moveMenuFileId === file.id) setMoveMenuFileId(null);
     try {
       if (file.storagePath) {
         await deleteObject(ref(storage, file.storagePath));
@@ -319,9 +407,66 @@ export function FilesPage({ search }: { search: string }) {
     }
   };
 
+  const moveFile = async (file: StoredFile, folderId: string | null) => {
+    const updated: StoredFile = { ...file };
+    if (folderId) updated.folderId = folderId;
+    else delete updated.folderId;
+    const previous = files;
+    setFiles((prev) => prev.map((item) => (item.id === file.id ? updated : item)));
+    setMoveMenuFileId(null);
+    try {
+      await saveFileMeta(updated);
+      show(t.tMoved);
+    } catch {
+      setFiles(previous);
+      setError(t.filesSaveFailed);
+    }
+  };
+
+  const createFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name || !user) return;
+    const folder: FileFolder = {
+      id: `ff-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name,
+      createdAt: new Date().toLocaleString(),
+    };
+    try {
+      await saveFolderMeta(folder);
+      setFolders((prev) => [folder, ...prev]);
+      setCreatingFolder(false);
+      setNewFolderName('');
+      show(t.filesFolderCreated);
+    } catch {
+      setError(t.filesSaveFailed);
+    }
+  };
+
+  const removeFolder = async (folder: FileFolder) => {
+    const previousFiles = files;
+    const previousFolders = folders;
+    const affected = files.filter((f) => f.folderId === folder.id);
+    setFolders((prev) => prev.filter((f) => f.id !== folder.id));
+    setFiles((prev) =>
+      prev.map((f) => (f.folderId === folder.id ? { ...f, folderId: undefined } : f)),
+    );
+    if (currentFolderId === folder.id) setCurrentFolderId(null);
+    try {
+      await deleteFolderMeta(folder.id);
+      await Promise.all(
+        affected.map((f) => saveFileMeta({ ...f, folderId: undefined })),
+      );
+    } catch {
+      setFiles(previousFiles);
+      setFolders(previousFolders);
+      setError(t.filesSaveFailed);
+    }
+  };
+
   const startRename = (file: StoredFile) => {
     setRenamingId(file.id);
     setRenameValue(file.name);
+    setMoveMenuFileId(null);
   };
 
   const cancelRename = () => {
@@ -355,6 +500,35 @@ export function FilesPage({ search }: { search: string }) {
     }
   };
 
+  const startFolderRename = (folder: FileFolder) => {
+    setRenamingFolderId(folder.id);
+    setFolderRenameValue(folder.name);
+  };
+
+  const cancelFolderRename = () => {
+    setRenamingFolderId(null);
+    setFolderRenameValue('');
+  };
+
+  const commitFolderRename = async (folder: FileFolder) => {
+    const next = folderRenameValue.trim();
+    if (!next || next === folder.name) {
+      cancelFolderRename();
+      return;
+    }
+    const updated = { ...folder, name: next };
+    const previous = folders;
+    setFolders((prev) => prev.map((f) => (f.id === folder.id ? updated : f)));
+    cancelFolderRename();
+    try {
+      await saveFolderMeta(updated);
+      show(t.filesRenameSuccess);
+    } catch {
+      setFolders(previous);
+      setError(t.filesSaveFailed);
+    }
+  };
+
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     if (!uploading) setDragging(true);
@@ -370,6 +544,8 @@ export function FilesPage({ search }: { search: string }) {
     setDragging(false);
     if (!uploading) void handleFiles(e.dataTransfer.files);
   };
+
+  const hasContent = visibleFolders.length > 0 || visibleFiles.length > 0;
 
   return (
     <div className="px-3 py-4 sm:px-5 sm:py-5">
@@ -415,13 +591,71 @@ export function FilesPage({ search }: { search: string }) {
         </div>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setCurrentFolderId(null)}
+          className={`rounded-lg px-2.5 py-1 text-[12px] font-semibold transition ${
+            !currentFolderId
+              ? 'bg-primary/10 text-primary'
+              : 'text-app-text-secondary hover:bg-app-bg dark:text-gray-400 dark:hover:bg-white/5'
+          }`}
+        >
+          📎 {t.filesAllFiles}
+        </button>
+        {currentFolder && (
+          <>
+            <span className="text-app-text-secondary/40">/</span>
+            <span className="rounded-lg bg-primary/10 px-2.5 py-1 text-[12px] font-semibold text-primary">
+              📁 {currentFolder.name}
+            </span>
+          </>
+        )}
+        {!currentFolderId && !creatingFolder && (
+          <button
+            type="button"
+            onClick={() => setCreatingFolder(true)}
+            className="ml-auto rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary hover:bg-primary/10"
+          >
+            + {t.filesNewFolder}
+          </button>
+        )}
+      </div>
+
+      {creatingFolder && (
+        <form
+          className="mb-4 flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void createFolder();
+          }}
+        >
+          <input
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            placeholder={t.filesFolderNamePh}
+            maxLength={80}
+            autoFocus
+            className="min-w-[180px] flex-1 rounded-xl border border-app-border bg-white px-3 py-2 text-sm outline-none focus:border-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
+          />
+          <button type="submit" className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-dark">✓</button>
+          <button
+            type="button"
+            onClick={() => { setCreatingFolder(false); setNewFolderName(''); }}
+            className="rounded-xl border border-app-border px-3 py-2 text-xs text-app-text-secondary dark:border-white/10"
+          >
+            ✕
+          </button>
+        </form>
+      )}
+
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
           ⚠️ {error}
         </div>
       )}
 
-      {loading || !filtered.length ? (
+      {loading || !hasContent ? (
         <div
           className={`animate-fade-in flex flex-col items-center rounded-3xl py-20 text-center text-app-text-secondary/70 transition-colors dark:text-gray-500 ${
             dragging ? 'bg-primary/5' : ''
@@ -430,12 +664,73 @@ export function FilesPage({ search }: { search: string }) {
           onDragLeave={onDragLeave}
           onDrop={onDrop}
         >
-          <span className="mb-3 text-5xl opacity-30">📎</span>
-          <p className="text-sm">{loading ? t.cloudSaving : search ? t.emptySearch : t.filesEmpty}</p>
+          <span className="mb-3 text-5xl opacity-30">{currentFolderId ? '📁' : '📎'}</span>
+          <p className="text-sm">
+            {loading ? t.cloudSaving : search ? t.emptySearch : currentFolderId ? t.filesFolderEmpty : t.filesEmpty}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((file) => (
+          {visibleFolders.map((folder) => (
+            <div
+              key={folder.id}
+              className="rounded-2xl border border-app-border bg-white p-4 shadow-sm transition hover:border-primary/30 hover:shadow-md dark:border-white/10 dark:bg-white/5"
+            >
+              <button
+                type="button"
+                onClick={() => setCurrentFolderId(folder.id)}
+                className="flex w-full items-start gap-3 text-left"
+              >
+                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 text-2xl dark:bg-amber-500/20">📁</div>
+                <div className="min-w-0 flex-1">
+                  {renamingFolderId === folder.id ? (
+                    <form
+                      className="flex items-center gap-1.5"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void commitFolderRename(folder);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        ref={folderRenameRef}
+                        value={folderRenameValue}
+                        onChange={(e) => setFolderRenameValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Escape') cancelFolderRename(); }}
+                        maxLength={80}
+                        className="min-w-0 flex-1 rounded-lg border border-app-border bg-app-bg px-2 py-1 text-sm font-semibold text-app-text outline-none focus:border-primary dark:border-white/15 dark:bg-white/5 dark:text-gray-100"
+                      />
+                      <button type="submit" className="rounded-lg bg-primary px-2 py-1 text-xs font-semibold text-white">✓</button>
+                    </form>
+                  ) : (
+                    <div className="truncate text-sm font-bold text-app-text dark:text-gray-100">{folder.name}</div>
+                  )}
+                  <div className="mt-1 text-xs text-app-text-secondary dark:text-gray-400">
+                    {fileCountInFolder(folder.id)} {t.filesInFolder}
+                  </div>
+                </div>
+              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => startFolderRename(folder)}
+                  className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100"
+                >
+                  {t.filesRename}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void removeFolder(folder)}
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10"
+                >
+                  {t.filesFolderDelete}
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {visibleFiles.map((file) => (
             <div key={file.id} className="rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">📄</div>
@@ -490,6 +785,40 @@ export function FilesPage({ search }: { search: string }) {
                 >
                   {t.filesRename}
                 </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setMoveMenuFileId(moveMenuFileId === file.id ? null : file.id)}
+                    className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100"
+                  >
+                    {t.filesMoveTo}
+                  </button>
+                  {moveMenuFileId === file.id && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setMoveMenuFileId(null)} />
+                      <div className="absolute left-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
+                        <button
+                          type="button"
+                          onClick={() => void moveFile(file, null)}
+                          className="flex w-full px-3 py-2 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5"
+                        >
+                          {t.filesMoveToRoot}
+                        </button>
+                        {folders.map((folder) => (
+                          <button
+                            key={folder.id}
+                            type="button"
+                            disabled={file.folderId === folder.id}
+                            onClick={() => void moveFile(file, folder.id)}
+                            className="flex w-full px-3 py-2 text-left text-[12px] hover:bg-app-bg disabled:opacity-40 dark:hover:bg-white/5"
+                          >
+                            📁 {folder.name}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
                 <button onClick={() => void removeFile(file)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
                   {t.filesDelete}
                 </button>
