@@ -1,6 +1,6 @@
 const DEFAULT_FROM = 'Taha Note <noreply@tahanote.com>';
 
-export async function sendEmail({ to, subject, html, text, replyTo }) {
+export async function sendEmail({ to, subject, html, text, replyTo, attachments }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     const error = new Error('missing-resend-api-key');
@@ -16,6 +16,7 @@ export async function sendEmail({ to, subject, html, text, replyTo }) {
   };
   if (text) payload.text = text;
   if (replyTo) payload.reply_to = replyTo;
+  if (attachments?.length) payload.attachments = attachments;
 
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',

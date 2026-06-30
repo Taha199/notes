@@ -1,5 +1,6 @@
 import { createSign } from 'node:crypto';
 import { sendEmail } from './lib/resend.js';
+import { emailHeaderHtml, logoAttachment } from './lib/emailBrand.js';
 
 const APP_URL = 'https://tahanote.com';
 const ALLOWED_ORIGINS = new Set([APP_URL, 'https://notes-woad-pi.vercel.app']);
@@ -79,10 +80,7 @@ function buildEmail({ verifyUrl, lang }) {
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:32px 16px;background:#f6f4ff"><tr><td align="center">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #e7e3ff;border-radius:16px;overflow:hidden">
       <tr><td style="padding:30px 34px 24px;background:#fbfaff;border-bottom:1px solid #ece9ff">
-        <table role="presentation" cellspacing="0" cellpadding="0"><tr>
-          <td style="width:42px;height:42px"><img src="${APP_URL}/logo.png" alt="Taha Note" width="42" height="42" style="display:block;border:0;border-radius:10px" /></td>
-          <td style="padding-left:12px;font-size:22px;font-weight:800;color:#5148c9">Taha Note</td>
-        </tr></table>
+        ${emailHeaderHtml()}
       </td></tr>
       <tr><td style="padding:34px">
         <p style="margin:0 0 9px;font-size:11px;font-weight:700;letter-spacing:1px;color:#6c63ff">VERIFY ACCOUNT</p>
@@ -178,6 +176,7 @@ export default async function handler(request, response) {
         to: email,
         subject: emailContent.subject,
         html: emailContent.html,
+        attachments: [logoAttachment()],
       });
     } catch (error) {
       if (error.message === 'missing-resend-api-key') {
