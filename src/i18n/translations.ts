@@ -234,6 +234,11 @@ export interface Translation {
   settingsFolderBackupLast: string;
   settingsFolderBackupRestore: string;
   settingsFolderBackupRestored: string;
+  settingsLocalBackup: string;
+  settingsLocalBackupEmpty: string;
+  settingsLocalBackupCounts: string;
+  settingsLocalBackupRestore: string;
+  settingsLocalBackupRestored: string;
   // Danger zone
   settingsDanger: string;
   settingsDeleteAccount: string;
@@ -541,6 +546,11 @@ export const LANGS: Record<Lang, Translation> = {
     settingsFolderBackupLast: 'Last backup',
     settingsFolderBackupRestore: 'Restore',
     settingsFolderBackupRestored: 'Folders restored from backup',
+    settingsLocalBackup: 'Restore from this browser',
+    settingsLocalBackupEmpty: 'No notes or quiz data found in this browser’s local storage.',
+    settingsLocalBackupCounts: '{notes} notes · {quizzes} quiz items · {folders} folders · {sets} sets · {chats} chats',
+    settingsLocalBackupRestore: 'Restore local backup',
+    settingsLocalBackupRestored: 'Data restored from this browser',
     settingsDanger: 'Danger Zone',
     settingsDeleteAccount: 'Delete Account',
     settingsDeleteConfirmTitle: 'Delete your account?',
@@ -844,6 +854,11 @@ export const LANGS: Record<Lang, Translation> = {
     settingsFolderBackupLast: 'Senaste säkerhetskopia',
     settingsFolderBackupRestore: 'Återställ',
     settingsFolderBackupRestored: 'Mappar återställda från backup',
+    settingsLocalBackup: 'Återställ från den här webbläsaren',
+    settingsLocalBackupEmpty: 'Inga anteckningar eller quiz hittades i webbläsarens lokala lagring.',
+    settingsLocalBackupCounts: '{notes} anteckningar · {quizzes} quiz · {folders} mappar · {sets} set · {chats} chattar',
+    settingsLocalBackupRestore: 'Återställ lokal backup',
+    settingsLocalBackupRestored: 'Data återställd från den här webbläsaren',
     settingsDanger: 'Farlig zon',
     settingsDeleteAccount: 'Radera konto',
     settingsDeleteConfirmTitle: 'Radera ditt konto?',

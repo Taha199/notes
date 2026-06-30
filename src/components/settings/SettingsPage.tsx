@@ -31,9 +31,11 @@ export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
-  const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
+  const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup, getLocalBackupSummary, restoreFromLocalBackup } = useNotes();
   const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(true);
+  const [localBackup, setLocalBackup] = useState(() => getLocalBackupSummary());
+  const [restoringLocal, setRestoringLocal] = useState(false);
   const [storageLimitMB, setStorageLimitMB] = useState(100);
   const [filesBytes, setFilesBytes] = useState(0);
 
@@ -159,6 +161,10 @@ export function SettingsPage() {
       .finally(() => { if (!cancelled) setLoadingBackups(false); });
     return () => { cancelled = true; };
   }, [listQuizFolderBackups]);
+
+  useEffect(() => {
+    setLocalBackup(getLocalBackupSummary());
+  }, [notes, quizzes, quizSets, quizFolders, chats]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const avatar = (user?.displayName || user?.email || '?').charAt(0).toUpperCase();
   const photoUrl = photoPreview || profilePhotoURL;
@@ -392,6 +398,49 @@ export function SettingsPage() {
             >
               {t.settingsFolderBackupRestore}
             </button>
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title={t.settingsLocalBackup}>
+        {localBackup.hasData ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2.5 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-app-text dark:text-gray-100">
+                {t.settingsLocalBackupCounts
+                  .replace('{notes}', String(localBackup.notes))
+                  .replace('{quizzes}', String(localBackup.quizzes))
+                  .replace('{folders}', String(localBackup.folders))
+                  .replace('{sets}', String(localBackup.sets))
+                  .replace('{chats}', String(localBackup.chats))}
+              </p>
+              <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
+                {lang === 'sv'
+                  ? 'Hittat i den här webbläsarens lagring — kan återställas till molnet.'
+                  : 'Found in this browser’s storage — can be pushed back to the cloud.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={restoringLocal}
+              onClick={() => {
+                setRestoringLocal(true);
+                void restoreFromLocalBackup()
+                  .then((counts) => {
+                    setLocalBackup(getLocalBackupSummary());
+                    const total = counts.notes + counts.quizzes + counts.folders + counts.sets + counts.chats;
+                    show(total > 0 ? t.settingsLocalBackupRestored : t.settingsLocalBackupEmpty);
+                  })
+                  .finally(() => setRestoringLocal(false));
+              }}
+              className="flex-shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+            >
+              {restoringLocal ? '…' : t.settingsLocalBackupRestore}
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/5">
+            <p className="text-sm text-app-text-secondary dark:text-gray-400">{t.settingsLocalBackupEmpty}</p>
           </div>
         )}
       </SectionCard>

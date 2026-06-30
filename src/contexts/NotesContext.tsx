@@ -48,6 +48,8 @@ interface NotesCtx {
   listQuizFolderBackups: () => Promise<{ key: string; label: string; folderCount: number }[]>;
   restoreQuizFolderBackup: (key: string) => Promise<number>;
   hasQuizFolderBackups: () => Promise<boolean>;
+  getLocalBackupSummary: () => { notes: number; quizzes: number; sets: number; folders: number; chats: number; hasData: boolean };
+  restoreFromLocalBackup: () => Promise<{ notes: number; quizzes: number; sets: number; folders: number; chats: number }>;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => number;
   removeItemFromSet: (setId: string, itemId: number) => void;
   updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
@@ -141,14 +143,36 @@ function readLocalNotesData() {
 }
 
 /**
- * Prefer cloud when it has data. If cloud field exists but is empty while localStorage
+ * Prefer cloud when it has data. If cloud field is missing or empty while localStorage
  * still has items (likely wiped by an earlier sync bug), restore from local and repair cloud.
  */
 function mergeCloudFieldOrLocal<T>(cloud: Record<string, unknown> | null, field: string, local: T[]): { value: T[]; repair: boolean } {
-  if (!cloud || !(field in cloud)) return { value: local, repair: false };
-  const cloudValue = firebaseToArray<T>(cloud[field] as T[] | Record<string, T>);
-  if (cloudValue.length === 0 && local.length > 0) return { value: local, repair: true };
-  return { value: cloudValue, repair: false };
+  const cloudHasField = !!cloud && field in cloud;
+  const cloudValue = cloudHasField ? firebaseToArray<T>(cloud![field] as T[] | Record<string, T>) : [];
+  if (local.length > 0 && (!cloudHasField || cloudValue.length === 0)) {
+    return { value: local, repair: true };
+  }
+  if (cloudHasField) return { value: cloudValue, repair: false };
+  return { value: local, repair: false };
+}
+
+function recoveryLog(message: string, detail?: Record<string, unknown>) {
+  if (detail) console.info('[malacadhati-recovery]', message, detail);
+  else console.info('[malacadhati-recovery]', message);
+}
+
+function isEmptyUserPayload(
+  nextNotes: Note[],
+  qList: QuizItem[],
+  chatList: ChatConversation[],
+  qsList: QuizSet[],
+  qfList: QuizFolder[],
+) {
+  return nextNotes.length === 0
+    && qList.length === 0
+    && chatList.length === 0
+    && countUserQuizSets(qsList) === 0
+    && countUserQuizFolders(qfList) === 0;
 }
 
 function countUserQuizFolders(folders: QuizFolder[]) {
@@ -317,6 +341,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const draftCounter = useRef(0);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
   const [loaded, setLoaded] = useState(false);
+  const loadedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savesInFlight = useRef(0);
   const savingStartedAt = useRef(0);
@@ -334,10 +359,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // Load from cloud when user changes
   useEffect(() => {
     let cancelled = false;
+    loadedRef.current = false;
     setLoaded(false);
     if (!user) {
       setNotes([]);
       setDrafts([]);
+      loadedRef.current = true;
       setLoaded(true);
       return;
     }
@@ -436,27 +463,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         );
         setQuizSets(normalizedSets);
         localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
-        if (normalizedSets.some((set, index) => set !== rawSets[index])) {
-          void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
-            method: 'PUT',
-            body: JSON.stringify(normalizedSets),
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
         setQuizFolders(normalizedFolders);
         localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
-        if (normalizedFolders.length !== rawFolders.length || normalizedFolders.some((folder, index) => folder !== rawFolders[index])) {
-          void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
-            method: 'PUT',
-            body: JSON.stringify(normalizedFolders),
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
 
         const needsRepair = notesMerge.repair || quizzesMerge.repair || chatsMerge.repair || repairQuizStructure
           || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)
           || (cloudFoldersEmpty && dedicatedFoldersEmpty && local.folders.length > 0);
+        recoveryLog('load complete', {
+          notes: notes.length,
+          quizzes: quizzes.length,
+          chats: chats.length,
+          userFolders: countUserQuizFolders(normalizedFolders),
+          userSets: countUserQuizSets(normalizedSets),
+          needsRepair,
+          notesFromLocal: notesMerge.repair,
+          quizzesFromLocal: quizzesMerge.repair,
+          chatsFromLocal: chatsMerge.repair,
+          quizStructureFromLocal: repairQuizStructure,
+        });
         if (needsRepair) {
+          recoveryLog('repairing cloud from local/history');
           void fetch(`${FB_DB_URL}/users/${user.uid}.json`, {
             method: 'PATCH',
             body: JSON.stringify({
@@ -501,9 +527,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
       } catch {
         if (cancelled) return;
+        recoveryLog('cloud fetch failed, applying local fallback', {
+          notes: local.notes.length,
+          quizzes: local.quizzes.length,
+          folders: local.folders.length,
+          sets: local.sets.length,
+        });
         applyLocalFallback();
       } finally {
         if (!cancelled) {
+          loadedRef.current = true;
           setLoaded(true);
           if (user) setCloudStatus('saved');
         }
@@ -514,15 +547,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
-  const persistSets = (nextSets: QuizSet[]) => {
+  const persistSets = (nextSets: QuizSet[], forceCloud = false) => {
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    persist(notes, undefined, undefined, undefined, nextSets);
+    persist(notes, undefined, undefined, undefined, nextSets, undefined, forceCloud);
   };
 
-  const persistFolders = (nextFolders: QuizFolder[]) => {
+  const persistFolders = (nextFolders: QuizFolder[], forceCloud = false) => {
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    persist(notes, undefined, undefined, undefined, undefined, nextFolders);
-    if (user) {
+    persist(notes, undefined, undefined, undefined, undefined, nextFolders, forceCloud);
+    if (user && loadedRef.current && (forceCloud || countUserQuizFolders(nextFolders) > 0 || countUserQuizSets(quizSets) > 0)) {
       void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
         method: 'PUT',
         body: JSON.stringify(nextFolders),
@@ -554,18 +587,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizFolders((prev) => {
       const next = ensureFavoritesFolder(ensureRestoredFolder(prev));
       if (JSON.stringify(next) !== JSON.stringify(prev)) {
-        persistFolders(next);
+        localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(next));
       }
       return next;
     });
     setQuizSets((prev) => {
       const next = ensureFavoritesSet(prev);
       if (JSON.stringify(next) !== JSON.stringify(prev)) {
-        persistSets(next);
+        localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
       }
       return next;
     });
-    // Run once after each account finishes loading.
+    // Run once after each account finishes loading — local only, never cloud-sync empty state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, user?.uid]);
 
@@ -598,20 +631,32 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return () => setTokenSink(() => {});
   }, [addTokens]);
 
-  const persist = (nextNotes: Note[], nextDrafts?: Draft[], nextQuizzes?: QuizItem[], nextChats?: ChatConversation[], nextQuizSets?: QuizSet[], nextQuizFolders?: QuizFolder[]) => {
+  const persist = (
+    nextNotes: Note[],
+    nextDrafts?: Draft[],
+    nextQuizzes?: QuizItem[],
+    nextChats?: ChatConversation[],
+    nextQuizSets?: QuizSet[],
+    nextQuizFolders?: QuizFolder[],
+    forceCloud = false,
+  ) => {
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
     const qList = nextQuizzes ?? quizzes;
     localStorage.setItem('malacadhati_quiz', JSON.stringify(qList));
-    if (!user) return;
+    if (!user || !loadedRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      savesInFlight.current += 1;
-      setCloudStatus('saving');
-      savingStartedAt.current = Date.now();
       const dList = nextDrafts ?? drafts;
       const chatList = nextChats ?? chats;
       const qsList = nextQuizSets ?? quizSets;
       const qfList = nextQuizFolders ?? quizFolders;
+      if (!forceCloud && isEmptyUserPayload(nextNotes, qList, chatList, qsList, qfList)) {
+        recoveryLog('skipped cloud sync — empty user payload');
+        return;
+      }
+      savesInFlight.current += 1;
+      setCloudStatus('saving');
+      savingStartedAt.current = Date.now();
       const draftContents: Record<string, { title: string; html: string }> = {};
       dList.forEach((d) => {
         draftContents[d.id] = { title: d.title, html: d.html };
@@ -942,8 +987,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const nextSets = ensureFavoritesSet(initializeQuizColors(rawSets, nextFolders.map((folder) => folder.color).filter((color): color is string => !!color)));
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    persistFolders(nextFolders);
-    persistSets(nextSets);
+    persistFolders(nextFolders, true);
+    persistSets(nextSets, true);
     const after = nextFolders.filter((folder) => !folder.system && !folder.trashed);
     return after.filter((folder) => !before.has(folder.id)).length;
   };
@@ -985,6 +1030,60 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persistFolders(nextFolders);
     const after = nextFolders.filter((folder) => !folder.system && !folder.trashed);
     return after.filter((folder) => !before.has(folder.id)).length;
+  };
+
+  const getLocalBackupSummary = () => {
+    const local = readLocalNotesData();
+    const summary = {
+      notes: local.notes.length,
+      quizzes: local.quizzes.length,
+      sets: local.sets.filter((set) => !set.system).length,
+      folders: local.folders.filter((folder) => !folder.system).length,
+      chats: local.chats.length,
+      hasData: false,
+    };
+    summary.hasData = summary.notes > 0 || summary.quizzes > 0 || summary.sets > 0 || summary.folders > 0 || summary.chats > 0;
+    return summary;
+  };
+
+  const restoreFromLocalBackup = async (): Promise<{ notes: number; quizzes: number; sets: number; folders: number; chats: number }> => {
+    if (!user) return { notes: 0, quizzes: 0, sets: 0, folders: 0, chats: 0 };
+    const local = readLocalNotesData();
+    const nextNotes = local.notes;
+    const nextQuizzes = local.quizzes;
+    const nextChats = local.chats;
+    const nextFolders = ensureFavoritesFolder(finalizeQuizFolders(local.folders, local.sets));
+    const nextSets = ensureFavoritesSet(initializeQuizColors(local.sets, nextFolders.map((folder) => folder.color).filter((color): color is string => !!color)));
+    const counts = {
+      notes: nextNotes.length,
+      quizzes: nextQuizzes.length,
+      sets: nextSets.filter((set) => !set.system).length,
+      folders: nextFolders.filter((folder) => !folder.system).length,
+      chats: nextChats.length,
+    };
+    recoveryLog('manual local restore', counts);
+    setNotes(nextNotes);
+    setQuizzes(nextQuizzes);
+    setChats(nextChats);
+    setQuizFolders(nextFolders);
+    setQuizSets(nextSets);
+    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
+    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persist(nextNotes, undefined, nextQuizzes, nextChats, nextSets, nextFolders, true);
+    await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
+      method: 'PUT',
+      body: JSON.stringify(nextSets),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
+      method: 'PUT',
+      body: JSON.stringify(nextFolders),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return counts;
   };
 
   const hasQuizFolderBackups = async (): Promise<boolean> => {
@@ -1183,6 +1282,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         listQuizFolderBackups,
         restoreQuizFolderBackup,
         hasQuizFolderBackups,
+        getLocalBackupSummary,
+        restoreFromLocalBackup,
         addItemToSet,
         removeItemFromSet,
         updateItemInSet,
