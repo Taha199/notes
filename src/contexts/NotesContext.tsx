@@ -102,6 +102,49 @@ function readLocalJson<T>(key: string): T | null {
   }
 }
 
+const LAST_UID_KEY = 'malacadhati_last_uid';
+
+const LOCAL_DATA_KEYS = [
+  'malacadhati',
+  'malacadhati_quiz',
+  'malacadhati_quiz_sets',
+  'malacadhati_quiz_folders',
+  'malacadhati_chats',
+] as const;
+
+function clearLocalNotesData() {
+  for (const key of LOCAL_DATA_KEYS) localStorage.removeItem(key);
+}
+
+/** Clear cached notes when a different account signs in (keys are not uid-scoped). */
+function syncAccountLocalStorage(uid: string) {
+  const prev = localStorage.getItem(LAST_UID_KEY);
+  if (prev && prev !== uid) clearLocalNotesData();
+  localStorage.setItem(LAST_UID_KEY, uid);
+}
+
+function readLocalNotesData() {
+  return {
+    notes: firebaseToArray<Note>(readLocalJson<Note[]>('malacadhati') ?? []),
+    quizzes: firebaseToArray<QuizItem>(readLocalJson<QuizItem[]>('malacadhati_quiz') ?? []),
+    chats: firebaseToArray<ChatConversation>(readLocalJson<ChatConversation[]>('malacadhati_chats') ?? []).map((c) => ({
+      ...c,
+      messages: c.messages ?? [],
+    })),
+    folders: firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []),
+    sets: firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({
+      ...set,
+      items: set.items ?? [],
+    })),
+  };
+}
+
+/** Cloud wins when the field is present (even if empty); otherwise keep local fallback. */
+function cloudFieldOrLocal<T>(cloud: Record<string, unknown> | null, field: string, local: T[]): T[] {
+  if (cloud && field in cloud) return firebaseToArray<T>(cloud[field] as T[] | Record<string, T>);
+  return local;
+}
+
 const AUTO_QUIZ_COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#10b981', '#ec4899', '#06b6d4', '#f97316'];
 const RESTORED_FOLDER_ID = 'system-restored-sets';
 export const FAVORITES_FOLDER_ID = 'system-favorites';
@@ -268,115 +311,114 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setLoaded(true);
       return;
     }
+    syncAccountLocalStorage(user.uid);
+    const local = readLocalNotesData();
+
+    const applyLocalFallback = () => {
+      if (local.notes.length) setNotes(local.notes);
+      if (local.quizzes.length) setQuizzes(local.quizzes);
+      if (local.chats.length) setChats(local.chats);
+      if (local.folders.length) {
+        setQuizFolders(ensureRestoredFolder(initializeQuizColors(local.folders)));
+      }
+      if (local.sets.length) setQuizSets(local.sets);
+      draftCounter.current = 1;
+      setDrafts([{ id: 'd1', title: '', html: '' }]);
+    };
+
     (async () => {
       try {
         const r = await fetch(`${FB_DB_URL}/users/${user.uid}.json`);
-        const cloud = await r.json();
+        if (!r.ok) throw new Error('cloud-fetch-failed');
+        const cloud = (await r.json()) as Record<string, unknown> | null;
         if (cancelled) return;
-        if (cloud && cloud.tokenUsage) {
-          setTokenUsage(cloud.tokenUsage);
+
+        if (cloud?.tokenUsage) {
+          setTokenUsage(cloud.tokenUsage as number);
         }
-        if (cloud && cloud.notes) {
-          setNotes(firebaseToArray<Note>(cloud.notes));
-          localStorage.setItem('malacadhati', JSON.stringify(firebaseToArray<Note>(cloud.notes)));
-          if (cloud.quizzes) {
-            const loadedQuizzes = firebaseToArray<QuizItem>(cloud.quizzes);
-            setQuizzes(loadedQuizzes);
-            localStorage.setItem('malacadhati_quiz', JSON.stringify(loadedQuizzes));
-          }
-          if (cloud.chats) {
-            // Firebase strips empty arrays — normalize messages on load.
-            const normalizedChats = firebaseToArray<ChatConversation>(cloud.chats).map((c) => ({ ...c, messages: c.messages ?? [] }));
-            setChats(normalizedChats);
-            localStorage.setItem('malacadhati_chats', JSON.stringify(normalizedChats));
-          }
 
-          let dedicatedFolders: QuizFolder[] = [];
-          let dedicatedSets: QuizSet[] = [];
-          try {
-            const folderRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`);
-            dedicatedFolders = firebaseToArray<QuizFolder>(await folderRes.json());
-          } catch { /* ignore */ }
-          try {
-            const setRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`);
+        const notes = cloudFieldOrLocal<Note>(cloud, 'notes', local.notes);
+        setNotes(notes);
+        localStorage.setItem('malacadhati', JSON.stringify(notes));
+
+        const quizzes = cloudFieldOrLocal<QuizItem>(cloud, 'quizzes', local.quizzes);
+        setQuizzes(quizzes);
+        localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzes));
+
+        const chats = cloudFieldOrLocal<ChatConversation>(cloud, 'chats', local.chats).map((c) => ({
+          ...c,
+          messages: c.messages ?? [],
+        }));
+        setChats(chats);
+        localStorage.setItem('malacadhati_chats', JSON.stringify(chats));
+
+        let dedicatedFolders: QuizFolder[] = [];
+        let dedicatedSets: QuizSet[] = [];
+        try {
+          const folderRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`);
+          if (folderRes.ok) dedicatedFolders = firebaseToArray<QuizFolder>(await folderRes.json());
+        } catch { /* ignore */ }
+        try {
+          const setRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`);
+          if (setRes.ok) {
             dedicatedSets = firebaseToArray<QuizSet>(await setRes.json()).map((set) => ({ ...set, items: set.items ?? [] }));
-          } catch { /* ignore */ }
+          }
+        } catch { /* ignore */ }
 
-          const rawFolders = mergeById(
-            firebaseToArray<QuizFolder>(cloud.quizFolders),
-            dedicatedFolders,
-            firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []),
+        const rawFolders = mergeById(
+          cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [],
+          dedicatedFolders,
+          local.folders,
+        );
+        const rawSets: QuizSet[] = mergeById(
+          cloud
+            ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
+            : [],
+          dedicatedSets,
+          local.sets,
+        );
+        const normalizedFolders = finalizeQuizFolders(rawFolders, rawSets);
+        const normalizedSets = initializeQuizColors(
+          rawSets,
+          normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
+        );
+        setQuizSets(normalizedSets);
+        localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+        if (normalizedSets.some((set, index) => set !== rawSets[index])) {
+          void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
+            method: 'PUT',
+            body: JSON.stringify(normalizedSets),
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        setQuizFolders(normalizedFolders);
+        localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+        if (normalizedFolders.length !== rawFolders.length || normalizedFolders.some((folder, index) => folder !== rawFolders[index])) {
+          void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
+            method: 'PUT',
+            body: JSON.stringify(normalizedFolders),
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        const cloudDrafts = cloud?.drafts;
+        if (Array.isArray(cloudDrafts) && cloudDrafts.length) {
+          const dc = (cloud?.draftContents as Record<string, { title?: string; html?: string }> | undefined) || {};
+          setDrafts(
+            cloudDrafts.map((id) => ({
+              id: String(id),
+              title: dc[String(id)]?.title || '',
+              html: dc[String(id)]?.html || '',
+            })),
           );
-          const rawSets: QuizSet[] = mergeById(
-            firebaseToArray<QuizSet>(cloud.quizSets).map((set) => ({ ...set, items: set.items ?? [] })),
-            dedicatedSets,
-            firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({ ...set, items: set.items ?? [] })),
-          );
-          const normalizedFolders = finalizeQuizFolders(rawFolders, rawSets);
-          const normalizedSets = initializeQuizColors(rawSets, normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color));
-          setQuizSets(normalizedSets);
-          localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
-          if (normalizedSets.some((set, index) => set !== rawSets[index])) {
-            void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
-              method: 'PUT',
-              body: JSON.stringify(normalizedSets),
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-          setQuizFolders(normalizedFolders);
-          localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
-          if (normalizedFolders.length !== rawFolders.length || normalizedFolders.some((folder, index) => folder !== rawFolders[index])) {
-            void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
-              method: 'PUT',
-              body: JSON.stringify(normalizedFolders),
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-          if (cloud.drafts && cloud.drafts.length) {
-            const dc = cloud.draftContents || {};
-            setDrafts(
-              cloud.drafts.map((id: string) => ({
-                id,
-                title: dc[id]?.title || '',
-                html: dc[id]?.html || '',
-              }))
-            );
-            draftCounter.current = cloud.draftId || cloud.drafts.length;
-          } else {
-            draftCounter.current = 1;
-            setDrafts([{ id: 'd1', title: '', html: '' }]);
-          }
+          draftCounter.current = (cloud?.draftId as number | undefined) || cloudDrafts.length;
         } else {
-          // New user with no data — clear everything so previous account's localStorage data doesn't leak
-          setNotes([]);
-          setQuizzes([]);
-          setQuizSets([]);
-          setQuizFolders(ensureRestoredFolder([]));
-          setChats([]);
-          setTokenUsage(0);
-          localStorage.removeItem('malacadhati');
-          localStorage.removeItem('malacadhati_quiz');
-          localStorage.removeItem('malacadhati_quiz_sets');
-          localStorage.removeItem('malacadhati_quiz_folders');
-          localStorage.removeItem('malacadhati_chats');
           draftCounter.current = 1;
           setDrafts([{ id: 'd1', title: '', html: '' }]);
         }
       } catch {
-        const localNotes = firebaseToArray<Note>(readLocalJson<Note[]>('malacadhati') ?? []);
-        if (localNotes.length) setNotes(localNotes);
-        const localQuizzes = firebaseToArray<QuizItem>(readLocalJson<QuizItem[]>('malacadhati_quiz') ?? []);
-        if (localQuizzes.length) setQuizzes(localQuizzes);
-        const localChats = firebaseToArray<ChatConversation>(readLocalJson<ChatConversation[]>('malacadhati_chats') ?? []);
-        if (localChats.length) setChats(localChats.map((c) => ({ ...c, messages: c.messages ?? [] })));
-        const localFolders = firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []);
-        if (localFolders.length) {
-          setQuizFolders(ensureRestoredFolder(initializeQuizColors(localFolders)));
-        }
-        const localSets = firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({ ...set, items: set.items ?? [] }));
-        if (localSets.length) setQuizSets(localSets);
-        draftCounter.current = 1;
-        setDrafts([{ id: 'd1', title: '', html: '' }]);
+        if (cancelled) return;
+        applyLocalFallback();
       } finally {
         if (!cancelled) {
           setLoaded(true);
