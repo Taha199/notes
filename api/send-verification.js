@@ -134,7 +134,7 @@ export default async function handler(request, response) {
   const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
   const lang = request.body?.lang === 'sv' ? 'sv' : 'en';
   if (!/^\S+@\S+\.\S+$/.test(email)) return response.status(400).json({ error: 'invalid-email' });
-  if (isRateLimited(request)) return response.status(202).json({ ok: true });
+  if (isRateLimited(request)) return response.status(429).json({ error: 'rate-limited' });
 
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');

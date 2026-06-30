@@ -175,6 +175,8 @@ export interface Translation {
   authErrNeedEmail: string;
   authResetSent: string;
   authErrSendFail: string;
+  authErrEmailConfig: string;
+  authErrRateLimited: string;
   featNotesTitle: string;
   featNotesSub: string;
   featCloudTitle: string;
@@ -480,6 +482,8 @@ export const LANGS: Record<Lang, Translation> = {
     authErrInvalidCred: 'Incorrect email or password', authErrGoogle: 'An error occurred during Google sign-in',
     authErrNeedEmail: 'Enter your email first', authResetSent: '✓ Password reset link sent',
     authErrSendFail: 'Could not send email, check the address',
+    authErrEmailConfig: 'Email service is not configured. Contact support.',
+    authErrRateLimited: 'Please wait a minute before requesting another email.',
     featNotesTitle: '📝 Quick Notes', featNotesSub: 'Save ideas in seconds',
     featCloudTitle: '☁️ Cloud Sync', featCloudSub: 'Access your notes everywhere',
     featSecureTitle: '🔒 Secure Storage', featSecureSub: 'Your data is protected and backed up',
@@ -774,6 +778,8 @@ export const LANGS: Record<Lang, Translation> = {
     authErrInvalidCred: 'Felaktig e-post eller lösenord', authErrGoogle: 'Ett fel uppstod vid Google-inloggning',
     authErrNeedEmail: 'Ange din e-post först', authResetSent: '✓ Länk för återställning av lösenord skickad',
     authErrSendFail: 'Kunde inte skicka e-post, kontrollera adressen',
+    authErrEmailConfig: 'E-posttjänsten är inte konfigurerad. Kontakta support.',
+    authErrRateLimited: 'Vänta en minut innan du begär ett nytt mejl.',
     featNotesTitle: '📝 Snabba anteckningar', featNotesSub: 'Spara idéer på några sekunder',
     featCloudTitle: '☁️ Molnsynkronisering', featCloudSub: 'Kom åt dina anteckningar överallt',
     featSecureTitle: '🔒 Säker lagring', featSecureSub: 'Dina data skyddas och säkerhetskopieras',

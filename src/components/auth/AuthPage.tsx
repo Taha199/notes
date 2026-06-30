@@ -19,6 +19,10 @@ const ERROR_KEYS: Record<string, string> = {
   'auth/invalid-email': 'authErrInvalidEmail',
   'auth/too-many-requests': 'authErrTooMany',
   'auth/invalid-credential': 'authErrInvalidCred',
+  'send-failed': 'authErrSendFail',
+  'email-config-missing': 'authErrEmailConfig',
+  'email-send-failed': 'authErrSendFail',
+  'rate-limited': 'authErrRateLimited',
 };
 
 export function AuthPage() {
@@ -64,7 +68,7 @@ export function AuthPage() {
         await signIn(email, password);
       }
     } catch (err) {
-      const code = (err as { code?: string }).code ?? '';
+      const code = (err as { code?: string }).code ?? (err as Error).message ?? '';
       const key = ERROR_KEYS[code];
       setError(key ? (t as unknown as Record<string, string>)[key] : (err as Error).message);
     } finally {
@@ -92,8 +96,10 @@ export function AuthPage() {
     try {
       await resetPassword(email);
       setSuccess(t.authResetSent);
-    } catch {
-      setError(t.authErrSendFail);
+    } catch (err) {
+      const code = (err as { code?: string }).code ?? (err as Error).message ?? '';
+      const key = ERROR_KEYS[code];
+      setError(key ? (t as unknown as Record<string, string>)[key] : t.authErrSendFail);
     }
   };
 
