@@ -4,7 +4,7 @@ import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
 
 const ICONS: Record<Page, string> = {
-  home: '🏠', fav: '★', unread: '📖', read: '✓', library: '📚', files: '📎', archive: '🗄', trash: '🗑', quiz: '🧠', chat: '💬', settings: '⚙️', admin: '👑',
+  home: '🏠', fav: '★', unread: '📖', read: '✓', library: '📚', files: '📎', archive: '🗄', trash: '🗑', quiz: '🧠', settings: '⚙️', admin: '👑',
 };
 
 export function Header({
@@ -22,7 +22,7 @@ export function Header({
 }) {
   const { t } = useLanguage();
   const titles: Record<Page, string> = {
-    home: t.pageHome, fav: t.pageFav, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, files: t.pageFiles, archive: t.pageArch, trash: t.pageTrash, quiz: 'Quiz', chat: 'AI Chat', settings: t.settingsTitle, admin: t.adminTitle,
+    home: t.pageHome, fav: t.pageFav, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, files: t.pageFiles, archive: t.pageArch, trash: t.pageTrash, quiz: 'Quiz', settings: t.settingsTitle, admin: t.adminTitle,
   };
 
   return (

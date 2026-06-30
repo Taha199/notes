@@ -14,7 +14,6 @@ Created by Abdullah Taha.
 - Cloud sync so notes are available across devices
 - Favourites, archive, trash, and note library
 - Quiz creation and practice from your notes
-- AI chat for questions about your notes and uploaded files
 - Secure file uploads (up to 20 MB per file)
 - Dark mode
 - Swedish (SV) and English (EN) interface
@@ -25,7 +24,6 @@ Created by Abdullah Taha.
 - Notes library: https://tahanote.com/library
 - File uploads: https://tahanote.com/files
 - Quiz: https://tahanote.com/quiz
-- AI chat: https://tahanote.com/chat
 - Notes to study: https://tahanote.com/unread
 - Studied notes: https://tahanote.com/read
 - Favourites: https://tahanote.com/favorites

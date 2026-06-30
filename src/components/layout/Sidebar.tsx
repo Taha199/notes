@@ -5,7 +5,6 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { ADMIN_EMAIL } from '../../lib/firebase';
 import { useTheme } from '../../contexts/ThemeContext';
-import { useToast } from '../../contexts/ToastContext';
 import { Logo } from '../common/Logo';
 
 export function Sidebar({
@@ -23,8 +22,7 @@ export function Sidebar({
 }) {
   const { t } = useLanguage();
   const { notes, trashedQuizzes, quizSets, quizFolders } = useNotes();
-  const { user, hasPassword, hasAi, isPlus, profilePhotoURL, signOut } = useAuth();
-  const { show } = useToast();
+  const { user, hasPassword, isPlus, profilePhotoURL, signOut } = useAuth();
   const { dark, toggleDark } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -45,7 +43,6 @@ export function Sidebar({
     { page: 'read', icon: '✓', label: t.navRead, badge: counts.read, badgeClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' },
     { page: 'library', icon: '📚', label: t.navLibrary, badge: counts.home, badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
     { page: 'files', icon: '📎', label: t.navFiles },
-    { page: 'chat', icon: '💬', label: 'AI Chat' },
   ];
   const items2: { page: Page; icon: string; label: string; badge?: number; badgeClass?: string }[] = [
     { page: 'archive', icon: '🗄', label: t.navArchive, badge: counts.archive, badgeClass: 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400' },
@@ -60,21 +57,15 @@ export function Sidebar({
   const NavBtn = ({ it }: { it: (typeof items)[number] }) => (
     <button
       onClick={() => {
-        if (it.page === 'chat' && !hasAi) {
-          show(t.plusAiLocked);
-          onMobileClose?.();
-          return;
-        }
         setPage(it.page);
         onMobileClose?.();
       }}
       className={
         'group relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13.5px] font-medium transition-all ' +
-        (page === it.page ? 'bg-primary/10 text-primary' : 'text-app-text-secondary hover:bg-white hover:text-app-text dark:hover:bg-white/5 dark:hover:text-gray-100') +
-        (it.page === 'chat' && !hasAi ? ' opacity-70' : '')
+        (page === it.page ? 'bg-primary/10 text-primary' : 'text-app-text-secondary hover:bg-white hover:text-app-text dark:hover:bg-white/5 dark:hover:text-gray-100')
       }
     >
-      <span className="text-base opacity-90">{it.page === 'chat' && !hasAi ? '🔒' : it.icon}</span>
+      <span className="text-base opacity-90">{it.icon}</span>
       {(!collapsed || mobileOpen) && <span className="overflow-hidden whitespace-nowrap">{it.label}</span>}
       {(!collapsed || mobileOpen) && !!it.badge && (
         <span className={'mr-0 ml-auto rounded-full px-2 py-0.5 text-[10.5px] font-bold ' + it.badgeClass}>{it.badge}</span>

@@ -347,7 +347,6 @@ export function SettingsPage() {
             {[
               { label: t.settingsStorageNotes, bytes: storage.notesBytes, icon: '📝' },
               { label: t.settingsStorageQuiz, bytes: storage.quizBytes, icon: '🧠' },
-              { label: t.settingsStorageChat, bytes: storage.chatBytes, icon: '💬' },
               { label: t.settingsStorageFiles, bytes: storage.filesBytes, icon: '📎' },
             ].map(({ label, bytes, icon }) => (
               <div key={label} className="flex items-center justify-between text-[13px]">

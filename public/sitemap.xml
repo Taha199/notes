@@ -4,7 +4,6 @@
   <url><loc>https://tahanote.com/library</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
   <url><loc>https://tahanote.com/files</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
   <url><loc>https://tahanote.com/quiz</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://tahanote.com/chat</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
   <url><loc>https://tahanote.com/unread</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
   <url><loc>https://tahanote.com/read</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
   <url><loc>https://tahanote.com/favorites</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>

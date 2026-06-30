@@ -49,10 +49,6 @@ const PAGE_META: Partial<Record<Page, { sv: { title: string; description: string
     sv: { title: 'Quiz – Taha Note', description: 'Skapa och träna med quiz från dina anteckningar i Taha Note.' },
     en: { title: 'Quiz – Taha Note', description: 'Create and practice quizzes from your notes in Taha Note.' },
   },
-  chat: {
-    sv: { title: 'AI Chat – Taha Note', description: 'Chatta med AI om dina anteckningar och filer i Taha Note.' },
-    en: { title: 'AI Chat – Taha Note', description: 'Chat with AI about your notes and files in Taha Note.' },
-  },
   unread: {
     sv: { title: 'Att studera – Taha Note', description: 'Anteckningar du ännu inte studerat – organiserade i Taha Note.' },
     en: { title: 'Notes to Study – Taha Note', description: 'Notes you have not studied yet – organized in Taha Note.' },
@@ -183,7 +179,6 @@ export function injectJsonLd() {
           'Rich-text notes',
           'Cloud sync',
           'Quiz generation',
-          'AI chat',
           'File uploads',
           'Favourites and archive',
           'Swedish and English',

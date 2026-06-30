@@ -13,7 +13,6 @@ import { SetPasswordModal } from './auth/SetPasswordModal';
 import { SeoHead } from './common/SeoHead';
 import { FilesPage } from './files/FilesPage';
 import { QuizPage } from './quiz/QuizPage';
-import { ChatPage } from './chat/ChatPage';
 import { SettingsPage } from './settings/SettingsPage';
 import { AdminPanel } from './admin/AdminPanel';
 import { ConfirmDialog } from './common/ConfirmDialog';
@@ -213,7 +212,7 @@ export function Dashboard() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Header page={page} search={search} setSearch={setSearch} onNewNote={handleNewNote} onOpenMenu={() => setMobileMenuOpen(true)} />
 
-        <div className={`flex-1 ${page === 'chat' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <div className="flex-1 overflow-y-auto">
           {page === 'home' && hasSearch && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🔎 {t.secAll}</div>
@@ -260,7 +259,6 @@ export function Dashboard() {
 
           {page === 'files' && <FilesPage search={search} />}
           {page === 'quiz' && <QuizPage />}
-          {page === 'chat' && <ChatPage />}
           {page === 'settings' && <SettingsPage />}
           {page === 'admin' && <AdminPanel />}
 
