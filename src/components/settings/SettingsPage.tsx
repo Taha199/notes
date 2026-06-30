@@ -225,6 +225,19 @@ export function SettingsPage() {
                   .replace('{sets}', String(recoverScan.totalRecoverable.sets))
                   .replace('{chats}', String(recoverScan.totalRecoverable.chats))}
               </p>
+              {recoverScan.folderNames.length > 0 && (
+                <p className="mt-1 text-app-text dark:text-gray-300">
+                  {lang === 'sv' ? 'Mappar' : 'Folders'}: {recoverScan.folderNames.join(', ')}
+                </p>
+              )}
+              {recoverScan.totalRecoverable.notes === 0
+                && recoverScan.totalRecoverable.quizzes === 0
+                && recoverScan.totalRecoverable.sets === 0
+                && recoverScan.totalRecoverable.folders > 0 && (
+                <p className="mt-2 rounded-lg border border-amber-300/50 bg-amber-50/80 px-2 py-1.5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  {t.settingsEmergencyRecoveryPartial.replace('{folders}', recoverScan.folderNames.join(', ') || String(recoverScan.totalRecoverable.folders))}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <button

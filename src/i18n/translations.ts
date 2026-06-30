@@ -245,6 +245,7 @@ export interface Translation {
   settingsEmergencyRecoveryRestore: string;
   settingsEmergencyRecoveryRestored: string;
   settingsEmergencyRecoveryEmpty: string;
+  settingsEmergencyRecoveryPartial: string;
   settingsLocalBackup: string;
   settingsLocalBackupEmpty: string;
   settingsLocalBackupCounts: string;
@@ -568,6 +569,7 @@ export const LANGS: Record<Lang, Translation> = {
     settingsEmergencyRecoveryRestore: 'Restore everything found',
     settingsEmergencyRecoveryRestored: 'Recovery complete — check Home and Quiz',
     settingsEmergencyRecoveryEmpty: 'No recoverable notes or quiz data found in Firebase.',
+    settingsEmergencyRecoveryPartial: 'Notes and quiz questions were deleted from the cloud server. Only folder structure can be restored: {folders}. Your uploaded files are still in Files.',
     settingsLocalBackup: 'Restore from this browser',
     settingsLocalBackupEmpty: 'No notes or quiz data found in this browser’s local storage.',
     settingsLocalBackupCounts: '{notes} notes · {quizzes} quiz items · {folders} folders · {sets} sets · {chats} chats',
@@ -887,6 +889,7 @@ export const LANGS: Record<Lang, Translation> = {
     settingsEmergencyRecoveryRestore: 'Återställ allt som hittas',
     settingsEmergencyRecoveryRestored: 'Återställning klar — kolla Hem och Quiz',
     settingsEmergencyRecoveryEmpty: 'Ingen återställningsbar data hittades i Firebase.',
+    settingsEmergencyRecoveryPartial: 'Anteckningar och quizfrågor raderades från molnet. Endast mappstruktur kan återställas: {folders}. Uppladdade filer finns kvar under Filer.',
     settingsLocalBackup: 'Återställ från den här webbläsaren',
     settingsLocalBackupEmpty: 'Inga anteckningar eller quiz hittades i webbläsarens lokala lagring.',
     settingsLocalBackupCounts: '{notes} anteckningar · {quizzes} quiz · {folders} mappar · {sets} set · {chats} chattar',

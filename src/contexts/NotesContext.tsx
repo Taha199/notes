@@ -22,8 +22,10 @@ export interface RecoverableCloudSummary {
     folderHistoryKeys: number;
     dedicatedSets: number;
     dedicatedFolders: number;
+    orphaned: { notes: number; quizzes: number; sets: number };
   };
   totalRecoverable: { notes: number; quizzes: number; sets: number; folders: number; chats: number };
+  folderNames: string[];
 }
 
 interface NotesCtx {
@@ -414,12 +416,138 @@ async function readDedicatedQuizData(uid: string) {
   return { folders, sets };
 }
 
+async function fetchAllDataHistorySnapshots(uid: string): Promise<DataHistorySnapshot[]> {
+  try {
+    const res = await fetch(`${FB_DB_URL}/users/${uid}/dataHistory.json?shallow=true`);
+    if (!res.ok) return [];
+    const keys = Object.keys((await res.json()) || {}).sort().reverse();
+    const snapshots = await Promise.all(keys.map((key) => fetchDataHistorySnapshot(uid, key)));
+    return snapshots.filter((snap): snap is DataHistorySnapshot => !!snap);
+  } catch {
+    return [];
+  }
+}
+
+function deepScanOrphanedContent(value: unknown): { notes: Note[]; quizzes: QuizItem[]; sets: QuizSet[] } {
+  const found = { notes: [] as Note[], quizzes: [] as QuizItem[], sets: [] as QuizSet[] };
+  const noteIds = new Set<number>();
+  const quizIds = new Set<number>();
+  const setIds = new Set<string>();
+  const seen = new WeakSet<object>();
+
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== 'object') return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+
+    const obj = node as Record<string, unknown>;
+
+    if (
+      typeof obj.title === 'string'
+      && typeof obj.html === 'string'
+      && (typeof obj.id === 'number' || typeof obj.id === 'string')
+      && !obj.question
+    ) {
+      const id = Number(obj.id);
+      const text = String(obj.text ?? obj.html.replace(/<[^>]*>/g, '')).trim();
+      if (Number.isFinite(id) && text.length > 8 && !noteIds.has(id)) {
+        noteIds.add(id);
+        found.notes.push({
+          id,
+          title: obj.title,
+          html: obj.html,
+          text,
+          fav: obj.fav === true,
+          read: obj.read === true,
+          archived: obj.archived === true,
+          trashed: obj.trashed === true,
+          deletedAt: typeof obj.deletedAt === 'string' ? obj.deletedAt : undefined,
+          date: typeof obj.date === 'string' ? obj.date : new Date().toISOString(),
+          lastEdited: typeof obj.lastEdited === 'string' ? obj.lastEdited : undefined,
+        });
+      }
+    }
+
+    if (
+      typeof obj.question === 'string'
+      && typeof obj.answer === 'string'
+      && (typeof obj.id === 'number' || typeof obj.id === 'string')
+    ) {
+      const id = Number(obj.id);
+      const question = obj.question.trim();
+      const answer = obj.answer.trim();
+      if (Number.isFinite(id) && question.length > 2 && answer.length > 0 && !quizIds.has(id)) {
+        quizIds.add(id);
+        found.quizzes.push({
+          id,
+          noteId: Number(obj.noteId ?? 0),
+          noteTitle: String(obj.noteTitle ?? ''),
+          question,
+          answer,
+          date: String(obj.date ?? new Date().toISOString()),
+          options: Array.isArray(obj.options) ? obj.options.map(String) : undefined,
+          correctIndex: typeof obj.correctIndex === 'number' ? obj.correctIndex : undefined,
+          correctIndexes: Array.isArray(obj.correctIndexes) ? obj.correctIndexes.map(Number) : undefined,
+          explanation: typeof obj.explanation === 'string' ? obj.explanation : undefined,
+          createdAt: typeof obj.createdAt === 'string' ? obj.createdAt : undefined,
+          updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : undefined,
+          trashed: obj.trashed === true,
+          deletedAt: typeof obj.deletedAt === 'string' ? obj.deletedAt : undefined,
+        });
+      }
+    }
+
+    if (typeof obj.name === 'string' && typeof obj.id === 'string' && Array.isArray(obj.items)) {
+      const setId = obj.id;
+      if (!setIds.has(setId)) {
+        setIds.add(setId);
+        const items = firebaseToArray<QuizItem>(obj.items as QuizItem[] | Record<string, QuizItem>);
+        found.sets.push({
+          id: setId,
+          name: obj.name,
+          items,
+          createdAt: typeof obj.createdAt === 'string' ? obj.createdAt : new Date().toISOString(),
+          color: typeof obj.color === 'string' ? obj.color : undefined,
+          colorInitialized: obj.colorInitialized === true,
+          trashed: obj.trashed === true,
+          deletedAt: typeof obj.deletedAt === 'string' ? obj.deletedAt : undefined,
+          folderId: typeof obj.folderId === 'string' ? obj.folderId : undefined,
+          system: obj.system === 'favorites' ? 'favorites' as const : undefined,
+        });
+      }
+    }
+
+    for (const child of Object.values(obj)) walk(child);
+  };
+
+  walk(value);
+  return found;
+}
+
 async function buildRecoverySnapshot(uid: string, cloud: Record<string, unknown> | null): Promise<DataHistorySnapshot> {
-  const [{ snapshot: historySnapshot }, dedicated, folderHistory] = await Promise.all([
-    fetchBestDataHistory(uid),
+  const [historySnapshots, dedicated, folderHistory, fullUserTree] = await Promise.all([
+    fetchAllDataHistorySnapshots(uid),
     readDedicatedQuizData(uid),
     fetchAllFolderHistory(uid),
+    fetch(`${FB_DB_URL}/users/${uid}.json`).then((r) => r.json()).catch(() => null),
   ]);
+
+  const historySnapshot = historySnapshots.reduce<DataHistorySnapshot | null>((best, snap) => {
+    if (!best || dataHistoryScore(snap) > dataHistoryScore(best)) return snap;
+    return best;
+  }, null);
+
+  const allHistoryNotes = historySnapshots.flatMap((snap) => snap.notes);
+  const allHistoryQuizzes = historySnapshots.flatMap((snap) => snap.quizzes);
+  const allHistorySets = historySnapshots.flatMap((snap) => snap.quizSets);
+  const allHistoryFolders = historySnapshots.flatMap((snap) => snap.quizFolders);
+  const allHistoryChats = historySnapshots.flatMap((snap) => snap.chats);
+  const orphaned = deepScanOrphanedContent(fullUserTree);
 
   const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
   const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
@@ -444,15 +572,23 @@ async function buildRecoverySnapshot(uid: string, cloud: Record<string, unknown>
   };
 
   return {
-    notes: mergeNotesById(history.notes, cloudNotes, draftNotes, chatNotes),
+    notes: mergeNotesById(history.notes, cloudNotes, draftNotes, chatNotes, allHistoryNotes, orphaned.notes),
     quizzes: mergeQuizzesById(
       history.quizzes,
       cloudQuizzes,
-      [history.quizSets, cloudSets, dedicated.sets].flatMap((sets) => sets.flatMap((set) => set.items ?? [])),
+      allHistoryQuizzes,
+      orphaned.quizzes,
+      [history.quizSets, cloudSets, dedicated.sets, allHistorySets, orphaned.sets].flatMap((sets) => sets.flatMap((set) => set.items ?? [])),
     ),
-    chats: cloudChats.length >= history.chats.length ? cloudChats : history.chats,
-    quizSets: mergeById(history.quizSets, cloudSets, dedicated.sets),
-    quizFolders: mergeById(history.quizFolders, cloudFolders, dedicated.folders, folderHistory),
+    chats: (() => {
+      const merged = new Map<string, ChatConversation>();
+      for (const chat of [...history.chats, ...allHistoryChats, ...cloudChats]) {
+        merged.set(chat.id, { ...chat, messages: chat.messages ?? [] });
+      }
+      return [...merged.values()];
+    })(),
+    quizSets: mergeById(history.quizSets, cloudSets, dedicated.sets, allHistorySets, orphaned.sets),
+    quizFolders: mergeById(history.quizFolders, cloudFolders, dedicated.folders, folderHistory, allHistoryFolders),
   };
 }
 
@@ -1491,11 +1627,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           folderHistoryKeys: 0,
           dedicatedSets: 0,
           dedicatedFolders: 0,
+          orphaned: { notes: 0, quizzes: 0, sets: 0 },
         },
         totalRecoverable: { notes: 0, quizzes: 0, sets: 0, folders: 0, chats: 0 },
+        folderNames: [],
       };
     }
     const cloud = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json()).catch(() => null) as Record<string, unknown> | null;
+    const fullUserTree = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json()).catch(() => null);
+    const orphaned = deepScanOrphanedContent(fullUserTree);
     const [{ key: bestKey, snapshot: bestHistory }, dedicated, folderHistoryKeys] = await Promise.all([
       fetchBestDataHistory(user.uid),
       readDedicatedQuizData(user.uid),
@@ -1512,6 +1652,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
       : [];
     const cloudFolders = cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [];
+    const folderNames = recovery.quizFolders
+      .filter((folder) => !folder.system && !folder.trashed)
+      .map((folder) => folder.name)
+      .filter(Boolean);
     return {
       sources: {
         cloud: {
@@ -1534,8 +1678,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         folderHistoryKeys,
         dedicatedSets: countUserQuizSets(dedicated.sets),
         dedicatedFolders: countUserQuizFolders(dedicated.folders),
+        orphaned: {
+          notes: orphaned.notes.length,
+          quizzes: orphaned.quizzes.length,
+          sets: countUserQuizSets(orphaned.sets),
+        },
       },
       totalRecoverable: summarizeDataSnapshot(recovery),
+      folderNames,
     };
   };
 
