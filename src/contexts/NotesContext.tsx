@@ -13,6 +13,19 @@ export interface Draft {
 
 type CloudStatus = 'idle' | 'saving' | 'saved';
 
+export interface RecoverableCloudSummary {
+  sources: {
+    cloud: { notes: number; quizzes: number; sets: number; folders: number; chats: number };
+    dataHistoryBest: { key: string | null; notes: number; quizzes: number; sets: number; folders: number; chats: number };
+    drafts: number;
+    chatUserMessages: number;
+    folderHistoryKeys: number;
+    dedicatedSets: number;
+    dedicatedFolders: number;
+  };
+  totalRecoverable: { notes: number; quizzes: number; sets: number; folders: number; chats: number };
+}
+
 interface NotesCtx {
   notes: Note[];
   drafts: Draft[];
@@ -51,6 +64,8 @@ interface NotesCtx {
   listDataBackups: () => Promise<{ key: string; label: string; notes: number; quizzes: number; sets: number; folders: number; chats: number }[]>;
   restoreDataBackup: (key: string) => Promise<{ notes: number; quizzes: number; sets: number; folders: number; chats: number }>;
   hasDataBackups: () => Promise<boolean>;
+  scanRecoverableCloud: () => Promise<RecoverableCloudSummary>;
+  emergencyRecoverFromCloud: () => Promise<{ notes: number; quizzes: number; sets: number; folders: number; chats: number }>;
   getLocalBackupSummary: () => { notes: number; quizzes: number; sets: number; folders: number; chats: number; hasData: boolean };
   restoreFromLocalBackup: () => Promise<{ notes: number; quizzes: number; sets: number; folders: number; chats: number }>;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => number;
@@ -287,25 +302,158 @@ async function fetchDataHistorySnapshot(uid: string, key: string): Promise<DataH
   }
 }
 
-async function fetchLatestDataHistory(uid: string): Promise<DataHistorySnapshot | null> {
+function mergeNotesById(...lists: Note[][]): Note[] {
+  const map = new Map<number, Note>();
+  for (const list of lists) {
+    for (const item of list) {
+      if (item?.id != null) map.set(item.id, item);
+    }
+  }
+  return [...map.values()];
+}
+
+function mergeQuizzesById(...lists: QuizItem[][]): QuizItem[] {
+  const map = new Map<number, QuizItem>();
+  for (const list of lists) {
+    for (const item of list) {
+      if (item?.id != null) map.set(item.id, item);
+    }
+  }
+  return [...map.values()];
+}
+
+function dataHistoryScore(snapshot: DataHistorySnapshot) {
+  const setItems = snapshot.quizSets.reduce((sum, set) => sum + (set.items?.length ?? 0), 0);
+  return snapshot.notes.length * 4
+    + snapshot.quizzes.length * 3
+    + countUserQuizSets(snapshot.quizSets) * 5
+    + setItems * 2
+    + countUserQuizFolders(snapshot.quizFolders) * 2
+    + snapshot.chats.length;
+}
+
+function notesFromChats(chats: ChatConversation[]): Note[] {
+  const notes: Note[] = [];
+  let id = Date.now();
+  for (const chat of chats) {
+    for (const message of chat.messages ?? []) {
+      if (message.role !== 'user') continue;
+      const text = message.text?.trim() ?? '';
+      if (text.length < 24) continue;
+      notes.push({
+        id: id++,
+        title: chat.title?.trim() || 'Recovered from chat',
+        html: `<p>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`,
+        text,
+        fav: false,
+        read: false,
+        archived: false,
+        date: message.timestamp || chat.createdAt || new Date().toISOString(),
+      });
+    }
+  }
+  return notes;
+}
+
+function countChatUserMessages(chats: ChatConversation[]) {
+  return chats.reduce((sum, chat) => sum + (chat.messages ?? []).filter((m) => m.role === 'user' && (m.text?.trim().length ?? 0) >= 24).length, 0);
+}
+
+async function fetchBestDataHistory(uid: string): Promise<{ key: string | null; snapshot: DataHistorySnapshot | null }> {
   try {
     const res = await fetch(`${FB_DB_URL}/users/${uid}/dataHistory.json?shallow=true`);
-    if (!res.ok) return null;
+    if (!res.ok) return { key: null, snapshot: null };
     const keys = Object.keys((await res.json()) || {}).sort().reverse();
+    let bestKey: string | null = null;
+    let bestSnapshot: DataHistorySnapshot | null = null;
+    let bestScore = 0;
     for (const key of keys) {
       const snapshot = await fetchDataHistorySnapshot(uid, key);
       if (!snapshot) continue;
-      const hasContent = snapshot.notes.length > 0
-        || snapshot.quizzes.length > 0
-        || countUserQuizSets(snapshot.quizSets) > 0
-        || countUserQuizFolders(snapshot.quizFolders) > 0
-        || snapshot.chats.length > 0;
-      if (hasContent) return snapshot;
+      const score = dataHistoryScore(snapshot);
+      if (score > bestScore) {
+        bestScore = score;
+        bestKey = key;
+        bestSnapshot = snapshot;
+      }
     }
-    return null;
+    return { key: bestKey, snapshot: bestSnapshot };
   } catch {
-    return null;
+    return { key: null, snapshot: null };
   }
+}
+
+async function fetchLatestDataHistory(uid: string): Promise<DataHistorySnapshot | null> {
+  const { snapshot } = await fetchBestDataHistory(uid);
+  return snapshot;
+}
+
+async function fetchAllFolderHistory(uid: string): Promise<QuizFolder[]> {
+  try {
+    const res = await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory.json?shallow=true`);
+    if (!res.ok) return [];
+    const keys = Object.keys((await res.json()) || {}).sort().reverse();
+    const lists = await Promise.all(keys.map(async (key) => firebaseToArray<QuizFolder>(
+      await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory/${key}.json`).then((r) => r.json()),
+    )));
+    return mergeById(...lists);
+  } catch {
+    return [];
+  }
+}
+
+async function readDedicatedQuizData(uid: string) {
+  let folders: QuizFolder[] = [];
+  let sets: QuizSet[] = [];
+  try {
+    folders = firebaseToArray<QuizFolder>(await fetch(`${FB_DB_URL}/users/${uid}/quizFolders.json`).then((r) => r.json()));
+  } catch { /* ignore */ }
+  try {
+    sets = firebaseToArray<QuizSet>(await fetch(`${FB_DB_URL}/users/${uid}/quizSets.json`).then((r) => r.json())).map((set) => ({ ...set, items: set.items ?? [] }));
+  } catch { /* ignore */ }
+  return { folders, sets };
+}
+
+async function buildRecoverySnapshot(uid: string, cloud: Record<string, unknown> | null): Promise<DataHistorySnapshot> {
+  const [{ snapshot: historySnapshot }, dedicated, folderHistory] = await Promise.all([
+    fetchBestDataHistory(uid),
+    readDedicatedQuizData(uid),
+    fetchAllFolderHistory(uid),
+  ]);
+
+  const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
+  const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
+  const cloudChats = cloud
+    ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>).map((chat) => ({ ...chat, messages: chat.messages ?? [] }))
+    : [];
+  const cloudSets = cloud
+    ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
+    : [];
+  const cloudFolders = cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [];
+  const draftNotes = cloud?.draftContents && typeof cloud.draftContents === 'object'
+    ? recoverNotesFromDraftContents(cloud.draftContents as Record<string, { title?: string; html?: string }>)
+    : [];
+  const chatNotes = notesFromChats(cloudChats);
+
+  const history = historySnapshot ?? {
+    notes: [],
+    quizzes: [],
+    chats: [],
+    quizSets: [],
+    quizFolders: [],
+  };
+
+  return {
+    notes: mergeNotesById(history.notes, cloudNotes, draftNotes, chatNotes),
+    quizzes: mergeQuizzesById(
+      history.quizzes,
+      cloudQuizzes,
+      [history.quizSets, cloudSets, dedicated.sets].flatMap((sets) => sets.flatMap((set) => set.items ?? [])),
+    ),
+    chats: cloudChats.length >= history.chats.length ? cloudChats : history.chats,
+    quizSets: mergeById(history.quizSets, cloudSets, dedicated.sets),
+    quizFolders: mergeById(history.quizFolders, cloudFolders, dedicated.folders, folderHistory),
+  };
 }
 
 function ensureRestoredFolder(folders: QuizFolder[]) {
@@ -513,27 +661,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         let chatsRepair = chatsMerge.repair;
 
         let historyRepair = false;
-        let historySnapshot: DataHistorySnapshot | null = null;
-        if (notes.length === 0 || quizzes.length === 0 || chats.length === 0) {
-          historySnapshot = await fetchLatestDataHistory(user.uid);
-          if (historySnapshot) {
-            if (notes.length === 0 && historySnapshot.notes.length > 0) {
-              notes = historySnapshot.notes;
-              notesRepair = true;
-              historyRepair = true;
-            }
-            if (quizzes.length === 0 && historySnapshot.quizzes.length > 0) {
-              quizzes = historySnapshot.quizzes;
-              quizzesRepair = true;
-              historyRepair = true;
-            }
-            if (chats.length === 0 && historySnapshot.chats.length > 0) {
-              chats = historySnapshot.chats;
-              chatsRepair = true;
-              historyRepair = true;
-            }
-          }
-        }
 
         if (notes.length === 0 && cloud?.draftContents && typeof cloud.draftContents === 'object') {
           const fromDrafts = recoverNotesFromDraftContents(cloud.draftContents as Record<string, { title?: string; html?: string }>);
@@ -598,23 +725,71 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzes));
           }
         }
+
+        const shouldDeepRecover = notes.length === 0
+          || quizzes.length === 0
+          || countUserQuizSets(rawSets) === 0
+          || countUserQuizFolders(rawFolders) === 0;
+        if (shouldDeepRecover) {
+          const recovery = await buildRecoverySnapshot(user.uid, cloud);
+          const nextNotes = mergeNotesById(notes, recovery.notes);
+          const nextQuizzes = mergeQuizzesById(
+            quizzes,
+            recovery.quizzes,
+            recovery.quizSets.flatMap((set) => set.items ?? []),
+          );
+          const nextChats = recovery.chats.length > chats.length ? recovery.chats : chats;
+          const nextRawFolders = mergeById(rawFolders, recovery.quizFolders);
+          const nextRawSets = mergeById(rawSets, recovery.quizSets);
+          if (nextNotes.length > notes.length) {
+            notes = nextNotes;
+            notesRepair = true;
+            historyRepair = true;
+            setNotes(notes);
+            localStorage.setItem('malacadhati', JSON.stringify(notes));
+          }
+          if (nextQuizzes.length > quizzes.length) {
+            quizzes = nextQuizzes;
+            quizzesRepair = true;
+            historyRepair = true;
+            setQuizzes(quizzes);
+            localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzes));
+          }
+          if (nextChats.length > chats.length) {
+            chats = nextChats;
+            chatsRepair = true;
+            historyRepair = true;
+            setChats(chats);
+            localStorage.setItem('malacadhati_chats', JSON.stringify(chats));
+          }
+          if (countUserQuizFolders(nextRawFolders) > countUserQuizFolders(rawFolders)) {
+            rawFolders = nextRawFolders;
+            repairQuizStructure = true;
+            historyRepair = true;
+          }
+          if (countUserQuizSets(nextRawSets) > countUserQuizSets(rawSets)) {
+            rawSets = nextRawSets;
+            repairQuizStructure = true;
+            historyRepair = true;
+          }
+          if (historyRepair) recoveryLog('deep cloud recovery merged', {
+            notes: notes.length,
+            quizzes: quizzes.length,
+            userFolders: countUserQuizFolders(rawFolders),
+            userSets: countUserQuizSets(rawSets),
+          });
+        }
+
         if (
           countUserQuizFolders(rawFolders) === 0
           && (cloudFoldersEmpty || dedicatedFoldersEmpty)
         ) {
-          const historyFolders = historySnapshot?.quizFolders.length
-            ? historySnapshot.quizFolders
-            : await fetchLatestFolderHistory(user.uid);
+          const historyFolders = await fetchLatestFolderHistory(user.uid);
           if (historyFolders) {
             rawFolders = mergeById(rawFolders, historyFolders);
             repairQuizStructure = true;
-            if (historySnapshot?.quizFolders.length) historyRepair = true;
+            historyRepair = true;
           }
-        }
-        if (countUserQuizSets(rawSets) === 0 && historySnapshot?.quizSets.some((set) => !set.system)) {
-          rawSets = mergeById(rawSets, historySnapshot.quizSets);
-          repairQuizStructure = true;
-          historyRepair = true;
         }
 
         const normalizedFolders = finalizeQuizFolders(rawFolders, rawSets);
@@ -1273,6 +1448,111 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const applyRecoverySnapshot = async (snapshot: DataHistorySnapshot, label: string) => {
+    const nextFolders = ensureFavoritesFolder(finalizeQuizFolders(snapshot.quizFolders, snapshot.quizSets));
+    const nextSets = ensureFavoritesSet(initializeQuizColors(
+      snapshot.quizSets,
+      nextFolders.map((folder) => folder.color).filter((color): color is string => !!color),
+    ));
+    const counts = summarizeDataSnapshot({ ...snapshot, quizFolders: nextFolders, quizSets: nextSets });
+    recoveryLog(label, counts);
+    setNotes(snapshot.notes);
+    setQuizzes(snapshot.quizzes);
+    setChats(snapshot.chats);
+    setQuizFolders(nextFolders);
+    setQuizSets(nextSets);
+    localStorage.setItem('malacadhati', JSON.stringify(snapshot.notes));
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(snapshot.quizzes));
+    localStorage.setItem('malacadhati_chats', JSON.stringify(snapshot.chats));
+    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persist(snapshot.notes, undefined, snapshot.quizzes, snapshot.chats, nextSets, nextFolders, true);
+    await fetch(`${FB_DB_URL}/users/${user!.uid}/quizSets.json`, {
+      method: 'PUT',
+      body: JSON.stringify(nextSets),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    await fetch(`${FB_DB_URL}/users/${user!.uid}/quizFolders.json`, {
+      method: 'PUT',
+      body: JSON.stringify(nextFolders),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return counts;
+  };
+
+  const scanRecoverableCloud = async (): Promise<RecoverableCloudSummary> => {
+    if (!user) {
+      return {
+        sources: {
+          cloud: { notes: 0, quizzes: 0, sets: 0, folders: 0, chats: 0 },
+          dataHistoryBest: { key: null, notes: 0, quizzes: 0, sets: 0, folders: 0, chats: 0 },
+          drafts: 0,
+          chatUserMessages: 0,
+          folderHistoryKeys: 0,
+          dedicatedSets: 0,
+          dedicatedFolders: 0,
+        },
+        totalRecoverable: { notes: 0, quizzes: 0, sets: 0, folders: 0, chats: 0 },
+      };
+    }
+    const cloud = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json()).catch(() => null) as Record<string, unknown> | null;
+    const [{ key: bestKey, snapshot: bestHistory }, dedicated, folderHistoryKeys] = await Promise.all([
+      fetchBestDataHistory(user.uid),
+      readDedicatedQuizData(user.uid),
+      fetch(`${FB_DB_URL}/users/${user.uid}/quizFoldersHistory.json?shallow=true`).then((r) => r.json()).then((data) => Object.keys(data || {}).length).catch(() => 0),
+    ]);
+    const cloudChats = cloud
+      ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>).map((chat) => ({ ...chat, messages: chat.messages ?? [] }))
+      : [];
+    const draftNotes = cloud?.draftContents && typeof cloud.draftContents === 'object'
+      ? recoverNotesFromDraftContents(cloud.draftContents as Record<string, { title?: string; html?: string }>)
+      : [];
+    const recovery = await buildRecoverySnapshot(user.uid, cloud);
+    const cloudSets = cloud
+      ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
+      : [];
+    const cloudFolders = cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [];
+    return {
+      sources: {
+        cloud: {
+          notes: firebaseToArray<Note>(cloud?.notes as Note[] | Record<string, Note>).length,
+          quizzes: firebaseToArray<QuizItem>(cloud?.quizzes as QuizItem[] | Record<string, QuizItem>).length,
+          sets: countUserQuizSets(cloudSets),
+          folders: countUserQuizFolders(cloudFolders),
+          chats: cloudChats.length,
+        },
+        dataHistoryBest: {
+          key: bestKey,
+          notes: bestHistory?.notes.length ?? 0,
+          quizzes: bestHistory?.quizzes.length ?? 0,
+          sets: bestHistory ? countUserQuizSets(bestHistory.quizSets) : 0,
+          folders: bestHistory ? countUserQuizFolders(bestHistory.quizFolders) : 0,
+          chats: bestHistory?.chats.length ?? 0,
+        },
+        drafts: draftNotes.length,
+        chatUserMessages: countChatUserMessages(cloudChats),
+        folderHistoryKeys,
+        dedicatedSets: countUserQuizSets(dedicated.sets),
+        dedicatedFolders: countUserQuizFolders(dedicated.folders),
+      },
+      totalRecoverable: summarizeDataSnapshot(recovery),
+    };
+  };
+
+  const emergencyRecoverFromCloud = async (): Promise<{ notes: number; quizzes: number; sets: number; folders: number; chats: number }> => {
+    if (!user) return { notes: 0, quizzes: 0, sets: 0, folders: 0, chats: 0 };
+    const cloud = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json()).catch(() => null) as Record<string, unknown> | null;
+    const recovery = await buildRecoverySnapshot(user.uid, cloud);
+    const merged: DataHistorySnapshot = {
+      notes: mergeNotesById(notes, recovery.notes),
+      quizzes: mergeQuizzesById(quizzes, recovery.quizzes, recovery.quizSets.flatMap((set) => set.items ?? [])),
+      chats: recovery.chats.length > chats.length ? recovery.chats : chats,
+      quizSets: mergeById(quizSets, recovery.quizSets),
+      quizFolders: mergeById(quizFolders, recovery.quizFolders),
+    };
+    return applyRecoverySnapshot(merged, 'emergency cloud recovery');
+  };
+
   const getLocalBackupSummary = () => {
     const local = readLocalNotesData();
     const summary = {
@@ -1526,6 +1806,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         listDataBackups,
         restoreDataBackup,
         hasDataBackups,
+        scanRecoverableCloud,
+        emergencyRecoverFromCloud,
         getLocalBackupSummary,
         restoreFromLocalBackup,
         addItemToSet,

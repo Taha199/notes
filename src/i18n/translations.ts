@@ -239,6 +239,12 @@ export interface Translation {
   settingsCloudBackupCounts: string;
   settingsCloudBackupRestore: string;
   settingsCloudBackupRestored: string;
+  settingsEmergencyRecovery: string;
+  settingsEmergencyRecoverySub: string;
+  settingsEmergencyRecoveryScan: string;
+  settingsEmergencyRecoveryRestore: string;
+  settingsEmergencyRecoveryRestored: string;
+  settingsEmergencyRecoveryEmpty: string;
   settingsLocalBackup: string;
   settingsLocalBackupEmpty: string;
   settingsLocalBackupCounts: string;
@@ -556,6 +562,12 @@ export const LANGS: Record<Lang, Translation> = {
     settingsCloudBackupCounts: '{notes} notes · {quizzes} quiz items · {folders} folders · {sets} sets · {chats} chats',
     settingsCloudBackupRestore: 'Restore',
     settingsCloudBackupRestored: 'Data restored from cloud backup',
+    settingsEmergencyRecovery: 'Emergency recovery',
+    settingsEmergencyRecoverySub: 'Search all cloud sources (backups, drafts, AI chat, quiz sets) and restore anything still stored in Firebase.',
+    settingsEmergencyRecoveryScan: 'Scan cloud',
+    settingsEmergencyRecoveryRestore: 'Restore everything found',
+    settingsEmergencyRecoveryRestored: 'Recovery complete — check Home and Quiz',
+    settingsEmergencyRecoveryEmpty: 'No recoverable notes or quiz data found in Firebase.',
     settingsLocalBackup: 'Restore from this browser',
     settingsLocalBackupEmpty: 'No notes or quiz data found in this browser’s local storage.',
     settingsLocalBackupCounts: '{notes} notes · {quizzes} quiz items · {folders} folders · {sets} sets · {chats} chats',
@@ -869,6 +881,12 @@ export const LANGS: Record<Lang, Translation> = {
     settingsCloudBackupCounts: '{notes} anteckningar · {quizzes} quiz · {folders} mappar · {sets} set · {chats} chattar',
     settingsCloudBackupRestore: 'Återställ',
     settingsCloudBackupRestored: 'Data återställd från molnsäkerhetskopia',
+    settingsEmergencyRecovery: 'Nödåterställning',
+    settingsEmergencyRecoverySub: 'Söker i alla molnbKällor (backups, utkast, AI-chatt, quiz-set) och återställer allt som finns kvar i Firebase.',
+    settingsEmergencyRecoveryScan: 'Skanna molnet',
+    settingsEmergencyRecoveryRestore: 'Återställ allt som hittas',
+    settingsEmergencyRecoveryRestored: 'Återställning klar — kolla Hem och Quiz',
+    settingsEmergencyRecoveryEmpty: 'Ingen återställningsbar data hittades i Firebase.',
     settingsLocalBackup: 'Återställ från den här webbläsaren',
     settingsLocalBackupEmpty: 'Inga anteckningar eller quiz hittades i webbläsarens lokala lagring.',
     settingsLocalBackupCounts: '{notes} anteckningar · {quizzes} quiz · {folders} mappar · {sets} set · {chats} chattar',

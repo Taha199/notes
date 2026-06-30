@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { useNotes } from '../../contexts/NotesContext';
+import { useNotes, type RecoverableCloudSummary } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
@@ -31,7 +31,7 @@ export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
-  const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup, listDataBackups, restoreDataBackup, getLocalBackupSummary, restoreFromLocalBackup } = useNotes();
+  const { notes, quizzes, quizSets, quizFolders, chats, loaded, listQuizFolderBackups, restoreQuizFolderBackup, listDataBackups, restoreDataBackup, scanRecoverableCloud, emergencyRecoverFromCloud, getLocalBackupSummary, restoreFromLocalBackup } = useNotes();
   const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
   const [dataBackups, setDataBackups] = useState<{ key: string; label: string; notes: number; quizzes: number; sets: number; folders: number; chats: number }[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(true);
@@ -39,6 +39,9 @@ export function SettingsPage() {
   const [localBackup, setLocalBackup] = useState(() => getLocalBackupSummary());
   const [restoringLocal, setRestoringLocal] = useState(false);
   const [restoringCloudKey, setRestoringCloudKey] = useState<string | null>(null);
+  const [recoverScan, setRecoverScan] = useState<RecoverableCloudSummary | null>(null);
+  const [scanningRecover, setScanningRecover] = useState(false);
+  const [recoveringEmergency, setRecoveringEmergency] = useState(false);
   const [storageLimitMB, setStorageLimitMB] = useState(100);
   const [filesBytes, setFilesBytes] = useState(0);
 
@@ -175,6 +178,16 @@ export function SettingsPage() {
   }, [listDataBackups]);
 
   useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    setScanningRecover(true);
+    void scanRecoverableCloud()
+      .then((summary) => { if (!cancelled) setRecoverScan(summary); })
+      .finally(() => { if (!cancelled) setScanningRecover(false); });
+    return () => { cancelled = true; };
+  }, [loaded, scanRecoverableCloud, notes.length, quizzes.length]);
+
+  useEffect(() => {
     setLocalBackup(getLocalBackupSummary());
   }, [notes, quizzes, quizSets, quizFolders, chats]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -182,10 +195,73 @@ export function SettingsPage() {
   const photoUrl = photoPreview || profilePhotoURL;
   const isAdmin = user?.email === ADMIN_EMAIL;
   const showPlusProfile = isPlus || isAdmin;
+  const recoverTotal = recoverScan
+    ? recoverScan.totalRecoverable.notes
+      + recoverScan.totalRecoverable.quizzes
+      + recoverScan.totalRecoverable.sets
+      + recoverScan.totalRecoverable.folders
+      + recoverScan.totalRecoverable.chats
+    : 0;
 
   return (
     <div className="mx-auto max-w-xl space-y-5 px-4 py-6 sm:px-6">
       <h1 className="text-lg font-bold text-app-text dark:text-gray-100">{t.settingsTitle}</h1>
+
+      <SectionCard title={t.settingsEmergencyRecovery}>
+        <p className="mb-3 text-sm text-app-text-secondary dark:text-gray-400">{t.settingsEmergencyRecoverySub}</p>
+        {scanningRecover ? (
+          <p className="text-sm text-app-text-secondary dark:text-gray-400">…</p>
+        ) : recoverScan ? (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 text-xs text-app-text-secondary dark:border-white/10 dark:bg-white/5 dark:text-gray-400">
+              <p>{lang === 'sv' ? 'Molnet' : 'Cloud'}: {recoverScan.sources.cloud.notes} notes · {recoverScan.sources.cloud.quizzes} quiz · {recoverScan.sources.cloud.sets} sets</p>
+              <p>{lang === 'sv' ? 'Backup' : 'Backup'}: {recoverScan.sources.dataHistoryBest.notes} notes · {recoverScan.sources.dataHistoryBest.sets} sets</p>
+              <p>{lang === 'sv' ? 'Utkast' : 'Drafts'}: {recoverScan.sources.drafts} · {lang === 'sv' ? 'AI-chatt' : 'AI chat'}: {recoverScan.sources.chatUserMessages} msgs · {lang === 'sv' ? 'Mapp-backups' : 'Folder backups'}: {recoverScan.sources.folderHistoryKeys}</p>
+              <p className="mt-1 font-medium text-app-text dark:text-gray-200">
+                {t.settingsCloudBackupCounts
+                  .replace('{notes}', String(recoverScan.totalRecoverable.notes))
+                  .replace('{quizzes}', String(recoverScan.totalRecoverable.quizzes))
+                  .replace('{folders}', String(recoverScan.totalRecoverable.folders))
+                  .replace('{sets}', String(recoverScan.totalRecoverable.sets))
+                  .replace('{chats}', String(recoverScan.totalRecoverable.chats))}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={scanningRecover}
+                onClick={() => {
+                  setScanningRecover(true);
+                  void scanRecoverableCloud()
+                    .then(setRecoverScan)
+                    .finally(() => setScanningRecover(false));
+                }}
+                className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-semibold text-app-text-secondary hover:bg-app-bg dark:border-white/15 dark:text-gray-300"
+              >
+                {t.settingsEmergencyRecoveryScan}
+              </button>
+              <button
+                type="button"
+                disabled={recoveringEmergency || recoverTotal === 0}
+                onClick={() => {
+                  setRecoveringEmergency(true);
+                  void emergencyRecoverFromCloud()
+                    .then((counts) => {
+                      const total = counts.notes + counts.quizzes + counts.folders + counts.sets + counts.chats;
+                      show(total > 0 ? t.settingsEmergencyRecoveryRestored : t.settingsEmergencyRecoveryEmpty);
+                      return scanRecoverableCloud();
+                    })
+                    .then(setRecoverScan)
+                    .finally(() => setRecoveringEmergency(false));
+                }}
+                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {recoveringEmergency ? '…' : t.settingsEmergencyRecoveryRestore}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </SectionCard>
 
       {/* Profile */}
       <SectionCard title={t.settingsProfile}>
