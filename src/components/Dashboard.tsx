@@ -17,11 +17,12 @@ import { SettingsPage } from './settings/SettingsPage';
 import { AdminPanel } from './admin/AdminPanel';
 import { ConfirmDialog } from './common/ConfirmDialog';
 
-function EmptyState({ text }: { text: string }) {
+function EmptyState({ text, hint }: { text: string; hint?: string }) {
   return (
     <div className="animate-fade-in flex flex-col items-center py-20 text-center text-app-text-secondary/70 dark:text-gray-500">
       <span className="mb-3 text-5xl opacity-30">🗒️</span>
       <p className="text-sm">{text}</p>
+      {hint && <p className="mt-3 max-w-sm text-xs leading-relaxed text-app-text-secondary/60 dark:text-gray-500">{hint}</p>}
     </div>
   );
 }
@@ -42,11 +43,12 @@ function noteMatchesSearch(note: Note, search: string) {
   return haystack.includes(query);
 }
 
-function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMode, selected, onToggleSelect }: {
+function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen, selectMode, selected, onToggleSelect }: {
   notes: Note[];
   search: string;
   emptySearchText: string;
   emptyText: string;
+  emptyHint?: string;
   onOpen: (id: number) => void;
   selectMode?: boolean;
   selected?: Set<number>;
@@ -54,7 +56,7 @@ function NoteList({ notes, search, emptySearchText, emptyText, onOpen, selectMod
 }) {
   const hasSearch = normalizeSearch(search).length > 0;
   const filtered = hasSearch ? notes.filter((n) => noteMatchesSearch(n, search)) : notes;
-  if (!filtered.length) return <EmptyState text={hasSearch ? emptySearchText : emptyText} />;
+  if (!filtered.length) return <EmptyState text={hasSearch ? emptySearchText : emptyText} hint={hasSearch ? undefined : emptyHint} />;
   return (
     <div className="grid grid-cols-1 gap-3.5 px-3 pb-6 sm:grid-cols-2 sm:px-5 lg:grid-cols-3 xl:grid-cols-4">
       {filtered.map((n) => (
@@ -222,6 +224,11 @@ export function Dashboard() {
 
           {page === 'home' && !hasSearch && (
             <div className="flex min-h-full flex-col gap-3.5 bg-app-bg p-3 dark:bg-white/5 sm:p-5">
+              {active.length > 0 && (
+                <div className="rounded-xl border border-blue-200/80 bg-blue-50/80 px-4 py-3 text-[13px] leading-relaxed text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
+                  📚 {t.homeSavedNotesHint}
+                </div>
+              )}
               {drafts.map((d, i) => (
                 <DraftEditor key={d.id} draft={d} index={i} total={drafts.length} />
               ))}
@@ -272,7 +279,7 @@ export function Dashboard() {
           {page === 'read' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">✓ {t.secRead}</div>
-              <NoteList notes={read} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
+              <NoteList notes={read} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} />
             </div>
           )}
 

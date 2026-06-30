@@ -61,6 +61,8 @@ export interface Translation {
   tagUnread: string;
   tagArch: string;
   emptyNotes: string;
+  emptyReadHint: string;
+  homeSavedNotesHint: string;
   emptySearch: string;
   emptyTrash: string;
   filesTitle: string;
@@ -80,6 +82,15 @@ export interface Translation {
   filesUploadFailed: string;
   filesUploadSuccess: string;
   filesQuotaExceeded: string;
+  filesAllFiles: string;
+  filesNewFolder: string;
+  filesFolderEmpty: string;
+  filesMoveTo: string;
+  filesMoveToRoot: string;
+  filesFolderDelete: string;
+  filesFolderCreated: string;
+  filesFolderNamePh: string;
+  filesInFolder: string;
   selDel: string;
   cancelSel: string;
   emptyTrashBtn: string;
@@ -441,10 +452,14 @@ export const LANGS: Record<Lang, Translation> = {
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
     tagFav: '⭐ Favourite', tagRead: '✓ Read', tagUnread: '📖 Unread', tagArch: '🗄 Archived',
-    emptyNotes: 'No notes here', emptySearch: 'No results', emptyTrash: 'Trash is empty',
+    emptyNotes: 'No notes here',
+    emptyReadHint: 'New notes stay on Home (drafts) until you tap Save Note, then appear in Notes to Study. Mark a note as studied to see it here.',
+    homeSavedNotesHint: 'You have saved notes in Notes Library and Notes to Study.',
+    emptySearch: 'No results', emptyTrash: 'Trash is empty',
     filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesSizeLimit: 'Maximum file size: 20 MB per file.', filesUpload: 'Choose files',
     filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewUnavailable: 'Preview is not available for this file type.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
+    filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header",
     titleRight: 'Align Right', titleLeft: 'Align Left', titleClr: 'Clear Formatting', titleColor: 'Text Color',
@@ -737,10 +752,14 @@ export const LANGS: Record<Lang, Translation> = {
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
     tagFav: '⭐ Favorit', tagRead: '✓ Läst', tagUnread: '📖 Oläst', tagArch: '🗄 Arkiverad',
-    emptyNotes: 'Inga anteckningar här', emptySearch: 'Inga resultat', emptyTrash: 'Papperskorgen är tom',
+    emptyNotes: 'Inga anteckningar här',
+    emptyReadHint: 'Nya anteckningar finns på Hem (utkast) tills du trycker Spara. Därefter visas de under Att studera. Markera som studerad för att se dem här.',
+    homeSavedNotesHint: 'Du har sparade anteckningar i Anteckningsbiblioteket och Att studera.',
+    emptySearch: 'Inga resultat', emptyTrash: 'Papperskorgen är tom',
     filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesSizeLimit: 'Maximal filstorlek: 20 MB per fil.', filesUpload: 'Välj filer',
     filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewUnavailable: 'Förhandsgranskning finns inte för den här filtypen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
+    filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik',
     titleRight: 'Höger', titleLeft: 'Vänster', titleClr: 'Ta bort formatering', titleColor: 'Textfärg',

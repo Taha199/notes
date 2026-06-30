@@ -363,10 +363,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           setDrafts([{ id: 'd1', title: '', html: '' }]);
         }
       } catch {
+        const localNotes = firebaseToArray<Note>(readLocalJson<Note[]>('malacadhati') ?? []);
+        if (localNotes.length) setNotes(localNotes);
+        const localQuizzes = firebaseToArray<QuizItem>(readLocalJson<QuizItem[]>('malacadhati_quiz') ?? []);
+        if (localQuizzes.length) setQuizzes(localQuizzes);
+        const localChats = firebaseToArray<ChatConversation>(readLocalJson<ChatConversation[]>('malacadhati_chats') ?? []);
+        if (localChats.length) setChats(localChats.map((c) => ({ ...c, messages: c.messages ?? [] })));
         const localFolders = firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []);
         if (localFolders.length) {
           setQuizFolders(ensureRestoredFolder(initializeQuizColors(localFolders)));
         }
+        const localSets = firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({ ...set, items: set.items ?? [] }));
+        if (localSets.length) setQuizSets(localSets);
         draftCounter.current = 1;
         setDrafts([{ id: 'd1', title: '', html: '' }]);
       } finally {
