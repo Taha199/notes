@@ -31,11 +31,14 @@ export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
-  const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup, getLocalBackupSummary, restoreFromLocalBackup } = useNotes();
+  const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup, listDataBackups, restoreDataBackup, getLocalBackupSummary, restoreFromLocalBackup } = useNotes();
   const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
+  const [dataBackups, setDataBackups] = useState<{ key: string; label: string; notes: number; quizzes: number; sets: number; folders: number; chats: number }[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(true);
+  const [loadingDataBackups, setLoadingDataBackups] = useState(true);
   const [localBackup, setLocalBackup] = useState(() => getLocalBackupSummary());
   const [restoringLocal, setRestoringLocal] = useState(false);
+  const [restoringCloudKey, setRestoringCloudKey] = useState<string | null>(null);
   const [storageLimitMB, setStorageLimitMB] = useState(100);
   const [filesBytes, setFilesBytes] = useState(0);
 
@@ -161,6 +164,15 @@ export function SettingsPage() {
       .finally(() => { if (!cancelled) setLoadingBackups(false); });
     return () => { cancelled = true; };
   }, [listQuizFolderBackups]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingDataBackups(true);
+    void listDataBackups()
+      .then((items) => { if (!cancelled) setDataBackups(items); })
+      .finally(() => { if (!cancelled) setLoadingDataBackups(false); });
+    return () => { cancelled = true; };
+  }, [listDataBackups]);
 
   useEffect(() => {
     setLocalBackup(getLocalBackupSummary());
@@ -365,6 +377,50 @@ export function SettingsPage() {
             ))}
           </div>
         </div>
+      </SectionCard>
+
+      <SectionCard title={t.settingsCloudBackup}>
+        {loadingDataBackups ? (
+          <p className="text-sm text-app-text-secondary dark:text-gray-400">…</p>
+        ) : dataBackups.length === 0 ? (
+          <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/5">
+            <p className="text-sm text-app-text-secondary dark:text-gray-400">{t.settingsCloudBackupEmpty}</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {dataBackups.slice(0, 8).map((backup) => (
+              <div key={backup.key} className="flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 dark:border-primary/30 dark:bg-primary/10">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-app-text dark:text-gray-100">{backup.label}</p>
+                  <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
+                    {t.settingsCloudBackupCounts
+                      .replace('{notes}', String(backup.notes))
+                      .replace('{quizzes}', String(backup.quizzes))
+                      .replace('{folders}', String(backup.folders))
+                      .replace('{sets}', String(backup.sets))
+                      .replace('{chats}', String(backup.chats))}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={restoringCloudKey === backup.key}
+                  onClick={() => {
+                    setRestoringCloudKey(backup.key);
+                    void restoreDataBackup(backup.key)
+                      .then((counts) => {
+                        const total = counts.notes + counts.quizzes + counts.folders + counts.sets + counts.chats;
+                        show(total > 0 ? t.settingsCloudBackupRestored : t.settingsCloudBackupEmpty);
+                      })
+                      .finally(() => setRestoringCloudKey(null));
+                  }}
+                  className="flex-shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
+                >
+                  {restoringCloudKey === backup.key ? '…' : t.settingsCloudBackupRestore}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </SectionCard>
 
       <SectionCard title={t.settingsFolderBackup}>

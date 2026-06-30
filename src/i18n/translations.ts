@@ -234,6 +234,11 @@ export interface Translation {
   settingsFolderBackupLast: string;
   settingsFolderBackupRestore: string;
   settingsFolderBackupRestored: string;
+  settingsCloudBackup: string;
+  settingsCloudBackupEmpty: string;
+  settingsCloudBackupCounts: string;
+  settingsCloudBackupRestore: string;
+  settingsCloudBackupRestored: string;
   settingsLocalBackup: string;
   settingsLocalBackupEmpty: string;
   settingsLocalBackupCounts: string;
@@ -546,6 +551,11 @@ export const LANGS: Record<Lang, Translation> = {
     settingsFolderBackupLast: 'Last backup',
     settingsFolderBackupRestore: 'Restore',
     settingsFolderBackupRestored: 'Folders restored from backup',
+    settingsCloudBackup: 'Cloud backup (notes & quiz)',
+    settingsCloudBackupEmpty: 'No cloud backups found yet. From now on, a full snapshot is saved automatically before each cloud sync.',
+    settingsCloudBackupCounts: '{notes} notes · {quizzes} quiz items · {folders} folders · {sets} sets · {chats} chats',
+    settingsCloudBackupRestore: 'Restore',
+    settingsCloudBackupRestored: 'Data restored from cloud backup',
     settingsLocalBackup: 'Restore from this browser',
     settingsLocalBackupEmpty: 'No notes or quiz data found in this browser’s local storage.',
     settingsLocalBackupCounts: '{notes} notes · {quizzes} quiz items · {folders} folders · {sets} sets · {chats} chats',
@@ -854,6 +864,11 @@ export const LANGS: Record<Lang, Translation> = {
     settingsFolderBackupLast: 'Senaste säkerhetskopia',
     settingsFolderBackupRestore: 'Återställ',
     settingsFolderBackupRestored: 'Mappar återställda från backup',
+    settingsCloudBackup: 'Molnsäkerhetskopia (anteckningar & quiz)',
+    settingsCloudBackupEmpty: 'Inga molnsäkerhetskopior ännu. Från och med nu sparas en fullständig kopia automatiskt före varje molnsynk.',
+    settingsCloudBackupCounts: '{notes} anteckningar · {quizzes} quiz · {folders} mappar · {sets} set · {chats} chattar',
+    settingsCloudBackupRestore: 'Återställ',
+    settingsCloudBackupRestored: 'Data återställd från molnsäkerhetskopia',
     settingsLocalBackup: 'Återställ från den här webbläsaren',
     settingsLocalBackupEmpty: 'Inga anteckningar eller quiz hittades i webbläsarens lokala lagring.',
     settingsLocalBackupCounts: '{notes} anteckningar · {quizzes} quiz · {folders} mappar · {sets} set · {chats} chattar',
