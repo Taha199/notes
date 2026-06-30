@@ -537,7 +537,7 @@ export function QuizPage() {
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, listQuizFolderBackups, restoreQuizFolderBackup, hasQuizFolderBackups, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -549,6 +549,16 @@ export function QuizPage() {
     const folderIds = new Set(allQuizFolders.map((folder) => folder.id));
     return allQuizSets.filter((set) => !set.trashed && set.folderId && !folderIds.has(set.folderId)).length;
   }, [allQuizFolders, allQuizSets]);
+  const userFolderCount = useMemo(
+    () => allQuizFolders.filter((folder) => !folder.system && !folder.trashed).length,
+    [allQuizFolders],
+  );
+  const userSetCount = useMemo(
+    () => allQuizSets.filter((set) => !set.system && !set.trashed).length,
+    [allQuizSets],
+  );
+  const [folderBackupsAvailable, setFolderBackupsAvailable] = useState(false);
+  const [latestBackupKey, setLatestBackupKey] = useState<string | null>(null);
 
   const savedSelection = useMemo(() => loadQuizSelection(), []);
   const [selectedSetId, setSelectedSetId] = useState<string | null>(() => savedSelection.setId);
@@ -721,6 +731,27 @@ export function QuizPage() {
   useEffect(() => {
     saveQuizSelection(selectedFolderId, selectedSetId);
   }, [selectedFolderId, selectedSetId]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    if (selectedFolderId && !selectedSetId) {
+      const folderSets = allQuizSets.filter(
+        (set) => !set.trashed && set.folderId === selectedFolderId,
+      );
+      if (folderSets.length > 0) setSelectedSetId(folderSets[0].id);
+    }
+    if (selectedSetId && !allQuizSets.some((set) => set.id === selectedSetId && !set.trashed)) {
+      setSelectedSetId(null);
+    }
+  }, [loaded, selectedFolderId, selectedSetId, allQuizSets]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    void hasQuizFolderBackups().then(setFolderBackupsAvailable);
+    void listQuizFolderBackups().then((backups) => {
+      setLatestBackupKey(backups[0]?.key ?? null);
+    });
+  }, [loaded, userFolderCount, userSetCount, hasQuizFolderBackups, listQuizFolderBackups]);
 
   const isNotesViewRef = useRef(false);
   useEffect(() => {
@@ -1040,11 +1071,15 @@ export function QuizPage() {
   const folderIds = new Set(quizFolders.map((f) => f.id));
   const ungroupedSets = sortedSets.filter((s) => !s.folderId || !folderIds.has(s.folderId));
   const setsInFolder = (fid: string) => sortedSets.filter((s) => s.folderId === fid);
+  const userSetsInFolder = (fid: string) => setsInFolder(fid).filter((s) => !s.system);
 
   const selectFolder = (folderId: string) => {
     setSelectedFolderId(folderId);
-    setSelectedSetId(setsInFolder(folderId)[0]?.id ?? null);
+    const folderSets = setsInFolder(folderId);
+    setSelectedSetId(folderSets[0]?.id ?? null);
   };
+
+  const showRecoveryBanner = loaded && folderBackupsAvailable && userFolderCount === 0 && userSetCount <= 1 && quizzes.length === 0;
 
   // Sets shown in the right panel depending on which folder is selected
   const currentSets = selectedFolderId ? setsInFolder(selectedFolderId) : ungroupedSets;
@@ -1153,8 +1188,27 @@ export function QuizPage() {
           >«</button>
         </div>
 
-        {(trashedUserFolders.length > 0 || orphanSetCount > 0) && (
+        {(showRecoveryBanner || trashedUserFolders.length > 0 || orphanSetCount > 0) && (
           <div className="mx-2 mb-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+            {showRecoveryBanner && latestBackupKey && (
+              <div className="space-y-1.5">
+                <p className="leading-snug">{t.quizRecoveryBanner}</p>
+                <button
+                  onClick={() => {
+                    void restoreQuizFolderBackup(latestBackupKey).then((count) => {
+                      void recoverQuizFolders().then((setCount) => {
+                        show(count > 0 || setCount > 0
+                          ? t.quizRecoveryRestored.replace('{n}', String(Math.max(count, setCount)))
+                          : t.settingsFolderBackupRestored);
+                      });
+                    });
+                  }}
+                  className="w-full rounded-lg bg-amber-600 px-2 py-1.5 text-[10px] font-semibold text-white hover:bg-amber-700"
+                >
+                  {t.quizRecoveryRestoreBtn}
+                </button>
+              </div>
+            )}
             {trashedUserFolders.map((folder) => (
               <div key={folder.id} className="flex items-center justify-between gap-2">
                 <span className="truncate">{t.quizFolderInTrash}: <strong>{folder.name}</strong></span>
@@ -1296,7 +1350,7 @@ export function QuizPage() {
                     <span title={f.system === 'favorites' ? t.quizFavorites : f.system ? t.quizRestoredSets : f.name} className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
                       {f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
                     </span>
-                    <span className="block text-[9px] text-app-text-secondary/50">{t.quizSetsCount.replace('{n}', String(setsInFolder(f.id).length))}</span>
+                    <span className="block text-[9px] text-app-text-secondary/50">{t.quizSetsCount.replace('{n}', String(userSetsInFolder(f.id).length))}</span>
                     {!f.system && (
                       <span
                         onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY > window.innerHeight * 0.6 ? window.innerHeight - e.clientY : e.clientY, flip: e.clientY > window.innerHeight * 0.6 }); setFolderColorPicker(false); }}
@@ -1387,7 +1441,7 @@ export function QuizPage() {
               {selectedSet
                 ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`
                 : isFolderEmptyView
-                  ? `📁 ${selectedFolder?.system === 'favorites' ? t.quizFavorites : selectedFolder?.system ? t.quizRestored : selectedFolder?.name ?? t.quizFolder} — ${t.quizSetsCount.replace('{n}', '0')}`
+                  ? `📁 ${selectedFolder?.system === 'favorites' ? t.quizFavorites : selectedFolder?.system ? t.quizRestored : selectedFolder?.name ?? t.quizFolder} — ${t.quizSetsCount.replace('{n}', String(userSetsInFolder(selectedFolderId ?? '').length))}`
                   : `🧠 ${t.quizQuestionsFromNotes} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`}
               {!isFolderEmptyView && knownCount > 0 && displayItems.length > 0 && (
                 <span className="ml-2 font-normal text-emerald-500">· {knownCount}/{displayItems.length} {t.quizKnownProgress}</span>

@@ -403,6 +403,9 @@ export interface Translation {
   quizMissingFoldersRestored: string;
   quizNoMoreFoldersFound: string;
   quizSearchMissingFolders: string;
+  quizRecoveryBanner: string;
+  quizRecoveryRestoreBtn: string;
+  quizRecoveryRestored: string;
   quizMoveFolderTrashMsg: string;
   quizMoveSetTrashMsg: string;
   quizSetsCount: string;
@@ -705,6 +708,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizMissingFoldersRestored: '↩ {n} missing folders restored',
     quizNoMoreFoldersFound: 'No more folders found',
     quizSearchMissingFolders: 'Search for missing folders',
+    quizRecoveryBanner: 'Your quiz folders look empty, but a cloud backup exists. Restore it with one click.',
+    quizRecoveryRestoreBtn: 'Restore from backup',
+    quizRecoveryRestored: '↩ Restored {n} items from backup',
     quizMoveFolderTrashMsg: 'The folder "{name}" and its sets will be moved to trash.',
     quizMoveSetTrashMsg: 'The set "{name}" will be moved to trash and can be restored later.',
     quizSetsCount: '{n} set',
@@ -1005,6 +1011,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizMissingFoldersRestored: '↩ {n} saknade mappar återställda',
     quizNoMoreFoldersFound: 'Inga fler mappar hittades',
     quizSearchMissingFolders: 'Sök efter saknade mappar',
+    quizRecoveryBanner: 'Dina quiz-mappar verkar tomma, men en molnsäkerhetskopia finns. Återställ med ett klick.',
+    quizRecoveryRestoreBtn: 'Återställ från backup',
+    quizRecoveryRestored: '↩ {n} objekt återställda från backup',
     quizMoveFolderTrashMsg: 'Mappen "{name}" och dess sets flyttas till papperskorgen.',
     quizMoveSetTrashMsg: 'Setet "{name}" flyttas till papperskorgen och kan återställas senare.',
     quizSetsCount: '{n} set',
