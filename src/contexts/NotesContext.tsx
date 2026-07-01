@@ -226,7 +226,7 @@ export const FAVORITES_FOLDER_ID = 'system-favorites';
 export const FAVORITES_SET_ID = 'system-favorites-set';
 const MAX_FOLDER_HISTORY = 40;
 const MAX_DATA_HISTORY = 48;
-const DATA_HISTORY_MIN_INTERVAL_MS = 3_600_000;
+const DATA_HISTORY_MIN_INTERVAL_MS = 60_000;
 
 function lastDataHistoryKey(uid: string) {
   return `malacadhati_last_data_history_${uid}`;
