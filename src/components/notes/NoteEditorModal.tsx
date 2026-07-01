@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -8,6 +8,69 @@ import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini'
 import type { Page } from '../../types';
 
 const hasContent = (h: string) => !!h.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+
+const NOTE_QUIZ_PANEL_MIN = 400;
+const NOTE_QUIZ_PANEL_MAX = 760;
+const NOTE_QUIZ_PANEL_KEY = 'malacadhati_note_quiz_panel_w';
+
+function readQuizPanelWidth() {
+  const n = Number(localStorage.getItem(NOTE_QUIZ_PANEL_KEY));
+  if (!Number.isFinite(n)) return NOTE_QUIZ_PANEL_MIN;
+  return Math.min(NOTE_QUIZ_PANEL_MAX, Math.max(NOTE_QUIZ_PANEL_MIN, n));
+}
+
+function ResizableNoteSplit({
+  left,
+  right,
+  rightClassName,
+  width,
+  onWidthChange,
+  resizeTitle,
+}: {
+  left: ReactNode;
+  right: ReactNode;
+  rightClassName: string;
+  width: number;
+  onWidthChange: (w: number) => void;
+  resizeTitle: string;
+}) {
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = width;
+    let lastW = startW;
+    const onMove = (ev: MouseEvent) => {
+      lastW = Math.min(NOTE_QUIZ_PANEL_MAX, Math.max(NOTE_QUIZ_PANEL_MIN, startW + (startX - ev.clientX)));
+      onWidthChange(lastW);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      try {
+        localStorage.setItem(NOTE_QUIZ_PANEL_KEY, String(lastW));
+      } catch { /* ignore */ }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">{left}</div>
+      <div
+        onMouseDown={startResize}
+        title={resizeTitle}
+        className="group/handle relative z-10 w-1.5 flex-shrink-0 cursor-col-resize border-x border-app-border/60 bg-app-bg/90 transition-colors hover:bg-primary/20 dark:border-white/10 dark:bg-white/5"
+      >
+        <span className="absolute inset-y-0 -left-2 -right-2" />
+        <div className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-border/80 group-hover/handle:bg-primary dark:bg-white/25" />
+      </div>
+      <div className={'flex flex-shrink-0 flex-col overflow-y-auto ' + rightClassName} style={{ width }}>
+        {right}
+      </div>
+    </div>
+  );
+}
 
 function mdToHtml(content: string): string {
   // Only convert if content looks like markdown (not already HTML)
@@ -65,6 +128,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [mcqCorrect, setMcqCorrect] = useState(0);
   const [copied, setCopied] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(note?.lastEdited ?? null);
+  const [quizPanelW, setQuizPanelW] = useState(readQuizPanelWidth);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -192,17 +256,19 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
         </div>
 
         {manualQuiz ? (
-          /* ── Add Question mode: note on left, form on right ── */
-          <div className="flex flex-1 overflow-hidden divide-x divide-app-border dark:divide-white/10">
-            {/* LEFT — Note (read-only) */}
-            <div className="flex flex-1 flex-col overflow-y-auto">
-              <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
-              <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
-            </div>
-
-
-            {/* RIGHT — Question form */}
-            <div className="flex w-[400px] flex-shrink-0 flex-col overflow-y-auto bg-emerald-50/40 dark:bg-emerald-500/5">
+          <ResizableNoteSplit
+            width={quizPanelW}
+            onWidthChange={setQuizPanelW}
+            resizeTitle={t.quizResizeFoldersHint}
+            rightClassName="bg-emerald-50/40 dark:bg-emerald-500/5"
+            left={(
+              <div className="flex flex-1 flex-col overflow-y-auto">
+                <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
+                <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
+              </div>
+            )}
+            right={(
+              <>
               {/* Form header */}
               <div className="flex items-center justify-between border-b border-emerald-200/70 px-4 py-2.5 dark:border-emerald-500/15">
                 <span className="text-[13px] font-bold text-emerald-700 dark:text-emerald-400">{t.noteCreateQuestion}</span>
@@ -296,19 +362,23 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   >{t.noteSaveQuestion}</button>
                 </div>
               </div>
-            </div>
-          </div>
+              </>
+            )}
+          />
         ) : aiMode ? (
-          /* ── AI Question mode: note on left, AI form on right ── */
-          <div className="flex flex-1 overflow-hidden divide-x divide-app-border dark:divide-white/10">
-            {/* LEFT — Note (read-only) */}
-            <div className="flex flex-1 flex-col overflow-y-auto">
-              <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
-              <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
-            </div>
-
-            {/* RIGHT — AI Question form */}
-            <div className="flex w-[400px] flex-shrink-0 flex-col overflow-y-auto bg-violet-50/40 dark:bg-violet-500/5">
+          <ResizableNoteSplit
+            width={quizPanelW}
+            onWidthChange={setQuizPanelW}
+            resizeTitle={t.quizResizeFoldersHint}
+            rightClassName="bg-violet-50/40 dark:bg-violet-500/5"
+            left={(
+              <div className="flex flex-1 flex-col overflow-y-auto">
+                <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
+                <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
+              </div>
+            )}
+            right={(
+              <>
               {/* Form header */}
               <div className="flex items-center justify-between border-b border-violet-200/70 px-4 py-2.5 dark:border-violet-500/15">
                 <span className="text-[13px] font-bold text-violet-700 dark:text-violet-400">{t.noteAiQuestion}</span>
@@ -381,19 +451,23 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   >{t.noteSaveQuestion}</button>
                 </div>
               </div>
-            </div>
-          </div>
+              </>
+            )}
+          />
         ) : quizOpen ? (
-          /* ── Generate Quiz mode: note on left, flashcard on right ── */
-          <div className="flex flex-1 overflow-hidden divide-x divide-app-border dark:divide-white/10">
-            {/* LEFT — Note (read-only) */}
-            <div className="flex flex-1 flex-col overflow-y-auto">
-              <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
-              <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
-            </div>
-
-            {/* RIGHT — Quiz flashcard */}
-            <div className="flex w-[400px] flex-shrink-0 flex-col overflow-y-auto bg-violet-50/40 dark:bg-violet-500/5">
+          <ResizableNoteSplit
+            width={quizPanelW}
+            onWidthChange={setQuizPanelW}
+            resizeTitle={t.quizResizeFoldersHint}
+            rightClassName="bg-violet-50/40 dark:bg-violet-500/5"
+            left={(
+              <div className="flex flex-1 flex-col overflow-y-auto">
+                <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
+                <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
+              </div>
+            )}
+            right={(
+              <>
               <div className="flex items-center justify-between border-b border-violet-200/70 px-4 py-2.5 dark:border-violet-500/15">
                 <span className="text-[13px] font-bold text-violet-700 dark:text-violet-400">
                   {t.noteQuizPanel}
@@ -511,8 +585,9 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   </>
                 )}
               </div>
-            </div>
-          </div>
+              </>
+            )}
+          />
         ) : (
           <>
             <input value={title} readOnly={locked} onChange={(e) => setTitle(e.target.value)} placeholder={t.mTiPh} className="border-b border-app-border px-3 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100 sm:px-4 sm:py-3.5 sm:text-lg" />
