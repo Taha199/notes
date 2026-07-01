@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
 import { getStorageLimitMB, MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
 import { isPlusUser } from '../../lib/userPlan';
+import { PlatformBackupCard } from './PlatformBackupCard';
 
 interface UserRow {
   uid: string;
@@ -23,12 +24,6 @@ interface AuthUserRow {
   displayName: string;
   lastLoginAt: number;
   provider: string;
-}
-
-interface PlatformBackupRow {
-  name: string;
-  size: number;
-  updated: string | null;
 }
 
 function formatBytes(bytes: number): string {
@@ -62,68 +57,6 @@ export function AdminPanel() {
   const [confirmDelete, setConfirmDelete] = useState<UserRow | null>(null);
   const [editingLimitUid, setEditingLimitUid] = useState<string | null>(null);
   const [limitInput, setLimitInput] = useState('');
-  const [platformBackups, setPlatformBackups] = useState<PlatformBackupRow[]>([]);
-  const [backupLoading, setBackupLoading] = useState(true);
-  const [backupRunning, setBackupRunning] = useState(false);
-  const [backupError, setBackupError] = useState('');
-
-  const loadPlatformBackups = async () => {
-    if (!user) return;
-    setBackupLoading(true);
-    setBackupError('');
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch('/api/admin-platform-backup', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('list-failed');
-      const data = (await res.json()) as { backups: PlatformBackupRow[] };
-      setPlatformBackups(data.backups ?? []);
-    } catch {
-      setBackupError('Kunde inte hämta plattformsbackups.');
-    } finally {
-      setBackupLoading(false);
-    }
-  };
-
-  const runPlatformBackup = async () => {
-    if (!user) return;
-    setBackupRunning(true);
-    setBackupError('');
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch('/api/admin-platform-backup', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('run-failed');
-      await loadPlatformBackups();
-    } catch {
-      setBackupError('Backup misslyckades. Kontrollera att service account har Storage-behörighet.');
-    } finally {
-      setBackupRunning(false);
-    }
-  };
-
-  const downloadPlatformBackup = async (name: string) => {
-    if (!user) return;
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin-platform-backup?download=${encodeURIComponent(name)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('download-failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name.split('/').pop() || 'tahanote-backup.json.gz';
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      setBackupError('Kunde inte ladda ner backup.');
-    }
-  };
 
   const load = async () => {
     setLoading(true);
@@ -168,10 +101,7 @@ export function AdminPanel() {
   };
 
   useEffect(() => {
-    if (isAdmin) {
-      load();
-      void loadPlatformBackups();
-    }
+    if (isAdmin) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
@@ -277,78 +207,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/25 dark:bg-emerald-500/10">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-bold text-emerald-900 dark:text-emerald-200">Plattformsbackup (alla användare)</h2>
-            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-emerald-800/80 dark:text-emerald-300/80">
-              Hela appens data (alla konton) sparas automatiskt varje timme i Firebase Storage — separat från Realtime Database.
-              Om molndatabasen skadas kan du ladda ner en kopia här.
-            </p>
-            {platformBackups[0] && (
-              <p className="mt-2 text-xs font-medium text-emerald-900 dark:text-emerald-200">
-                Senaste: {platformBackups[0].updated ? new Date(platformBackups[0].updated).toLocaleString('sv-SE') : '—'}
-                {' · '}{formatBytes(platformBackups[0].size)}
-              </p>
-            )}
-            {backupError && <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">{backupError}</p>}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void runPlatformBackup()}
-              disabled={backupRunning}
-              className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-            >
-              {backupRunning ? 'Sparar…' : 'Kör backup nu'}
-            </button>
-            {platformBackups[0] && (
-              <button
-                type="button"
-                onClick={() => void downloadPlatformBackup(platformBackups[0].name)}
-                className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
-              >
-                Ladda ner senaste
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => void loadPlatformBackups()}
-              disabled={backupLoading}
-              className="rounded-xl border border-emerald-300 px-4 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-500/30 dark:text-emerald-200"
-            >
-              Uppdatera lista
-            </button>
-          </div>
-        </div>
-        {backupLoading ? (
-          <p className="mt-3 text-xs text-emerald-800/70 dark:text-emerald-300/70">Laddar backups…</p>
-        ) : platformBackups.length === 0 ? (
-          <p className="mt-3 text-xs text-emerald-800/70 dark:text-emerald-300/70">
-            Inga plattformsbackups ännu. Kör en manuellt eller vänta på timvis cron (kräver CRON_SECRET i Vercel).
-          </p>
-        ) : (
-          <div className="mt-3 space-y-1.5">
-            {platformBackups.slice(0, 6).map((backup) => (
-              <div key={backup.name} className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200/80 bg-white/70 px-3 py-2 dark:border-emerald-500/20 dark:bg-black/20">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-app-text dark:text-gray-100">{backup.name.split('/').pop()}</p>
-                  <p className="text-[10px] text-app-text-secondary dark:text-gray-400">
-                    {backup.updated ? new Date(backup.updated).toLocaleString('sv-SE') : '—'} · {formatBytes(backup.size)}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void downloadPlatformBackup(backup.name)}
-                  className="flex-shrink-0 rounded-lg bg-emerald-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-emerald-700"
-                >
-                  Ladda ner
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <PlatformBackupCard className="mb-5" />
 
       {loading ? (
         <p className="py-10 text-center text-sm text-app-text-secondary">Laddar…</p>

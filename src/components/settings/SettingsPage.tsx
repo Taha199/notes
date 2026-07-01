@@ -15,6 +15,7 @@ import {
   supportsFolderBackup,
   writeBackupToFolder,
 } from '../../lib/externalBackup';
+import { PlatformBackupCard } from '../admin/PlatformBackupCard';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
@@ -478,6 +479,8 @@ export function SettingsPage() {
           </div>
         </div>
       </SectionCard>
+
+      {isAdmin && <PlatformBackupCard />}
 
       <SectionCard title={t.settingsExternalBackup}>
         <p className="mb-4 text-sm leading-relaxed text-app-text-secondary dark:text-gray-400">{t.settingsExternalBackupSub}</p>
