@@ -21,6 +21,8 @@ export interface DraftContent {
 
 export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz' | 'settings' | 'admin';
 
+export type NoteViewMode = 'grid' | 'expanded';
+
 export interface ChatAttachment {
   name: string;
   mimeType: string;

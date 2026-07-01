@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Note } from '../../types';
+import type { Note, NoteViewMode } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -8,6 +8,7 @@ import { ConfirmDialog } from '../common/ConfirmDialog';
 interface Props {
   note: Note;
   onOpen: (id: number) => void;
+  viewMode?: NoteViewMode;
   selectMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
@@ -31,11 +32,12 @@ function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: 
   );
 }
 
-export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }: Props) {
+export function NoteCard({ note, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect }: Props) {
   const { t, lang } = useLanguage();
   const { toggleRead, toggleUnread, toggleFav, archive, unarchive, trash, restore, permDelete } = useNotes();
   const { show } = useToast();
   const [confirmPermDel, setConfirmPermDel] = useState(false);
+  const expanded = viewMode === 'expanded';
 
   const handleClick = () => {
     if (selectMode && onToggleSelect) onToggleSelect(note.id);
@@ -43,19 +45,21 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
   };
 
   const isTrash = !!note.trashed;
+  const plainPreview = note.text?.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') ?? '';
 
   return (
     <div
       onClick={handleClick}
       className={
-        'animate-slide-up flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg dark:bg-gray-800/60 ' +
+        'animate-slide-up flex cursor-pointer flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition-all dark:bg-gray-800/60 ' +
+        (expanded ? 'hover:shadow-md' : 'h-full hover:-translate-y-0.5 hover:shadow-lg') +
         (note.fav && !isTrash
           ? 'border-amber-300 bg-gradient-to-br from-amber-50 to-white dark:border-amber-500/40 dark:from-amber-500/10'
           : 'border-app-border dark:border-white/10') +
         (selected ? ' ring-2 ring-primary border-primary' : '')
       }
     >
-      <div className="flex flex-1 items-start gap-2.5 p-4 pb-2">
+      <div className={'flex flex-1 items-start gap-2.5 ' + (expanded ? 'p-5 pb-3' : 'p-4 pb-2')}>
         {selectMode && (
           <input
             type="checkbox"
@@ -67,13 +71,20 @@ export function NoteCard({ note, onOpen, selectMode, selected, onToggleSelect }:
         )}
         <div className="min-w-0 flex-1">
           {note.title && (
-            <p className={'truncate text-sm font-semibold ' + (note.fav ? 'text-amber-900 dark:text-amber-300' : 'text-app-text dark:text-gray-100')}>
+            <p className={'text-sm font-semibold ' + (expanded ? 'mb-2' : 'truncate') + ' ' + (note.fav ? 'text-amber-900 dark:text-amber-300' : 'text-app-text dark:text-gray-100')}>
               {note.title}
             </p>
           )}
-          <p className={'mt-0.5 line-clamp-3 text-[13px] leading-relaxed ' + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
-            {note.text?.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').slice(0, 220)}
-          </p>
+          {expanded ? (
+            <div
+              className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_img]:my-2 [&_img]:max-h-64 [&_img]:rounded-lg [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+              dangerouslySetInnerHTML={{ __html: note.html || `<p>${plainPreview}</p>` }}
+            />
+          ) : (
+            <p className={'mt-0.5 line-clamp-3 text-[13px] leading-relaxed ' + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
+              {plainPreview.slice(0, 220)}
+            </p>
+          )}
           {!isTrash && (
             <div className="mt-2.5 flex flex-wrap gap-1.5">
               {note.fav && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{t.tagFav}</span>}

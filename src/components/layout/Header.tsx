@@ -1,7 +1,8 @@
-import type { Page } from '../../types';
+import type { Page, NoteViewMode } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { CloudSaveIndicator } from '../common/CloudSaveIndicator';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
+import { NoteViewToggle } from '../notes/NoteViewToggle';
 
 const ICONS: Record<Page, string> = {
   home: '🏠', fav: '★', unread: '📖', read: '✓', library: '📚', files: '📎', archive: '🗄', trash: '🗑', quiz: '🧠', settings: '⚙️', admin: '👑',
@@ -13,12 +14,16 @@ export function Header({
   setSearch,
   onNewNote,
   onOpenMenu,
+  noteViewMode,
+  onNoteViewModeChange,
 }: {
   page: Page;
   search: string;
   setSearch: (s: string) => void;
   onNewNote: () => void;
   onOpenMenu: () => void;
+  noteViewMode?: NoteViewMode;
+  onNoteViewModeChange?: (mode: NoteViewMode) => void;
 }) {
   const { t } = useLanguage();
   const titles: Record<Page, string> = {
@@ -53,6 +58,9 @@ export function Header({
             className="w-full rounded-xl border border-app-border bg-app-bg py-2 pl-3 pr-9 text-[13.5px] outline-none transition-all focus:border-primary/50 focus:bg-white focus:ring-4 focus:ring-primary/10 dark:border-white/10 dark:bg-white/5 dark:text-gray-100 md:w-[180px] md:focus:w-[220px]"
           />
         </div>
+        {noteViewMode && onNoteViewModeChange && (
+          <NoteViewToggle mode={noteViewMode} onChange={onNoteViewModeChange} />
+        )}
         <LanguageSwitcher />
         <button onClick={onNewNote} className="flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-primary px-3 py-2 text-[13px] font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark sm:px-4">
           + <span className="hidden sm:inline">{t.newNote}</span>

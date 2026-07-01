@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Page, Note } from '../types';
+import type { Page, Note, NoteViewMode } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useNotes } from '../contexts/NotesContext';
 import { useToast } from '../contexts/ToastContext';
@@ -43,13 +43,14 @@ function noteMatchesSearch(note: Note, search: string) {
   return haystack.includes(query);
 }
 
-function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen, selectMode, selected, onToggleSelect }: {
+function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect }: {
   notes: Note[];
   search: string;
   emptySearchText: string;
   emptyText: string;
   emptyHint?: string;
   onOpen: (id: number) => void;
+  viewMode?: NoteViewMode;
   selectMode?: boolean;
   selected?: Set<number>;
   onToggleSelect?: (id: number) => void;
@@ -57,13 +58,30 @@ function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen
   const hasSearch = normalizeSearch(search).length > 0;
   const filtered = hasSearch ? notes.filter((n) => noteMatchesSearch(n, search)) : notes;
   if (!filtered.length) return <EmptyState text={hasSearch ? emptySearchText : emptyText} hint={hasSearch ? undefined : emptyHint} />;
+  const expanded = viewMode === 'expanded';
   return (
-    <div className="grid grid-cols-1 gap-3.5 px-3 pb-6 sm:grid-cols-2 sm:px-5 lg:grid-cols-3 xl:grid-cols-4">
+    <div className={
+      expanded
+        ? 'mx-auto flex max-w-3xl flex-col gap-4 px-3 pb-6 sm:px-5'
+        : 'grid grid-cols-1 gap-3.5 px-3 pb-6 sm:grid-cols-2 sm:px-5 lg:grid-cols-3 xl:grid-cols-4'
+    }>
       {filtered.map((n) => (
-        <NoteCard key={n.id} note={n} onOpen={onOpen} selectMode={selectMode} selected={selected?.has(n.id)} onToggleSelect={onToggleSelect} />
+        <NoteCard key={n.id} note={n} onOpen={onOpen} viewMode={viewMode} selectMode={selectMode} selected={selected?.has(n.id)} onToggleSelect={onToggleSelect} />
       ))}
     </div>
   );
+}
+
+const NOTE_VIEW_KEY = 'malacadhati_notes_view';
+const NOTE_VIEW_PAGES: Page[] = ['home', 'library', 'unread', 'read', 'fav', 'archive', 'trash'];
+
+function readNoteViewMode(): NoteViewMode {
+  try {
+    const raw = localStorage.getItem(NOTE_VIEW_KEY);
+    return raw === 'expanded' ? 'expanded' : 'grid';
+  } catch {
+    return 'grid';
+  }
 }
 
 function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, createdLabel, deletedLabel, restoreLabel, deleteLabel, restoreTo, onRestore, onDelete, selectMode, selected, onToggleSelect }: {
@@ -150,7 +168,16 @@ export function Dashboard() {
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
   const [confirmDelSel, setConfirmDelSel] = useState(false);
   const [confirmQuizTrash, setConfirmQuizTrash] = useState<{ type: 'set' | 'folder' | 'question'; id: string | number } | null>(null);
+  const [noteViewMode, setNoteViewMode] = useState<NoteViewMode>(() => readNoteViewMode());
   const hasSearch = normalizeSearch(search).length > 0;
+  const showNoteViewToggle = NOTE_VIEW_PAGES.includes(page) && (page !== 'home' || hasSearch);
+
+  const handleNoteViewMode = useCallback((mode: NoteViewMode) => {
+    setNoteViewMode(mode);
+    try {
+      localStorage.setItem(NOTE_VIEW_KEY, mode);
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     const onPopState = () => {
@@ -212,13 +239,21 @@ export function Dashboard() {
       <Sidebar page={page} setPage={setPage} onOpenSetPassword={() => setShowSetPassword(true)} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header page={page} search={search} setSearch={setSearch} onNewNote={handleNewNote} onOpenMenu={() => setMobileMenuOpen(true)} />
+        <Header
+          page={page}
+          search={search}
+          setSearch={setSearch}
+          onNewNote={handleNewNote}
+          onOpenMenu={() => setMobileMenuOpen(true)}
+          noteViewMode={showNoteViewToggle ? noteViewMode : undefined}
+          onNoteViewModeChange={showNoteViewToggle ? handleNoteViewMode : undefined}
+        />
 
         <div className="flex-1 overflow-y-auto">
           {page === 'home' && hasSearch && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🔎 {t.secAll}</div>
-              <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
+              <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
@@ -260,7 +295,7 @@ export function Dashboard() {
                 ))}
               </div>
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">📚 {t.secAll}</div>
-              <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
+              <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
@@ -272,32 +307,32 @@ export function Dashboard() {
           {page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">📖 {t.secUnread}</div>
-              <NoteList notes={unread} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
+              <NoteList notes={unread} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {page === 'read' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">✓ {t.secRead}</div>
-              <NoteList notes={read} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} />
+              <NoteList notes={read} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {page === 'archive' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🗄 {t.secArch}</div>
-              <NoteList notes={archived} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
+              <NoteList notes={archived} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {page === 'fav' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">★ {t.secFav}</div>
-              <NoteList notes={fav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
+              <NoteList notes={fav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
               {favArch.length > 0 && (
                 <>
                   <div className="mb-2.5 mt-7 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🗄 {t.secFavArch}</div>
-                  <NoteList notes={favArch} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} />
+                  <NoteList notes={favArch} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
                 </>
               )}
             </div>
@@ -341,7 +376,7 @@ export function Dashboard() {
                 {visibleTrashedNotes.length > 0 && (
                   <section>
                     <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">📝 {trashCopy.notes} · {visibleTrashedNotes.length}</div>
-                    <NoteList notes={visibleTrashedNotes} search="" emptySearchText={t.emptySearch} emptyText={t.emptyTrash} onOpen={() => {}} selectMode={selectMode} selected={selected} onToggleSelect={toggleSelect} />
+                    <NoteList notes={visibleTrashedNotes} search="" emptySearchText={t.emptySearch} emptyText={t.emptyTrash} onOpen={() => {}} viewMode={noteViewMode} selectMode={selectMode} selected={selected} onToggleSelect={toggleSelect} />
                   </section>
                 )}
 
