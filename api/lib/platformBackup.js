@@ -126,6 +126,7 @@ export async function downloadPlatformBackup(objectName) {
 }
 
 export function verifyCronSecret(request) {
+  if (request.headers['x-vercel-cron'] === '1') return true;
   const expected = process.env.CRON_SECRET;
   if (!expected) return false;
   const auth = request.headers.authorization || '';

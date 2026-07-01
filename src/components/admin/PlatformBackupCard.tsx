@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useToast } from '../../contexts/ToastContext';
+import { ADMIN_EMAIL } from '../../lib/firebase';
 
 interface PlatformBackupRow {
   name: string;
   size: number;
   updated: string | null;
 }
+
+const AUTO_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const AUTO_BACKUP_KEY = 'malacadhati_admin_platform_backup_at';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
@@ -16,48 +21,59 @@ function formatBytes(bytes: number): string {
 
 const copy = {
   en: {
-    title: 'Platform backup (all users)',
-    sub: 'Full app data for every account is saved daily to Firebase Storage — separate from Realtime Database. Download a copy here if the cloud database is damaged. Run manual backup anytime for an immediate copy.',
-    run: 'Run backup now',
+    title: 'Full app backup (all users)',
+    sub: 'Runs automatically once per day. You do not need to change any settings — open this page anytime to download a copy.',
+    run: 'Save copy now',
     running: 'Saving…',
+    autoRunning: 'Creating first automatic copy…',
     downloadLatest: 'Download latest',
-    refresh: 'Refresh list',
-    loading: 'Loading backups…',
-    empty: 'No platform backups yet. Run one manually or wait for the daily cron (requires CRON_SECRET in Vercel).',
-    latest: 'Latest',
+    refresh: 'Refresh',
+    loading: 'Checking backups…',
+    empty: 'No copy saved yet — creating one automatically…',
+    protected: 'Protected — latest copy saved',
+    latest: 'Latest copy',
     download: 'Download',
-    listError: 'Could not load platform backups.',
-    runError: 'Backup failed. Check that the service account has Storage permission.',
-    downloadError: 'Could not download backup.',
+    listError: 'Could not load backups. Try again in a moment.',
+    runError: 'Could not save backup. Try the button again.',
+    runOk: 'Backup saved for all users',
+    downloadError: 'Download failed. Try again.',
+    downloadOk: 'Download started',
   },
   sv: {
-    title: 'Plattformsbackup (alla användare)',
-    sub: 'Hela appens data (alla konton) sparas automatiskt en gång per dygn i Firebase Storage — separat från Realtime Database. Om molndatabasen skadas kan du ladda ner en kopia här. Kör manuell backup när som helst för en omedelbar kopia.',
-    run: 'Kör backup nu',
+    title: 'Säkerhetskopia — hela appen (alla användare)',
+    sub: 'Sker automatiskt en gång per dygn. Du behöver inte göra något tekniskt — öppna den här sidan när du vill ladda ner en kopia.',
+    run: 'Spara kopia nu',
     running: 'Sparar…',
+    autoRunning: 'Skapar första automatiska kopian…',
     downloadLatest: 'Ladda ner senaste',
-    refresh: 'Uppdatera lista',
-    loading: 'Laddar backups…',
-    empty: 'Inga plattformsbackups ännu. Kör en manuellt eller vänta på daglig cron (kräver CRON_SECRET i Vercel).',
-    latest: 'Senaste',
+    refresh: 'Uppdatera',
+    loading: 'Kontrollerar kopior…',
+    empty: 'Ingen kopia ännu — skapar en automatiskt…',
+    protected: 'Skyddat — senaste kopia sparad',
+    latest: 'Senaste kopia',
     download: 'Ladda ner',
-    listError: 'Kunde inte hämta plattformsbackups.',
-    runError: 'Backup misslyckades. Kontrollera att service account har Storage-behörighet.',
-    downloadError: 'Kunde inte ladda ner backup.',
+    listError: 'Kunde inte hämta kopior. Försök igen om en stund.',
+    runError: 'Kunde inte spara backup. Tryck på knappen igen.',
+    runOk: 'Backup sparad för alla användare',
+    downloadError: 'Nedladdning misslyckades. Försök igen.',
+    downloadOk: 'Nedladdning startad',
   },
 };
 
 export function PlatformBackupCard({ className = '' }: { className?: string }) {
   const { user } = useAuth();
   const { lang } = useLanguage();
+  const { show } = useToast();
   const t = copy[lang];
   const [platformBackups, setPlatformBackups] = useState<PlatformBackupRow[]>([]);
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupRunning, setBackupRunning] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
   const [backupError, setBackupError] = useState('');
+  const autoStarted = useRef(false);
 
-  const loadPlatformBackups = async () => {
-    if (!user) return;
+  const loadPlatformBackups = async (): Promise<PlatformBackupRow[]> => {
+    if (!user) return [];
     setBackupLoading(true);
     setBackupError('');
     try {
@@ -67,16 +83,19 @@ export function PlatformBackupCard({ className = '' }: { className?: string }) {
       });
       if (!res.ok) throw new Error('list-failed');
       const data = (await res.json()) as { backups: PlatformBackupRow[] };
-      setPlatformBackups(data.backups ?? []);
+      const items = data.backups ?? [];
+      setPlatformBackups(items);
+      return items;
     } catch {
       setBackupError(t.listError);
+      return [];
     } finally {
       setBackupLoading(false);
     }
   };
 
-  const runPlatformBackup = async () => {
-    if (!user) return;
+  const runPlatformBackup = async (silent = false): Promise<boolean> => {
+    if (!user) return false;
     setBackupRunning(true);
     setBackupError('');
     try {
@@ -86,11 +105,16 @@ export function PlatformBackupCard({ className = '' }: { className?: string }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('run-failed');
+      localStorage.setItem(AUTO_BACKUP_KEY, String(Date.now()));
       await loadPlatformBackups();
+      if (!silent) show(t.runOk);
+      return true;
     } catch {
       setBackupError(t.runError);
+      return false;
     } finally {
       setBackupRunning(false);
+      setAutoRunning(false);
     }
   };
 
@@ -109,21 +133,44 @@ export function PlatformBackupCard({ className = '' }: { className?: string }) {
       a.download = name.split('/').pop() || 'tahanote-backup.json.gz';
       a.click();
       URL.revokeObjectURL(url);
+      show(t.downloadOk);
     } catch {
       setBackupError(t.downloadError);
     }
   };
 
   useEffect(() => {
-    void loadPlatformBackups();
+    if (!user || user.email !== ADMIN_EMAIL || autoStarted.current) return;
+    autoStarted.current = true;
+
+    void (async () => {
+      const items = await loadPlatformBackups();
+      const lastAuto = Number(localStorage.getItem(AUTO_BACKUP_KEY)) || 0;
+      const stale = Date.now() - lastAuto > AUTO_BACKUP_INTERVAL_MS;
+      const needsBackup = items.length === 0 || stale;
+      if (!needsBackup) return;
+
+      setAutoRunning(true);
+      await runPlatformBackup(true);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
+
+  const busy = backupRunning || autoRunning;
+  const isProtected = platformBackups.length > 0 && !backupError;
 
   return (
     <div className={'rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/25 dark:bg-emerald-500/10 ' + className}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-bold text-emerald-900 dark:text-emerald-200">{t.title}</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-bold text-emerald-900 dark:text-emerald-200">{t.title}</h2>
+            {isProtected && !busy && (
+              <span className="rounded-full bg-emerald-600/15 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                ✓ {t.protected}
+              </span>
+            )}
+          </div>
           <p className="mt-1 max-w-2xl text-xs leading-relaxed text-emerald-800/80 dark:text-emerald-300/80">{t.sub}</p>
           {platformBackups[0] && (
             <p className="mt-2 text-xs font-medium text-emerald-900 dark:text-emerald-200">
@@ -137,37 +184,30 @@ export function PlatformBackupCard({ className = '' }: { className?: string }) {
           <button
             type="button"
             onClick={() => void runPlatformBackup()}
-            disabled={backupRunning}
+            disabled={busy}
             className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
           >
-            {backupRunning ? t.running : t.run}
+            {busy ? (autoRunning ? t.autoRunning : t.running) : t.run}
           </button>
           {platformBackups[0] && (
             <button
               type="button"
               onClick={() => void downloadPlatformBackup(platformBackups[0].name)}
-              className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
+              disabled={busy}
+              className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
             >
               {t.downloadLatest}
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => void loadPlatformBackups()}
-            disabled={backupLoading}
-            className="rounded-xl border border-emerald-300 px-4 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-500/30 dark:text-emerald-200"
-          >
-            {t.refresh}
-          </button>
         </div>
       </div>
       {backupLoading ? (
         <p className="mt-3 text-xs text-emerald-800/70 dark:text-emerald-300/70">{t.loading}</p>
       ) : platformBackups.length === 0 ? (
-        <p className="mt-3 text-xs text-emerald-800/70 dark:text-emerald-300/70">{t.empty}</p>
+        <p className="mt-3 text-xs text-emerald-800/70 dark:text-emerald-300/70">{busy ? t.autoRunning : t.empty}</p>
       ) : (
         <div className="mt-3 space-y-1.5">
-          {platformBackups.slice(0, 6).map((backup) => (
+          {platformBackups.slice(0, 4).map((backup) => (
             <div key={backup.name} className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200/80 bg-white/70 px-3 py-2 dark:border-emerald-500/20 dark:bg-black/20">
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-app-text dark:text-gray-100">{backup.name.split('/').pop()}</p>
