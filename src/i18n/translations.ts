@@ -256,6 +256,16 @@ export interface Translation {
   settingsLocalBackupCounts: string;
   settingsLocalBackupRestore: string;
   settingsLocalBackupRestored: string;
+  settingsExternalBackup: string;
+  settingsExternalBackupSub: string;
+  settingsExternalBackupDownload: string;
+  settingsExternalBackupFolder: string;
+  settingsExternalBackupFolderOn: string;
+  settingsExternalBackupFolderOff: string;
+  settingsExternalBackupFolderHint: string;
+  settingsExternalBackupSaved: string;
+  settingsExternalBackupUnsupported: string;
+  settingsCloudBackupHint: string;
   // Danger zone
   settingsDanger: string;
   settingsDeleteAccount: string;
@@ -569,7 +579,7 @@ export const LANGS: Record<Lang, Translation> = {
     settingsFolderBackupRestore: 'Restore',
     settingsFolderBackupRestored: 'Folders restored from backup',
     settingsCloudBackup: 'Cloud backup (notes & quiz)',
-    settingsCloudBackupEmpty: 'No cloud backups found yet. From now on, a full snapshot is saved automatically before each cloud sync.',
+    settingsCloudBackupEmpty: 'No internal backups yet. An hourly safety snapshot is saved automatically while you use the app.',
     settingsCloudBackupCounts: '{notes} notes · {quizzes} quiz items · {folders} folders · {sets} sets · {chats} chats',
     settingsCloudBackupRestore: 'Restore',
     settingsCloudBackupRestored: 'Data restored from cloud backup',
@@ -585,6 +595,16 @@ export const LANGS: Record<Lang, Translation> = {
     settingsLocalBackupCounts: '{notes} notes · {quizzes} quiz items · {folders} folders · {sets} sets · {chats} chats',
     settingsLocalBackupRestore: 'Restore local backup',
     settingsLocalBackupRestored: 'Data restored from this browser',
+    settingsExternalBackup: 'Backup outside Firebase',
+    settingsExternalBackupSub: 'Download a JSON file or save hourly to a folder on your computer (e.g. Dropbox, iCloud Drive, Google Drive desktop).',
+    settingsExternalBackupDownload: 'Download backup now',
+    settingsExternalBackupFolder: 'Hourly save to folder',
+    settingsExternalBackupFolderOn: 'On — saves every hour while this site is open',
+    settingsExternalBackupFolderOff: 'Choose folder…',
+    settingsExternalBackupFolderHint: 'Pick a folder synced with your cloud (Dropbox, Drive, etc.). A new JSON file is written each hour.',
+    settingsExternalBackupSaved: 'Backup saved to folder',
+    settingsExternalBackupUnsupported: 'Folder backup needs Chrome or Edge on desktop.',
+    settingsCloudBackupHint: 'Internal safety copies inside Firebase (for undo after accidents). Saved hourly, last 48 kept. Use “Backup outside Firebase” for a copy you control.',
     settingsDanger: 'Danger Zone',
     settingsDeleteAccount: 'Delete Account',
     settingsDeleteConfirmTitle: 'Delete your account?',
@@ -894,7 +914,7 @@ export const LANGS: Record<Lang, Translation> = {
     settingsFolderBackupRestore: 'Återställ',
     settingsFolderBackupRestored: 'Mappar återställda från backup',
     settingsCloudBackup: 'Molnsäkerhetskopia (anteckningar & quiz)',
-    settingsCloudBackupEmpty: 'Inga molnsäkerhetskopior ännu. Från och med nu sparas en fullständig kopia automatiskt före varje molnsynk.',
+    settingsCloudBackupEmpty: 'Inga interna säkerhetskopior ännu. En timvis säkerhetskopia sparas automatiskt medan du använder appen.',
     settingsCloudBackupCounts: '{notes} anteckningar · {quizzes} quiz · {folders} mappar · {sets} set · {chats} chattar',
     settingsCloudBackupRestore: 'Återställ',
     settingsCloudBackupRestored: 'Data återställd från molnsäkerhetskopia',
@@ -910,6 +930,16 @@ export const LANGS: Record<Lang, Translation> = {
     settingsLocalBackupCounts: '{notes} anteckningar · {quizzes} quiz · {folders} mappar · {sets} set · {chats} chattar',
     settingsLocalBackupRestore: 'Återställ lokal backup',
     settingsLocalBackupRestored: 'Data återställd från den här webbläsaren',
+    settingsExternalBackup: 'Backup utanför Firebase',
+    settingsExternalBackupSub: 'Ladda ner en JSON-fil eller spara varje timme i en mapp på datorn (t.ex. Dropbox, iCloud Drive, Google Drive).',
+    settingsExternalBackupDownload: 'Ladda ner backup nu',
+    settingsExternalBackupFolder: 'Spara varje timme till mapp',
+    settingsExternalBackupFolderOn: 'På — sparas varje timme medan sidan är öppen',
+    settingsExternalBackupFolderOff: 'Välj mapp…',
+    settingsExternalBackupFolderHint: 'Välj en mapp som synkas med molnet. En ny JSON-fil skrivs varje timme.',
+    settingsExternalBackupSaved: 'Backup sparad i mappen',
+    settingsExternalBackupUnsupported: 'Mappbackup kräver Chrome eller Edge på dator.',
+    settingsCloudBackupHint: 'Interna säkerhetskopior i Firebase (för ångra efter olyckor). Sparas varje timme, senaste 48 behålls. Använd “Backup utanför Firebase” för en kopia du kontrollerar.',
     settingsDanger: 'Farlig zon',
     settingsDeleteAccount: 'Radera konto',
     settingsDeleteConfirmTitle: 'Radera ditt konto?',

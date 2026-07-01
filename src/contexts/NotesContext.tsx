@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Note, QuizItem, QuizSet, QuizFolder, ChatConversation } from '../types';
 import { FB_DB_URL } from '../lib/firebase';
+import { buildFullBackupPayload, shouldRunHourlyFolderBackup, writeBackupToFolder } from '../lib/externalBackup';
 import { setTokenSink } from '../lib/gemini';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
@@ -224,8 +225,29 @@ const RESTORED_FOLDER_ID = 'system-restored-sets';
 export const FAVORITES_FOLDER_ID = 'system-favorites';
 export const FAVORITES_SET_ID = 'system-favorites-set';
 const MAX_FOLDER_HISTORY = 40;
-const MAX_DATA_HISTORY = 40;
-const DATA_HISTORY_MIN_INTERVAL_MS = 60_000;
+const MAX_DATA_HISTORY = 48;
+const DATA_HISTORY_MIN_INTERVAL_MS = 3_600_000;
+
+function lastDataHistoryKey(uid: string) {
+  return `malacadhati_last_data_history_${uid}`;
+}
+
+function getLastDataHistoryAt(uid: string) {
+  const mem = lastDataHistoryAtByUid.get(uid) ?? 0;
+  try {
+    const stored = Number(localStorage.getItem(lastDataHistoryKey(uid))) || 0;
+    return Math.max(mem, stored);
+  } catch {
+    return mem;
+  }
+}
+
+function setLastDataHistoryAt(uid: string, ts: number) {
+  lastDataHistoryAtByUid.set(uid, ts);
+  try {
+    localStorage.setItem(lastDataHistoryKey(uid), String(ts));
+  } catch { /* ignore */ }
+}
 
 interface DataHistorySnapshot {
   notes: Note[];
@@ -275,9 +297,9 @@ async function trimHistoryKeys(uid: string, path: string, max: number) {
 async function appendDataHistory(uid: string, snapshot: DataHistorySnapshot) {
   if (isEmptyUserPayload(snapshot.notes, snapshot.quizzes, snapshot.chats, snapshot.quizSets, snapshot.quizFolders)) return;
   const now = Date.now();
-  const last = lastDataHistoryAtByUid.get(uid) ?? 0;
+  const last = getLastDataHistoryAt(uid);
   if (now - last < DATA_HISTORY_MIN_INTERVAL_MS) return;
-  lastDataHistoryAtByUid.set(uid, now);
+  setLastDataHistoryAt(uid, now);
   const key = String(now);
   await fetch(`${FB_DB_URL}/users/${uid}/dataHistory/${key}.json`, {
     method: 'PUT',
@@ -1073,6 +1095,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setTokenSink(addTokens);
     return () => setTokenSink(() => {});
   }, [addTokens]);
+
+  useEffect(() => {
+    if (!user || !loaded) return;
+    const run = () => {
+      if (!shouldRunHourlyFolderBackup()) return;
+      void writeBackupToFolder(buildFullBackupPayload({
+        notes,
+        quizzes,
+        quizSets,
+        quizFolders,
+        chats,
+      }));
+    };
+    run();
+    const id = window.setInterval(run, 60_000);
+    return () => window.clearInterval(id);
+  }, [user, loaded, notes, quizzes, quizSets, quizFolders, chats]);
 
   const persist = (
     nextNotes: Note[],

@@ -6,6 +6,15 @@ import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
 import { getStorageLimitMB, mbToBytes } from '../../lib/storageQuota';
+import {
+  buildFullBackupPayload,
+  downloadBackupJson,
+  isAutoFolderBackupEnabled,
+  pickBackupFolder,
+  setAutoFolderBackupEnabled,
+  supportsFolderBackup,
+  writeBackupToFolder,
+} from '../../lib/externalBackup';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
@@ -38,6 +47,8 @@ export function SettingsPage() {
   const [loadingDataBackups, setLoadingDataBackups] = useState(true);
   const [localBackup, setLocalBackup] = useState(() => getLocalBackupSummary());
   const [restoringLocal, setRestoringLocal] = useState(false);
+  const [autoFolderBackup, setAutoFolderBackup] = useState(() => isAutoFolderBackupEnabled());
+  const folderBackupSupported = supportsFolderBackup();
   const [restoringCloudKey, setRestoringCloudKey] = useState<string | null>(null);
   const [recoverScan, setRecoverScan] = useState<RecoverableCloudSummary | null>(null);
   const [scanningRecover, setScanningRecover] = useState(false);
@@ -468,7 +479,58 @@ export function SettingsPage() {
         </div>
       </SectionCard>
 
+      <SectionCard title={t.settingsExternalBackup}>
+        <p className="mb-4 text-sm leading-relaxed text-app-text-secondary dark:text-gray-400">{t.settingsExternalBackupSub}</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              downloadBackupJson(buildFullBackupPayload({ notes, quizzes, quizSets, quizFolders, chats }));
+              show(t.settingsExternalBackupDownload);
+            }}
+            className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-primary-dark"
+          >
+            {t.settingsExternalBackupDownload}
+          </button>
+          {folderBackupSupported ? (
+            <button
+              type="button"
+              onClick={() => {
+                void pickBackupFolder().then(async (handle) => {
+                  if (!handle) return;
+                  setAutoFolderBackup(true);
+                  setAutoFolderBackupEnabled(true);
+                  const ok = await writeBackupToFolder(buildFullBackupPayload({ notes, quizzes, quizSets, quizFolders, chats }));
+                  show(ok ? t.settingsExternalBackupSaved : t.settingsExternalBackupFolderOff);
+                });
+              }}
+              className={'rounded-lg border px-4 py-2 text-xs font-semibold transition-all ' + (autoFolderBackup ? 'border-emerald-400 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-app-border text-app-text-secondary hover:border-primary/40 dark:border-white/10')}
+            >
+              {autoFolderBackup ? t.settingsExternalBackupFolderOn : t.settingsExternalBackupFolderOff}
+            </button>
+          ) : (
+            <p className="self-center text-xs text-app-text-secondary dark:text-gray-500">{t.settingsExternalBackupUnsupported}</p>
+          )}
+        </div>
+        {folderBackupSupported && (
+          <p className="mt-3 text-xs leading-relaxed text-app-text-secondary/80 dark:text-gray-500">{t.settingsExternalBackupFolderHint}</p>
+        )}
+        {autoFolderBackup && (
+          <button
+            type="button"
+            onClick={() => {
+              setAutoFolderBackup(false);
+              setAutoFolderBackupEnabled(false);
+            }}
+            className="mt-3 text-xs text-app-text-secondary underline hover:text-app-text dark:text-gray-500"
+          >
+            {lang === 'sv' ? 'Stäng av timvis mappbackup' : 'Turn off hourly folder backup'}
+          </button>
+        )}
+      </SectionCard>
+
       <SectionCard title={t.settingsCloudBackup}>
+        <p className="mb-4 text-sm leading-relaxed text-app-text-secondary dark:text-gray-400">{t.settingsCloudBackupHint}</p>
         {loadingDataBackups ? (
           <p className="text-sm text-app-text-secondary dark:text-gray-400">…</p>
         ) : dataBackups.length === 0 ? (
