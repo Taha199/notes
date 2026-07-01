@@ -7,6 +7,7 @@ import { pageFromPath, pathFromPage } from '../lib/pageRoute';
 import { Sidebar } from './layout/Sidebar';
 import { Header } from './layout/Header';
 import { NoteCard } from './notes/NoteCard';
+import { NoteViewToggle } from './notes/NoteViewToggle';
 import { DraftEditor } from './notes/DraftEditor';
 import { NoteEditorModal } from './notes/NoteEditorModal';
 import { SetPasswordModal } from './auth/SetPasswordModal';
@@ -43,6 +44,23 @@ function noteMatchesSearch(note: Note, search: string) {
   return haystack.includes(query);
 }
 
+function NoteSectionBar({
+  label,
+  noteViewMode,
+  onNoteViewModeChange,
+}: {
+  label: string;
+  noteViewMode: NoteViewMode;
+  onNoteViewModeChange: (mode: NoteViewMode) => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">{label}</div>
+      <NoteViewToggle mode={noteViewMode} onChange={onNoteViewModeChange} />
+    </div>
+  );
+}
+
 function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect }: {
   notes: Note[];
   search: string;
@@ -73,7 +91,6 @@ function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen
 }
 
 const NOTE_VIEW_KEY = 'malacadhati_notes_view';
-const NOTE_VIEW_PAGES: Page[] = ['home', 'library', 'unread', 'read', 'fav', 'archive', 'trash'];
 
 function readNoteViewMode(): NoteViewMode {
   try {
@@ -170,7 +187,6 @@ export function Dashboard() {
   const [confirmQuizTrash, setConfirmQuizTrash] = useState<{ type: 'set' | 'folder' | 'question'; id: string | number } | null>(null);
   const [noteViewMode, setNoteViewMode] = useState<NoteViewMode>(() => readNoteViewMode());
   const hasSearch = normalizeSearch(search).length > 0;
-  const showNoteViewToggle = NOTE_VIEW_PAGES.includes(page) && (page !== 'home' || hasSearch);
 
   const handleNoteViewMode = useCallback((mode: NoteViewMode) => {
     setNoteViewMode(mode);
@@ -245,14 +261,12 @@ export function Dashboard() {
           setSearch={setSearch}
           onNewNote={handleNewNote}
           onOpenMenu={() => setMobileMenuOpen(true)}
-          noteViewMode={showNoteViewToggle ? noteViewMode : undefined}
-          onNoteViewModeChange={showNoteViewToggle ? handleNoteViewMode : undefined}
         />
 
         <div className="flex-1 overflow-y-auto">
           {page === 'home' && hasSearch && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🔎 {t.secAll}</div>
+              <NoteSectionBar label={`🔎 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
               <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
@@ -294,7 +308,7 @@ export function Dashboard() {
                   </div>
                 ))}
               </div>
-              <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">📚 {t.secAll}</div>
+              <NoteSectionBar label={`📚 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
               <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
@@ -306,32 +320,32 @@ export function Dashboard() {
 
           {page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">📖 {t.secUnread}</div>
+              <NoteSectionBar label={`📖 ${t.secUnread}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
               <NoteList notes={unread} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {page === 'read' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">✓ {t.secRead}</div>
+              <NoteSectionBar label={`✓ ${t.secRead}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
               <NoteList notes={read} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {page === 'archive' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🗄 {t.secArch}</div>
+              <NoteSectionBar label={`🗄 ${t.secArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
               <NoteList notes={archived} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {page === 'fav' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">★ {t.secFav}</div>
+              <NoteSectionBar label={`★ ${t.secFav}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
               <NoteList notes={fav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
               {favArch.length > 0 && (
                 <>
-                  <div className="mb-2.5 mt-7 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">🗄 {t.secFavArch}</div>
+                  <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
                   <NoteList notes={favArch} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
                 </>
               )}
@@ -375,7 +389,7 @@ export function Dashboard() {
               <div className="space-y-7 px-3 py-4 sm:px-5 sm:py-5">
                 {visibleTrashedNotes.length > 0 && (
                   <section>
-                    <div className="mb-2.5 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">📝 {trashCopy.notes} · {visibleTrashedNotes.length}</div>
+                    <NoteSectionBar label={`📝 ${trashCopy.notes} · ${visibleTrashedNotes.length}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
                     <NoteList notes={visibleTrashedNotes} search="" emptySearchText={t.emptySearch} emptyText={t.emptyTrash} onOpen={() => {}} viewMode={noteViewMode} selectMode={selectMode} selected={selected} onToggleSelect={toggleSelect} />
                   </section>
                 )}

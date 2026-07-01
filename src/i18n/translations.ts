@@ -69,6 +69,7 @@ export interface Translation {
   notesViewExpanded: string;
   notesViewGridTitle: string;
   notesViewExpandedTitle: string;
+  notesViewLabel: string;
   filesTitle: string;
   filesSub: string;
   filesSizeLimit: string;
@@ -484,6 +485,7 @@ export const LANGS: Record<Lang, Translation> = {
     notesViewExpanded: 'Full',
     notesViewGridTitle: 'Card view',
     notesViewExpandedTitle: 'Full note view',
+    notesViewLabel: 'View',
     filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesSizeLimit: 'Maximum file size: 20 MB per file.', filesUpload: 'Choose files',
     filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewUnavailable: 'Preview is not available for this file type.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
@@ -808,6 +810,7 @@ export const LANGS: Record<Lang, Translation> = {
     notesViewExpanded: 'Hela',
     notesViewGridTitle: 'Kortvy',
     notesViewExpandedTitle: 'Visa hela anteckningen',
+    notesViewLabel: 'Visning',
     filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesSizeLimit: 'Maximal filstorlek: 20 MB per fil.', filesUpload: 'Välj filer',
     filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewUnavailable: 'Förhandsgranskning finns inte för den här filtypen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
