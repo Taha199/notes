@@ -10,7 +10,7 @@ import type { Page } from '../../types';
 const hasContent = (h: string) => !!h.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
 
 const NOTE_QUIZ_PANEL_MIN = 400;
-const NOTE_QUIZ_PANEL_MAX = 760;
+const NOTE_QUIZ_PANEL_MAX = 960;
 const NOTE_QUIZ_PANEL_KEY = 'malacadhati_note_quiz_panel_w';
 
 function readQuizPanelWidth() {
@@ -215,7 +215,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   };
 
   return (
-    <div onClick={(e) => e.target === e.currentTarget && onClose()} className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-2 backdrop-blur-sm sm:p-4">
+    <div onClick={(e) => e.target === e.currentTarget && onClose()} className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-1 backdrop-blur-sm sm:p-2">
       <button
         type="button"
         onClick={() => previousNoteId !== undefined && onChangeNote?.(previousNoteId)}
@@ -236,7 +236,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
       >
         ›
       </button>
-      <div className="flex max-h-[96dvh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900 sm:max-h-[92vh] sm:rounded-3xl" style={{ animation: 'slideUp .22s cubic-bezier(.34,1.56,.64,1)' }}>
+      <div className="flex h-[min(92dvh,1100px)] w-full max-w-[min(98vw,90rem)] flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900 sm:rounded-3xl" style={{ animation: 'slideUp .22s cubic-bezier(.34,1.56,.64,1)' }}>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-app-border bg-app-bg px-3 py-3 dark:border-white/10 dark:bg-white/5 sm:px-4">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <button
