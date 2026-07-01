@@ -390,6 +390,19 @@ async function fetchLatestDataHistory(uid: string): Promise<DataHistorySnapshot 
   return snapshot;
 }
 
+/** Single latest dataHistory entry — used on normal load when notes are empty. */
+async function fetchLatestDataHistorySnapshot(uid: string): Promise<DataHistorySnapshot | null> {
+  try {
+    const res = await fetch(`${FB_DB_URL}/users/${uid}/dataHistory.json?shallow=true`);
+    if (!res.ok) return null;
+    const keys = Object.keys((await res.json()) || {}).sort().reverse();
+    if (!keys.length) return null;
+    return fetchDataHistorySnapshot(uid, keys[0]);
+  } catch {
+    return null;
+  }
+}
+
 async function fetchAllFolderHistory(uid: string): Promise<QuizFolder[]> {
   try {
     const res = await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory.json?shallow=true`);
@@ -534,7 +547,9 @@ async function buildRecoverySnapshot(uid: string, cloud: Record<string, unknown>
     fetchAllDataHistorySnapshots(uid),
     readDedicatedQuizData(uid),
     fetchAllFolderHistory(uid),
-    fetch(`${FB_DB_URL}/users/${uid}.json`).then((r) => r.json()).catch(() => null),
+    cloud
+      ? Promise.resolve(cloud)
+      : fetch(`${FB_DB_URL}/users/${uid}.json`).then((r) => r.json()).catch(() => null),
   ]);
 
   const historySnapshot = historySnapshots.reduce<DataHistorySnapshot | null>((best, snap) => {
@@ -758,7 +773,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     syncAccountLocalStorage(user.uid);
     const local = readLocalNotesData();
 
-    const applyLocalFallback = () => {
+    const applyLocalCache = () => {
       if (local.notes.length) setNotes(local.notes);
       if (local.quizzes.length) setQuizzes(local.quizzes);
       if (local.chats.length) setChats(local.chats);
@@ -766,9 +781,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setQuizFolders(ensureRestoredFolder(initializeQuizColors(local.folders)));
       }
       if (local.sets.length) setQuizSets(local.sets);
+    };
+
+    const applyLocalFallback = () => {
+      applyLocalCache();
       draftCounter.current = 1;
       setDrafts([{ id: 'd1', title: '', html: '' }]);
     };
+
+    applyLocalCache();
 
     (async () => {
       try {
@@ -805,6 +826,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             notesRepair = true;
             historyRepair = true;
             recoveryLog('recovered notes from draftContents', { count: fromDrafts.length });
+          }
+        }
+
+        if (notes.length === 0) {
+          const historySnapshot = await fetchLatestDataHistorySnapshot(user.uid);
+          if (historySnapshot?.notes.length) {
+            notes = mergeNotesById(notes, historySnapshot.notes);
+            notesRepair = true;
+            historyRepair = true;
+            recoveryLog('recovered notes from latest dataHistory', { count: notes.length });
           }
         }
 
@@ -860,60 +891,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             setQuizzes(quizzes);
             localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzes));
           }
-        }
-
-        const shouldDeepRecover = notes.length === 0
-          || quizzes.length === 0
-          || countUserQuizSets(rawSets) === 0
-          || countUserQuizFolders(rawFolders) === 0;
-        if (shouldDeepRecover) {
-          const recovery = await buildRecoverySnapshot(user.uid, cloud);
-          const nextNotes = mergeNotesById(notes, recovery.notes);
-          const nextQuizzes = mergeQuizzesById(
-            quizzes,
-            recovery.quizzes,
-            recovery.quizSets.flatMap((set) => set.items ?? []),
-          );
-          const nextChats = recovery.chats.length > chats.length ? recovery.chats : chats;
-          const nextRawFolders = mergeById(rawFolders, recovery.quizFolders);
-          const nextRawSets = mergeById(rawSets, recovery.quizSets);
-          if (nextNotes.length > notes.length) {
-            notes = nextNotes;
-            notesRepair = true;
-            historyRepair = true;
-            setNotes(notes);
-            localStorage.setItem('malacadhati', JSON.stringify(notes));
-          }
-          if (nextQuizzes.length > quizzes.length) {
-            quizzes = nextQuizzes;
-            quizzesRepair = true;
-            historyRepair = true;
-            setQuizzes(quizzes);
-            localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzes));
-          }
-          if (nextChats.length > chats.length) {
-            chats = nextChats;
-            chatsRepair = true;
-            historyRepair = true;
-            setChats(chats);
-            localStorage.setItem('malacadhati_chats', JSON.stringify(chats));
-          }
-          if (countUserQuizFolders(nextRawFolders) > countUserQuizFolders(rawFolders)) {
-            rawFolders = nextRawFolders;
-            repairQuizStructure = true;
-            historyRepair = true;
-          }
-          if (countUserQuizSets(nextRawSets) > countUserQuizSets(rawSets)) {
-            rawSets = nextRawSets;
-            repairQuizStructure = true;
-            historyRepair = true;
-          }
-          if (historyRepair) recoveryLog('deep cloud recovery merged', {
-            notes: notes.length,
-            quizzes: quizzes.length,
-            userFolders: countUserQuizFolders(rawFolders),
-            userSets: countUserQuizSets(rawSets),
-          });
         }
 
         if (
