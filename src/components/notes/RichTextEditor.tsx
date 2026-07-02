@@ -46,6 +46,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [previewZoom, setPreviewZoom] = useState(1);
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; rect: DOMRect } | null>(null);
+  const isResizingImg = useRef(false);
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -1015,6 +1016,38 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     reader.readAsDataURL(file);
   };
 
+  // ── Image resize: drag the corner handle to grow/shrink ───────────────
+  const startImageResize = (e: React.MouseEvent, img: HTMLImageElement) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ed = editorRef.current;
+    if (!ed) return;
+    isResizingImg.current = true;
+    const startX = e.clientX;
+    const rect = img.getBoundingClientRect();
+    const startWidth = rect.width;
+    const ratio = rect.height / (rect.width || 1);
+    const maxW = Math.max(120, ed.clientWidth - 32);
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(maxW, Math.max(60, startWidth + (ev.clientX - startX)));
+      const w = Math.round(next);
+      img.style.width = `${w}px`;
+      img.style.height = `${Math.round(w * ratio)}px`;
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = 'none';
+      setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      isResizingImg.current = false;
+      setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+      emitHtml(ed.innerHTML);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
   // ── Divider: underline the current line + start a new paragraph below ──
   const insertDivider = () => {
     const ed = editorRef.current;
@@ -1272,7 +1305,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           emitHtml(ed?.innerHTML ?? '');
         }}
         onMouseMove={(event) => {
-          if (!editable) return;
+          if (!editable || isResizingImg.current) return;
           const target = event.target;
           if (target instanceof HTMLImageElement) {
             setHoveredImg({ el: target, rect: target.getBoundingClientRect() });
@@ -1280,7 +1313,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             setHoveredImg(null);
           }
         }}
-        onMouseLeave={() => setHoveredImg(null)}
+        onMouseLeave={() => { if (!isResizingImg.current) setHoveredImg(null); }}
         onClick={(event) => {
           if (!editable && event.detail >= 3) { event.preventDefault(); onLockedTripleClick?.(); return; }
           const target = event.target;
@@ -1297,11 +1330,31 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         return (
           <div
             onMouseEnter={() => setHoveredImg(hoveredImg)}
-            onMouseLeave={() => setHoveredImg(null)}
+            onMouseLeave={() => { if (!isResizingImg.current) setHoveredImg(null); }}
             style={{ position: 'fixed', left: r.right - 56, top: r.top + 4, zIndex: 9999, display: 'flex', gap: 4 }}
           >
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; }} className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900" title="Zoom">🔍</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); setHoveredImg(null); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700" title="Delete">✕</button>
+          </div>
+        );
+      })()}
+
+      {/* Image resize handle — drag the corner to grow/shrink */}
+      {editable && hoveredImg && (() => {
+        const r = hoveredImg.rect;
+        return (
+          <div
+            onMouseDown={(e) => startImageResize(e, hoveredImg.el)}
+            onMouseEnter={() => setHoveredImg(hoveredImg)}
+            onMouseLeave={() => { if (!isResizingImg.current) setHoveredImg(null); }}
+            title={t.titleResizeImage}
+            style={{ position: 'fixed', left: r.right - 15, top: r.bottom - 15, zIndex: 9999, cursor: 'nwse-resize', touchAction: 'none' }}
+            className="flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 border-white bg-primary text-white shadow-lg"
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <path d="M10 3 L3 10" />
+              <path d="M10 7.5 L7.5 10" />
+            </svg>
           </div>
         );
       })()}
