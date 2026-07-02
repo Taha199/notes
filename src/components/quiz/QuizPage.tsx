@@ -311,6 +311,9 @@ interface OpenQuestionForm {
   question: string;
   answer: string;
   saveStatus: 'empty' | 'syncing' | 'saved';
+  // true when editing an already-saved question; drafts leave this falsy so
+  // Cancel discards them even if they contain partial content.
+  finalized?: boolean;
 }
 
 interface EditPanelProps {
@@ -634,7 +637,8 @@ export function QuizPage() {
       correctIndex: override?.correctIndexes?.[0],
       correctIndexes: override?.correctIndexes,
       explanation: override?.explanation,
-      draft: finalize ? false : true,
+      // Never demote an already-saved question back to a draft on autosave.
+      draft: finalize ? false : (form.finalized ? false : true),
     };
 
     updateForm(formId, { saveStatus: 'syncing' });
@@ -666,6 +670,7 @@ export function QuizPage() {
           question: initial.question ?? '',
           answer: initial.answer ?? '',
           saveStatus: 'saved',
+          finalized: true,
         },
       ]);
       return;
@@ -700,7 +705,10 @@ export function QuizPage() {
 
   const handleCancelForm = (formId: string) => {
     const form = openFormsRef.current.find((f) => f.formId === formId);
-    if (form?.itemId && !hasContent(form.question) && !hasContent(form.answer)) {
+    const bothEmpty = form ? (!hasContent(form.question) && !hasContent(form.answer)) : false;
+    // Discard unsaved drafts entirely (even with partial content); only drop an
+    // already-saved question when the user cleared both fields.
+    if (form?.itemId && (!form.finalized || bothEmpty)) {
       if (selectedSetId) removeItemFromSet(selectedSetId, form.itemId);
       else permDeleteQuiz(form.itemId);
     }
