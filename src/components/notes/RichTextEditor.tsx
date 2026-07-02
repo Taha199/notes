@@ -51,6 +51,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const imgInputRef = useRef<HTMLInputElement>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const lastLocalHtmlRef = useRef(html);
+  const lastPropHtmlRef = useRef(html);
 
   const emitHtml = (next: string) => {
     lastLocalHtmlRef.current = next;
@@ -646,13 +647,17 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   useEffect(() => {
     const ed = editorRef.current;
     if (!ed) return;
+    // A different html prop than last render means the parent deliberately set new
+    // content (e.g. the "Paste note" button) — always honor it below.
+    const propChanged = html !== lastPropHtmlRef.current;
+    lastPropHtmlRef.current = html;
     if (document.activeElement === ed) return;
     if (ed.innerHTML === html) {
       lastLocalHtmlRef.current = html;
       return;
     }
-    // Parent state may lag behind local toolbar edits — don't restore stale html.
-    if (ed.innerHTML === lastLocalHtmlRef.current && html !== lastLocalHtmlRef.current) return;
+    // Skip only stale echoes of our own edits; deliberate parent updates still apply.
+    if (!propChanged && ed.innerHTML === lastLocalHtmlRef.current && html !== lastLocalHtmlRef.current) return;
     ed.innerHTML = html;
     lastLocalHtmlRef.current = html;
   }, [html]);
@@ -933,9 +938,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     setBarColor(c);
-    const rangeToUse = savedRange.current?.cloneRange() ?? null;
-    ed.focus({ preventScroll: true });
-    if (rangeToUse) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(rangeToUse); }
+    // Prefer the live/saved non-collapsed selection so colouring reliably hits the text.
+    resolveFormatRange();
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('foreColor', false, c);
     saveSel();
@@ -947,9 +951,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const clearTextColor = () => {
     const ed = editorRef.current;
     if (!ed) return;
-    const rangeToUse = savedRange.current?.cloneRange() ?? null;
-    ed.focus({ preventScroll: true });
-    if (rangeToUse) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(rangeToUse); }
+    resolveFormatRange();
     const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null;
     // Strip inline color from spans the selection touches; leave background-color intact.
     ed.querySelectorAll<HTMLElement>('[style*="color"]').forEach((el) => {
@@ -978,9 +980,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     setHlColor(c);
-    const rangeToUse = savedRange.current?.cloneRange() ?? null;
-    ed.focus({ preventScroll: true });
-    if (rangeToUse) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(rangeToUse); }
+    resolveFormatRange();
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('backColor', false, c);
     if (c === 'transparent') {
