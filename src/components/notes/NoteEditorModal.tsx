@@ -117,6 +117,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [manualQ, setManualQ] = useState('');
   const [manualA, setManualA] = useState('');
   const [manualAiLoading, setManualAiLoading] = useState(false);
+  const [manualResetKey, setManualResetKey] = useState(0);
   // AI Question mode (third screen)
   const [aiMode, setAiMode] = useState(false);
   const [aiQ, setAiQ] = useState('');
@@ -286,7 +287,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                     >{t.notePaste}</button>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-                    <RichTextEditor html={manualQ} onChange={setManualQ} placeholder={t.noteWriteQuestionPh} minHeight="110px" />
+                    <RichTextEditor key={`mq-${manualResetKey}`} html={manualQ} onChange={setManualQ} placeholder={t.noteWriteQuestionPh} minHeight="110px" />
                   </div>
                 </div>
 
@@ -337,7 +338,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                     </div>
                   ) : (
                     <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-                      <RichTextEditor html={manualA} onChange={setManualA} placeholder={t.noteWriteAnswerPh} minHeight="110px" />
+                      <RichTextEditor key={`ma-${manualResetKey}`} html={manualA} onChange={setManualA} placeholder={t.noteWriteAnswerPh} minHeight="110px" />
                     </div>
                   )}
                 </div>
@@ -355,7 +356,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       }
                       addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ, answer, date: nowStr() });
                       show(t.noteSavedQuiz);
-                      setManualQ(''); setManualA(''); setMcqOptions(['', '', '', '']); setMcqCorrect(0);
+                      setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); setManualAiLoading(false); setManualResetKey((k) => k + 1);
                     }}
                     disabled={!hasContent(manualQ) || (mcqMode && mcqOptions.filter((o) => o.trim()).length < 2)}
                     className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
