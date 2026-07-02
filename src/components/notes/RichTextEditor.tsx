@@ -413,10 +413,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     ed.querySelectorAll<HTMLElement>('div, p').forEach((block) => {
       block.querySelectorAll<HTMLElement>('span[style*="font-size"]').forEach((span) => {
         const text = span.textContent?.replace(/\u200B/g, '').trim() ?? '';
-        if (!text) span.remove();
+        if (!text && !span.querySelector('img')) span.remove();
       });
       const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
-      if (!text) {
+      // Blocks that hold an image have no text but must not be wiped.
+      if (!text && !block.querySelector('img')) {
         block.innerHTML = '<br>';
         block.style.removeProperty('font-size');
         block.style.removeProperty('line-height');
@@ -428,7 +429,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       const block = topBlocks[i];
       if (!['DIV', 'P'].includes(block.tagName)) continue;
       const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
-      if (text) continue;
+      if (text || block.querySelector('img')) continue;
       const prevText = topBlocks[i - 1].textContent?.replace(/\u200B/g, '').trim() ?? '';
       const nextText = topBlocks[i + 1].textContent?.replace(/\u200B/g, '').trim() ?? '';
       if (prevText && nextText) block.remove();
@@ -503,11 +504,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     newBlock.setAttribute('dir', 'auto');
     resetBlockToLeft(newBlock);
 
-    if (tailHasContent) newBlock.appendChild(tailContents);
+    if (tailHasContent || tailContents.querySelector?.('img')) newBlock.appendChild(tailContents);
     else newBlock.innerHTML = '<br>';
 
     block.parentNode?.insertBefore(newBlock, block.nextSibling);
-    if (!block.textContent?.replace(/\u200B/g, '').trim()) block.innerHTML = '<br>';
+    if (!block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img')) block.innerHTML = '<br>';
 
     placeCaretInBlock(newBlock, true);
     return newBlock;
@@ -533,11 +534,11 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       (tailContents.textContent?.replace(/\u200B/g, '').trim() ?? '').length > 0
       || tailContents.querySelector('br');
 
-    if (tailHasContent) newBlock.appendChild(tailContents);
+    if (tailHasContent || tailContents.querySelector?.('img')) newBlock.appendChild(tailContents);
     else newBlock.innerHTML = '<br>';
 
     block.parentNode?.insertBefore(newBlock, block.nextSibling);
-    if (!block.textContent?.replace(/\u200B/g, '').trim()) block.innerHTML = '<br>';
+    if (!block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img')) block.innerHTML = '<br>';
     placeCaretInBlock(newBlock, true);
     return newBlock;
   };
@@ -588,7 +589,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const block = getBlockParent(sel.anchorNode, ed);
     if (block) {
       const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
-      if (!text) {
+      if (!text && !block.querySelector('img')) {
         block.innerHTML = '<br>';
         block.style.removeProperty('font-size');
         block.style.removeProperty('line-height');
