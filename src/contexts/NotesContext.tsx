@@ -43,13 +43,26 @@ function pickNewerQuizItem(a: QuizItem, b: QuizItem) {
   return quizSyncTime(b) >= quizSyncTime(a) ? b : a;
 }
 
+function noteContentLength(note: Note) {
+  return (note.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length + (note.title || '').trim().length;
+}
+
+function pickBetterNote(local: Note, remote: Note) {
+  if (noteSyncKey(local) === noteSyncKey(remote)) return local;
+  const localLen = noteContentLength(local);
+  const remoteLen = noteContentLength(remote);
+  if (remoteLen !== localLen) return remoteLen > localLen ? remote : local;
+  if (local.trashed && !remote.trashed) return remote;
+  if (!local.trashed && remote.trashed) return local;
+  return local;
+}
+
 function mergeNotesForSync(local: Note[], remote: Note[]) {
   const map = new Map<number, Note>();
   for (const item of local) map.set(item.id, item);
   for (const item of remote) {
     const existing = map.get(item.id);
-    if (!existing) map.set(item.id, item);
-    else if (noteSyncKey(existing) !== noteSyncKey(item)) map.set(item.id, item);
+    map.set(item.id, existing ? pickBetterNote(existing, item) : item);
   }
   return [...map.values()];
 }
@@ -919,20 +932,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           setTokenUsage(cloud.tokenUsage as number);
         }
 
-        const notesMerge = mergeCloudFieldOrLocal<Note>(cloud, 'notes', local.notes);
-        let notes = notesMerge.value;
-        let notesRepair = notesMerge.repair;
+        const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
+        let notes = mergeNotesForSync(local.notes, cloudNotes);
+        let notesRepair = notes.length > cloudNotes.length
+          || (local.notes.length > 0 && cloudNotes.length === 0)
+          || (local.notes.length > 0 && notes.length > cloudNotes.length);
 
-        const quizzesMerge = mergeCloudFieldOrLocal<QuizItem>(cloud, 'quizzes', local.quizzes);
-        let quizzes = quizzesMerge.value;
-        let quizzesRepair = quizzesMerge.repair;
+        const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
+        let quizzes = mergeQuizzesForSync(local.quizzes, cloudQuizzes);
+        let quizzesRepair = quizzes.length > cloudQuizzes.length
+          || (local.quizzes.length > 0 && cloudQuizzes.length === 0);
 
-        const chatsMerge = mergeCloudFieldOrLocal<ChatConversation>(cloud, 'chats', local.chats);
-        let chats = chatsMerge.value.map((c) => ({
+        const cloudChatsRaw = cloud ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>) : [];
+        let chats = mergeChatsForSync(local.chats, cloudChatsRaw).map((c) => ({
           ...c,
           messages: c.messages ?? [],
         }));
-        let chatsRepair = chatsMerge.repair;
+        let chatsRepair = chats.length > cloudChatsRaw.length
+          || (local.chats.length > 0 && cloudChatsRaw.length === 0);
 
         let historyRepair = false;
 
@@ -949,11 +966,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (notes.length === 0) {
           const historySnapshot = await fetchLatestDataHistorySnapshot(user.uid);
           if (historySnapshot?.notes.length) {
-            notes = mergeNotesById(notes, historySnapshot.notes);
+            notes = mergeNotesForSync(notes, historySnapshot.notes);
             notesRepair = true;
             historyRepair = true;
             recoveryLog('recovered notes from latest dataHistory', { count: notes.length });
           }
+        }
+
+        const historySnapshots = await fetchAllDataHistorySnapshots(user.uid);
+        for (const snapshot of historySnapshots) {
+          const before = notes.length;
+          notes = mergeNotesForSync(notes, snapshot.notes);
+          if (notes.length > before) {
+            notesRepair = true;
+            historyRepair = true;
+            recoveryLog('restored notes from dataHistory snapshot', { before, after: notes.length, savedAt: snapshot.savedAt });
+          }
+          const quizzesBefore = quizzes.length;
+          quizzes = mergeQuizzesForSync(quizzes, snapshot.quizzes);
+          if (quizzes.length > quizzesBefore) quizzesRepair = true;
         }
 
         setNotes(notes);
