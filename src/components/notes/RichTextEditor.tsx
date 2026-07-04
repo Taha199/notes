@@ -46,6 +46,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const [previewZoom, setPreviewZoom] = useState(1);
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; rect: DOMRect } | null>(null);
+  const [imgResizeMode, setImgResizeMode] = useState(false);
   const isResizingImg = useRef(false);
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
@@ -1043,8 +1044,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const handle = e.currentTarget as HTMLElement;
     handle.setPointerCapture(e.pointerId);
     isResizingImg.current = true;
-    img.style.maxWidth = 'none';
-    img.style.maxHeight = 'none';
     const startX = e.clientX;
     const startY = e.clientY;
     const rect = img.getBoundingClientRect();
@@ -1052,10 +1051,19 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const startHeight = rect.height;
     const ratio = startHeight / (startWidth || 1);
     const maxW = Math.max(120, ed.clientWidth - 32);
+    let resizeStarted = false;
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!resizeStarted) {
+        if (Math.hypot(dx, dy) < 4) return;
+        resizeStarted = true;
+        img.style.maxWidth = 'none';
+        img.style.maxHeight = 'none';
+      }
       ev.preventDefault();
-      applyImageSize(img, mode, startWidth, startHeight, ratio, maxW, ev.clientX - startX, ev.clientY - startY);
+      applyImageSize(img, mode, startWidth, startHeight, ratio, maxW, dx, dy);
       setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
     };
     const onUp = (ev: PointerEvent) => {
@@ -1065,8 +1073,10 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       handle.removeEventListener('pointerup', onUp);
       handle.removeEventListener('pointercancel', onUp);
       isResizingImg.current = false;
-      setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
-      emitHtml(ed.innerHTML);
+      if (resizeStarted) {
+        setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+        emitHtml(ed.innerHTML);
+      }
     };
     handle.addEventListener('pointermove', onMove);
     handle.addEventListener('pointerup', onUp);
@@ -1171,7 +1181,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div ref={editorWrapRef} className={'relative ' + (editable ? '' : '[&_img]:cursor-zoom-in')}>
+    <div ref={editorWrapRef} className={'relative ' + (editable ? '' : '[&_img]:mx-auto [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:object-contain')}>
       {/* Toolbar */}
       <div
         className={
@@ -1334,16 +1344,24 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           const target = event.target;
           if (target instanceof HTMLImageElement) {
             setHoveredImg({ el: target, rect: target.getBoundingClientRect() });
-          } else {
+          } else if (!imgResizeMode) {
             setHoveredImg(null);
           }
         }}
-        onMouseLeave={() => { if (!isResizingImg.current) setHoveredImg(null); }}
+        onMouseLeave={() => { if (!isResizingImg.current && !imgResizeMode) { setHoveredImg(null); setImgResizeMode(false); } }}
         onClick={(event) => {
           if (!editable && event.detail >= 3) { event.preventDefault(); onLockedTripleClick?.(); return; }
           if (isResizingImg.current) return;
           const target = event.target;
-          if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); naturalSizeRef.current = null; }
+          if (target instanceof HTMLImageElement) {
+            setPreviewImage(target.currentSrc || target.src);
+            setPreviewZoom(1);
+            naturalSizeRef.current = null;
+            setImgResizeMode(false);
+          } else if (editable) {
+            setHoveredImg(null);
+            setImgResizeMode(false);
+          }
         }}
         suppressContentEditableWarning
         className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5' + (resizable && editable ? ' resize-y' : '')}
@@ -1359,14 +1377,15 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
             onMouseLeave={() => { if (!isResizingImg.current) setHoveredImg(null); }}
             style={{ position: 'fixed', left: r.right - 56, top: r.top + 4, zIndex: 9999, display: 'flex', gap: 4 }}
           >
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; }} className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900" title="Zoom">🔍</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); setHoveredImg(null); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700" title="Delete">✕</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; setImgResizeMode(false); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900" title="Zoom">🔍</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={'flex h-6 w-6 items-center justify-center rounded-full text-xs text-white shadow-lg ' + (imgResizeMode ? 'bg-primary hover:bg-primary/90' : 'bg-gray-800/80 hover:bg-gray-900')} title={t.titleResizeImage}>↔</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); setHoveredImg(null); setImgResizeMode(false); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700" title="Delete">✕</button>
           </div>
         );
       })()}
 
-      {/* Image resize handles — width (right), height (bottom), proportional (corner) */}
-      {editable && hoveredImg && (() => {
+      {/* Image resize handles — only after tapping ↔ (avoids accidental resize when viewing) */}
+      {editable && hoveredImg && imgResizeMode && (() => {
         const r = hoveredImg.rect;
         const keep = () => setHoveredImg(hoveredImg);
         const leave = () => { if (!isResizingImg.current) setHoveredImg(null); };

@@ -77,7 +77,7 @@ export function NoteCard({ note, onOpen, viewMode = 'grid', selectMode, selected
           )}
           {expanded ? (
             <div
-              className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_img]:my-2 [&_img]:max-h-64 [&_img]:rounded-lg [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+              className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_img]:mx-auto [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:rounded-lg [&_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
               dangerouslySetInnerHTML={{ __html: note.html || `<p>${plainPreview}</p>` }}
             />
           ) : (

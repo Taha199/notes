@@ -1,12 +1,20 @@
 import type { Note } from '../types';
 
-/** Sort key from note creation date (Created field), not lastEdited or savedAt. */
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})/;
+
+/** Sort key from note creation — uses explicit-year dates or note.id (Date.now() at create). */
 export function noteCreatedAtMs(note: Note): number {
-  if (note.date) {
-    const t = Date.parse(note.date);
-    if (!Number.isNaN(t)) return t;
+  const createdMs = note.id;
+  if (!note.date) return createdMs;
+
+  // Locale strings like "4 Jul, 14:05" have no year — Date.parse picks ~2001, so use note.id.
+  if (!ISO_DATE.test(note.date) && !/\d{4}/.test(note.date)) {
+    return createdMs;
   }
-  return note.id;
+
+  const parsed = Date.parse(note.date);
+  if (!Number.isNaN(parsed)) return parsed;
+  return createdMs;
 }
 
 export function sortNotesByCreatedDesc(notes: Note[]): Note[] {
