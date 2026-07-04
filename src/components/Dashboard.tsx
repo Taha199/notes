@@ -4,6 +4,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useNotes } from '../contexts/NotesContext';
 import { useToast } from '../contexts/ToastContext';
 import { pageFromPath, pathFromPage } from '../lib/pageRoute';
+import { sortNotesBySavedDesc } from '../lib/noteSort';
 import { Sidebar } from './layout/Sidebar';
 import { Header } from './layout/Header';
 import { NoteCard } from './notes/NoteCard';
@@ -75,7 +76,8 @@ function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen
 }) {
   const hasSearch = normalizeSearch(search).length > 0;
   const filtered = hasSearch ? notes.filter((n) => noteMatchesSearch(n, search)) : notes;
-  if (!filtered.length) return <EmptyState text={hasSearch ? emptySearchText : emptyText} hint={hasSearch ? undefined : emptyHint} />;
+  const sorted = sortNotesBySavedDesc(filtered);
+  if (!sorted.length) return <EmptyState text={hasSearch ? emptySearchText : emptyText} hint={hasSearch ? undefined : emptyHint} />;
   const expanded = viewMode === 'expanded';
   return (
     <div className={
@@ -83,7 +85,7 @@ function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen
         ? 'mx-auto flex max-w-3xl flex-col gap-4 px-3 pb-6 sm:px-5'
         : 'grid grid-cols-1 gap-3.5 px-3 pb-6 sm:grid-cols-2 sm:px-5 lg:grid-cols-3 xl:grid-cols-4'
     }>
-      {filtered.map((n) => (
+      {sorted.map((n) => (
         <NoteCard key={n.id} note={n} onOpen={onOpen} viewMode={viewMode} selectMode={selectMode} selected={selected?.has(n.id)} onToggleSelect={onToggleSelect} />
       ))}
     </div>
@@ -229,7 +231,7 @@ export function Dashboard() {
         : page === 'archive' ? archived
           : page === 'fav' ? [...fav, ...favArch]
             : active;
-    return hasSearch ? source.filter((note) => noteMatchesSearch(note, search)) : source;
+    return sortNotesBySavedDesc(hasSearch ? source.filter((note) => noteMatchesSearch(note, search)) : source);
   }, [active, archived, fav, favArch, hasSearch, page, read, search, unread]);
   const openNoteIndex = openNoteId === null ? -1 : navigableNotes.findIndex((note) => note.id === openNoteId);
   const previousNoteId = openNoteIndex > 0 ? navigableNotes[openNoteIndex - 1]?.id : undefined;

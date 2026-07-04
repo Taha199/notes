@@ -160,7 +160,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const save = () => {
     if (!plainText) return;
     const ts = nowStr();
-    updateNote(note.id, { title: title.trim(), html, text: plainText, lastEdited: ts });
+    updateNote(note.id, { title: title.trim(), html, text: plainText, lastEdited: ts, savedAt: new Date().toISOString() });
     setLastSavedAt(ts);
   };
 

@@ -12,6 +12,8 @@ export interface Note {
   deletedAt?: string;
   date: string;
   lastEdited?: string;
+  /** ISO timestamp — set on each save for reliable sort order. */
+  savedAt?: string;
 }
 
 export interface DraftContent {

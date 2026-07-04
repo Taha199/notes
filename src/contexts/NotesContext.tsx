@@ -1452,6 +1452,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       read: false,
       archived: false,
       date: nowStr(),
+      savedAt: new Date().toISOString(),
     };
     setNotes((prevNotes) => {
       const nextNotes = [newNote, ...prevNotes];
