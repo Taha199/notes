@@ -4,7 +4,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useNotes } from '../contexts/NotesContext';
 import { useToast } from '../contexts/ToastContext';
 import { pageFromPath, pathFromPage } from '../lib/pageRoute';
-import { sortNotesBySavedDesc } from '../lib/noteSort';
+import { sortNotesByCreatedDesc } from '../lib/noteSort';
 import { Sidebar } from './layout/Sidebar';
 import { Header } from './layout/Header';
 import { NoteCard } from './notes/NoteCard';
@@ -76,7 +76,7 @@ function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen
 }) {
   const hasSearch = normalizeSearch(search).length > 0;
   const filtered = hasSearch ? notes.filter((n) => noteMatchesSearch(n, search)) : notes;
-  const sorted = sortNotesBySavedDesc(filtered);
+  const sorted = sortNotesByCreatedDesc(filtered);
   if (!sorted.length) return <EmptyState text={hasSearch ? emptySearchText : emptyText} hint={hasSearch ? undefined : emptyHint} />;
   const expanded = viewMode === 'expanded';
   return (
@@ -231,7 +231,7 @@ export function Dashboard() {
         : page === 'archive' ? archived
           : page === 'fav' ? [...fav, ...favArch]
             : active;
-    return sortNotesBySavedDesc(hasSearch ? source.filter((note) => noteMatchesSearch(note, search)) : source);
+    return sortNotesByCreatedDesc(hasSearch ? source.filter((note) => noteMatchesSearch(note, search)) : source);
   }, [active, archived, fav, favArch, hasSearch, page, read, search, unread]);
   const openNoteIndex = openNoteId === null ? -1 : navigableNotes.findIndex((note) => note.id === openNoteId);
   const previousNoteId = openNoteIndex > 0 ? navigableNotes[openNoteIndex - 1]?.id : undefined;

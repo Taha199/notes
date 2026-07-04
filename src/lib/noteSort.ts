@@ -1,19 +1,14 @@
 import type { Note } from '../types';
 
-/** Best-effort timestamp for when the note was last saved (newest sort key). */
-export function noteSavedAtMs(note: Note): number {
-  if (note.savedAt) {
-    const t = Date.parse(note.savedAt);
-    if (!Number.isNaN(t)) return t;
-  }
-  for (const raw of [note.lastEdited, note.date]) {
-    if (!raw) continue;
-    const t = Date.parse(raw);
+/** Sort key from note creation date (Created field), not lastEdited or savedAt. */
+export function noteCreatedAtMs(note: Note): number {
+  if (note.date) {
+    const t = Date.parse(note.date);
     if (!Number.isNaN(t)) return t;
   }
   return note.id;
 }
 
-export function sortNotesBySavedDesc(notes: Note[]): Note[] {
-  return [...notes].sort((a, b) => noteSavedAtMs(b) - noteSavedAtMs(a));
+export function sortNotesByCreatedDesc(notes: Note[]): Note[] {
+  return [...notes].sort((a, b) => noteCreatedAtMs(b) - noteCreatedAtMs(a));
 }
