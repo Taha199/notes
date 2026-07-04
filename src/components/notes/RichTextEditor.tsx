@@ -1018,12 +1018,33 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   };
 
   // ── Image resize: drag a handle to grow/shrink (corner keeps ratio) ────
-  const startImageResize = (e: React.MouseEvent, img: HTMLImageElement, mode: 'both' | 'width' | 'height') => {
+  const applyImageSize = (img: HTMLImageElement, mode: 'both' | 'width' | 'height', startWidth: number, startHeight: number, ratio: number, maxW: number, dx: number, dy: number) => {
+    img.style.maxWidth = 'none';
+    img.style.maxHeight = 'none';
+    if (mode === 'height') {
+      img.style.width = `${Math.round(startWidth)}px`;
+      img.style.height = `${Math.max(40, Math.round(startHeight + dy))}px`;
+    } else if (mode === 'width') {
+      const w = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
+      img.style.width = `${w}px`;
+      img.style.height = 'auto';
+    } else {
+      const w = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
+      img.style.width = `${w}px`;
+      img.style.height = `${Math.round(w * ratio)}px`;
+    }
+  };
+
+  const startImageResize = (e: React.PointerEvent, img: HTMLImageElement, mode: 'both' | 'width' | 'height') => {
     e.preventDefault();
     e.stopPropagation();
     const ed = editorRef.current;
     if (!ed) return;
+    const handle = e.currentTarget as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
     isResizingImg.current = true;
+    img.style.maxWidth = 'none';
+    img.style.maxHeight = 'none';
     const startX = e.clientX;
     const startY = e.clientY;
     const rect = img.getBoundingClientRect();
@@ -1031,32 +1052,25 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const startHeight = rect.height;
     const ratio = startHeight / (startWidth || 1);
     const maxW = Math.max(120, ed.clientWidth - 32);
-    const onMove = (ev: MouseEvent) => {
-      img.style.maxWidth = '100%';
-      img.style.maxHeight = 'none';
-      if (mode === 'height') {
-        img.style.width = `${Math.round(startWidth)}px`;
-        img.style.height = `${Math.max(40, Math.round(startHeight + (ev.clientY - startY)))}px`;
-      } else if (mode === 'width') {
-        const w = Math.min(maxW, Math.max(60, Math.round(startWidth + (ev.clientX - startX))));
-        img.style.width = `${w}px`;
-        img.style.height = `${Math.round(startHeight)}px`;
-      } else {
-        const w = Math.min(maxW, Math.max(60, Math.round(startWidth + (ev.clientX - startX))));
-        img.style.width = `${w}px`;
-        img.style.height = `${Math.round(w * ratio)}px`;
-      }
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      ev.preventDefault();
+      applyImageSize(img, mode, startWidth, startHeight, ratio, maxW, ev.clientX - startX, ev.clientY - startY);
       setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
     };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      handle.releasePointerCapture(ev.pointerId);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
       isResizingImg.current = false;
       setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
       emitHtml(ed.innerHTML);
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
   };
 
   // ── Divider: underline the current line + start a new paragraph below ──
@@ -1327,6 +1341,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         onMouseLeave={() => { if (!isResizingImg.current) setHoveredImg(null); }}
         onClick={(event) => {
           if (!editable && event.detail >= 3) { event.preventDefault(); onLockedTripleClick?.(); return; }
+          if (isResizingImg.current) return;
           const target = event.target;
           if (target instanceof HTMLImageElement) { setPreviewImage(target.currentSrc || target.src); setPreviewZoom(1); naturalSizeRef.current = null; }
         }}
@@ -1359,7 +1374,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         return (
           <>
             <div
-              onMouseDown={(e) => startImageResize(e, hoveredImg.el, 'width')}
+              onPointerDown={(e) => startImageResize(e, hoveredImg.el, 'width')}
               onMouseEnter={keep}
               onMouseLeave={leave}
               title={t.titleResizeWidth}
@@ -1371,7 +1386,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
               </svg>
             </div>
             <div
-              onMouseDown={(e) => startImageResize(e, hoveredImg.el, 'height')}
+              onPointerDown={(e) => startImageResize(e, hoveredImg.el, 'height')}
               onMouseEnter={keep}
               onMouseLeave={leave}
               title={t.titleResizeHeight}
@@ -1383,7 +1398,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
               </svg>
             </div>
             <div
-              onMouseDown={(e) => startImageResize(e, hoveredImg.el, 'both')}
+              onPointerDown={(e) => startImageResize(e, hoveredImg.el, 'both')}
               onMouseEnter={keep}
               onMouseLeave={leave}
               title={t.titleResizeImage}
