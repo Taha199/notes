@@ -215,6 +215,27 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     }
   };
 
+  const noteEditorLeft = (
+    <div className="flex flex-1 flex-col overflow-y-auto">
+      <input
+        value={title}
+        readOnly={locked}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder={t.mTiPh}
+        className="border-b border-app-border px-3 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100 sm:px-4 sm:py-3.5 sm:text-lg"
+      />
+      <RichTextEditor
+        html={html}
+        onChange={setHtml}
+        placeholder=""
+        editable={!locked}
+        minHeight="180px"
+        resizable
+        onLockedTripleClick={() => setLocked(false)}
+      />
+    </div>
+  );
+
   return (
     <div onClick={(e) => e.target === e.currentTarget && onClose()} className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-1 backdrop-blur-sm sm:p-2">
       <button
@@ -262,12 +283,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             onWidthChange={setQuizPanelW}
             resizeTitle={t.quizResizeFoldersHint}
             rightClassName="bg-emerald-50/40 dark:bg-emerald-500/5"
-            left={(
-              <div className="flex flex-1 flex-col overflow-y-auto">
-                <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
-                <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
-              </div>
-            )}
+            left={noteEditorLeft}
             right={(
               <>
               {/* Form header */}
@@ -372,12 +388,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             onWidthChange={setQuizPanelW}
             resizeTitle={t.quizResizeFoldersHint}
             rightClassName="bg-violet-50/40 dark:bg-violet-500/5"
-            left={(
-              <div className="flex flex-1 flex-col overflow-y-auto">
-                <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
-                <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
-              </div>
-            )}
+            left={noteEditorLeft}
             right={(
               <>
               {/* Form header */}
@@ -461,12 +472,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             onWidthChange={setQuizPanelW}
             resizeTitle={t.quizResizeFoldersHint}
             rightClassName="bg-violet-50/40 dark:bg-violet-500/5"
-            left={(
-              <div className="flex flex-1 flex-col overflow-y-auto">
-                <input value={title} readOnly placeholder={t.mTiPh} className="border-b border-app-border px-4 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100" />
-                <RichTextEditor html={html} onChange={() => {}} placeholder="" editable={false} minHeight="150px" />
-              </div>
-            )}
+            left={noteEditorLeft}
             right={(
               <>
               <div className="flex items-center justify-between border-b border-violet-200/70 px-4 py-2.5 dark:border-violet-500/15">
@@ -590,12 +596,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             )}
           />
         ) : (
-          <>
-            <input value={title} readOnly={locked} onChange={(e) => setTitle(e.target.value)} placeholder={t.mTiPh} className="border-b border-app-border px-3 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100 sm:px-4 sm:py-3.5 sm:text-lg" />
-            <div className="flex-1 overflow-y-auto">
-              <RichTextEditor html={html} onChange={setHtml} placeholder="" editable={!locked} minHeight="180px" resizable onLockedTripleClick={() => setLocked(false)} />
-            </div>
-          </>
+          noteEditorLeft
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border bg-app-bg px-3 py-2 dark:border-white/10 dark:bg-white/5 sm:px-4">
