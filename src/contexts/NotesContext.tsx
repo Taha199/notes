@@ -12,7 +12,83 @@ export interface Draft {
   html: string;
 }
 
-type CloudStatus = 'idle' | 'saving' | 'saved';
+type CloudStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+type PersistSnapshot = {
+  notes?: Note[];
+  drafts?: Draft[];
+  quizzes?: QuizItem[];
+  chats?: ChatConversation[];
+  quizSets?: QuizSet[];
+  quizFolders?: QuizFolder[];
+};
+
+async function withAuth(url: string, getToken: () => Promise<string | null>): Promise<string> {
+  try {
+    const token = await getToken();
+    if (token) return `${url}${url.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`;
+  } catch { /* ignore */ }
+  return url;
+}
+
+function noteSyncKey(note: Note) {
+  return `${note.title}\0${note.html}\0${note.read}\0${note.fav}\0${note.archived}\0${note.trashed}`;
+}
+
+function quizSyncTime(item: QuizItem) {
+  return Date.parse(item.updatedAt || item.createdAt || '') || 0;
+}
+
+function pickNewerQuizItem(a: QuizItem, b: QuizItem) {
+  return quizSyncTime(b) >= quizSyncTime(a) ? b : a;
+}
+
+function mergeNotesForSync(local: Note[], remote: Note[]) {
+  const map = new Map<number, Note>();
+  for (const item of local) map.set(item.id, item);
+  for (const item of remote) {
+    const existing = map.get(item.id);
+    if (!existing) map.set(item.id, item);
+    else if (noteSyncKey(existing) !== noteSyncKey(item)) map.set(item.id, item);
+  }
+  return [...map.values()];
+}
+
+function mergeQuizzesForSync(local: QuizItem[], remote: QuizItem[]) {
+  const map = new Map<number, QuizItem>();
+  for (const item of local) map.set(item.id, item);
+  for (const item of remote) {
+    const existing = map.get(item.id);
+    map.set(item.id, existing ? pickNewerQuizItem(existing, item) : item);
+  }
+  return [...map.values()];
+}
+
+function chatSyncTime(chat: ChatConversation) {
+  const last = chat.messages?.[chat.messages.length - 1]?.timestamp;
+  return Date.parse(last || chat.createdAt || '') || 0;
+}
+
+function mergeChatsForSync(local: ChatConversation[], remote: ChatConversation[]) {
+  const map = new Map<string, ChatConversation>();
+  for (const chat of local) map.set(chat.id, chat);
+  for (const chat of remote) {
+    const existing = map.get(chat.id);
+    if (!existing || chatSyncTime(chat) >= chatSyncTime(existing)) map.set(chat.id, chat);
+  }
+  return [...map.values()];
+}
+
+function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[]) {
+  const map = new Map<string, QuizSet>();
+  for (const set of local) map.set(set.id, set);
+  for (const set of remote) {
+    const existing = map.get(set.id);
+    if (!existing) map.set(set.id, set);
+    else map.set(set.id, { ...set, items: mergeQuizzesForSync(existing.items ?? [], set.items ?? []) });
+  }
+  return [...map.values()];
+}
 
 export interface RecoverableCloudSummary {
   sources: {
@@ -769,7 +845,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savesInFlight = useRef(0);
   const savingStartedAt = useRef(0);
+  const isApplyingRemoteRef = useRef(false);
+  const lastLocalSaveAt = useRef(0);
+  const saveFailedRef = useRef(false);
+  const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const notesRef = useRef(notes);
+  const quizzesRef = useRef(quizzes);
+  const chatsRef = useRef(chats);
+  const quizSetsRef = useRef(quizSets);
+  const quizFoldersRef = useRef(quizFolders);
+  const draftsRef = useRef(drafts);
+  const tokenUsageRef = useRef(tokenUsage);
   const MIN_SYNC_VISIBLE_MS = 650;
+
+  notesRef.current = notes;
+  quizzesRef.current = quizzes;
+  chatsRef.current = chats;
+  quizSetsRef.current = quizSets;
+  quizFoldersRef.current = quizFolders;
+  draftsRef.current = drafts;
+  tokenUsageRef.current = tokenUsage;
 
   const nowStr = () =>
     new Date().toLocaleString(t.dateLocale, {
@@ -815,7 +910,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const r = await fetch(`${FB_DB_URL}/users/${user.uid}.json`);
+        const r = await fetch(await withAuth(`${FB_DB_URL}/users/${user.uid}.json`, () => user.getIdToken()));
         if (!r.ok) throw new Error('cloud-fetch-failed');
         const cloud = (await r.json()) as Record<string, unknown> | null;
         if (cancelled) return;
@@ -1021,12 +1116,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const persistSets = (nextSets: QuizSet[], forceCloud = false) => {
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    persist(notes, undefined, undefined, undefined, nextSets, undefined, forceCloud);
+    persist({ quizSets: nextSets }, forceCloud);
   };
 
   const persistFolders = (nextFolders: QuizFolder[], forceCloud = false) => {
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    persist(notes, undefined, undefined, undefined, undefined, nextFolders, forceCloud);
+    persist({ quizFolders: nextFolders }, forceCloud);
     if (user && loadedRef.current && (forceCloud || countUserQuizFolders(nextFolders) > 0 || countUserQuizSets(quizSets) > 0)) {
       void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
         method: 'PUT',
@@ -1070,7 +1165,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const saveChats = (nextChats: ChatConversation[]) => {
     setChats(nextChats);
     localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
-    persist(notes, undefined, undefined, nextChats);
+    persist({ chats: nextChats });
   };
 
   const userRef = useRef(user);
@@ -1113,30 +1208,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id);
   }, [user, loaded, notes, quizzes, quizSets, quizFolders, chats]);
 
-  const persist = (
-    nextNotes: Note[],
-    nextDrafts?: Draft[],
-    nextQuizzes?: QuizItem[],
-    nextChats?: ChatConversation[],
-    nextQuizSets?: QuizSet[],
-    nextQuizFolders?: QuizFolder[],
-    forceCloud = false,
-  ) => {
-    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
-    const qList = nextQuizzes ?? quizzes;
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(qList));
-    if (!user || !loadedRef.current) return;
+  const persist = (overrides?: PersistSnapshot, forceCloud = false) => {
+    const snap: Required<PersistSnapshot> = {
+      notes: overrides?.notes ?? notesRef.current,
+      drafts: overrides?.drafts ?? draftsRef.current,
+      quizzes: overrides?.quizzes ?? quizzesRef.current,
+      chats: overrides?.chats ?? chatsRef.current,
+      quizSets: overrides?.quizSets ?? quizSetsRef.current,
+      quizFolders: overrides?.quizFolders ?? quizFoldersRef.current,
+    };
+    localStorage.setItem('malacadhati', JSON.stringify(snap.notes));
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(snap.quizzes));
+    if (!user || !loadedRef.current || isApplyingRemoteRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      const dList = nextDrafts ?? drafts;
-      const chatList = nextChats ?? chats;
-      const qsList = nextQuizSets ?? quizSets;
-      const qfList = nextQuizFolders ?? quizFolders;
+      const u = userRef.current;
+      if (!u || isApplyingRemoteRef.current) return;
+      const { notes: nextNotes, drafts: dList, quizzes: qList, chats: chatList, quizSets: qsList, quizFolders: qfList } = snap;
       if (!forceCloud && isEmptyUserPayload(nextNotes, qList, chatList, qsList, qfList)) {
         recoveryLog('skipped cloud sync — empty user payload');
         return;
       }
-      void appendDataHistory(user.uid, {
+      void appendDataHistory(u.uid, {
         notes: nextNotes,
         quizzes: qList,
         chats: chatList,
@@ -1150,25 +1243,40 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       dList.forEach((d) => {
         draftContents[d.id] = { title: d.title, html: d.html };
       });
-      fetch(`${FB_DB_URL}/users/${user.uid}.json`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          notes: nextNotes,
-          drafts: dList.map((d) => d.id),
-          draftId: draftCounter.current,
-          draftContents,
-          quizzes: qList,
-          chats: chatList,
-          quizSets: qsList,
-          quizFolders: qfList,
-          tokenUsage,
+      void withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()).then((url) =>
+        fetch(url, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            notes: nextNotes,
+            drafts: dList.map((d) => d.id),
+            draftId: draftCounter.current,
+            draftContents,
+            quizzes: qList,
+            chats: chatList,
+            quizSets: qsList,
+            quizFolders: qfList,
+            tokenUsage: tokenUsageRef.current,
+            cloudSyncAt: Date.now(),
+          }),
+          headers: { 'Content-Type': 'application/json' },
         }),
-        headers: { 'Content-Type': 'application/json' },
-      })
-        .catch(() => {})
+      )
+        .then((res) => {
+          if (!res.ok) throw new Error('cloud-save-failed');
+          saveFailedRef.current = false;
+          lastLocalSaveAt.current = Date.now();
+        })
+        .catch(() => {
+          saveFailedRef.current = true;
+          setCloudStatus('error');
+        })
         .finally(() => {
           savesInFlight.current = Math.max(0, savesInFlight.current - 1);
           if (savesInFlight.current === 0) {
+            if (saveFailedRef.current) {
+              setCloudStatus('error');
+              return;
+            }
             const elapsed = Date.now() - savingStartedAt.current;
             const delay = Math.max(0, MIN_SYNC_VISIBLE_MS - elapsed);
             const markSaved = () => setCloudStatus('saved');
@@ -1179,10 +1287,97 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }, 1200);
   };
 
+  const applyRemoteSnapshot = (cloud: Record<string, unknown>) => {
+    const remoteNotes = firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>);
+    const remoteQuizzes = firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>);
+    const remoteChats = firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>)
+      .map((c) => ({ ...c, messages: c.messages ?? [] }));
+    const remoteSets = firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>)
+      .map((set) => ({ ...set, items: set.items ?? [] }));
+    const remoteFolders = firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>);
+
+    const mergedNotes = mergeNotesForSync(notesRef.current, remoteNotes);
+    const mergedQuizzes = mergeQuizzesForSync(quizzesRef.current, remoteQuizzes);
+    const mergedChats = mergeChatsForSync(chatsRef.current, remoteChats);
+    const mergedSets = mergeQuizSetsForSync(quizSetsRef.current, remoteSets);
+    const mergedFolders = mergeById(quizFoldersRef.current, remoteFolders);
+
+    const normalizedFolders = finalizeQuizFolders(mergedFolders, mergedSets);
+    const normalizedSets = initializeQuizColors(
+      mergedSets,
+      normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
+    );
+
+    let changed = false;
+    if (JSON.stringify(mergedNotes) !== JSON.stringify(notesRef.current)) {
+      setNotes(mergedNotes);
+      localStorage.setItem('malacadhati', JSON.stringify(mergedNotes));
+      changed = true;
+    }
+    if (JSON.stringify(mergedQuizzes) !== JSON.stringify(quizzesRef.current)) {
+      setQuizzes(mergedQuizzes);
+      localStorage.setItem('malacadhati_quiz', JSON.stringify(mergedQuizzes));
+      changed = true;
+    }
+    if (JSON.stringify(mergedChats) !== JSON.stringify(chatsRef.current)) {
+      setChats(mergedChats);
+      localStorage.setItem('malacadhati_chats', JSON.stringify(mergedChats));
+      changed = true;
+    }
+    if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
+      setQuizSets(normalizedSets);
+      localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+      changed = true;
+    }
+    if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
+      setQuizFolders(normalizedFolders);
+      localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+      changed = true;
+    }
+    if (changed) recoveryLog('applied remote cloud snapshot');
+  };
+
+  const pullFromCloud = async () => {
+    const u = userRef.current;
+    if (!u || !loadedRef.current || isApplyingRemoteRef.current) return;
+    if (saveTimer.current || savesInFlight.current > 0) return;
+    if (Date.now() - lastLocalSaveAt.current < 2500) return;
+    try {
+      const r = await fetch(await withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()));
+      if (!r.ok) return;
+      const cloud = (await r.json()) as Record<string, unknown> | null;
+      if (!cloud) return;
+      isApplyingRemoteRef.current = true;
+      applyRemoteSnapshot(cloud);
+    } catch {
+      /* ignore pull errors */
+    } finally {
+      isApplyingRemoteRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (!user || !loaded) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void pullFromCloud();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    pullTimer.current = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void pullFromCloud();
+    }, 30_000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      if (pullTimer.current) clearInterval(pullTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, loaded]);
+
   const mutateNotes = (fn: (prev: Note[]) => Note[]) => {
     setNotes((prev) => {
       const next = fn(prev);
-      persist(next);
+      persist({ notes: next });
       return next;
     });
   };
@@ -1191,7 +1386,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const id = 'd' + ++draftCounter.current;
     setDrafts((prev) => {
       const next = [...prev, { id, title: '', html: '' }];
-      persist(notes, next);
+      persist({ drafts: next });
       return next;
     });
   };
@@ -1199,7 +1394,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const removeDraft = (id: string) => {
     setDrafts((prev) => {
       const next = prev.filter((d) => d.id !== id);
-      persist(notes, next);
+      persist({ drafts: next });
       return next;
     });
   };
@@ -1207,7 +1402,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateDraft = (id: string, patch: Partial<Draft>) => {
     setDrafts((prev) => {
       const next = prev.map((d) => (d.id === id ? { ...d, ...patch } : d));
-      persist(notes, next);
+      persist({ drafts: next });
       return next;
     });
   };
@@ -1231,7 +1426,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const nextNotes = [newNote, ...prevNotes];
       setDrafts((prevDrafts) => {
         const nextDrafts = prevDrafts.filter((d) => d.id !== id);
-        persist(nextNotes, nextDrafts);
+        persist({ notes: nextNotes, drafts: nextDrafts });
         return nextDrafts;
       });
       return nextNotes;
@@ -1246,7 +1441,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizzes((prev) => {
       const now = new Date().toISOString();
       const next = [...prev, { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now }];
-      persist(notes, undefined, next);
+      persist({ quizzes: next });
       return next;
     });
     return newId;
@@ -1255,7 +1450,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const deleteQuiz = (id: number) => {
     setQuizzes((prev) => {
       const next = prev.map((q) => q.id === id ? { ...q, trashed: true, deletedAt: nowStr() } : q);
-      persist(notes, undefined, next);
+      persist({ quizzes: next });
       return next;
     });
   };
@@ -1263,7 +1458,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const restoreQuiz = (id: number) => {
     setQuizzes((prev) => {
       const next = prev.map((q) => q.id === id ? { ...q, trashed: false, deletedAt: undefined } : q);
-      persist(notes, undefined, next);
+      persist({ quizzes: next });
       return next;
     });
   };
@@ -1271,7 +1466,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const permDeleteQuiz = (id: number) => {
     setQuizzes((prev) => {
       const next = prev.filter((q) => q.id !== id);
-      persist(notes, undefined, next);
+      persist({ quizzes: next });
       return next;
     });
   };
@@ -1279,7 +1474,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => {
     setQuizzes((prev) => {
       const next = prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
-      persist(notes, undefined, next);
+      persist({ quizzes: next });
       return next;
     });
   };
@@ -1438,7 +1633,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizFolders(nextFolders);
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    persist(notes, undefined, undefined, undefined, nextSets, nextFolders);
+    persist({ quizSets: nextSets, quizFolders: nextFolders });
   };
 
   const recoverQuizFolders = async (): Promise<number> => {
@@ -1575,7 +1770,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    persist(nextNotes, undefined, nextQuizzes, nextChats, nextSets, nextFolders, true);
+    persist({ notes: nextNotes, quizzes: nextQuizzes, chats: nextChats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
       method: 'PUT',
       body: JSON.stringify(nextSets),
@@ -1618,7 +1813,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_chats', JSON.stringify(snapshot.chats));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    persist(snapshot.notes, undefined, snapshot.quizzes, snapshot.chats, nextSets, nextFolders, true);
+    persist({ notes: snapshot.notes, quizzes: snapshot.quizzes, chats: snapshot.chats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await fetch(`${FB_DB_URL}/users/${user!.uid}/quizSets.json`, {
       method: 'PUT',
       body: JSON.stringify(nextSets),
@@ -1759,7 +1954,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    persist(nextNotes, undefined, nextQuizzes, nextChats, nextSets, nextFolders, true);
+    persist({ notes: nextNotes, quizzes: nextQuizzes, chats: nextChats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
       method: 'PUT',
       body: JSON.stringify(nextSets),
@@ -1840,7 +2035,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
       if (swapIdx < 0 || swapIdx >= next.length) return prev;
       [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
-      persist(notes, undefined, next);
+      persist({ quizzes: next });
       return next;
     });
   };
@@ -1873,7 +2068,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (from < 0 || to < 0 || from === to) return prev;
       const [item] = next.splice(from, 1);
       next.splice(to, 0, item);
-      persist(notes, undefined, next);
+      persist({ quizzes: next });
       return next;
     });
   };
@@ -1899,7 +2094,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const setQuizzesOrder = (itemIds: number[]) => {
     setQuizzes((prev) => {
       const next = orderItemsByIds(prev, itemIds);
-      persist(notes, undefined, next);
+      persist({ quizzes: next });
       return next;
     });
   };
@@ -1929,7 +2124,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    persist(nextNotes, undefined, nextQuizzes, undefined, nextSets, nextFolders);
+    persist({ notes: nextNotes, quizzes: nextQuizzes, quizSets: nextSets, quizFolders: nextFolders });
   };
   const deleteMany = (ids: number[]) => {
     const idSet = new Set(ids);

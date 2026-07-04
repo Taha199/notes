@@ -40,7 +40,7 @@ export function SaveStatusBadge({
   size = 'sm',
   className = '',
 }: {
-  status: 'saved' | 'syncing' | 'none';
+  status: 'saved' | 'syncing' | 'error' | 'none';
   title: string;
   size?: 'sm' | 'xs';
   className?: string;
@@ -64,7 +64,9 @@ export function SaveStatusBadge({
   const colorClass =
     status === 'syncing'
       ? 'text-primary dark:text-primary'
-      : 'text-emerald-600 dark:text-emerald-400';
+      : status === 'error'
+        ? 'text-amber-600 dark:text-amber-400'
+        : 'text-emerald-600 dark:text-emerald-400';
 
   return (
     <span
@@ -79,6 +81,8 @@ export function SaveStatusBadge({
     >
       {status === 'syncing' ? (
         <CloudSyncIcon size={px} className="animate-spin [animation-duration:0.9s]" />
+      ) : status === 'error' ? (
+        <span className="text-[13px] font-bold leading-none" aria-hidden>!</span>
       ) : (
         <CloudSavedIcon size={px} />
       )}

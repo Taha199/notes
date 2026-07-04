@@ -17,11 +17,12 @@ export function CloudSaveIndicator({
   if (!user) return null;
 
   const syncing = cloudStatus === 'saving';
+  const failed = cloudStatus === 'error';
 
   return (
     <SaveStatusBadge
-      status={syncing ? 'syncing' : 'saved'}
-      title={syncing ? t.cloudSaving : t.cloudSavedMain}
+      status={syncing ? 'syncing' : failed ? 'error' : 'saved'}
+      title={syncing ? t.cloudSaving : failed ? t.cloudSaveError : t.cloudSavedMain}
       size={size}
       className={className}
     />
