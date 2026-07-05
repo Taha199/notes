@@ -756,11 +756,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const li = resolveListItemForAction(range, ed);
     if (!li) return;
 
-    if (isNestedListItem(li) && isLiEmpty(li)) {
-      if (!returnToParentListItem(li)) return;
-    } else if (!nestSubListUnder(li)) {
-      return;
-    }
+    if (!nestSubListUnder(li)) return;
     saveSel();
     readCommandState();
     emitHtml();
