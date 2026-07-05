@@ -389,6 +389,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return null;
   };
 
+  /** Resolve LI even when the caret sits on the list element (e.g. margin click). */
+  const resolveListItemAtSelection = (range: Range, ed: HTMLElement): HTMLLIElement | null => {
+    const direct = getListItem(range.startContainer, ed);
+    if (direct) return direct;
+
+    const list = getListContainer(range.startContainer, ed);
+    if (!list) return null;
+
+    const items = Array.from(list.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
+    if (items.length === 0) return null;
+
+    if (range.startContainer === list) {
+      const idx = Math.max(0, Math.min(range.startOffset, items.length - 1));
+      return items[idx];
+    }
+
+    return items[items.length - 1];
+  };
+
   const getListContainer = (node: Node | null, ed: HTMLElement): HTMLUListElement | HTMLOListElement | null => {
     let el: Node | null = node;
     if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
@@ -413,6 +432,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return probe.toString().replace(/\u200B/g, '').length === 0;
   };
 
+  const isCaretAtEffectiveEndOfLi = (li: HTMLLIElement, range: Range): boolean => {
+    if (isCaretAtEndOfBlock(li, range)) return true;
+    const tail = document.createRange();
+    tail.setStart(range.endContainer, range.endOffset);
+    tail.setEnd(li, li.childNodes.length);
+    const scratch = document.createElement('div');
+    scratch.appendChild(tail.cloneContents());
+    return scratch.innerHTML.replace(/<br\s*\/?>/gi, '').replace(/\u200B/g, '').trim() === '';
+  };
+
   const isCaretAtStartOfBlock = (block: HTMLElement, range: Range): boolean => {
     const probe = document.createRange();
     probe.selectNodeContents(block);
@@ -420,7 +449,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return probe.toString().replace(/\u200B/g, '').length === 0;
   };
 
-  const isLiEmpty = (li: HTMLLIElement) => !(li.textContent?.replace(/\u200B/g, '').trim() ?? '');
+  const isLiEmpty = (li: HTMLLIElement) =>
+    !(li.textContent?.replace(/\u200B/g, '').trim() ?? '') && !li.querySelector('img');
 
   const insertNewListItemAfter = (li: HTMLLIElement) => {
     const newLi = document.createElement('li');
@@ -507,8 +537,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const div = unwrapListItemToDiv(li);
     const list = li.parentElement;
     if (!list || !LIST_TAGS.has(list.tagName)) return;
-    list.replaceChild(div, li);
-    if (list.children.length === 0) list.remove();
+    const parent = list.parentNode;
+    if (!parent) return;
+
+    const afterList = list.nextSibling;
+    li.remove();
+    if (list.children.length === 0) {
+      parent.insertBefore(div, list);
+      list.remove();
+    } else {
+      parent.insertBefore(div, afterList);
+    }
     placeCaretInBlock(div, caretAtStart);
     normalizeEmptyFontBlocks(ed);
   };
@@ -817,8 +856,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   const placeCaretInBlock = (block: HTMLElement, atStart: boolean) => {
     const range = document.createRange();
-    range.selectNodeContents(block);
-    range.collapse(atStart);
+    if (block.tagName === 'LI' && isLiEmpty(block as HTMLLIElement) && !block.querySelector('br')) {
+      block.innerHTML = '<br>';
+    }
+    const br = block.querySelector(':scope > br');
+    if (block.tagName === 'LI' && br && isLiEmpty(block as HTMLLIElement)) {
+      range.setStartBefore(br);
+      range.collapse(true);
+    } else {
+      range.selectNodeContents(block);
+      range.collapse(atStart);
+    }
     const sel = window.getSelection();
     sel?.removeAllRanges();
     sel?.addRange(range);
@@ -1047,6 +1095,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   const normalizeEmptyFontBlocks = (ed: HTMLElement) => {
     ed.querySelectorAll<HTMLElement>('div, p').forEach((block) => {
+      if (block.closest('li, ul, ol')) return;
       block.querySelectorAll<HTMLElement>('span[style*="font-size"]').forEach((span) => {
         const text = span.textContent?.replace(/\u200B/g, '').trim() ?? '';
         if (!text && !span.querySelector('img')) span.remove();
@@ -1218,12 +1267,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return false;
   };
 
-  const finishNewLineEditing = (ed: HTMLElement) => {
+  const finishNewLineEditing = (ed: HTMLElement, opts?: { inList?: boolean }) => {
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
 
+    const inList = opts?.inList ?? !!getListContainer(sel.anchorNode, ed);
     const block = getBlockParent(sel.anchorNode, ed);
-    if (block && block.tagName !== 'LI') {
+    if (block && block.tagName !== 'LI' && !block.closest('li, ul, ol')) {
       const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
       if (!text && !block.querySelector('img')) {
         block.innerHTML = '<br>';
@@ -1237,7 +1287,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       }
     }
 
-    normalizeEmptyFontBlocks(ed);
+    if (!inList) normalizeEmptyFontBlocks(ed);
     stripEmptyFontSpans(ed);
     pendingFontSize.current = null;
     setFontSize(DEFAULT_FONT_PX);
@@ -1247,7 +1297,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   };
 
   const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Enter' || e.shiftKey) return;
+    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
     const ed = editorRef.current;
     if (!ed) return;
 
@@ -1255,22 +1305,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (!sel?.rangeCount) return;
     const range = sel.getRangeAt(0);
 
-    const li = getListItem(sel.anchorNode, ed);
+    const li = resolveListItemAtSelection(range, ed);
     if (li) {
       e.preventDefault();
       if (isLiEmpty(li)) {
         exitListItem(li, ed, true);
-      } else if (isCaretAtEndOfBlock(li, range)) {
+      } else if (isCaretAtEffectiveEndOfLi(li, range)) {
         insertNewListItemAfter(li);
       } else if (isCaretAtStartOfLi(li, range)) {
         splitListItemAtStart(li);
       } else {
         splitListItemAtCaret(li, range);
       }
-      finishNewLineEditing(ed);
-      saveSel();
-      readCommandState();
-      emitHtml();
+      finishNewLineEditing(ed, { inList: true });
       return;
     }
 
@@ -1278,9 +1325,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (block && continuePseudoListOnEnter(block, range)) {
       e.preventDefault();
       finishNewLineEditing(ed);
-      saveSel();
-      readCommandState();
-      emitHtml();
+      return;
+    }
+
+    const orphanList = getListContainer(sel.anchorNode, ed);
+    if (orphanList) {
+      e.preventDefault();
+      const items = Array.from(orphanList.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
+      const target = items[items.length - 1];
+      if (target) {
+        if (isLiEmpty(target)) exitListItem(target, ed, true);
+        else insertNewListItemAfter(target);
+      }
+      finishNewLineEditing(ed, { inList: true });
       return;
     }
 
@@ -1303,13 +1360,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   };
 
   const handleEditorBackspace = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Backspace') return;
+    if (e.key !== 'Backspace' || e.nativeEvent.isComposing) return;
     const ed = editorRef.current;
     if (!ed) return;
     const sel = window.getSelection();
     if (!sel?.rangeCount || !sel.isCollapsed) return;
     const range = sel.getRangeAt(0);
-    const li = getListItem(range.startContainer, ed);
+    const li = resolveListItemAtSelection(range, ed);
     if (li) {
       const atStart = isCaretAtStartOfLi(li, range);
 
