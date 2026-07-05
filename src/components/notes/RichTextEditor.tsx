@@ -75,17 +75,27 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     root.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}`).forEach((el) => el.remove());
   };
 
+  /** Serialize without cloning — avoids duplicating large base64 images in memory. */
   const serializeEditorHtml = (ed: HTMLElement): string => {
-    const clone = ed.cloneNode(true) as HTMLElement;
-    stripImageToolbars(clone);
-    return clone.innerHTML;
+    const detached: { frame: HTMLElement; host: HTMLElement }[] = [];
+    ed.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}`).forEach((node) => {
+      if (node instanceof HTMLElement && node.parentElement instanceof HTMLElement) {
+        detached.push({ frame: node.parentElement, host: node });
+        node.remove();
+      }
+    });
+    const html = ed.innerHTML;
+    detached.forEach(({ frame, host }) => frame.appendChild(host));
+    return html;
   };
 
   const normalizeEditorImages = (ed: HTMLElement) => {
     stripImageToolbars(ed);
     ed.querySelectorAll('img').forEach((node) => {
-      if (node instanceof HTMLImageElement && !node.closest(`.${NOTE_IMG_FRAME}`)) {
-        ensureImageFrame(node, ed);
+      if (node instanceof HTMLImageElement) {
+        if (!node.loading) node.loading = 'lazy';
+        if (!node.decoding) node.decoding = 'async';
+        if (!node.closest(`.${NOTE_IMG_FRAME}`)) ensureImageFrame(node, ed);
       }
     });
     ed.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((frame) => {
@@ -130,6 +140,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   imgResizeModeRef.current = imgResizeMode;
   const isResizingImg = useRef(false);
   const activeFrameRef = useRef<HTMLElement | null>(null);
+  const hoveredImgElRef = useRef<HTMLImageElement | null>(null);
+  const hoverMoveRafRef = useRef<number | null>(null);
 
   const syncHoveredImg = (img: HTMLImageElement, frame: HTMLElement) => ({
     el: img,
@@ -142,6 +154,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (isResizingImg.current || imgResizeModeRef.current) return;
     activeFrameRef.current?.classList.remove('note-img-frame--active');
     activeFrameRef.current = null;
+    hoveredImgElRef.current = null;
     setHoveredImg(null);
     setImgResizeMode(false);
   };
@@ -150,13 +163,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const ed = editorRef.current;
     if (!ed) return;
     const frame = ensureImageFrame(img, ed);
+    if (hoveredImgElRef.current === img && activeFrameRef.current === frame) return;
     if (activeFrameRef.current && activeFrameRef.current !== frame) {
       activeFrameRef.current.classList.remove('note-img-frame--active');
     }
     frame.classList.add('note-img-frame--active');
     activeFrameRef.current = frame;
-    const next = syncHoveredImg(img, frame);
-    setHoveredImg((prev) => (prev?.el === img ? { ...next, rect: prev.rect } : next));
+    hoveredImgElRef.current = img;
+    setHoveredImg(syncHoveredImg(img, frame));
   };
 
   const resolveImageFromHoverTarget = (target: EventTarget | null): HTMLImageElement | null => {
@@ -170,17 +184,21 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   const handleEditorMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!editable || isResizingImg.current) return;
-    const img = resolveImageFromHoverTarget(event.target);
-    if (img) {
-      showImageToolbar(img);
-      return;
-    }
-    if (imgResizeMode) return;
-    if (hoveredImg) {
-      const target = event.target;
-      if (target instanceof Node && hoveredImg.frame.contains(target)) return;
-      hideImageToolbar();
-    }
+    if (hoverMoveRafRef.current !== null) return;
+    const target = event.target;
+    hoverMoveRafRef.current = requestAnimationFrame(() => {
+      hoverMoveRafRef.current = null;
+      const img = resolveImageFromHoverTarget(target);
+      if (img) {
+        showImageToolbar(img);
+        return;
+      }
+      if (imgResizeModeRef.current) return;
+      if (hoveredImgElRef.current) {
+        if (target instanceof Node && activeFrameRef.current?.contains(target)) return;
+        hideImageToolbar();
+      }
+    });
   };
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
@@ -197,14 +215,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const selectionRafRef = useRef<number | null>(null);
   const EMIT_DEBOUNCE_MS = 280;
 
-  const emitHtml = (raw?: string) => {
-    const ed = editorRef.current;
-    const next = ed ? serializeEditorHtml(ed) : (raw ?? '');
-    lastLocalHtmlRef.current = next;
-    onLiveChangeRef.current?.(next);
+  const emitHtml = () => {
     if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
     emitTimerRef.current = setTimeout(() => {
       emitTimerRef.current = null;
+      const ed = editorRef.current;
+      if (!ed) return;
+      const next = serializeEditorHtml(ed);
+      lastLocalHtmlRef.current = next;
+      onLiveChangeRef.current?.(next);
       onChangeRef.current(next);
     }, EMIT_DEBOUNCE_MS);
   };
@@ -578,7 +597,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       frame.style.marginLeft = '0';
       frame.style.marginRight = '0';
     }
-    emitHtml(ed.innerHTML);
+    emitHtml();
     setHoveredImg(syncHoveredImg(img, frame));
   };
 
@@ -659,7 +678,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
     saveSel();
     readCommandState();
-    emitHtml(ed.innerHTML);
+    emitHtml();
     ed.focus({ preventScroll: true });
   };
 
@@ -711,7 +730,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     document.execCommand('styleWithCSS', false, 'true');
     if (document.execCommand('insertText', false, TAB_INDENT)) {
       saveSel();
-      emitHtml(ed.innerHTML);
+      emitHtml();
       return;
     }
 
@@ -724,7 +743,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     sel.removeAllRanges();
     sel.addRange(range);
     savedRange.current = range.cloneRange();
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   const insertTabIndentRef = useRef(insertTabIndent);
@@ -861,7 +880,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     setFontSize(DEFAULT_FONT_PX);
     saveSel();
     readCommandState();
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -976,6 +995,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   useEffect(() => () => {
     if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
     if (inputCleanupRafRef.current !== null) cancelAnimationFrame(inputCleanupRafRef.current);
+    if (hoverMoveRafRef.current !== null) cancelAnimationFrame(hoverMoveRafRef.current);
   }, []);
 
   useEffect(() => {
@@ -1007,7 +1027,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     document.execCommand(cmd, false, value);
     saveSel();
     readCommandState();
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   const applyFontSizeStyle = (span: HTMLSpanElement, px: number) => {
@@ -1065,7 +1085,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     pendingFontSize.current = px;
     setFontSize(px);
     saveSel();
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   const restoreSavedRange = (saved: Range | null, ed: HTMLElement): Range | null => {
@@ -1155,7 +1175,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       finalSel?.addRange(nextRange);
       setFontSize(px);
       saveSel();
-      emitHtml(ed.innerHTML);
+      emitHtml();
       return;
     }
 
@@ -1177,7 +1197,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     finalSel?.addRange(nextRange);
     setFontSize(px);
     saveSel();
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   const nextSz = (cur: number, d: number) => {
@@ -1217,7 +1237,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     document.execCommand('foreColor', false, c);
     saveSel();
     setPalOpen(false);
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   // Remove explicit text color so the text follows the theme (white in dark, dark in light).
@@ -1238,7 +1258,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     });
     saveSel();
     setPalOpen(false);
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   const toggleHlPalette = (e: React.MouseEvent) => {
@@ -1270,7 +1290,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     }
     saveSel();
     setHlPalOpen(false);
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   // ── Image ─────────────────────────────────────────────────────────────
@@ -1281,7 +1301,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     reader.onload = () => {
       const url = reader.result as string;
       ensureFocus(true);
-      document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto"><img src="${url}" style="display:block;max-width:160px;max-height:160px;height:auto;cursor:zoom-in;" /></div><br>`);
+      document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto"><img src="${url}" loading="lazy" decoding="async" style="display:block;max-width:160px;max-height:160px;height:auto;cursor:zoom-in;" /></div><br>`);
       normalizeEditorImages(ed);
       saveSel();
       emitHtml();
@@ -1349,7 +1369,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       if (resizeStarted) {
         const frame = ensureImageFrame(img, ed);
         setHoveredImg(syncHoveredImg(img, frame));
-        emitHtml(ed.innerHTML);
+        emitHtml();
       }
     };
     handle.addEventListener('pointermove', onMove);
@@ -1364,7 +1384,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     ensureFocus(true);
     document.execCommand('insertHTML', false, '<hr style="border:0;border-top:1px solid currentColor;opacity:0.3;margin:10px 0" /><div dir="auto"><br></div>');
     saveSel();
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   const formatTodayHeaderLabel = () => new Date().toLocaleDateString(lang === 'sv' ? 'sv-SE' : 'en-GB', {
@@ -1415,7 +1435,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
     saveSel();
     readCommandState();
-    emitHtml(ed.innerHTML);
+    emitHtml();
   };
 
   // ── Close palette on outside click ────────────────────────────────────
@@ -1611,9 +1631,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           }
         }}
         onInput={() => {
-          const ed = editorRef.current;
-          if (!ed) return;
-          emitHtml(ed.innerHTML);
+          emitHtml();
           if (inputCleanupRafRef.current !== null) return;
           inputCleanupRafRef.current = requestAnimationFrame(() => {
             inputCleanupRafRef.current = null;
@@ -1649,7 +1667,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           }
         }}
         suppressContentEditableWarning
-        className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame]:transition-colors [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full' + (resizable && editable ? ' resize-y' : '')}
+        className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
         style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
 
