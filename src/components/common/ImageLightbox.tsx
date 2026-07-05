@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isInsideEditableEditor, resolveNoteImage } from '../../lib/noteImage';
 
 /**
  * Global click-to-zoom for content images. Listens for clicks on <img> elements
@@ -10,15 +11,15 @@ export function ImageLightbox() {
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target || target.tagName !== 'IMG') return;
+      const img = resolveNoteImage(e.target);
+      if (!img) return;
       // RichTextEditor handles its own image preview — avoid a double modal.
-      if (target.closest('[contenteditable]')) return;
-      const img = target as HTMLImageElement;
-      if (!img.src) return;
+      if (isInsideEditableEditor(e.target)) return;
+      const src = img.currentSrc || img.src;
+      if (!src) return;
       e.preventDefault();
       e.stopPropagation();
-      setSrc(img.src);
+      setSrc(src);
     };
     document.addEventListener('click', onClick, true);
     return () => document.removeEventListener('click', onClick, true);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
@@ -12,9 +13,6 @@ const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Ho
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
 const TAB_INDENT = '    ';
-const NOTE_IMG_FRAME = 'note-img-frame';
-const NOTE_IMG_TOOLBAR = 'note-img-frame__toolbar';
-const NOTE_IMG_TOOLBAR_HOST = 'note-img-frame__toolbar-host';
 interface Props {
   html: string;
   onChange: (html: string) => void;
@@ -173,22 +171,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     setHoveredImg(syncHoveredImg(img, frame));
   };
 
-  const resolveImageFromHoverTarget = (target: EventTarget | null): HTMLImageElement | null => {
-    if (target instanceof HTMLImageElement) return target;
-    if (!(target instanceof HTMLElement)) return null;
-    const frame = target.closest(`.${NOTE_IMG_FRAME}`);
-    if (!(frame instanceof HTMLElement)) return null;
-    const img = frame.querySelector('img');
-    return img instanceof HTMLImageElement ? img : null;
-  };
-
   const handleEditorMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!editable || isResizingImg.current) return;
     if (hoverMoveRafRef.current !== null) return;
     const target = event.target;
     hoverMoveRafRef.current = requestAnimationFrame(() => {
       hoverMoveRafRef.current = null;
-      const img = resolveImageFromHoverTarget(target);
+      const img = resolveNoteImage(target);
       if (img) {
         showImageToolbar(img);
         return;
@@ -1475,7 +1464,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div ref={editorWrapRef} className={'relative ' + (editable ? '' : '[&_img]:mx-auto [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:object-contain')}>
+    <div ref={editorWrapRef} className={'relative ' + (editable ? '' : '[&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_img]:mx-auto [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:object-contain')}>
       {/* Toolbar */}
       <div
         className={
@@ -1655,9 +1644,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
         onClick={(event) => {
           if (!editable && event.detail >= 3) { event.preventDefault(); onLockedTripleClick?.(); return; }
           if (isResizingImg.current) return;
-          const target = event.target;
-          if (target instanceof HTMLImageElement) {
-            setPreviewImage(target.currentSrc || target.src);
+          const img = resolveNoteImage(event.target);
+          if (img) {
+            setPreviewImage(img.currentSrc || img.src);
             setPreviewZoom(1);
             naturalSizeRef.current = null;
             setImgResizeMode(false);
