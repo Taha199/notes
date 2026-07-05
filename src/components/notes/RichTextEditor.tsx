@@ -8,6 +8,8 @@ const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8',
 const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48, 56, 64, 72];
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
+const LIST_TAGS = new Set(['UL', 'OL']);
+const BULLET_PREFIX_RE = /^[\s\u00a0]*(?:[•●◦▪▫‣⁃·\-–—*+]|\d+[.)])\s+/;
 type BlockAlign = 'left' | 'center' | 'right';
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
@@ -369,6 +371,157 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       el = el.parentElement;
     }
     return null;
+  };
+
+  const getListItem = (node: Node | null, ed: HTMLElement): HTMLLIElement | null => {
+    let el: Node | null = node;
+    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    while (el instanceof HTMLElement && el !== ed) {
+      if (el.tagName === 'LI') return el as HTMLLIElement;
+      el = el.parentElement;
+    }
+    return null;
+  };
+
+  const getListContainer = (node: Node | null, ed: HTMLElement): HTMLUListElement | HTMLOListElement | null => {
+    let el: Node | null = node;
+    if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    while (el instanceof HTMLElement && el !== ed) {
+      if (LIST_TAGS.has(el.tagName)) return el as HTMLUListElement | HTMLOListElement;
+      el = el.parentElement;
+    }
+    return null;
+  };
+
+  const isCaretAtStartOfLi = (li: HTMLLIElement, range: Range): boolean => {
+    const probe = document.createRange();
+    probe.selectNodeContents(li);
+    probe.setEnd(range.startContainer, range.startOffset);
+    return probe.toString().replace(/\u200B/g, '').length === 0;
+  };
+
+  const unwrapListItemToDiv = (li: HTMLLIElement): HTMLDivElement => {
+    const div = document.createElement('div');
+    div.setAttribute('dir', 'auto');
+    while (li.firstChild) div.appendChild(li.firstChild);
+    div.querySelectorAll('ul, ol').forEach((nested) => unwrapList(nested as HTMLUListElement | HTMLOListElement));
+    const text = div.textContent?.replace(/\u200B/g, '').trim() ?? '';
+    if (!text && !div.querySelector('img')) div.innerHTML = '<br>';
+    return div;
+  };
+
+  const unwrapList = (list: HTMLUListElement | HTMLOListElement) => {
+    const parent = list.parentNode;
+    if (!parent) return;
+    const items = Array.from(list.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
+    const divs = items.map((li) => unwrapListItemToDiv(li));
+    divs.forEach((div) => parent.insertBefore(div, list));
+    list.remove();
+  };
+
+  const exitListItem = (li: HTMLLIElement, ed: HTMLElement, caretAtStart: boolean) => {
+    const div = unwrapListItemToDiv(li);
+    const list = li.parentElement;
+    if (!list || !LIST_TAGS.has(list.tagName)) return;
+    list.replaceChild(div, li);
+    if (list.children.length === 0) list.remove();
+    placeCaretInBlock(div, caretAtStart);
+    normalizeEmptyFontBlocks(ed);
+  };
+
+  const mergeListItemWithPrevious = (li: HTMLLIElement) => {
+    const prevLi = li.previousElementSibling;
+    if (!(prevLi instanceof HTMLLIElement)) return false;
+    const junction = prevLi.textContent?.length ?? 0;
+    while (li.firstChild) prevLi.appendChild(li.firstChild);
+    li.remove();
+    const list = prevLi.parentElement;
+    if (list && list.children.length === 0) list.remove();
+    const textNode = prevLi.firstChild;
+    const sel = window.getSelection();
+    const pos = document.createRange();
+    if (textNode?.nodeType === Node.TEXT_NODE) {
+      pos.setStart(textNode, Math.min(junction, textNode.textContent?.length ?? 0));
+    } else {
+      pos.selectNodeContents(prevLi);
+      pos.collapse(false);
+    }
+    pos.collapse(true);
+    sel?.removeAllRanges();
+    sel?.addRange(pos);
+    savedRange.current = pos.cloneRange();
+    return true;
+  };
+
+  const stripBulletPrefixFromBlock = (block: HTMLElement) => {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    const firstText = walker.nextNode();
+    if (!firstText || firstText.nodeType !== Node.TEXT_NODE) return;
+    const text = firstText.textContent ?? '';
+    const stripped = text.replace(BULLET_PREFIX_RE, '');
+    if (stripped === text) return;
+    firstText.textContent = stripped;
+    if (!block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img')) {
+      block.innerHTML = '<br>';
+    }
+  };
+
+  const collectBlocksInRange = (ed: HTMLElement, range: Range): HTMLElement[] => {
+    const blocks = new Set<HTMLElement>();
+    if (range.collapsed) {
+      const block = getBlockParent(range.startContainer, ed);
+      if (block && block.tagName !== 'LI') blocks.add(block);
+      return [...blocks];
+    }
+    ed.querySelectorAll<HTMLElement>('div, p').forEach((block) => {
+      if (range.intersectsNode(block) && block.tagName !== 'LI' && !block.closest('li')) {
+        blocks.add(block);
+      }
+    });
+    return [...blocks];
+  };
+
+  const removeListFormatting = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ensureFocus(true);
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const range = sel.getRangeAt(0);
+
+    const lists = new Set<HTMLUListElement | HTMLOListElement>();
+    ed.querySelectorAll('ul, ol').forEach((node) => {
+      if (range.intersectsNode(node)) lists.add(node as HTMLUListElement | HTMLOListElement);
+    });
+    const caretList = getListContainer(sel.anchorNode, ed);
+    if (caretList) lists.add(caretList);
+
+    if (lists.size > 0) {
+      [...lists].forEach((list) => unwrapList(list));
+    } else {
+      collectBlocksInRange(ed, range).forEach(stripBulletPrefixFromBlock);
+    }
+
+    saveSel();
+    readCommandState();
+    emitHtml();
+  };
+
+  const toggleList = (ordered: boolean) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const cmd = ordered ? 'insertOrderedList' : 'insertUnorderedList';
+    const opposite = ordered ? 'insertUnorderedList' : 'insertOrderedList';
+    ensureFocus(true);
+    document.execCommand('styleWithCSS', false, 'true');
+    try {
+      if (document.queryCommandState(opposite)) document.execCommand(opposite, false);
+    } catch { /* noop */ }
+    document.execCommand(cmd, false);
+    ed.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
+    saveSel();
+    readCommandState();
+    emitHtml();
   };
 
   const getLineBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
@@ -874,14 +1027,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
-    e.preventDefault();
     const ed = editorRef.current;
     if (!ed) return;
 
-    clearPendingFontMarker();
-
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
+    const li = getListItem(sel.anchorNode, ed);
+    if (li) {
+      const text = li.textContent?.replace(/\u200B/g, '').trim() ?? '';
+      if (!text) {
+        e.preventDefault();
+        exitListItem(li, ed, true);
+        finishNewLineEditing(ed);
+      }
+      return;
+    }
+
+    e.preventDefault();
+
+    clearPendingFontMarker();
+
     const block = getLineBlock(sel.anchorNode, ed);
     const range = sel.getRangeAt(0);
 
@@ -897,6 +1062,39 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       ensureCaretOnOwnLeftLine(ed);
       finishNewLineEditing(ed);
     });
+  };
+
+  const handleEditorBackspace = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Backspace') return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || !sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const li = getListItem(range.startContainer, ed);
+    if (!li) return;
+
+    const text = li.textContent?.replace(/\u200B/g, '').trim() ?? '';
+    const atStart = isCaretAtStartOfLi(li, range);
+
+    if (!text) {
+      e.preventDefault();
+      exitListItem(li, ed, true);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
+    if (atStart) {
+      e.preventDefault();
+      if (!mergeListItemWithPrevious(li)) {
+        exitListItem(li, ed, true);
+      }
+      saveSel();
+      readCommandState();
+      emitHtml();
+    }
   };
 
   // ── Initial content ───────────────────────────────────────────────────
@@ -936,6 +1134,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     TOGGLE_COMMANDS.forEach((c) => {
       try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
     });
+    try { if (document.queryCommandState('insertUnorderedList')) active.add('insertUnorderedList'); } catch { /* noop */ }
+    try { if (document.queryCommandState('insertOrderedList')) active.add('insertOrderedList'); } catch { /* noop */ }
     const ed = editorRef.current;
     const sel = window.getSelection();
     if (ed && sel?.rangeCount) {
@@ -1558,6 +1758,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
+        {/* Lists */}
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); toggleList(false); }} title={t.titleBulletList} className={btnCls(activeCmds.has('insertUnorderedList'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></svg>
+        </button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); toggleList(true); }} title={t.titleNumberedList} className={btnCls(activeCmds.has('insertOrderedList'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><text x="2" y="8" fontSize="7" fontWeight="700" fill="currentColor">1</text><text x="2" y="14" fontSize="7" fontWeight="700" fill="currentColor">2</text><text x="2" y="20" fontSize="7" fontWeight="700" fill="currentColor">3</text><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></svg>
+        </button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); removeListFormatting(); }} title={t.titleRemoveList} className={btnCls(false)}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 6h14M5 12h14M5 18h14"/><path d="M3 6l2 2M3 12l2 2M3 18l2 2" strokeWidth="1.5"/></svg>
+        </button>
+
+        <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
+
         {/* Today's date header */}
         <button
           type="button"
@@ -1611,6 +1824,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
         }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
+          handleEditorBackspace(e);
           handleEditorEnter(e);
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             requestAnimationFrame(() => {
@@ -1631,7 +1845,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
                 node.setAttribute('dir', 'auto');
               }
             });
+            live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             stripEmptyFontSpans(live);
+          });
+        }}
+        onPaste={() => {
+          requestAnimationFrame(() => {
+            const live = editorRef.current;
+            if (!live) return;
+            live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
+            emitHtml();
           });
         }}
         onMouseMove={handleEditorMouseMove}
