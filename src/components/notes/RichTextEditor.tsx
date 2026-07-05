@@ -53,7 +53,30 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   imgResizeModeRef.current = imgResizeMode;
   const isResizingImg = useRef(false);
   const hideImgToolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const IMG_TOOLBAR_CORRIDOR_PX = 64;
+
+  const isPointerOverImage = (clientX: number, clientY: number, img: HTMLImageElement) => {
+    const rect = img.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  };
+
+  const cancelHideImageToolbar = () => {
+    if (hideImgToolbarTimer.current) {
+      clearTimeout(hideImgToolbarTimer.current);
+      hideImgToolbarTimer.current = null;
+    }
+  };
+
+  const hideImageToolbar = () => {
+    cancelHideImageToolbar();
+    if (isResizingImg.current || imgResizeModeRef.current) return;
+    setHoveredImg(null);
+    setImgResizeMode(false);
+  };
+
+  const showImageToolbar = (img: HTMLImageElement) => {
+    cancelHideImageToolbar();
+    setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+  };
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -90,39 +113,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       emitTimerRef.current = null;
     }
     onChangeRef.current(next);
-  };
-
-  const isInImageHoverZone = (clientX: number, clientY: number, img: HTMLImageElement) => {
-    const rect = img.getBoundingClientRect();
-    const padX = Math.max(80, rect.width * 0.15);
-    return (
-      clientX >= rect.left - padX
-      && clientX <= rect.right + padX
-      && clientY >= rect.top - IMG_TOOLBAR_CORRIDOR_PX
-      && clientY <= rect.bottom + 16
-    );
-  };
-
-  const cancelHideImageToolbar = () => {
-    if (hideImgToolbarTimer.current) {
-      clearTimeout(hideImgToolbarTimer.current);
-      hideImgToolbarTimer.current = null;
-    }
-  };
-
-  const scheduleHideImageToolbar = () => {
-    cancelHideImageToolbar();
-    hideImgToolbarTimer.current = setTimeout(() => {
-      if (!isResizingImg.current && !imgResizeModeRef.current) {
-        setHoveredImg(null);
-        setImgResizeMode(false);
-      }
-    }, 280);
-  };
-
-  const showImageToolbar = (img: HTMLImageElement) => {
-    cancelHideImageToolbar();
-    setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
   };
 
   // ── Helpers ──────────────────────────────────────────────────────────
@@ -1482,6 +1472,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           if (ed) sanitizeCaretFontContext(ed);
         }}
         onBlur={() => { flushEmitHtml(); }}
+        onScroll={() => {
+          if (hoveredImg?.el.isConnected) {
+            setHoveredImg({ el: hoveredImg.el, rect: hoveredImg.el.getBoundingClientRect() });
+          } else if (hoveredImg) {
+            hideImageToolbar();
+          }
+        }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
           handleEditorEnter(e);
@@ -1517,14 +1514,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             return;
           }
           if (imgResizeMode) return;
-          if (hoveredImg && isInImageHoverZone(event.clientX, event.clientY, hoveredImg.el)) {
-            cancelHideImageToolbar();
-            setHoveredImg({ el: hoveredImg.el, rect: hoveredImg.el.getBoundingClientRect() });
-            return;
+          if (hoveredImg) {
+            if (isPointerOverImage(event.clientX, event.clientY, hoveredImg.el)) {
+              setHoveredImg({ el: hoveredImg.el, rect: hoveredImg.el.getBoundingClientRect() });
+              return;
+            }
+            hideImageToolbar();
           }
-          scheduleHideImageToolbar();
         }}
-        onMouseLeave={() => { if (!isResizingImg.current && !imgResizeMode) scheduleHideImageToolbar(); }}
+        onMouseLeave={() => { if (!isResizingImg.current && !imgResizeMode) hideImageToolbar(); }}
         onClick={(event) => {
           if (!editable && event.detail >= 3) { event.preventDefault(); onLockedTripleClick?.(); return; }
           if (isResizingImg.current) return;
@@ -1547,28 +1545,27 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       {/* Image hover buttons */}
       {editable && hoveredImg && (() => {
         const r = hoveredImg.rect;
-        const imgBtn = 'flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-[11px] text-white shadow-lg hover:bg-gray-900';
-        const barWidth = Math.min(window.innerWidth - 16, Math.max(r.width + 40, 300));
-        const barLeft = r.left + r.width / 2 - barWidth / 2;
+        const imgBtn = 'flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-[11px] text-white shadow-md hover:bg-black/85';
+        const barInset = 8;
+        const barHeight = Math.min(40, Math.max(28, r.height - barInset * 2));
+        const barTop = Math.max(r.top + barInset, r.bottom - barHeight - barInset);
         return (
           <div
-            onMouseEnter={cancelHideImageToolbar}
-            onMouseLeave={scheduleHideImageToolbar}
             onMouseDown={(e) => e.preventDefault()}
             style={{
               position: 'fixed',
-              left: Math.max(8, barLeft),
-              top: Math.max(8, r.top - IMG_TOOLBAR_CORRIDOR_PX + 8),
-              width: barWidth,
-              paddingBottom: 14,
+              left: r.left + barInset,
+              top: barTop,
+              width: Math.max(100, r.width - barInset * 2),
+              height: barHeight,
               zIndex: 9999,
               pointerEvents: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            <div
-              className="flex flex-wrap justify-center gap-1 rounded-xl bg-gray-900/10 p-1 backdrop-blur-[2px]"
-              style={{ maxWidth: barWidth }}
-            >
+            <div className="flex max-w-full flex-wrap items-center justify-center gap-1 rounded-xl bg-black/50 px-2 py-1.5 shadow-lg ring-1 ring-white/20 backdrop-blur-sm">
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
@@ -1576,7 +1573,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={imgBtn + (imgResizeMode ? ' !bg-primary hover:!bg-primary/90' : '')} title={t.titleResizeImage}>↔</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); setHoveredImg(null); setImgResizeMode(false); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700" title="Delete">✕</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); hideImageToolbar(); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600/90 text-xs font-bold text-white shadow-md hover:bg-red-700" title="Delete">✕</button>
             </div>
           </div>
         );
@@ -1586,7 +1583,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       {editable && hoveredImg && imgResizeMode && (() => {
         const r = hoveredImg.rect;
         const keep = () => { cancelHideImageToolbar(); setHoveredImg({ el: hoveredImg.el, rect: hoveredImg.el.getBoundingClientRect() }); };
-        const leave = () => { if (!isResizingImg.current) scheduleHideImageToolbar(); };
+        const leave = () => { if (!isResizingImg.current) hideImageToolbar(); };
         const base = 'flex items-center justify-center rounded-full border-2 border-white bg-primary text-white shadow-lg';
         return (
           <>
