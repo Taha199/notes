@@ -973,10 +973,6 @@ export function QuizPage() {
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : isNotesView ? quizzes : [];
   const studyItems = useMemo(() => displayItems.filter((item) => !item.draft), [displayItems]);
-  const openItemIds = useMemo(
-    () => new Set(openForms.map((f) => f.itemId).filter((id): id is number => id !== null)),
-    [openForms],
-  );
 
   const orderedItems = useMemo(() => {
     if (itemSort === 'manual') return displayItems;
@@ -1009,7 +1005,6 @@ export function QuizPage() {
   };
 
   const renderItem = (item: QuizItem, visualIndex: number) => {
-    if (openItemIds.has(item.id)) return null;
     const questionNumber = visualIndex + 1;
     return (
       <QuizItemRow
@@ -1037,6 +1032,12 @@ export function QuizPage() {
         onSwapToPosition={(targetPosition) => handleSwapToPosition(item.id, targetPosition)}
       />
     );
+  };
+
+  const renderItemOrForm = (item: QuizItem, visualIndex: number) => {
+    const form = openForms.find((f) => f.itemId === item.id);
+    if (form) return renderOpenForm(form);
+    return renderItem(item, visualIndex);
   };
 
   const renderOpenForm = (form: OpenQuestionForm) => {
@@ -1567,9 +1568,11 @@ export function QuizPage() {
           <>
           {/* Questions list */}
           <div className="flex flex-col gap-2">
-            {orderedItems.map((item, index) => renderItem(item, index))}
+            {orderedItems.map((item, index) => renderItemOrForm(item, index))}
 
-            {openForms.map((form) => renderOpenForm(form))}
+            {openForms
+              .filter((f) => f.itemId === null || !orderedItems.some((i) => i.id === f.itemId))
+              .map((form) => renderOpenForm(form))}
 
             {/* Add question dashed button — opens another form without closing existing ones */}
             <button
