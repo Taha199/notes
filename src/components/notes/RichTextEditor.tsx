@@ -634,6 +634,65 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     insertNewListItemAfter(li);
   };
 
+  const isNestedListItem = (li: HTMLLIElement) => {
+    const list = li.parentElement;
+    return !!list && LIST_TAGS.has(list.tagName) && list.parentElement?.closest('li') instanceof HTMLLIElement;
+  };
+
+  const canIndentListItem = (li: HTMLLIElement) => li.previousElementSibling instanceof HTMLLIElement;
+
+  const indentListItem = (li: HTMLLIElement): boolean => {
+    const prevLi = li.previousElementSibling;
+    if (!(prevLi instanceof HTMLLIElement)) return false;
+
+    const parentList = li.parentElement;
+    if (!parentList || !LIST_TAGS.has(parentList.tagName)) return false;
+    const ordered = parentList.tagName === 'OL';
+
+    let subList = Array.from(prevLi.children).find(
+      (c): c is HTMLUListElement | HTMLOListElement =>
+        c instanceof HTMLElement && LIST_TAGS.has(c.tagName),
+    );
+    if (!subList) {
+      subList = document.createElement(ordered ? 'ol' : 'ul');
+      subList.setAttribute('dir', 'auto');
+      prevLi.appendChild(subList);
+    }
+
+    subList.appendChild(li);
+    placeCaretInBlock(li, isLiEmpty(li));
+    return true;
+  };
+
+  const outdentListItem = (li: HTMLLIElement): boolean => {
+    const subList = li.parentElement;
+    if (!subList || !LIST_TAGS.has(subList.tagName)) return false;
+    const parentLi = subList.parentElement;
+    if (!(parentLi instanceof HTMLLIElement)) return false;
+    const outerList = parentLi.parentElement;
+    if (!outerList || !LIST_TAGS.has(outerList.tagName)) return false;
+
+    outerList.insertBefore(li, parentLi.nextSibling);
+    if (subList.children.length === 0) subList.remove();
+    placeCaretInBlock(li, false);
+    return true;
+  };
+
+  const applySubList = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.focus({ preventScroll: true });
+    restoreSel();
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
+    if (!li || !indentListItem(li)) return;
+    saveSel();
+    readCommandState();
+    emitHtml();
+    setListPalOpen(false);
+  };
+
   const mergeListItemWithPrevious = (li: HTMLLIElement) => {
     const prevLi = li.previousElementSibling;
     if (!(prevLi instanceof HTMLLIElement)) return false;
@@ -1582,6 +1641,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
         active.delete('insertUnorderedList');
         active.add('insertOrderedList');
       }
+      const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
+      if (li) {
+        if (isNestedListItem(li)) active.add('nestedList');
+        if (canIndentListItem(li)) active.add('canIndentList');
+      }
       const align = readAlignmentAtCaret(ed);
       if (align === 'left') active.add('justifyLeft');
       else if (align === 'center') active.add('justifyCenter');
@@ -1633,9 +1697,24 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   useEffect(() => {
     if (!editable) return;
     const onDocKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || e.shiftKey) return;
+      if (e.key !== 'Tab') return;
       const ed = editorRef.current;
       if (!ed || document.activeElement !== ed) return;
+      const sel = window.getSelection();
+      if (sel?.rangeCount) {
+        const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
+        if (li) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          if (e.shiftKey) outdentListItem(li);
+          else indentListItem(li);
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return;
+        }
+      }
+      if (e.shiftKey) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       insertTabIndentRef.current(ed);
@@ -2254,14 +2333,37 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></svg>
           </button>
           {(activeCmds.has('insertUnorderedList') || activeCmds.has('insertOrderedList')) && (
-            <button
-              type="button"
-              onMouseDown={(e) => { e.preventDefault(); saveSel(); applyList('none'); }}
-              title={t.titleRemoveList}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[11px] font-bold text-app-text-secondary hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15 dark:hover:text-red-300"
-            >
-              ✕
-            </button>
+            <>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); saveSel(); applySubList(); }}
+                disabled={!activeCmds.has('canIndentList')}
+                title={t.titleSubList}
+                className={
+                  'flex h-7 w-7 items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-35 ' +
+                  (activeCmds.has('nestedList')
+                    ? 'bg-primary text-white'
+                    : 'text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10')
+                }
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <circle cx="4" cy="6" r="1.4" />
+                  <circle cx="4" cy="12" r="1.4" />
+                  <rect x="8" y="5" width="12" height="2" rx="1" />
+                  <rect x="8" y="11" width="12" height="2" rx="1" />
+                  <circle cx="10" cy="18" r="1.4" />
+                  <rect x="14" y="17" width="8" height="2" rx="1" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); saveSel(); applyList('none'); }}
+                title={t.titleRemoveList}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-[11px] font-bold text-app-text-secondary hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15 dark:hover:text-red-300"
+              >
+                ✕
+              </button>
+            </>
           )}
         </div>
 
@@ -2432,6 +2534,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           >
             <span className="w-4 text-center text-[11px] font-bold">1.</span>
             <span>{t.titleNumberedList}</span>
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); applySubList(); }}
+            className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-app-bg dark:hover:bg-white/5 ' + (activeCmds.has('nestedList') ? 'font-semibold text-primary' : 'text-app-text dark:text-gray-100')}
+          >
+            <span className="w-4 text-center text-[10px] leading-none">↳</span>
+            <span>{t.titleSubList}</span>
           </button>
         </div>,
         document.body,

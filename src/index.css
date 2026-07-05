@@ -162,6 +162,14 @@ body {
   list-style-type: decimal;
 }
 
+[contenteditable] ul ul,
+[contenteditable] ol ol,
+[contenteditable] ul ol,
+[contenteditable] ol ul {
+  margin-top: 0.125rem;
+  margin-bottom: 0.125rem;
+}
+
 [contenteditable] li {
   display: list-item;
 }
