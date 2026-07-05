@@ -649,27 +649,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   const canIndentListItem = (li: HTMLLIElement) => li.previousElementSibling instanceof HTMLLIElement;
 
-  const getParentListItem = (li: HTMLLIElement): HTMLLIElement | null => {
-    const subList = li.parentElement;
-    if (!subList || !LIST_TAGS.has(subList.tagName)) return null;
-    const parentLi = subList.parentElement;
-    return parentLi instanceof HTMLLIElement ? parentLi : null;
-  };
-
-  /** Move back to the parent list item (remove empty nested line or outdent with content). */
+  /** Promote a nested item to the parent list (sibling after its parent line). */
   const returnToParentListItem = (li: HTMLLIElement): boolean => {
-    const parentLi = getParentListItem(li);
-    if (!parentLi) return false;
-    const subList = li.parentElement;
-    if (!subList || !LIST_TAGS.has(subList.tagName)) return false;
-
-    if (isLiEmpty(li)) {
-      li.remove();
-      if (subList.children.length === 0) subList.remove();
-      placeCaretInBlock(parentLi, false);
-      return true;
-    }
-
+    if (!isNestedListItem(li)) return false;
     return outdentListItem(li);
   };
 
@@ -706,7 +688,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
     outerList.insertBefore(li, parentLi.nextSibling);
     if (subList.children.length === 0) subList.remove();
-    placeCaretInBlock(li, false);
+    placeCaretInBlock(li, isLiEmpty(li));
     return true;
   };
 
