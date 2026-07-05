@@ -1,6 +1,6 @@
 import { useLanguage } from '../../contexts/LanguageContext';
 import { isDesktopApp } from '../../lib/isDesktopApp';
-import { MAC_DMG_URL } from '../../lib/desktopApp';
+import { MAC_DMG_FILENAME, MAC_DMG_URL } from '../../lib/desktopApp';
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -47,12 +47,12 @@ export function DownloadPage() {
             <p className="text-sm text-app-text-secondary dark:text-gray-400">{t.downloadMacDesc}</p>
             <a
               href={MAC_DMG_URL}
+              download={MAC_DMG_FILENAME}
               className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-[13.5px] font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark"
             >
               ⬇️ {t.downloadMacButton}
             </a>
             <p className="mt-3 text-xs leading-relaxed text-app-text-secondary/80 dark:text-gray-500">{t.downloadMacReqs}</p>
-            <p className="mt-2 text-xs leading-relaxed text-amber-700/90 dark:text-amber-400/90">{t.downloadMacUnavailable}</p>
           </div>
         </div>
       </SectionCard>
