@@ -630,13 +630,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     saveSel();
   };
 
-  const handleEmptyListItemEnter = (li: HTMLLIElement, ed: HTMLElement) => {
-    const prev = li.previousElementSibling;
-    if (prev instanceof HTMLLIElement && isLiEmpty(prev)) {
-      li.remove();
-      exitListItem(prev, ed, false);
-      return;
-    }
+  const handleEmptyListItemEnter = (li: HTMLLIElement) => {
     insertNewListItemAfter(li);
   };
 
@@ -1446,7 +1440,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (li) {
       e.preventDefault();
       if (isLiEmpty(li)) {
-        handleEmptyListItemEnter(li, ed);
+        handleEmptyListItemEnter(li);
       } else if (isCaretAtEffectiveEndOfLi(li, range)) {
         insertNewListItemAfter(li);
       } else if (isCaretAtStartOfLi(li, range)) {
@@ -1471,7 +1465,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       const items = Array.from(orphanList.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
       const target = items[items.length - 1];
       if (target) {
-        if (isLiEmpty(target)) handleEmptyListItemEnter(target, ed);
+        if (isLiEmpty(target)) handleEmptyListItemEnter(target);
         else insertNewListItemAfter(target);
       }
       finishNewLineEditing(ed, { inList: true });
