@@ -148,6 +148,42 @@ body {
   pointer-events: none;
 }
 
+[contenteditable] ul,
+[contenteditable] ol {
+  margin: 0.25rem 0;
+  padding-inline-start: 1.5rem;
+}
+
+[contenteditable] ul {
+  list-style-type: disc;
+}
+
+[contenteditable] ol {
+  list-style-type: decimal;
+}
+
+[contenteditable] li {
+  display: list-item;
+}
+
+.note-content ul,
+.note-content ol {
+  margin: 0.25rem 0;
+  padding-inline-start: 1.5rem;
+}
+
+.note-content ul {
+  list-style-type: disc;
+}
+
+.note-content ol {
+  list-style-type: decimal;
+}
+
+.note-content li {
+  display: list-item;
+}
+
 .note-content .note-img-frame,
 [contenteditable] .note-img-frame {
   display: block;

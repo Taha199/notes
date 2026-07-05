@@ -432,6 +432,34 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return newBlock;
   };
 
+  const isNumberedPrefix = (match: RegExpMatchArray) => /\d+[.)]/.test(match[0]);
+
+  /** Ensure a div/p block exists at the caret for list conversion. */
+  const ensureBlockAtRange = (ed: HTMLElement, range: Range): HTMLElement => {
+    const existing = resolveBlockAtRange(range, ed);
+    if (existing && existing !== ed && existing.tagName !== 'LI' && !existing.closest('li')) {
+      return existing;
+    }
+
+    const div = document.createElement('div');
+    div.setAttribute('dir', 'auto');
+    div.innerHTML = '<br>';
+
+    if (range.startContainer === ed) {
+      const children = Array.from(ed.children);
+      const idx = Math.min(range.startOffset, children.length);
+      if (idx < children.length) ed.insertBefore(div, children[idx]);
+      else ed.appendChild(div);
+    } else {
+      const anchor = getBlockParent(range.startContainer, ed);
+      if (anchor?.parentNode) anchor.parentNode.insertBefore(div, anchor.nextSibling);
+      else ed.appendChild(div);
+    }
+
+    placeCaretInBlock(div, true);
+    return div;
+  };
+
   const getListItem = (node: Node | null, ed: HTMLElement): HTMLLIElement | null => {
     let el: Node | null = node;
     if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
@@ -696,7 +724,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   const continuePseudoListOnEnter = (block: HTMLElement, range: Range): boolean => {
     const match = getBlockPrefixMatch(block);
-    if (!match) return false;
+    if (!match || isNumberedPrefix(match)) return false;
 
     const contentText = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').trim();
     if (!contentText) {
@@ -802,18 +830,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       return;
     }
 
-    const activeBlock = isolateLineBlockForList(range, ed);
-    const blocks = getBlocksForListAction(ed, sel.getRangeAt(0), activeBlock);
-    if (blocks.length > 0) {
-      convertBlocksToList(blocks, ordered, activeBlock ?? blocks[0]);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      setListPalOpen(false);
-      return;
+    let activeBlock = isolateLineBlockForList(range, ed);
+    if (!activeBlock || activeBlock === ed || activeBlock.tagName === 'LI' || activeBlock.closest('li')) {
+      activeBlock = ensureBlockAtRange(ed, sel.getRangeAt(0));
     }
-
-    toggleList(ordered);
+    convertBlocksToList([activeBlock], ordered, activeBlock);
+    saveSel();
+    readCommandState();
+    emitHtml();
     setListPalOpen(false);
   };
 
@@ -1379,7 +1403,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
-    const range = sel.getRangeAt(0);
+    let range = sel.getRangeAt(0);
+
+    const lineBlock = getLineBlock(sel.anchorNode, ed);
+    if (lineBlock && lineBlock.tagName !== 'LI' && !lineBlock.closest('li')) {
+      const prefix = getBlockPrefixMatch(lineBlock);
+      if (prefix && isNumberedPrefix(prefix)) {
+        convertBlocksToList([lineBlock], true, lineBlock);
+        if (sel.rangeCount) range = sel.getRangeAt(0);
+      }
+    }
 
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
@@ -1398,7 +1431,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     }
 
     const block = getLineBlock(sel.anchorNode, ed);
-    if (block && continuePseudoListOnEnter(block, range)) {
+    if (block && continuePseudoListOnEnter(block, sel.getRangeAt(0))) {
       e.preventDefault();
       finishNewLineEditing(ed);
       return;
@@ -1519,6 +1552,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const ed = editorRef.current;
     const sel = window.getSelection();
     if (ed && sel?.rangeCount) {
+      const list = getListContainer(sel.anchorNode, ed);
+      if (list?.tagName === 'UL') {
+        active.delete('insertOrderedList');
+        active.add('insertUnorderedList');
+      } else if (list?.tagName === 'OL') {
+        active.delete('insertUnorderedList');
+        active.add('insertOrderedList');
+      }
       const align = readAlignmentAtCaret(ed);
       if (align === 'left') active.add('justifyLeft');
       else if (align === 'center') active.add('justifyCenter');
