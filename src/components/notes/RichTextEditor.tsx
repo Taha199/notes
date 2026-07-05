@@ -9,7 +9,7 @@ const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48,
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
 const LIST_TAGS = new Set(['UL', 'OL']);
-const BULLET_PREFIX_RE = /^[\s\u00a0]*(?:[•●◦▪▫‣⁃·\-–—*+]|\d+[.)])\s+/;
+const BULLET_PREFIX_RE = /^[\s\u00a0]*(?:[•●◦▪▫‣⁃·\-–—*+]|\d+[.)])\s*/;
 type BlockAlign = 'left' | 'center' | 'right';
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
@@ -406,11 +406,55 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return probe.toString().replace(/\u200B/g, '').length === 0;
   };
 
+  const isCaretAtEndOfBlock = (block: HTMLElement, range: Range): boolean => {
+    const probe = document.createRange();
+    probe.selectNodeContents(block);
+    probe.setStart(range.endContainer, range.endOffset);
+    return probe.toString().replace(/\u200B/g, '').length === 0;
+  };
+
   const isCaretAtStartOfBlock = (block: HTMLElement, range: Range): boolean => {
     const probe = document.createRange();
     probe.selectNodeContents(block);
     probe.setEnd(range.startContainer, range.startOffset);
     return probe.toString().replace(/\u200B/g, '').length === 0;
+  };
+
+  const isLiEmpty = (li: HTMLLIElement) => !(li.textContent?.replace(/\u200B/g, '').trim() ?? '');
+
+  const insertNewListItemAfter = (li: HTMLLIElement) => {
+    const newLi = document.createElement('li');
+    newLi.setAttribute('dir', 'auto');
+    newLi.innerHTML = '<br>';
+    li.parentNode?.insertBefore(newLi, li.nextSibling);
+    placeCaretInBlock(newLi, true);
+  };
+
+  const splitListItemAtCaret = (li: HTMLLIElement, range: Range) => {
+    const newLi = document.createElement('li');
+    newLi.setAttribute('dir', 'auto');
+    const tailRange = document.createRange();
+    tailRange.setStart(range.endContainer, range.endOffset);
+    tailRange.setEnd(li, li.childNodes.length);
+    const tail = tailRange.extractContents();
+    if ((tail.textContent?.replace(/\u200B/g, '').trim() ?? '') || tail.querySelector('br, img')) {
+      newLi.appendChild(tail);
+    } else {
+      newLi.innerHTML = '<br>';
+    }
+    if (isLiEmpty(li)) li.innerHTML = '<br>';
+    li.parentNode?.insertBefore(newLi, li.nextSibling);
+    placeCaretInBlock(newLi, true);
+  };
+
+  const splitListItemAtStart = (li: HTMLLIElement) => {
+    const newLi = document.createElement('li');
+    newLi.setAttribute('dir', 'auto');
+    while (li.firstChild) newLi.appendChild(li.firstChild);
+    if (isLiEmpty(newLi)) newLi.innerHTML = '<br>';
+    li.innerHTML = '<br>';
+    li.parentNode?.insertBefore(newLi, li);
+    placeCaretInBlock(newLi, true);
   };
 
   const getBlockPrefixMatch = (block: HTMLElement): RegExpMatchArray | null => {
@@ -559,6 +603,23 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const contentText = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').trim();
     if (!contentText) {
       stripBulletPrefixFromBlock(block);
+      return true;
+    }
+
+    if (isCaretAtEndOfBlock(block, range)) {
+      const newBlock = document.createElement('div');
+      newBlock.setAttribute('dir', 'auto');
+      const prefix = nextPrefixFromMatch(match);
+      const prefixNode = document.createTextNode(prefix);
+      newBlock.appendChild(prefixNode);
+      block.parentNode?.insertBefore(newBlock, block.nextSibling);
+      const caretRange = document.createRange();
+      caretRange.setStart(prefixNode, prefix.length);
+      caretRange.collapse(true);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(caretRange);
+      savedRange.current = caretRange.cloneRange();
       return true;
     }
 
@@ -1162,7 +1223,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (!sel?.rangeCount) return;
 
     const block = getBlockParent(sel.anchorNode, ed);
-    if (block) {
+    if (block && block.tagName !== 'LI') {
       const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
       if (!text && !block.querySelector('img')) {
         block.innerHTML = '<br>';
@@ -1196,12 +1257,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
     const li = getListItem(sel.anchorNode, ed);
     if (li) {
-      const text = li.textContent?.replace(/\u200B/g, '').trim() ?? '';
       e.preventDefault();
-      if (!text) {
+      if (isLiEmpty(li)) {
         exitListItem(li, ed, true);
+      } else if (isCaretAtEndOfBlock(li, range)) {
+        insertNewListItemAfter(li);
+      } else if (isCaretAtStartOfLi(li, range)) {
+        splitListItemAtStart(li);
       } else {
-        document.execCommand('insertParagraph');
+        splitListItemAtCaret(li, range);
       }
       finishNewLineEditing(ed);
       saveSel();
@@ -1247,10 +1311,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const range = sel.getRangeAt(0);
     const li = getListItem(range.startContainer, ed);
     if (li) {
-      const text = li.textContent?.replace(/\u200B/g, '').trim() ?? '';
       const atStart = isCaretAtStartOfLi(li, range);
 
-      if (!text) {
+      if (isLiEmpty(li)) {
         e.preventDefault();
         exitListItem(li, ed, true);
         saveSel();
