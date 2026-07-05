@@ -2433,15 +2433,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             <span className="w-4 text-center text-[11px] font-bold">1.</span>
             <span>{t.titleNumberedList}</span>
           </button>
-          <div className="my-1 h-px bg-app-border dark:bg-white/10" />
-          <button
-            type="button"
-            onMouseDown={(e) => { e.preventDefault(); applyList('none'); }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-app-text-secondary hover:bg-app-bg dark:text-gray-300 dark:hover:bg-white/5"
-          >
-            <span className="w-4 text-center">✕</span>
-            <span>{t.titleRemoveList}</span>
-          </button>
         </div>,
         document.body,
       )}
