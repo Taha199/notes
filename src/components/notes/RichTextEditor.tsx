@@ -197,6 +197,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const hlPalRef = useRef<HTMLDivElement>(null);
   const listWrapRef = useRef<HTMLDivElement>(null);
   const listPalRef = useRef<HTMLDivElement>(null);
+  /** Frozen caret when the list menu opens — used so toolbar clicks don't lose the target line. */
+  const listMenuRangeRef = useRef<Range | null>(null);
   const [listPalOpen, setListPalOpen] = useState(false);
   const [listPalPos, setListPalPos] = useState({ left: 0, top: 0 });
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -377,6 +379,57 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       el = el.parentElement;
     }
     return null;
+  };
+
+  /** Resolve the block line for a range, including when the caret sits on the editor root. */
+  const resolveBlockAtRange = (range: Range, ed: HTMLElement): HTMLElement | null => {
+    if (range.startContainer === ed) {
+      const children = Array.from(ed.children).filter((n): n is HTMLElement => n instanceof HTMLElement);
+      const offset = range.startOffset;
+      if (offset < children.length) {
+        const child = children[offset];
+        if (LIST_TAGS.has(child.tagName)) {
+          const items = child.querySelectorAll('li');
+          return (items[items.length - 1] as HTMLLIElement) ?? child;
+        }
+        if (BLOCK_TAGS.has(child.tagName)) return child;
+      }
+      if (children.length > 0) {
+        const last = children[children.length - 1];
+        if (LIST_TAGS.has(last.tagName)) {
+          const items = last.querySelectorAll('li');
+          return (items[items.length - 1] as HTMLLIElement) ?? last;
+        }
+        if (BLOCK_TAGS.has(last.tagName)) return last;
+      }
+      return null;
+    }
+    const fromLine = getLineBlock(range.startContainer, ed);
+    if (fromLine && fromLine !== ed) return fromLine;
+    return getBlockParent(range.startContainer, ed);
+  };
+
+  /** Split a multi-line div so list formatting targets only the caret's visual line. */
+  const isolateLineBlockForList = (range: Range, ed: HTMLElement): HTMLElement | null => {
+    const block = resolveBlockAtRange(range, ed);
+    if (!block || block === ed || block.tagName === 'LI' || block.closest('li')) return block;
+    if (!caretFollowsLineBreakInBlock(block, range)) return block;
+
+    const newBlock = document.createElement('div');
+    newBlock.setAttribute('dir', 'auto');
+    const tailRange = document.createRange();
+    tailRange.setStart(range.endContainer, range.endOffset);
+    tailRange.setEnd(block, block.childNodes.length);
+    const tail = tailRange.extractContents();
+    const tailText = tail.textContent?.replace(/\u200B/g, '').trim() ?? '';
+    if (tailText || tail.querySelector('br, img')) {
+      newBlock.appendChild(tail);
+    } else {
+      newBlock.innerHTML = '<br>';
+    }
+    block.parentNode?.insertBefore(newBlock, block.nextSibling);
+    placeCaretInBlock(newBlock, true);
+    return newBlock;
   };
 
   const getListItem = (node: Node | null, ed: HTMLElement): HTMLLIElement | null => {
@@ -604,16 +657,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return [...blocks];
   };
 
-  const getBlocksForListAction = (ed: HTMLElement, range: Range): HTMLElement[] => {
+  const getBlocksForListAction = (ed: HTMLElement, range: Range, activeBlock?: HTMLElement | null): HTMLElement[] => {
     if (!range.collapsed) {
       return collectBlocksInRange(ed, range).filter((b) => !b.closest('li'));
     }
-    const block = getLineBlock(range.startContainer, ed);
+    const block = activeBlock ?? resolveBlockAtRange(range, ed);
     if (!block || block === ed || block.tagName === 'LI' || block.closest('li')) return [];
     return [block];
   };
 
-  const convertBlocksToList = (blocks: HTMLElement[], ordered: boolean) => {
+  const convertBlocksToList = (blocks: HTMLElement[], ordered: boolean, activeBlock?: HTMLElement | null) => {
     if (blocks.length === 0) return;
     const parent = blocks[0].parentNode;
     if (!parent) return;
@@ -631,8 +684,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     });
     parent.insertBefore(list, blocks[0]);
     blocks.forEach((b) => b.remove());
-    const lastLi = list.lastElementChild;
-    if (lastLi instanceof HTMLElement) placeCaretInBlock(lastLi, false);
+    const focusBlock = activeBlock && blocks.includes(activeBlock)
+      ? activeBlock
+      : blocks[blocks.length - 1];
+    const focusIdx = Math.max(0, blocks.indexOf(focusBlock));
+    const targetLi = list.children[focusIdx];
+    if (targetLi instanceof HTMLElement) {
+      placeCaretInBlock(targetLi, isLiEmpty(targetLi as HTMLLIElement));
+    }
   };
 
   const continuePseudoListOnEnter = (block: HTMLElement, range: Range): boolean => {
@@ -692,14 +751,30 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return true;
   };
 
+  const restoreListActionRange = (): Range | null => {
+    const ed = editorRef.current;
+    if (!ed) return null;
+    ed.focus({ preventScroll: true });
+    const frozen = listMenuRangeRef.current;
+    listMenuRangeRef.current = null;
+    const sel = window.getSelection();
+    if (frozen && ed.contains(frozen.commonAncestorContainer)) {
+      sel?.removeAllRanges();
+      sel?.addRange(frozen);
+      savedRange.current = frozen.cloneRange();
+      return frozen.cloneRange();
+    }
+    restoreSel();
+    return sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+  };
+
   const applyList = (mode: 'bullet' | 'ordered' | 'none') => {
     const ed = editorRef.current;
     if (!ed) return;
-    ensureFocus(true);
-    restoreSel();
+    const range = restoreListActionRange();
+    if (!range) return;
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
-    const range = sel.getRangeAt(0);
 
     if (mode === 'none') {
       removeListFormatting();
@@ -727,9 +802,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       return;
     }
 
-    const blocks = getBlocksForListAction(ed, range);
+    const activeBlock = isolateLineBlockForList(range, ed);
+    const blocks = getBlocksForListAction(ed, sel.getRangeAt(0), activeBlock);
     if (blocks.length > 0) {
-      convertBlocksToList(blocks, ordered);
+      convertBlocksToList(blocks, ordered, activeBlock ?? blocks[0]);
       saveSel();
       readCommandState();
       emitHtml();
@@ -1780,9 +1856,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     saveSel();
     const opening = !listPalOpen;
     if (opening) {
+      const r = liveRange() ?? savedRange.current;
+      listMenuRangeRef.current = r ? r.cloneRange() : null;
       positionPalette(e.currentTarget as HTMLElement, setListPalPos);
       setPalOpen(false);
       setHlPalOpen(false);
+    } else {
+      listMenuRangeRef.current = null;
     }
     setListPalOpen(opening);
   };
@@ -1992,9 +2072,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const close = (e: MouseEvent) => {
       const t = e.target as Node;
       if (listWrapRef.current?.contains(t) || listPalRef.current?.contains(t)) return;
+      listMenuRangeRef.current = null;
       setListPalOpen(false);
     };
-    const closeAll = () => setListPalOpen(false);
+    const closeAll = () => {
+      listMenuRangeRef.current = null;
+      setListPalOpen(false);
+    };
     document.addEventListener('mousedown', close);
     window.addEventListener('resize', closeAll);
     window.addEventListener('scroll', closeAll, true);
