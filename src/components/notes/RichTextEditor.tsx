@@ -54,9 +54,23 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const isResizingImg = useRef(false);
   const hideImgToolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isPointerOverImage = (clientX: number, clientY: number, img: HTMLImageElement) => {
-    const rect = img.getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  const IMG_TOOLBAR_H = 32;
+  const IMG_TOOLBAR_GAP = 3;
+
+  const getImageToolbarLayout = (r: DOMRect) => ({
+    top: r.bottom + IMG_TOOLBAR_GAP,
+    left: r.left,
+    width: r.width,
+    height: IMG_TOOLBAR_H,
+  });
+
+  const isPointerOverImageHoverZone = (clientX: number, clientY: number, img: HTMLImageElement) => {
+    const r = img.getBoundingClientRect();
+    const bar = getImageToolbarLayout(r);
+    const onImage = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+    const onBar = clientX >= bar.left && clientX <= bar.left + bar.width
+      && clientY >= bar.top && clientY <= bar.top + bar.height;
+    return onImage || onBar;
   };
 
   const cancelHideImageToolbar = () => {
@@ -1515,7 +1529,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           }
           if (imgResizeMode) return;
           if (hoveredImg) {
-            if (isPointerOverImage(event.clientX, event.clientY, hoveredImg.el)) {
+            if (isPointerOverImageHoverZone(event.clientX, event.clientY, hoveredImg.el)) {
               setHoveredImg({ el: hoveredImg.el, rect: hoveredImg.el.getBoundingClientRect() });
               return;
             }
@@ -1545,35 +1559,32 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       {/* Image hover buttons */}
       {editable && hoveredImg && (() => {
         const r = hoveredImg.rect;
-        const imgBtn = 'flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-[11px] text-white shadow-md hover:bg-black/85';
-        const barInset = 8;
-        const barHeight = Math.min(40, Math.max(28, r.height - barInset * 2));
-        const barTop = Math.max(r.top + barInset, r.bottom - barHeight - barInset);
+        const bar = getImageToolbarLayout(r);
+        const imgBtn = 'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-app-bg text-[10px] text-app-text shadow-sm ring-1 ring-app-border hover:bg-primary/10 dark:bg-gray-800 dark:text-gray-100 dark:ring-white/15';
         return (
           <div
             onMouseDown={(e) => e.preventDefault()}
             style={{
               position: 'fixed',
-              left: r.left + barInset,
-              top: barTop,
-              width: Math.max(100, r.width - barInset * 2),
-              height: barHeight,
+              left: bar.left,
+              top: bar.top,
+              width: bar.width,
+              height: bar.height,
               zIndex: 9999,
               pointerEvents: 'auto',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
             }}
           >
-            <div className="flex max-w-full flex-wrap items-center justify-center gap-1 rounded-xl bg-black/50 px-2 py-1.5 shadow-lg ring-1 ring-white/20 backdrop-blur-sm">
+            <div className="flex h-full items-center gap-0.5 overflow-x-auto rounded-lg border border-app-border/80 bg-white/95 px-1.5 shadow-md backdrop-blur-sm dark:border-white/15 dark:bg-gray-900/95">
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
+            <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/70 dark:bg-white/15" />
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'up'); }} className={imgBtn} title={t.titleMoveImageUp}>↑</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
+            <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/70 dark:bg-white/15" />
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={imgBtn + (imgResizeMode ? ' !bg-primary hover:!bg-primary/90' : '')} title={t.titleResizeImage}>↔</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); hideImageToolbar(); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600/90 text-xs font-bold text-white shadow-md hover:bg-red-700" title="Delete">✕</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={imgBtn + (imgResizeMode ? ' !bg-primary/15 !text-primary ring-primary/40' : '')} title={t.titleResizeImage}>↔</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); hideImageToolbar(); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-red-50 text-[10px] font-bold text-red-600 ring-1 ring-red-200 hover:bg-red-100 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30" title="Delete">✕</button>
             </div>
           </div>
         );
