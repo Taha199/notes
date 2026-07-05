@@ -195,6 +195,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const colorPalRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
   const hlPalRef = useRef<HTMLDivElement>(null);
+  const listWrapRef = useRef<HTMLDivElement>(null);
+  const listPalRef = useRef<HTMLDivElement>(null);
+  const [listPalOpen, setListPalOpen] = useState(false);
+  const [listPalPos, setListPalPos] = useState({ left: 0, top: 0 });
   const imgInputRef = useRef<HTMLInputElement>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const lastLocalHtmlRef = useRef(html);
@@ -402,6 +406,40 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return probe.toString().replace(/\u200B/g, '').length === 0;
   };
 
+  const isCaretAtStartOfBlock = (block: HTMLElement, range: Range): boolean => {
+    const probe = document.createRange();
+    probe.selectNodeContents(block);
+    probe.setEnd(range.startContainer, range.startOffset);
+    return probe.toString().replace(/\u200B/g, '').length === 0;
+  };
+
+  const getBlockPrefixMatch = (block: HTMLElement): RegExpMatchArray | null => {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    const firstText = walker.nextNode();
+    if (!firstText || firstText.nodeType !== Node.TEXT_NODE) return null;
+    return (firstText.textContent ?? '').match(BULLET_PREFIX_RE);
+  };
+
+  const nextPrefixFromMatch = (match: RegExpMatchArray): string => {
+    const full = match[0];
+    const num = full.match(/(\d+)([.)])/);
+    if (num) return full.replace(num[1], String(parseInt(num[1], 10) + 1));
+    return full;
+  };
+
+  const stripBulletPrefixFromLi = (li: HTMLElement) => {
+    const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+    const firstText = walker.nextNode();
+    if (!firstText || firstText.nodeType !== Node.TEXT_NODE) return;
+    const text = firstText.textContent ?? '';
+    const stripped = text.replace(BULLET_PREFIX_RE, '');
+    if (stripped === text) return;
+    firstText.textContent = stripped;
+    if (!li.textContent?.replace(/\u200B/g, '').trim() && !li.querySelector('img')) {
+      li.innerHTML = '<br>';
+    }
+  };
+
   const unwrapListItemToDiv = (li: HTMLLIElement): HTMLDivElement => {
     const div = document.createElement('div');
     div.setAttribute('dir', 'auto');
@@ -481,6 +519,126 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       }
     });
     return [...blocks];
+  };
+
+  const getBlocksForListAction = (ed: HTMLElement, range: Range): HTMLElement[] => {
+    if (!range.collapsed) {
+      return collectBlocksInRange(ed, range).filter((b) => !b.closest('li'));
+    }
+    const block = getLineBlock(range.startContainer, ed);
+    if (!block || block === ed || block.tagName === 'LI' || block.closest('li')) return [];
+    return [block];
+  };
+
+  const convertBlocksToList = (blocks: HTMLElement[], ordered: boolean) => {
+    if (blocks.length === 0) return;
+    const parent = blocks[0].parentNode;
+    if (!parent) return;
+    const list = document.createElement(ordered ? 'ol' : 'ul');
+    list.setAttribute('dir', 'auto');
+    blocks.forEach((block) => {
+      const li = document.createElement('li');
+      li.setAttribute('dir', 'auto');
+      while (block.firstChild) li.appendChild(block.firstChild);
+      stripBulletPrefixFromLi(li);
+      if (!li.textContent?.replace(/\u200B/g, '').trim() && !li.querySelector('img')) {
+        li.innerHTML = '<br>';
+      }
+      list.appendChild(li);
+    });
+    parent.insertBefore(list, blocks[0]);
+    blocks.forEach((b) => b.remove());
+    const lastLi = list.lastElementChild;
+    if (lastLi instanceof HTMLElement) placeCaretInBlock(lastLi, false);
+  };
+
+  const continuePseudoListOnEnter = (block: HTMLElement, range: Range): boolean => {
+    const match = getBlockPrefixMatch(block);
+    if (!match) return false;
+
+    const contentText = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').trim();
+    if (!contentText) {
+      stripBulletPrefixFromBlock(block);
+      return true;
+    }
+
+    const tailRange = document.createRange();
+    tailRange.setStart(range.endContainer, range.endOffset);
+    tailRange.setEnd(block, block.childNodes.length);
+    const tail = tailRange.extractContents();
+
+    const newBlock = document.createElement('div');
+    newBlock.setAttribute('dir', 'auto');
+    const prefix = nextPrefixFromMatch(match);
+    const prefixNode = document.createTextNode(prefix);
+    newBlock.appendChild(prefixNode);
+    const tailText = tail.textContent ?? '';
+    if (tailText.trim()) {
+      if (tail.childNodes.length === 1 && tail.firstChild?.nodeType === Node.TEXT_NODE) {
+        newBlock.appendChild(document.createTextNode(tailText));
+      } else {
+        newBlock.appendChild(tail);
+      }
+    }
+
+    block.parentNode?.insertBefore(newBlock, block.nextSibling);
+    const caretRange = document.createRange();
+    caretRange.setStart(prefixNode, prefix.length);
+    caretRange.collapse(true);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(caretRange);
+    savedRange.current = caretRange.cloneRange();
+    return true;
+  };
+
+  const applyList = (mode: 'bullet' | 'ordered' | 'none') => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ensureFocus(true);
+    restoreSel();
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const range = sel.getRangeAt(0);
+
+    if (mode === 'none') {
+      removeListFormatting();
+      setListPalOpen(false);
+      return;
+    }
+
+    const ordered = mode === 'ordered';
+    const caretList = getListContainer(sel.anchorNode, ed);
+
+    if (caretList) {
+      const isOrdered = caretList.tagName === 'OL';
+      if (isOrdered === ordered) {
+        unwrapList(caretList);
+      } else {
+        const newList = document.createElement(ordered ? 'ol' : 'ul');
+        newList.setAttribute('dir', 'auto');
+        while (caretList.firstChild) newList.appendChild(caretList.firstChild);
+        caretList.parentNode?.replaceChild(newList, caretList);
+      }
+      saveSel();
+      readCommandState();
+      emitHtml();
+      setListPalOpen(false);
+      return;
+    }
+
+    const blocks = getBlocksForListAction(ed, range);
+    if (blocks.length > 0) {
+      convertBlocksToList(blocks, ordered);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      setListPalOpen(false);
+      return;
+    }
+
+    toggleList(ordered);
+    setListPalOpen(false);
   };
 
   const removeListFormatting = () => {
@@ -1034,23 +1192,37 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
+    const range = sel.getRangeAt(0);
+
     const li = getListItem(sel.anchorNode, ed);
     if (li) {
       const text = li.textContent?.replace(/\u200B/g, '').trim() ?? '';
+      e.preventDefault();
       if (!text) {
-        e.preventDefault();
         exitListItem(li, ed, true);
-        finishNewLineEditing(ed);
+      } else {
+        document.execCommand('insertParagraph');
       }
+      finishNewLineEditing(ed);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
+    const block = getLineBlock(sel.anchorNode, ed);
+    if (block && continuePseudoListOnEnter(block, range)) {
+      e.preventDefault();
+      finishNewLineEditing(ed);
+      saveSel();
+      readCommandState();
+      emitHtml();
       return;
     }
 
     e.preventDefault();
 
     clearPendingFontMarker();
-
-    const block = getLineBlock(sel.anchorNode, ed);
-    const range = sel.getRangeAt(0);
 
     if (block && readBlockAlignment(block) !== 'left') {
       createLeftLineFromCaret(block, range);
@@ -1074,25 +1246,35 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (!sel?.rangeCount || !sel.isCollapsed) return;
     const range = sel.getRangeAt(0);
     const li = getListItem(range.startContainer, ed);
-    if (!li) return;
+    if (li) {
+      const text = li.textContent?.replace(/\u200B/g, '').trim() ?? '';
+      const atStart = isCaretAtStartOfLi(li, range);
 
-    const text = li.textContent?.replace(/\u200B/g, '').trim() ?? '';
-    const atStart = isCaretAtStartOfLi(li, range);
+      if (!text) {
+        e.preventDefault();
+        exitListItem(li, ed, true);
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return;
+      }
 
-    if (!text) {
-      e.preventDefault();
-      exitListItem(li, ed, true);
-      saveSel();
-      readCommandState();
-      emitHtml();
+      if (atStart) {
+        e.preventDefault();
+        if (!mergeListItemWithPrevious(li)) {
+          exitListItem(li, ed, true);
+        }
+        saveSel();
+        readCommandState();
+        emitHtml();
+      }
       return;
     }
 
-    if (atStart) {
+    const block = getLineBlock(range.startContainer, ed);
+    if (block && block.tagName !== 'LI' && !block.closest('li') && isCaretAtStartOfBlock(block, range) && getBlockPrefixMatch(block)) {
       e.preventDefault();
-      if (!mergeListItemWithPrevious(li)) {
-        exitListItem(li, ed, true);
-      }
+      stripBulletPrefixFromBlock(block);
       saveSel();
       readCommandState();
       emitHtml();
@@ -1422,6 +1604,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (opening) {
       positionPalette(e.currentTarget as HTMLElement, setPalPos);
       setHlPalOpen(false);
+      setListPalOpen(false);
     }
     setPalOpen(opening);
   };
@@ -1467,8 +1650,21 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (opening) {
       positionPalette(e.currentTarget as HTMLElement, setHlPalPos);
       setPalOpen(false);
+      setListPalOpen(false);
     }
     setHlPalOpen(opening);
+  };
+
+  const toggleListMenu = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    saveSel();
+    const opening = !listPalOpen;
+    if (opening) {
+      positionPalette(e.currentTarget as HTMLElement, setListPalPos);
+      setPalOpen(false);
+      setHlPalOpen(false);
+    }
+    setListPalOpen(opening);
   };
 
   const applyHighlight = (c: string) => {
@@ -1672,6 +1868,20 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   }, [hlPalOpen]);
 
   useEffect(() => {
+    if (!listPalOpen) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (listWrapRef.current?.contains(t) || listPalRef.current?.contains(t)) return;
+      setListPalOpen(false);
+    };
+    const closeAll = () => setListPalOpen(false);
+    document.addEventListener('mousedown', close);
+    window.addEventListener('resize', closeAll);
+    window.addEventListener('scroll', closeAll, true);
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('resize', closeAll); window.removeEventListener('scroll', closeAll, true); };
+  }, [listPalOpen]);
+
+  useEffect(() => {
     if (!previewImage) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setPreviewImage(null); };
     window.addEventListener('keydown', handler);
@@ -1761,16 +1971,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
-        {/* Lists */}
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); toggleList(false); }} title={t.titleBulletList} className={btnCls(activeCmds.has('insertUnorderedList'))}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></svg>
-        </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); toggleList(true); }} title={t.titleNumberedList} className={btnCls(activeCmds.has('insertOrderedList'))}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><text x="2" y="8" fontSize="7" fontWeight="700" fill="currentColor">1</text><text x="2" y="14" fontSize="7" fontWeight="700" fill="currentColor">2</text><text x="2" y="20" fontSize="7" fontWeight="700" fill="currentColor">3</text><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></svg>
-        </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); removeListFormatting(); }} title={t.titleRemoveList} className={btnCls(false)}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 6h14M5 12h14M5 18h14"/><path d="M3 6l2 2M3 12l2 2M3 18l2 2" strokeWidth="1.5"/></svg>
-        </button>
+        {/* Lists — one menu */}
+        <div ref={listWrapRef} className="relative">
+          <button
+            type="button"
+            onMouseDown={toggleListMenu}
+            title={t.titleBulletList}
+            className={btnCls(activeCmds.has('insertUnorderedList') || activeCmds.has('insertOrderedList'))}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></svg>
+          </button>
+        </div>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
@@ -1913,6 +2124,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             <div key={c} onMouseDown={(e) => { e.preventDefault(); applyHighlight(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
           ))}
           <div onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }} className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ Ta bort markering</div>
+        </div>,
+        document.body,
+      )}
+
+      {listPalOpen && createPortal(
+        <div
+          ref={listPalRef}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          className="fixed z-[9999] min-w-[168px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
+          style={{ left: listPalPos.left, top: listPalPos.top }}
+        >
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); applyList('bullet'); }}
+            className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-app-bg dark:hover:bg-white/5 ' + (activeCmds.has('insertUnorderedList') ? 'font-semibold text-primary' : 'text-app-text dark:text-gray-100')}
+          >
+            <span className="w-4 text-center">•</span>
+            <span>{t.titleBulletList}</span>
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); applyList('ordered'); }}
+            className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-app-bg dark:hover:bg-white/5 ' + (activeCmds.has('insertOrderedList') ? 'font-semibold text-primary' : 'text-app-text dark:text-gray-100')}
+          >
+            <span className="w-4 text-center text-[11px] font-bold">1.</span>
+            <span>{t.titleNumberedList}</span>
+          </button>
+          <div className="my-1 h-px bg-app-border dark:bg-white/10" />
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); applyList('none'); }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-app-text-secondary hover:bg-app-bg dark:text-gray-300 dark:hover:bg-white/5"
+          >
+            <span className="w-4 text-center">✕</span>
+            <span>{t.titleRemoveList}</span>
+          </button>
         </div>,
         document.body,
       )}
