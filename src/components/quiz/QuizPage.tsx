@@ -397,7 +397,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
+    <div className="rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
       <div className="flex items-center justify-between border-b border-app-border px-4 py-2 dark:border-white/10">
         <div className="flex min-w-0 items-center gap-3">
           <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? t.quizEditMcqBadge : t.quizEditQaBadge}</span>
@@ -423,13 +423,15 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
       </div>
       <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 md:items-stretch">
         <div className="flex min-h-0 flex-col">
-          <div className="flex min-h-[200px] flex-1 flex-col overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+          <div className="flex max-h-[min(55dvh,32rem)] min-h-[200px] flex-1 flex-col rounded-xl border border-app-border dark:border-white/10">
+            <div className="flex min-h-0 flex-1 flex-col">
             <RichTextEditor
               html={question}
               onChange={onChangeQ}
               placeholder={`${t.quizQuestionLabel}...`}
               minHeight="140px"
             />
+            </div>
             {hasAi && !mcq && (
               <div className="shrink-0 border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
                 <div className="h-7" aria-hidden="true" />
@@ -482,13 +484,15 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           </div>
         ) : (
         <div className="flex min-h-0 flex-col">
-          <div className="flex min-h-[200px] flex-1 flex-col overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+          <div className="flex max-h-[min(55dvh,32rem)] min-h-[200px] flex-1 flex-col rounded-xl border border-app-border dark:border-white/10">
+            <div className="flex min-h-0 flex-1 flex-col">
             <RichTextEditor
               html={answer}
               onChange={onChangeA}
               placeholder={`${t.quizAnswerLabel}...`}
               minHeight="140px"
             />
+            </div>
             {hasAi && (
               <div className="flex shrink-0 justify-end border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
                 <button

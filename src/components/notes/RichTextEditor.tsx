@@ -1662,14 +1662,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       ? 'bg-gray-900 text-white shadow-[0_3px_0_0_rgba(0,0,0,0.8)] -translate-y-px dark:bg-primary dark:shadow-[0_3px_0_0_rgba(108,99,255,0.6)]'
       : 'text-app-text-secondary hover:bg-white dark:hover:bg-white/10');
 
+  const flexToolbar = stickyToolbar && editable;
+  const scrollableContent = flexToolbar || resizable || !!maxHeight;
+
   // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div ref={editorWrapRef} className={'relative ' + (editable ? '' : '[&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_img]:mx-auto [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:object-contain')}>
+    <div ref={editorWrapRef} className={'relative ' + (flexToolbar ? 'flex min-h-0 flex-col ' : '') + (editable ? '' : '[&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_img]:mx-auto [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:object-contain')}>
       {/* Toolbar */}
       <div
         className={
           'flex flex-wrap items-center gap-0.5 border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5 ' +
-          (stickyToolbar && editable ? 'sticky top-0 z-20 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95' : '')
+          (flexToolbar ? 'z-30 flex-shrink-0 ' : '') +
+          (flexToolbar ? 'sticky top-0 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95' : '')
         }
         style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
         onMouseDownCapture={() => {
@@ -1879,7 +1883,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           }
         }}
         suppressContentEditableWarning
-        className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
+        className={(scrollableContent ? 'min-h-0 flex-1 overflow-y-auto ' : '') + 'px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
         style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
 

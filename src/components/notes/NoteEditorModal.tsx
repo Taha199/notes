@@ -55,7 +55,7 @@ function ResizableNoteSplit({
   };
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex flex-1 min-h-0">
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">{left}</div>
       <div
         onMouseDown={startResize}
@@ -311,8 +311,10 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       className="flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-gray-800 dark:text-emerald-300"
                     >{t.notePaste}</button>
                   </div>
-                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                  <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
+                    <div className="flex min-h-0 flex-1 flex-col">
                     <RichTextEditor key={`mq-${manualResetKey}`} html={manualQ} onChange={setManualQ} placeholder={t.noteWriteQuestionPh} minHeight="110px" />
+                    </div>
                   </div>
                 </div>
 
@@ -362,8 +364,10 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       </div>
                     </div>
                   ) : (
-                    <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                    <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
+                      <div className="flex min-h-0 flex-1 flex-col">
                       <RichTextEditor key={`ma-${manualResetKey}`} html={manualA} onChange={setManualA} placeholder={t.noteWriteAnswerPh} minHeight="110px" />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -431,8 +435,10 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       </button>
                     </div>
                   </div>
-                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                  <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
+                    <div className="flex min-h-0 flex-1 flex-col">
                     <RichTextEditor html={aiQ} onChange={setAiQ} placeholder={t.noteGenerateQuestionPh} minHeight="110px" />
+                    </div>
                   </div>
                 </div>
 
@@ -453,8 +459,10 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       {aiGenALoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
                     </button>
                   </div>
-                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                  <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
+                    <div className="flex min-h-0 flex-1 flex-col">
                     <RichTextEditor html={aiA} onChange={setAiA} placeholder={t.noteGenerateAnswerPh} minHeight="110px" />
+                    </div>
                   </div>
                 </div>
 
@@ -524,8 +532,10 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       <div className="flex flex-col gap-3">
                         <div>
                           <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{t.quizQuestionLabel}</label>
-                          <div className="rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
+                          <div className="flex max-h-[min(50dvh,28rem)] min-h-[80px] flex-col rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
+                            <div className="flex min-h-0 flex-1 flex-col">
                             <RichTextEditor html={editQ} onChange={setEditQ} placeholder={t.noteWriteQuestionEditPh} editable={true} minHeight="80px" />
+                            </div>
                           </div>
                         </div>
                         <div>
@@ -547,8 +557,10 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                             </button>
                             )}
                           </div>
-                          <div className="rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
+                          <div className="flex max-h-[min(50dvh,28rem)] min-h-[100px] flex-col rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
+                            <div className="flex min-h-0 flex-1 flex-col">
                             <RichTextEditor html={editA} onChange={setEditA} placeholder={t.noteWriteAnswerPh} editable={true} minHeight="100px" />
+                            </div>
                           </div>
                         </div>
                         <div className="flex justify-end gap-2">
