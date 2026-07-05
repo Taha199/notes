@@ -49,15 +49,17 @@ function NoteSectionBar({
   label,
   noteViewMode,
   onNoteViewModeChange,
+  showViewToggle = true,
 }: {
   label: string;
   noteViewMode: NoteViewMode;
   onNoteViewModeChange: (mode: NoteViewMode) => void;
+  showViewToggle?: boolean;
 }) {
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
       <div className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">{label}</div>
-      <NoteViewToggle mode={noteViewMode} onChange={onNoteViewModeChange} />
+      {showViewToggle && <NoteViewToggle mode={noteViewMode} onChange={onNoteViewModeChange} />}
     </div>
   );
 }
@@ -347,7 +349,7 @@ export function Dashboard() {
               <NoteList notes={fav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
               {favArch.length > 0 && (
                 <>
-                  <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
+                  <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} showViewToggle={false} />
                   <NoteList notes={favArch} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
                 </>
               )}
