@@ -48,6 +48,7 @@ export function DownloadPage() {
             <a
               href={MAC_DMG_URL}
               download={MAC_DMG_FILENAME}
+              rel="noopener noreferrer"
               className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-[13.5px] font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark"
             >
               ⬇️ {t.downloadMacButton}

@@ -68,3 +68,22 @@ electron/
 ```
 
 Web app code under `src/` is unchanged. Desktop config lives only under `electron/` plus `package.json` build settings.
+
+## Hosting the Mac installer (.dmg)
+
+The `.dmg` is ~135 MB and is tracked with **Git LFS** (see `.gitattributes`). Do **not** rely on Vercel to serve `public/downloads/*.dmg`: unless **Git LFS support** is enabled in the Vercel project (Settings → Git → Git LFS), deploys copy only the small LFS **pointer** (~130 bytes), which macOS reports as a corrupted disk image.
+
+**Current approach:** the download button on `/download` points to the GitHub media CDN, which serves the real LFS binary:
+
+`https://media.githubusercontent.com/media/Taha199/notes/main/public/downloads/Taha%20Note-1.0.0-arm64.dmg`
+
+### Publishing a new installer
+
+1. Build: `npm run desktop:build`
+2. Verify: `hdiutil verify "release/Taha Note-<version>-arm64.dmg"`
+3. Copy to `public/downloads/` (same filename as in `src/lib/desktopApp.ts`)
+4. Push LFS objects: `git lfs push --all origin` (required — GitHub stores the binary separately from git commits)
+5. Commit and push the pointer update on `main`
+6. Update `MAC_DMG_FILENAME` / URL in `src/lib/desktopApp.ts` when the version changes
+
+**Alternative:** [GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github) (`gh release upload`) or Firebase Storage — often simpler if you prefer not to use LFS + media CDN.
