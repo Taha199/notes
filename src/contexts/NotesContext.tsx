@@ -856,6 +856,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false);
   const loadedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savesInFlight = useRef(0);
   const savingStartedAt = useRef(0);
   const isApplyingRemoteRef = useRef(false);
@@ -1227,17 +1228,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const run = () => {
       if (!shouldRunHourlyFolderBackup()) return;
       void writeBackupToFolder(buildFullBackupPayload({
-        notes,
-        quizzes,
-        quizSets,
-        quizFolders,
-        chats,
+        notes: notesRef.current,
+        quizzes: quizzesRef.current,
+        quizSets: quizSetsRef.current,
+        quizFolders: quizFoldersRef.current,
+        chats: chatsRef.current,
       }));
     };
     run();
     const id = window.setInterval(run, 60_000);
     return () => window.clearInterval(id);
-  }, [user, loaded, notes, quizzes, quizSets, quizFolders, chats]);
+  }, [user, loaded]);
 
   const persist = (overrides?: PersistSnapshot, forceCloud = false) => {
     const snap: Required<PersistSnapshot> = {
@@ -1248,14 +1249,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSets: overrides?.quizSets ?? quizSetsRef.current,
       quizFolders: overrides?.quizFolders ?? quizFoldersRef.current,
     };
-    localStorage.setItem('malacadhati', JSON.stringify(snap.notes));
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(snap.quizzes));
+    if (localSaveTimer.current) clearTimeout(localSaveTimer.current);
+    localSaveTimer.current = setTimeout(() => {
+      localSaveTimer.current = null;
+      localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
+      localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
+    }, 600);
     if (!user || !loadedRef.current || isApplyingRemoteRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       const u = userRef.current;
       if (!u || isApplyingRemoteRef.current) return;
-      const { notes: nextNotes, drafts: dList, quizzes: qList, chats: chatList, quizSets: qsList, quizFolders: qfList } = snap;
+      const nextNotes = notesRef.current;
+      const dList = draftsRef.current;
+      const qList = quizzesRef.current;
+      const chatList = chatsRef.current;
+      const qsList = quizSetsRef.current;
+      const qfList = quizFoldersRef.current;
       if (!forceCloud && isEmptyUserPayload(nextNotes, qList, chatList, qsList, qfList)) {
         recoveryLog('skipped cloud sync — empty user payload');
         return;

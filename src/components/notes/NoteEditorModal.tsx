@@ -131,11 +131,18 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(note?.lastEdited ?? null);
   const [quizPanelW, setQuizPanelW] = useState(readQuizPanelWidth);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const htmlLiveRef = useRef(html);
+
+  useEffect(() => {
+    htmlLiveRef.current = html;
+  }, [html]);
 
   useEffect(() => {
     if (note) {
       setTitle(note.title);
-      setHtml(mdToHtml(note.html));
+      const nextHtml = mdToHtml(note.html);
+      setHtml(nextHtml);
+      htmlLiveRef.current = nextHtml;
       setLocked(!!note.read);
     }
   }, [note?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -158,9 +165,11 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const current = quizItems[quizIndex];
 
   const save = () => {
-    if (!plainText) return;
+    const liveHtml = htmlLiveRef.current;
+    const text = liveHtml.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+    if (!text) return;
     const ts = nowStr();
-    updateNote(note.id, { title: title.trim(), html, text: plainText, lastEdited: ts, savedAt: new Date().toISOString() });
+    updateNote(note.id, { title: title.trim(), html: liveHtml, text, lastEdited: ts, savedAt: new Date().toISOString() });
     setLastSavedAt(ts);
   };
 
@@ -227,6 +236,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
       <RichTextEditor
         html={html}
         onChange={setHtml}
+        onLiveChange={(v) => { htmlLiveRef.current = v; }}
         placeholder=""
         editable={!locked}
         minHeight="180px"

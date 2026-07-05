@@ -14,6 +14,8 @@ const TAB_INDENT = '    ';
 interface Props {
   html: string;
   onChange: (html: string) => void;
+  /** Fires on every edit immediately — use for save refs without re-rendering each keystroke. */
+  onLiveChange?: (html: string) => void;
   placeholder: string;
   editable?: boolean;
   minHeight?: string;
@@ -24,7 +26,7 @@ interface Props {
   stickyToolbar?: boolean;
 }
 
-export function RichTextEditor({ html, onChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
+export function RichTextEditor({ html, onChange, onLiveChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
   const { t, lang } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -58,10 +60,36 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const lastLocalHtmlRef = useRef(html);
   const lastPropHtmlRef = useRef(html);
+  const onChangeRef = useRef(onChange);
+  const onLiveChangeRef = useRef(onLiveChange);
+  onChangeRef.current = onChange;
+  onLiveChangeRef.current = onLiveChange;
+  const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputCleanupRafRef = useRef<number | null>(null);
+  const selectionRafRef = useRef<number | null>(null);
+  const EMIT_DEBOUNCE_MS = 280;
 
   const emitHtml = (next: string) => {
     lastLocalHtmlRef.current = next;
-    onChange(next);
+    onLiveChangeRef.current?.(next);
+    if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
+    emitTimerRef.current = setTimeout(() => {
+      emitTimerRef.current = null;
+      onChangeRef.current(next);
+    }, EMIT_DEBOUNCE_MS);
+  };
+
+  const flushEmitHtml = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const next = ed.innerHTML;
+    lastLocalHtmlRef.current = next;
+    onLiveChangeRef.current?.(next);
+    if (emitTimerRef.current) {
+      clearTimeout(emitTimerRef.current);
+      emitTimerRef.current = null;
+    }
+    onChangeRef.current(next);
   };
 
   const isInImageHoverZone = (clientX: number, clientY: number, img: HTMLImageElement) => {
@@ -813,21 +841,34 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
 
   useEffect(() => {
     const handler = () => {
-      const ed = editorRef.current;
-      if (!ed) return;
-      const focusedInEditor = document.activeElement === ed || ed.contains(document.activeElement);
-      const sel = window.getSelection();
-      const selInEd = sel?.rangeCount && ed.contains(sel.getRangeAt(0).commonAncestorContainer);
-      const savedInEd = savedRange.current && ed.contains(savedRange.current.commonAncestorContainer);
-      if (focusedInEditor || selInEd || savedInEd) {
-        saveSel();
-        readCommandState();
-        syncFontSizeFromCaret();
-      }
+      if (selectionRafRef.current !== null) return;
+      selectionRafRef.current = requestAnimationFrame(() => {
+        selectionRafRef.current = null;
+        const ed = editorRef.current;
+        if (!ed) return;
+        const focusedInEditor = document.activeElement === ed || ed.contains(document.activeElement);
+        const sel = window.getSelection();
+        const selInEd = sel?.rangeCount && ed.contains(sel.getRangeAt(0).commonAncestorContainer);
+        const savedInEd = savedRange.current && ed.contains(savedRange.current.commonAncestorContainer);
+        if (focusedInEditor || selInEd || savedInEd) {
+          saveSel();
+          readCommandState();
+          syncFontSizeFromCaret();
+        }
+      });
     };
     document.addEventListener('selectionchange', handler);
-    return () => document.removeEventListener('selectionchange', handler);
+    return () => {
+      document.removeEventListener('selectionchange', handler);
+      if (selectionRafRef.current !== null) cancelAnimationFrame(selectionRafRef.current);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => {
+    cancelHideImageToolbar();
+    if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
+    if (inputCleanupRafRef.current !== null) cancelAnimationFrame(inputCleanupRafRef.current);
+  }, []);
 
   useEffect(() => {
     if (!editable) return;
@@ -842,8 +883,6 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     document.addEventListener('keydown', onDocKeyDown, true);
     return () => document.removeEventListener('keydown', onDocKeyDown, true);
   }, [editable]);
-
-  useEffect(() => () => cancelHideImageToolbar(), []);
 
   // ── exec: apply a formatting command ─────────────────────────────────
   const exec = (cmd: string, value?: string) => {
@@ -1442,6 +1481,7 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
           const ed = editorRef.current;
           if (ed) sanitizeCaretFontContext(ed);
         }}
+        onBlur={() => { flushEmitHtml(); }}
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
           handleEditorEnter(e);
@@ -1454,17 +1494,20 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         }}
         onInput={() => {
           const ed = editorRef.current;
-          if (ed) {
-            ed.childNodes.forEach((node) => {
+          if (!ed) return;
+          emitHtml(ed.innerHTML);
+          if (inputCleanupRafRef.current !== null) return;
+          inputCleanupRafRef.current = requestAnimationFrame(() => {
+            inputCleanupRafRef.current = null;
+            const live = editorRef.current;
+            if (!live) return;
+            live.childNodes.forEach((node) => {
               if (node instanceof HTMLElement && !node.hasAttribute('dir')) {
                 node.setAttribute('dir', 'auto');
               }
             });
-            stripEmptyFontSpans(ed);
-            syncFontSizeFromCaret();
-            if (ensureCaretOnOwnLeftLine(ed)) readCommandState();
-          }
-          emitHtml(ed?.innerHTML ?? '');
+            stripEmptyFontSpans(live);
+          });
         }}
         onMouseMove={(event) => {
           if (!editable || isResizingImg.current) return;
