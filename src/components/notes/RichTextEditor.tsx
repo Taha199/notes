@@ -2461,14 +2461,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
                   </svg>
                 </button>
               )}
-              <button
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); saveSel(); applyList('none'); }}
-                title={t.titleRemoveList}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[11px] font-bold text-app-text-secondary hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15 dark:hover:text-red-300"
-              >
-                ✕
-              </button>
             </>
           )}
         </div>
