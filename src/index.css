@@ -148,6 +148,33 @@ body {
   pointer-events: none;
 }
 
+.note-content .note-img-frame,
+[contenteditable] .note-img-frame {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  margin: 0.5rem 0;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(248, 250, 252, 0.35);
+}
+
+.dark .note-content .note-img-frame,
+.dark [contenteditable] .note-img-frame {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(17, 24, 39, 0.35);
+}
+
+.note-content .note-img-frame img,
+[contenteditable] .note-img-frame img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0;
+  border-radius: 0;
+}
+
 .note-content table tr,
 [contenteditable] table tr {
   display: flex;

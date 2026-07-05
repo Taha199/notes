@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
@@ -11,6 +12,7 @@ const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Ho
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
 const TAB_INDENT = '    ';
+const NOTE_IMG_FRAME = 'note-img-frame';
 interface Props {
   html: string;
   onChange: (html: string) => void;
@@ -29,6 +31,47 @@ interface Props {
 export function RichTextEditor({ html, onChange, onLiveChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
   const { t, lang } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
+
+  const ensureImageFrame = (img: HTMLImageElement, _ed: HTMLElement): HTMLElement => {
+    const existing = img.closest(`.${NOTE_IMG_FRAME}`);
+    if (existing instanceof HTMLElement) return existing;
+    const frame = document.createElement('div');
+    frame.className = NOTE_IMG_FRAME;
+    frame.setAttribute('contenteditable', 'false');
+    frame.setAttribute('dir', 'auto');
+    const parent = img.parentNode;
+    if (!parent) return img;
+    parent.insertBefore(frame, img);
+    frame.appendChild(img);
+    img.style.display = 'block';
+    img.style.maxWidth = '100%';
+    if (!img.style.height) img.style.height = 'auto';
+    img.style.margin = '0';
+    img.style.borderRadius = '0';
+    return frame;
+  };
+
+  const normalizeEditorImages = (ed: HTMLElement) => {
+    ed.querySelectorAll('img').forEach((node) => {
+      if (node instanceof HTMLImageElement && !node.closest(`.${NOTE_IMG_FRAME}`)) {
+        ensureImageFrame(node, ed);
+      }
+    });
+  };
+
+  const removeImageBlock = (img: HTMLImageElement) => {
+    const frame = img.closest(`.${NOTE_IMG_FRAME}`);
+    if (frame?.parentNode) {
+      const after = frame.nextSibling;
+      frame.parentNode.removeChild(frame);
+      if (after?.nodeName === 'BR' && after.parentNode) after.parentNode.removeChild(after);
+    } else {
+      const next = img.nextSibling;
+      img.parentNode?.removeChild(img);
+      if (next?.nodeName === 'BR') next.parentNode?.removeChild(next);
+    }
+  };
+
   const savedRange = useRef<Range | null>(null);
   const savedFormattingRange = useRef<Range | null>(null);
   const pendingFontSize = useRef<number | null>(null);
@@ -47,49 +90,29 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
-  const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; rect: DOMRect } | null>(null);
+  const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; frame: HTMLElement; rect: DOMRect } | null>(null);
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
   const isResizingImg = useRef(false);
-  const hideImgToolbarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const IMG_TOOLBAR_H = 32;
-  const IMG_TOOLBAR_GAP = 3;
-
-  const getImageToolbarLayout = (r: DOMRect) => ({
-    top: r.bottom + IMG_TOOLBAR_GAP,
-    left: r.left,
-    width: r.width,
-    height: IMG_TOOLBAR_H,
+  const syncHoveredImg = (img: HTMLImageElement, frame: HTMLElement) => ({
+    el: img,
+    frame,
+    rect: img.getBoundingClientRect(),
   });
 
-  const isPointerOverImageHoverZone = (clientX: number, clientY: number, img: HTMLImageElement) => {
-    const r = img.getBoundingClientRect();
-    const bar = getImageToolbarLayout(r);
-    const onImage = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
-    const onBar = clientX >= bar.left && clientX <= bar.left + bar.width
-      && clientY >= bar.top && clientY <= bar.top + bar.height;
-    return onImage || onBar;
-  };
-
-  const cancelHideImageToolbar = () => {
-    if (hideImgToolbarTimer.current) {
-      clearTimeout(hideImgToolbarTimer.current);
-      hideImgToolbarTimer.current = null;
-    }
-  };
-
   const hideImageToolbar = () => {
-    cancelHideImageToolbar();
     if (isResizingImg.current || imgResizeModeRef.current) return;
     setHoveredImg(null);
     setImgResizeMode(false);
   };
 
   const showImageToolbar = (img: HTMLImageElement) => {
-    cancelHideImageToolbar();
-    setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+    const ed = editorRef.current;
+    if (!ed) return;
+    const frame = ensureImageFrame(img, ed);
+    setHoveredImg(syncHoveredImg(img, frame));
   };
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
@@ -469,32 +492,41 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const applyImageAlignment = (img: HTMLImageElement, align: BlockAlign) => {
     const ed = editorRef.current;
     if (!ed) return;
-    const block = ensureStandaloneImageBlock(img, ed);
-    block.style.display = 'block';
-    block.style.width = '100%';
-    block.style.textAlign = align;
-    block.style.marginLeft = '0';
-    block.style.marginRight = '0';
-    applyImageMargins(img, align);
+    const frame = ensureImageFrame(img, ed);
+    frame.style.display = 'block';
+    frame.style.width = 'fit-content';
+    frame.style.maxWidth = '100%';
+    img.style.marginLeft = '0';
+    img.style.marginRight = '0';
+    if (align === 'center') {
+      frame.style.marginLeft = 'auto';
+      frame.style.marginRight = 'auto';
+    } else if (align === 'right') {
+      frame.style.marginLeft = 'auto';
+      frame.style.marginRight = '0';
+    } else {
+      frame.style.marginLeft = '0';
+      frame.style.marginRight = '0';
+    }
     emitHtml(ed.innerHTML);
-    setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+    setHoveredImg(syncHoveredImg(img, frame));
   };
 
   const moveImageVertically = (img: HTMLImageElement, direction: 'up' | 'down') => {
     const ed = editorRef.current;
     if (!ed) return;
-    const block = ensureStandaloneImageBlock(img, ed);
-    const parent = block.parentElement;
+    const frame = ensureImageFrame(img, ed);
+    const parent = frame.parentElement;
     if (!parent) return;
     const siblings = Array.from(parent.children).filter((n): n is HTMLElement => n instanceof HTMLElement);
-    const idx = siblings.indexOf(block);
+    const idx = siblings.indexOf(frame);
     if (idx < 0) return;
 
     if (direction === 'up') {
       if (idx <= 0) return;
-      parent.insertBefore(block, siblings[idx - 1]);
+      parent.insertBefore(frame, siblings[idx - 1]);
     } else if (idx < siblings.length - 1) {
-      parent.insertBefore(siblings[idx + 1], block);
+      parent.insertBefore(siblings[idx + 1], frame);
     } else {
       const tail = document.createElement('div');
       tail.setAttribute('dir', 'auto');
@@ -506,7 +538,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     lastLocalHtmlRef.current = nextHtml;
     onChange(nextHtml);
     requestAnimationFrame(() => {
-      if (img.isConnected) setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+      if (img.isConnected) setHoveredImg(syncHoveredImg(img, ensureImageFrame(img, ed)));
     });
   };
 
@@ -793,7 +825,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== html) {
       editorRef.current.innerHTML = html;
-      lastLocalHtmlRef.current = html;
+      normalizeEditorImages(editorRef.current);
+      lastLocalHtmlRef.current = editorRef.current.innerHTML;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -814,7 +847,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     // Skip only stale echoes of our own edits; deliberate parent updates still apply.
     if (!propChanged && ed.innerHTML === lastLocalHtmlRef.current && html !== lastLocalHtmlRef.current) return;
     ed.innerHTML = html;
-    lastLocalHtmlRef.current = html;
+    normalizeEditorImages(ed);
+    lastLocalHtmlRef.current = ed.innerHTML;
   }, [html]);
 
   // ── Command state ─────────────────────────────────────────────────────
@@ -869,10 +903,35 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => {
-    cancelHideImageToolbar();
     if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
     if (inputCleanupRafRef.current !== null) cancelAnimationFrame(inputCleanupRafRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!editable) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const onOver = (e: MouseEvent) => {
+      const frame = (e.target as HTMLElement).closest?.(`.${NOTE_IMG_FRAME}`);
+      if (!(frame instanceof HTMLElement)) return;
+      const img = frame.querySelector('img');
+      if (img instanceof HTMLImageElement) showImageToolbar(img);
+    };
+    const onOut = (e: MouseEvent) => {
+      if (isResizingImg.current || imgResizeModeRef.current) return;
+      const from = (e.target as HTMLElement).closest?.(`.${NOTE_IMG_FRAME}`);
+      if (!(from instanceof HTMLElement)) return;
+      const to = e.relatedTarget as Node | null;
+      if (to && from.contains(to)) return;
+      hideImageToolbar();
+    };
+    ed.addEventListener('mouseover', onOver);
+    ed.addEventListener('mouseout', onOut);
+    return () => {
+      ed.removeEventListener('mouseover', onOver);
+      ed.removeEventListener('mouseout', onOut);
+    };
+  }, [editable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!editable) return;
@@ -1177,7 +1236,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     reader.onload = () => {
       const url = reader.result as string;
       ensureFocus(true);
-      document.execCommand('insertHTML', false, `<img src="${url}" style="display:block;max-width:160px;max-height:160px;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;" /><br>`);
+      document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto"><img src="${url}" style="display:block;max-width:160px;max-height:160px;height:auto;cursor:zoom-in;" /></div><br>`);
       saveSel();
       emitHtml(ed.innerHTML);
     };
@@ -1231,7 +1290,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       }
       ev.preventDefault();
       applyImageSize(img, mode, startWidth, startHeight, ratio, maxW, dx, dy);
-      setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+      const frame = ensureImageFrame(img, ed);
+      setHoveredImg(syncHoveredImg(img, frame));
     };
     const onUp = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
@@ -1241,7 +1301,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       handle.removeEventListener('pointercancel', onUp);
       isResizingImg.current = false;
       if (resizeStarted) {
-        setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+        const frame = ensureImageFrame(img, ed);
+        setHoveredImg(syncHoveredImg(img, frame));
         emitHtml(ed.innerHTML);
       }
     };
@@ -1488,7 +1549,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
         onBlur={() => { flushEmitHtml(); }}
         onScroll={() => {
           if (hoveredImg?.el.isConnected) {
-            setHoveredImg({ el: hoveredImg.el, rect: hoveredImg.el.getBoundingClientRect() });
+            setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame));
           } else if (hoveredImg) {
             hideImageToolbar();
           }
@@ -1520,22 +1581,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             stripEmptyFontSpans(live);
           });
         }}
-        onMouseMove={(event) => {
-          if (!editable || isResizingImg.current) return;
-          const target = event.target;
-          if (target instanceof HTMLImageElement) {
-            showImageToolbar(target);
-            return;
-          }
-          if (imgResizeMode) return;
-          if (hoveredImg) {
-            if (isPointerOverImageHoverZone(event.clientX, event.clientY, hoveredImg.el)) {
-              setHoveredImg({ el: hoveredImg.el, rect: hoveredImg.el.getBoundingClientRect() });
-              return;
-            }
-            hideImageToolbar();
-          }
-        }}
         onMouseLeave={() => { if (!isResizingImg.current && !imgResizeMode) hideImageToolbar(); }}
         onClick={(event) => {
           if (!editable && event.detail >= 3) { event.preventDefault(); onLockedTripleClick?.(); return; }
@@ -1552,29 +1597,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           }
         }}
         suppressContentEditableWarning
-        className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5' + (resizable && editable ? ' resize-y' : '')}
+        className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:flex [&_.note-img-frame]:max-w-full [&_.note-img-frame]:flex-col [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/60 [&_.note-img-frame]:bg-app-bg/30 dark:[&_.note-img-frame]:border-white/15 dark:[&_.note-img-frame]:bg-gray-900/40 [&_.note-img-frame_img]:max-w-full' + (resizable && editable ? ' resize-y' : '')}
         style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
 
-      {/* Image hover buttons */}
-      {editable && hoveredImg && (() => {
-        const r = hoveredImg.rect;
-        const bar = getImageToolbarLayout(r);
+      {/* Image toolbar — portaled inside the image frame */}
+      {editable && hoveredImg && createPortal((() => {
         const imgBtn = 'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-app-bg text-[10px] text-app-text shadow-sm ring-1 ring-app-border hover:bg-primary/10 dark:bg-gray-800 dark:text-gray-100 dark:ring-white/15';
         return (
           <div
+            className="note-img-frame__toolbar flex w-full items-center justify-center gap-0.5 overflow-x-auto border-t border-app-border/70 bg-white/95 px-1.5 py-0.5 dark:border-white/10 dark:bg-gray-900/95"
             onMouseDown={(e) => e.preventDefault()}
-            style={{
-              position: 'fixed',
-              left: bar.left,
-              top: bar.top,
-              width: bar.width,
-              height: bar.height,
-              zIndex: 9999,
-              pointerEvents: 'auto',
-            }}
           >
-            <div className="flex h-full items-center gap-0.5 overflow-x-auto rounded-lg border border-app-border/80 bg-white/95 px-1.5 shadow-md backdrop-blur-sm dark:border-white/15 dark:bg-gray-900/95">
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
@@ -1584,16 +1618,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/70 dark:bg-white/15" />
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={imgBtn + (imgResizeMode ? ' !bg-primary/15 !text-primary ring-primary/40' : '')} title={t.titleResizeImage}>↔</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); hideImageToolbar(); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-red-50 text-[10px] font-bold text-red-600 ring-1 ring-red-200 hover:bg-red-100 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30" title="Delete">✕</button>
-            </div>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-red-50 text-[10px] font-bold text-red-600 ring-1 ring-red-200 hover:bg-red-100 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30" title="Delete">✕</button>
           </div>
         );
-      })()}
+      })(), hoveredImg.frame)}
 
       {/* Image resize handles — only after tapping ↔ (avoids accidental resize when viewing) */}
       {editable && hoveredImg && imgResizeMode && (() => {
         const r = hoveredImg.rect;
-        const keep = () => { cancelHideImageToolbar(); setHoveredImg({ el: hoveredImg.el, rect: hoveredImg.el.getBoundingClientRect() }); };
+        const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
         const leave = () => { if (!isResizingImg.current) hideImageToolbar(); };
         const base = 'flex items-center justify-center rounded-full border-2 border-white bg-primary text-white shadow-lg';
         return (
