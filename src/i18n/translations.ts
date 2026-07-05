@@ -413,7 +413,7 @@ export interface Translation {
   quizColorPink: string;
   quizColorCyan: string;
   quizSortManualFull: string;
-  quizSortOldest: string;
+  quizSortNewest: string;
   quizSortStudy: string;
   quizSortDateShort: string;
   quizSortStudyShort: string;
@@ -760,7 +760,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizColorPink: 'Pink',
     quizColorCyan: 'Cyan',
     quizSortManualFull: '✋ Manual order',
-    quizSortOldest: '🕑 Oldest → newest',
+    quizSortNewest: '🕑 Newest → oldest',
     quizSortStudy: '📚 Not studied / studied',
     quizSortDateShort: 'Date',
     quizSortStudyShort: 'Study',
@@ -1105,7 +1105,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizColorPink: 'Rosa',
     quizColorCyan: 'Cyan',
     quizSortManualFull: '✋ Egen ordning',
-    quizSortOldest: '🕑 Äldst → nyast',
+    quizSortNewest: '🕑 Nyast → äldst',
     quizSortStudy: '📚 Ej studerade / studerade',
     quizSortDateShort: 'Datum',
     quizSortStudyShort: 'Studie',

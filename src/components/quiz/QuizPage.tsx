@@ -11,6 +11,7 @@ import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
+import { quizItemCreatedAtMs } from '../../lib/quizSort';
 import { SITE_URL } from '../../lib/seo';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
@@ -29,17 +30,19 @@ function saveQuizSelection(folderId: string | null, setId: string | null) {
   localStorage.setItem(QUIZ_SELECTION_KEY, JSON.stringify({ folderId, setId }));
 }
 
-type ItemSort = 'manual' | 'oldest' | 'study';
+type ItemSort = 'manual' | 'newest' | 'study';
 
-const ITEM_SORT_OPTIONS: { key: ItemSort; labelKey: 'quizSortManualFull' | 'quizSortOldest' | 'quizSortStudy'; shortKey: 'quizSortManualShort' | 'quizSortDateShort' | 'quizSortStudyShort' }[] = [
+const ITEM_SORT_OPTIONS: { key: ItemSort; labelKey: 'quizSortManualFull' | 'quizSortNewest' | 'quizSortStudy'; shortKey: 'quizSortManualShort' | 'quizSortDateShort' | 'quizSortStudyShort' }[] = [
   { key: 'manual', labelKey: 'quizSortManualFull', shortKey: 'quizSortManualShort' },
-  { key: 'oldest', labelKey: 'quizSortOldest', shortKey: 'quizSortDateShort' },
+  { key: 'newest', labelKey: 'quizSortNewest', shortKey: 'quizSortDateShort' },
   { key: 'study', labelKey: 'quizSortStudy', shortKey: 'quizSortStudyShort' },
 ];
 
-function getItemCreatedTime(item: QuizItem): number {
-  if (item.createdAt) return new Date(item.createdAt).getTime();
-  return item.id;
+function loadItemSort(): ItemSort {
+  const stored = localStorage.getItem('malacadhati_quiz_itemsort');
+  if (stored === 'oldest') return 'newest';
+  if (stored === 'manual' || stored === 'newest' || stored === 'study') return stored;
+  return 'newest';
 }
 
 function loadProgress(): Record<string, Record<number, 'known' | 'learning'>> {
@@ -588,7 +591,7 @@ export function QuizPage() {
   // Hide answers (self-test): blur all Svar, click a card to reveal it
   const [hideAnswers, setHideAnswers] = useState(false);
   // Question list ordering: manual / oldest-first / studied vs not studied
-  const [itemSort, setItemSort] = useState<ItemSort>(() => (localStorage.getItem('malacadhati_quiz_itemsort') as ItemSort) || 'manual');
+  const [itemSort, setItemSort] = useState<ItemSort>(loadItemSort);
   const [itemSortMenuOpen, setItemSortMenuOpen] = useState(false);
   const changeItemSort = (mode: ItemSort) => {
     setItemSort(mode);
@@ -972,20 +975,21 @@ export function QuizPage() {
   const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : isNotesView ? quizzes : [];
-  const studyItems = useMemo(() => displayItems.filter((item) => !item.draft), [displayItems]);
 
   const orderedItems = useMemo(() => {
     if (itemSort === 'manual') return displayItems;
-    if (itemSort === 'oldest') {
-      return [...displayItems].sort((a, b) => getItemCreatedTime(a) - getItemCreatedTime(b));
+    if (itemSort === 'newest') {
+      return [...displayItems].sort((a, b) => quizItemCreatedAtMs(b) - quizItemCreatedAtMs(a));
     }
     return [...displayItems].sort((a, b) => {
       const aStudied = currentProgress[a.id] === 'known' ? 1 : 0;
       const bStudied = currentProgress[b.id] === 'known' ? 1 : 0;
       if (aStudied !== bStudied) return aStudied - bStudied;
-      return getItemCreatedTime(a) - getItemCreatedTime(b);
+      return quizItemCreatedAtMs(b) - quizItemCreatedAtMs(a);
     });
   }, [displayItems, itemSort, currentProgress]);
+
+  const studyItems = useMemo(() => orderedItems.filter((item) => !item.draft), [orderedItems]);
 
   const canReorder = orderedItems.length > 1 && (!!selectedSetId || isNotesView);
 
