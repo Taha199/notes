@@ -452,17 +452,30 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     const ed = editorRef.current;
     if (!ed) return;
     const block = ensureStandaloneImageBlock(img, ed);
+    const parent = block.parentElement;
+    if (!parent) return;
+    const siblings = Array.from(parent.children).filter((n): n is HTMLElement => n instanceof HTMLElement);
+    const idx = siblings.indexOf(block);
+    if (idx < 0) return;
+
     if (direction === 'up') {
-      const prev = block.previousElementSibling;
-      if (!prev) return;
-      block.parentNode?.insertBefore(block, prev);
+      if (idx <= 0) return;
+      parent.insertBefore(block, siblings[idx - 1]);
+    } else if (idx < siblings.length - 1) {
+      parent.insertBefore(siblings[idx + 1], block);
     } else {
-      const next = block.nextElementSibling;
-      if (!next) return;
-      block.parentNode?.insertBefore(next, block);
+      const tail = document.createElement('div');
+      tail.setAttribute('dir', 'auto');
+      tail.innerHTML = '<br>';
+      parent.appendChild(tail);
     }
-    emitHtml(ed.innerHTML);
-    setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+
+    const nextHtml = ed.innerHTML;
+    lastLocalHtmlRef.current = nextHtml;
+    onChange(nextHtml);
+    requestAnimationFrame(() => {
+      if (img.isConnected) setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+    });
   };
 
   const applyBlockAlignment = (align: BlockAlign) => {
@@ -760,7 +773,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     // content (e.g. the "Paste note" button) — always honor it below.
     const propChanged = html !== lastPropHtmlRef.current;
     lastPropHtmlRef.current = html;
-    if (document.activeElement === ed) return;
+    const active = document.activeElement;
+    if (active && editorWrapRef.current?.contains(active)) return;
     if (ed.innerHTML === html) {
       lastLocalHtmlRef.current = html;
       return;
