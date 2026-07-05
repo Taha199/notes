@@ -199,6 +199,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const listPalRef = useRef<HTMLDivElement>(null);
   /** Frozen caret when the list menu opens — used so toolbar clicks don't lose the target line. */
   const listMenuRangeRef = useRef<Range | null>(null);
+  const listMenuBlockRef = useRef<HTMLElement | null>(null);
   const [listPalOpen, setListPalOpen] = useState(false);
   const [listPalPos, setListPalPos] = useState({ left: 0, top: 0 });
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -799,16 +800,29 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const applyList = (mode: 'bullet' | 'ordered' | 'none') => {
     const ed = editorRef.current;
     if (!ed) return;
-    const range = restoreListActionRange();
-    if (!range) return;
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
 
     if (mode === 'none') {
+      ed.focus({ preventScroll: true });
+      const frozen = listMenuRangeRef.current;
+      listMenuRangeRef.current = null;
+      listMenuBlockRef.current = null;
+      const sel = window.getSelection();
+      if (frozen && ed.contains(frozen.commonAncestorContainer)) {
+        sel?.removeAllRanges();
+        sel?.addRange(frozen);
+        savedRange.current = frozen.cloneRange();
+      } else {
+        restoreSel();
+      }
       removeListFormatting();
       setListPalOpen(false);
       return;
     }
+
+    const range = restoreListActionRange();
+    if (!range) return;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
 
     const ordered = mode === 'ordered';
     const caretList = getListContainer(sel.anchorNode, ed);
@@ -816,13 +830,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (caretList) {
       const isOrdered = caretList.tagName === 'OL';
       if (isOrdered === ordered) {
-        unwrapList(caretList);
-      } else {
-        const newList = document.createElement(ordered ? 'ol' : 'ul');
-        newList.setAttribute('dir', 'auto');
-        while (caretList.firstChild) newList.appendChild(caretList.firstChild);
-        caretList.parentNode?.replaceChild(newList, caretList);
+        setListPalOpen(false);
+        return;
       }
+      const newList = document.createElement(ordered ? 'ol' : 'ul');
+      newList.setAttribute('dir', 'auto');
+      while (caretList.firstChild) newList.appendChild(caretList.firstChild);
+      caretList.parentNode?.replaceChild(newList, caretList);
       saveSel();
       readCommandState();
       emitHtml();
@@ -830,7 +844,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       return;
     }
 
-    let activeBlock = isolateLineBlockForList(range, ed);
+    const savedBlock = listMenuBlockRef.current;
+    listMenuBlockRef.current = null;
+    let activeBlock =
+      savedBlock?.isConnected &&
+      savedBlock !== ed &&
+      savedBlock.tagName !== 'LI' &&
+      !savedBlock.closest('li')
+        ? savedBlock
+        : isolateLineBlockForList(range, ed);
     if (!activeBlock || activeBlock === ed || activeBlock.tagName === 'LI' || activeBlock.closest('li')) {
       activeBlock = ensureBlockAtRange(ed, sel.getRangeAt(0));
     }
@@ -1895,15 +1917,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const toggleListMenu = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     saveSel();
+    const ed = editorRef.current;
     const opening = !listPalOpen;
     if (opening) {
       const r = liveRange() ?? savedRange.current;
       listMenuRangeRef.current = r ? r.cloneRange() : null;
+      listMenuBlockRef.current = r && ed ? resolveBlockAtRange(r, ed) : null;
       positionPalette(e.currentTarget as HTMLElement, setListPalPos);
       setPalOpen(false);
       setHlPalOpen(false);
     } else {
       listMenuRangeRef.current = null;
+      listMenuBlockRef.current = null;
     }
     setListPalOpen(opening);
   };
@@ -2114,10 +2139,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       const t = e.target as Node;
       if (listWrapRef.current?.contains(t) || listPalRef.current?.contains(t)) return;
       listMenuRangeRef.current = null;
+      listMenuBlockRef.current = null;
       setListPalOpen(false);
     };
     const closeAll = () => {
       listMenuRangeRef.current = null;
+      listMenuBlockRef.current = null;
       setListPalOpen(false);
     };
     document.addEventListener('mousedown', close);
@@ -2217,7 +2244,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
         {/* Lists — one menu */}
-        <div ref={listWrapRef} className="relative">
+        <div ref={listWrapRef} className="relative flex items-center gap-0.5">
           <button
             type="button"
             onMouseDown={toggleListMenu}
@@ -2226,6 +2253,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></svg>
           </button>
+          {(activeCmds.has('insertUnorderedList') || activeCmds.has('insertOrderedList')) && (
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); saveSel(); applyList('none'); }}
+              title={t.titleRemoveList}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-[11px] font-bold text-app-text-secondary hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/15 dark:hover:text-red-300"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
