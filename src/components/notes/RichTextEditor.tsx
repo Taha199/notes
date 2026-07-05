@@ -192,7 +192,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     });
   };
   const colorWrapRef = useRef<HTMLDivElement>(null);
+  const colorPalRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
+  const hlPalRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const lastLocalHtmlRef = useRef(html);
@@ -1408,12 +1410,20 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   // ── Color / highlight ─────────────────────────────────────────────────
   // Color palette is a floating overlay so the editor may have lost focus.
   // We MUST restore selection here.
+  const positionPalette = (btn: HTMLElement, setPos: (p: { left: number; top: number }) => void) => {
+    const rect = btn.getBoundingClientRect();
+    setPos({ left: rect.left, top: rect.bottom + 8 });
+  };
+
   const togglePalette = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     saveSel();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setPalPos({ left: rect.left, top: rect.bottom + 8 });
-    setPalOpen((o) => !o);
+    const opening = !palOpen;
+    if (opening) {
+      positionPalette(e.currentTarget as HTMLElement, setPalPos);
+      setHlPalOpen(false);
+    }
+    setPalOpen(opening);
   };
 
   const applyColor = (c: string) => {
@@ -1453,9 +1463,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const toggleHlPalette = (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     saveSel();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setHlPalPos({ left: rect.left, top: rect.bottom + 8 });
-    setHlPalOpen((o) => !o);
+    const opening = !hlPalOpen;
+    if (opening) {
+      positionPalette(e.currentTarget as HTMLElement, setHlPalPos);
+      setPalOpen(false);
+    }
+    setHlPalOpen(opening);
   };
 
   const applyHighlight = (c: string) => {
@@ -1627,10 +1640,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     emitHtml();
   };
 
-  // ── Close palette on outside click ────────────────────────────────────
+  // ── Close palette on outside click / scroll ─────────────────────────────
+  // Palettes are portaled to document.body so fixed coords match the viewport
+  // (backdrop-blur on the sticky toolbar otherwise breaks position:fixed).
   useEffect(() => {
     if (!palOpen) return;
-    const close = (e: MouseEvent) => { if (!colorWrapRef.current?.contains(e.target as Node)) setPalOpen(false); };
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (colorWrapRef.current?.contains(t) || colorPalRef.current?.contains(t)) return;
+      setPalOpen(false);
+    };
     const closeAll = () => setPalOpen(false);
     document.addEventListener('mousedown', close);
     window.addEventListener('resize', closeAll);
@@ -1640,7 +1659,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   useEffect(() => {
     if (!hlPalOpen) return;
-    const close = (e: MouseEvent) => { if (!hlWrapRef.current?.contains(e.target as Node)) setHlPalOpen(false); };
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (hlWrapRef.current?.contains(t) || hlPalRef.current?.contains(t)) return;
+      setHlPalOpen(false);
+    };
     const closeAll = () => setHlPalOpen(false);
     document.addEventListener('mousedown', close);
     window.addEventListener('resize', closeAll);
@@ -1705,18 +1728,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             <span className="text-xs font-bold leading-none">A</span>
             <span className="h-[3px] w-4 rounded-sm" style={{ background: barColor }} />
           </button>
-          {palOpen && (
-            <div
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              className="fixed z-[9999] grid w-[184px] grid-cols-6 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
-              style={{ left: palPos.left, top: palPos.top }}
-            >
-              {COLORS.map((c) => (
-                <div key={c} onMouseDown={(e) => { e.preventDefault(); applyColor(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
-              ))}
-              <div onMouseDown={(e) => { e.preventDefault(); clearTextColor(); }} className="col-span-6 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ Standardfärg (auto)</div>
-            </div>
-          )}
         </div>
 
         {/* Highlight */}
@@ -1725,18 +1736,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             <span className="text-xs font-bold leading-none" style={{ WebkitTextStroke: '0.5px #555' }}>A</span>
             <span className="h-[3px] w-4 rounded-sm" style={{ background: hlColor }} />
           </button>
-          {hlPalOpen && (
-            <div
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              className="fixed z-[9999] grid w-[164px] grid-cols-5 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
-              style={{ left: hlPalPos.left, top: hlPalPos.top }}
-            >
-              {HIGHLIGHT_COLORS.map((c) => (
-                <div key={c} onMouseDown={(e) => { e.preventDefault(); applyHighlight(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
-              ))}
-              <div onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }} className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ Ta bort markering</div>
-            </div>
-          )}
         </div>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
@@ -1886,6 +1885,37 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
         className={(scrollableContent ? 'min-h-0 flex-1 overflow-y-auto ' : '') + 'px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
         style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
+
+      {/* Color / highlight palettes — portaled to body (see comment above useEffects) */}
+      {palOpen && createPortal(
+        <div
+          ref={colorPalRef}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          className="fixed z-[9999] grid w-[184px] grid-cols-6 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
+          style={{ left: palPos.left, top: palPos.top }}
+        >
+          {COLORS.map((c) => (
+            <div key={c} onMouseDown={(e) => { e.preventDefault(); applyColor(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
+          ))}
+          <div onMouseDown={(e) => { e.preventDefault(); clearTextColor(); }} className="col-span-6 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ Standardfärg (auto)</div>
+        </div>,
+        document.body,
+      )}
+
+      {hlPalOpen && createPortal(
+        <div
+          ref={hlPalRef}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          className="fixed z-[9999] grid w-[164px] grid-cols-5 gap-1.5 rounded-xl border border-app-border bg-white p-2.5 shadow-xl dark:border-white/10 dark:bg-gray-800"
+          style={{ left: hlPalPos.left, top: hlPalPos.top }}
+        >
+          {HIGHLIGHT_COLORS.map((c) => (
+            <div key={c} onMouseDown={(e) => { e.preventDefault(); applyHighlight(c); }} className="h-6 w-6 cursor-pointer rounded-md border border-black/10 transition-transform hover:scale-125" style={{ background: c }} />
+          ))}
+          <div onMouseDown={(e) => { e.preventDefault(); applyHighlight('transparent'); }} className="col-span-5 mt-0.5 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-app-border py-1 text-[11px] text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5">✕ Ta bort markering</div>
+        </div>,
+        document.body,
+      )}
 
       {/* Image toolbar — portaled inside the image frame */}
       {editable && hoveredImg && createPortal((() => {
