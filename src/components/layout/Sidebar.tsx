@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { Page } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { ADMIN_EMAIL } from '../../lib/firebase';
 import { useTheme } from '../../contexts/ThemeContext';
-import { isDesktopApp } from '../../lib/isDesktopApp';
 import { Logo } from '../common/Logo';
 
 export function Sidebar({
@@ -26,11 +25,6 @@ export function Sidebar({
   const { user, hasPassword, isPlus, profilePhotoURL, signOut } = useAuth();
   const { dark, toggleDark } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
-  const [desktopApp, setDesktopApp] = useState(false);
-
-  useEffect(() => {
-    setDesktopApp(isDesktopApp());
-  }, []);
 
   const counts = {
     home: notes.filter((n) => !n.archived && !n.trashed).length,
@@ -130,17 +124,6 @@ export function Sidebar({
           <NavBtn key={it.page} it={it} />
         ))}
         <div className="my-1.5 border-t border-app-border dark:border-white/10" />
-        {!desktopApp && (
-          <>
-            {(!collapsed || mobileOpen) && (
-              <p className="px-3 pb-0.5 pt-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/55 dark:text-gray-500">
-                {t.downloadSectionTitle}
-              </p>
-            )}
-            <NavBtn it={{ page: 'download', icon: '💻', label: t.navDownload }} />
-            <div className="my-1.5 border-t border-app-border dark:border-white/10" />
-          </>
-        )}
         {items2.map((it) => (
           <NavBtn key={it.page} it={it} />
         ))}
