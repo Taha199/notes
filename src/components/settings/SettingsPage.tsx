@@ -32,9 +32,7 @@ export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
-  const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup } = useNotes();
-  const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
-  const [loadingBackups, setLoadingBackups] = useState(true);
+  const { notes, quizzes, quizSets, quizFolders, chats } = useNotes();
   const [storageLimitMB, setStorageLimitMB] = useState(100);
   const [filesBytes, setFilesBytes] = useState(0);
 
@@ -151,15 +149,6 @@ export function SettingsPage() {
     })();
     return () => { cancelled = true; };
   }, [user?.uid, user?.email]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoadingBackups(true);
-    void listQuizFolderBackups()
-      .then((items) => { if (!cancelled) setFolderBackups(items); })
-      .finally(() => { if (!cancelled) setLoadingBackups(false); });
-    return () => { cancelled = true; };
-  }, [listQuizFolderBackups]);
 
   const avatar = (user?.displayName || user?.email || '?').charAt(0).toUpperCase();
   const photoUrl = photoPreview || profilePhotoURL;
@@ -363,41 +352,6 @@ export function SettingsPage() {
       </SectionCard>
 
       {isAdmin && <PlatformBackupCard />}
-
-      <SectionCard title={t.settingsFolderBackup}>
-        {loadingBackups ? (
-          <p className="text-sm text-app-text-secondary dark:text-gray-400">…</p>
-        ) : folderBackups.length === 0 ? (
-          <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/5">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-app-text-secondary dark:text-gray-400">
-              {t.settingsFolderBackupLast}
-            </p>
-            <p className="mt-0.5 text-sm text-app-text-secondary dark:text-gray-400">{t.settingsFolderBackupEmpty}</p>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/5">
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-app-text-secondary dark:text-gray-400">
-                {t.settingsFolderBackupLast}
-              </p>
-              <p className="mt-0.5 truncate text-sm font-medium text-app-text dark:text-gray-100">
-                {new Date(Number(folderBackups[0].key)).toLocaleString(t.dateLocale)}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                void restoreQuizFolderBackup(folderBackups[0].key).then((count) => {
-                  show(count > 0 ? `${t.settingsFolderBackupRestored} (${count})` : t.settingsFolderBackupRestored);
-                });
-              }}
-              className="flex-shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
-            >
-              {t.settingsFolderBackupRestore}
-            </button>
-          </div>
-        )}
-      </SectionCard>
 
       {/* Danger Zone */}
       <div className="overflow-hidden rounded-2xl border border-red-200 bg-white shadow-sm dark:border-red-500/20 dark:bg-gray-900">
