@@ -16,6 +16,7 @@ import { SeoHead } from './common/SeoHead';
 import { FilesPage } from './files/FilesPage';
 import { QuizPage } from './quiz/QuizPage';
 import { SettingsPage } from './settings/SettingsPage';
+import { DownloadPage } from './download/DownloadPage';
 import { AdminPanel } from './admin/AdminPanel';
 import { ConfirmDialog } from './common/ConfirmDialog';
 
@@ -319,6 +320,7 @@ export function Dashboard() {
 
           {page === 'files' && <FilesPage search={search} />}
           {page === 'quiz' && <QuizPage />}
+          {page === 'download' && <DownloadPage />}
           {page === 'settings' && <SettingsPage />}
           {page === 'admin' && <AdminPanel />}
 

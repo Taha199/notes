@@ -10,6 +10,7 @@ const PAGE_PATHS: Record<Page, string> = {
   archive: '/archive',
   trash: '/trash',
   quiz: '/quiz',
+  download: '/download',
   settings: '/settings',
   admin: '/admin',
 };

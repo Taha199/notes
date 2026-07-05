@@ -14,6 +14,21 @@ export interface Translation {
   navFiles: string;
   navArchive: string;
   navTrash: string;
+  navDownload: string;
+  downloadSectionTitle: string;
+  pageDownload: string;
+  downloadTitle: string;
+  downloadSubtitle: string;
+  downloadMacTitle: string;
+  downloadMacDesc: string;
+  downloadMacButton: string;
+  downloadMacReqs: string;
+  downloadMacUnavailable: string;
+  downloadBuildTitle: string;
+  downloadBuildDesc: string;
+  downloadBuildOutput: string;
+  downloadAlreadyTitle: string;
+  downloadAlreadyDesc: string;
   searchPh: string;
   newNote: string;
   locked: string;
@@ -483,6 +498,16 @@ export const LANGS: Record<Lang, Translation> = {
     appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
     navHome: 'Home', navFav: 'Favourites', navUnread: 'Notes to Study', navRead: 'Studied Notes',
     navLibrary: 'Notes Library', navFiles: 'File Uploads', navArchive: 'Archive', navTrash: 'Trash',
+    navDownload: 'Desktop app', downloadSectionTitle: 'Download as app',
+    pageDownload: 'Desktop app', downloadTitle: 'Taha Note for Mac',
+    downloadSubtitle: 'Install Taha Note as a native Mac app. Your notes sync with the web — same account, same features.',
+    downloadMacTitle: 'macOS', downloadMacDesc: 'Apple Silicon (M1/M2/M3) · macOS 12 or later',
+    downloadMacButton: 'Download for Mac (.dmg)',
+    downloadMacReqs: 'Open the .dmg, drag Taha Note to Applications, then launch from Launchpad.',
+    downloadMacUnavailable: 'The installer is not hosted online yet — use the build steps below, or check back soon.',
+    downloadBuildTitle: 'Build from source', downloadBuildDesc: 'Developers can build the Mac app from the project repository:',
+    downloadBuildOutput: 'Output: release/mac/Taha Note.app and release/Taha Note-1.0.0-arm64.dmg',
+    downloadAlreadyTitle: 'You\'re using the desktop app', downloadAlreadyDesc: 'This window is already the Taha Note Mac app.',
     searchPh: 'Search...', newNote: 'New Note', locked: 'Locked', editing: 'Editing',
     mDel: 'Delete', mUnarch: 'Unarchive', mDone: 'Mark as Studied', mUndone: 'Mark as Unstudied', mArchive: 'Archive', mSave: 'Save', mCopy: 'Copy', mGenQuiz: 'Generate Quiz', mAddQ: 'Add Question', mTiPh: 'Title (optional)',
     archPill: 'Read & Archived', userName: 'User', userSub: 'My Personal Notes',
@@ -818,6 +843,16 @@ export const LANGS: Record<Lang, Translation> = {
     appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
     navHome: 'Hem', navFav: 'Favoriter', navUnread: 'Att studera', navRead: 'Studerade',
     navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArchive: 'Arkiv', navTrash: 'Papperskorg',
+    navDownload: 'Skrivbordsapp', downloadSectionTitle: 'Ladda ner som program',
+    pageDownload: 'Skrivbordsapp', downloadTitle: 'Taha Note för Mac',
+    downloadSubtitle: 'Installera Taha Note som en inbyggd Mac-app. Dina anteckningar synkas med webben — samma konto, samma funktioner.',
+    downloadMacTitle: 'macOS', downloadMacDesc: 'Apple Silicon (M1/M2/M3) · macOS 12 eller senare',
+    downloadMacButton: 'Ladda ner för Mac (.dmg)',
+    downloadMacReqs: 'Öppna .dmg-filen, dra Taha Note till Program och starta från Launchpad.',
+    downloadMacUnavailable: 'Installationsfilen finns inte online än — använd byggstegen nedan eller kom tillbaka snart.',
+    downloadBuildTitle: 'Bygg från källkod', downloadBuildDesc: 'Utvecklare kan bygga Mac-appen från projektets källkod:',
+    downloadBuildOutput: 'Resultat: release/mac/Taha Note.app och release/Taha Note-1.0.0-arm64.dmg',
+    downloadAlreadyTitle: 'Du använder skrivbordsappen', downloadAlreadyDesc: 'Det här fönstret är redan Taha Note Mac-appen.',
     searchPh: 'Sök...', newNote: 'Ny Anteckning', locked: 'Låst', editing: 'Redigerar',
     mDel: 'Radera', mUnarch: 'Avarkivera', mDone: 'Markera som Studerad', mUndone: 'Markera som Ostuderad', mArchive: 'Arkivera', mSave: 'Spara', mCopy: 'Kopiera', mGenQuiz: 'Generera Quiz', mAddQ: 'Lägg till fråga', mTiPh: 'Titel (valfri)',
     archPill: 'Läst & Arkiverad', userName: 'Användare', userSub: 'Mina Personliga Anteckningar',

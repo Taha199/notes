@@ -69,6 +69,10 @@ const PAGE_META: Partial<Record<Page, { sv: { title: string; description: string
     sv: { title: 'Papperskorg – Taha Note', description: 'Raderade anteckningar och quiz i Taha Note.' },
     en: { title: 'Trash – Taha Note', description: 'Deleted notes and quizzes in Taha Note.' },
   },
+  download: {
+    sv: { title: 'Ladda ner skrivbordsapp – Taha Note', description: 'Installera Taha Note som en inbyggd Mac-app för Apple Silicon.' },
+    en: { title: 'Download Desktop App – Taha Note', description: 'Install Taha Note as a native Mac app for Apple Silicon.' },
+  },
   settings: {
     sv: { title: 'Inställningar – Taha Note', description: 'Hantera ditt Taha Note-konto och lagring.' },
     en: { title: 'Settings – Taha Note', description: 'Manage your Taha Note account and storage.' },

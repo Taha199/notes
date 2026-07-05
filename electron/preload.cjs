@@ -1,1 +1,6 @@
-// Reserved for future desktop-only APIs (notifications, file dialogs, etc.)
+const { contextBridge } = require('electron');
+
+contextBridge.exposeInMainWorld('tahaNoteDesktop', {
+  isDesktop: true,
+  platform: process.platform,
+});

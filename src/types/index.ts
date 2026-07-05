@@ -21,7 +21,7 @@ export interface DraftContent {
   html: string;
 }
 
-export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz' | 'settings' | 'admin';
+export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz' | 'download' | 'settings' | 'admin';
 
 export type NoteViewMode = 'grid' | 'expanded';
 
