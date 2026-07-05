@@ -631,12 +631,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement) => {
-    if (isNestedListItem(li)) {
-      const prev = li.previousElementSibling;
-      if (!(prev instanceof HTMLLIElement) || isLiEmpty(prev)) {
-        if (returnToParentListItem(li)) return;
-      }
-    }
     insertNewListItemAfter(li);
   };
 
