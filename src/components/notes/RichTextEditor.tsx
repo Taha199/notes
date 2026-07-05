@@ -158,6 +158,30 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const next = syncHoveredImg(img, frame);
     setHoveredImg((prev) => (prev?.el === img ? { ...next, rect: prev.rect } : next));
   };
+
+  const resolveImageFromHoverTarget = (target: EventTarget | null): HTMLImageElement | null => {
+    if (target instanceof HTMLImageElement) return target;
+    if (!(target instanceof HTMLElement)) return null;
+    const frame = target.closest(`.${NOTE_IMG_FRAME}`);
+    if (!(frame instanceof HTMLElement)) return null;
+    const img = frame.querySelector('img');
+    return img instanceof HTMLImageElement ? img : null;
+  };
+
+  const handleEditorMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!editable || isResizingImg.current) return;
+    const img = resolveImageFromHoverTarget(event.target);
+    if (img) {
+      showImageToolbar(img);
+      return;
+    }
+    if (imgResizeMode) return;
+    if (hoveredImg) {
+      const target = event.target;
+      if (target instanceof Node && hoveredImg.frame.contains(target)) return;
+      hideImageToolbar();
+    }
+  };
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
@@ -892,6 +916,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     }
     // Skip only stale echoes of our own edits; deliberate parent updates still apply.
     if (!propChanged && ed.innerHTML === lastLocalHtmlRef.current && html !== lastLocalHtmlRef.current) return;
+    hideImageToolbar();
     ed.innerHTML = html;
     normalizeEditorImages(ed);
     lastLocalHtmlRef.current = ed.innerHTML;
@@ -952,32 +977,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
     if (inputCleanupRafRef.current !== null) cancelAnimationFrame(inputCleanupRafRef.current);
   }, []);
-
-  useEffect(() => {
-    if (!editable) return;
-    const ed = editorRef.current;
-    if (!ed) return;
-    const onOver = (e: MouseEvent) => {
-      const frame = (e.target as HTMLElement).closest?.(`.${NOTE_IMG_FRAME}`);
-      if (!(frame instanceof HTMLElement)) return;
-      const img = frame.querySelector('img');
-      if (img instanceof HTMLImageElement) showImageToolbar(img);
-    };
-    const onOut = (e: MouseEvent) => {
-      if (isResizingImg.current || imgResizeModeRef.current) return;
-      const from = (e.target as HTMLElement).closest?.(`.${NOTE_IMG_FRAME}`);
-      if (!(from instanceof HTMLElement)) return;
-      const to = e.relatedTarget as Node | null;
-      if (to && from.contains(to)) return;
-      hideImageToolbar();
-    };
-    ed.addEventListener('mouseover', onOver);
-    ed.addEventListener('mouseout', onOut);
-    return () => {
-      ed.removeEventListener('mouseover', onOver);
-      ed.removeEventListener('mouseout', onOut);
-    };
-  }, [editable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!editable) return;
@@ -1283,8 +1282,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       const url = reader.result as string;
       ensureFocus(true);
       document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto"><img src="${url}" style="display:block;max-width:160px;max-height:160px;height:auto;cursor:zoom-in;" /></div><br>`);
+      normalizeEditorImages(ed);
       saveSel();
-      emitHtml(ed.innerHTML);
+      emitHtml();
     };
     reader.readAsDataURL(file);
   };
@@ -1592,7 +1592,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           const ed = editorRef.current;
           if (ed) sanitizeCaretFontContext(ed);
         }}
-        onBlur={() => { flushEmitHtml(); }}
+        onBlur={() => { hideImageToolbar(); flushEmitHtml(); }}
         onScroll={() => {
           if (hoveredImg?.el.isConnected) {
             setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame));
@@ -1627,7 +1627,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             stripEmptyFontSpans(live);
           });
         }}
-        onMouseLeave={() => { if (!isResizingImg.current && !imgResizeMode) hideImageToolbar(); }}
+        onMouseMove={handleEditorMouseMove}
+        onMouseLeave={(e) => {
+          if (isResizingImg.current || imgResizeMode) return;
+          const rt = e.relatedTarget;
+          if (rt instanceof Node && editorRef.current?.contains(rt)) return;
+          hideImageToolbar();
+        }}
         onClick={(event) => {
           if (!editable && event.detail >= 3) { event.preventDefault(); onLockedTripleClick?.(); return; }
           if (isResizingImg.current) return;
