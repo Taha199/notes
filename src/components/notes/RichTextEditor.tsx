@@ -678,15 +678,75 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     return true;
   };
 
+  const nestSubListUnder = (li: HTMLLIElement): boolean => {
+    const parentList = li.parentElement;
+    if (!parentList || !LIST_TAGS.has(parentList.tagName)) return false;
+    const ordered = parentList.tagName === 'OL';
+
+    let subList = Array.from(li.children).find(
+      (c): c is HTMLUListElement | HTMLOListElement =>
+        c instanceof HTMLElement && LIST_TAGS.has(c.tagName),
+    );
+    if (!subList) {
+      subList = document.createElement(ordered ? 'ol' : 'ul');
+      subList.setAttribute('dir', 'auto');
+      li.appendChild(subList);
+    }
+
+    const newLi = document.createElement('li');
+    newLi.setAttribute('dir', 'auto');
+    newLi.innerHTML = '<br>';
+    subList.appendChild(newLi);
+    placeCaretInBlock(newLi, true);
+    return true;
+  };
+
+  const restoreListEditingSelection = (): Range | null => {
+    const ed = editorRef.current;
+    if (!ed) return null;
+    ed.focus({ preventScroll: true });
+    const sel = window.getSelection();
+    if (!sel) return null;
+
+    const frozen = listMenuRangeRef.current;
+    if (frozen && ed.contains(frozen.commonAncestorContainer)) {
+      sel.removeAllRanges();
+      sel.addRange(frozen);
+      savedRange.current = frozen.cloneRange();
+      return frozen.cloneRange();
+    }
+    if (savedRange.current && ed.contains(savedRange.current.commonAncestorContainer)) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange.current);
+      return savedRange.current.cloneRange();
+    }
+    const live = liveRange();
+    if (live) return live;
+    restoreSel();
+    return sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+  };
+
+  const resolveListItemForAction = (range: Range, ed: HTMLElement): HTMLLIElement | null => {
+    const direct = resolveListItemAtSelection(range, ed);
+    if (direct) return direct;
+    const block = listMenuBlockRef.current;
+    if (block?.isConnected) {
+      const fromBlock = block.closest('li');
+      if (fromBlock instanceof HTMLLIElement) return fromBlock;
+    }
+    return null;
+  };
+
   const applySubList = () => {
     const ed = editorRef.current;
     if (!ed) return;
-    ed.focus({ preventScroll: true });
-    restoreSel();
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
-    const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
-    if (!li || !indentListItem(li)) return;
+    const range = restoreListEditingSelection();
+    if (!range) return;
+    listMenuRangeRef.current = null;
+    listMenuBlockRef.current = null;
+
+    const li = resolveListItemForAction(range, ed);
+    if (!li || !nestSubListUnder(li)) return;
     saveSel();
     readCommandState();
     emitHtml();
@@ -1643,7 +1703,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       }
       const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
       if (li) {
-        if (isNestedListItem(li)) active.add('nestedList');
+        active.add('inListItem');
+        if (isNestedListItem(li) || li.querySelector(':scope > ul, :scope > ol')) active.add('nestedList');
         if (canIndentListItem(li)) active.add('canIndentList');
       }
       const align = readAlignmentAtCaret(ed);
@@ -2337,10 +2398,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
               <button
                 type="button"
                 onMouseDown={(e) => { e.preventDefault(); saveSel(); applySubList(); }}
-                disabled={!activeCmds.has('canIndentList')}
                 title={t.titleSubList}
                 className={
-                  'flex h-7 w-7 items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-35 ' +
+                  'flex h-7 w-7 items-center justify-center rounded-md ' +
                   (activeCmds.has('nestedList')
                     ? 'bg-primary text-white'
                     : 'text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10')
@@ -2477,7 +2537,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           }
         }}
         suppressContentEditableWarning
-        className={(scrollableContent ? 'min-h-0 flex-1 overflow-y-auto ' : '') + 'px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
+        className={(scrollableContent ? 'min-h-0 flex-1 overflow-y-auto ' : '') + 'px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:ps-5 [&_ol]:list-decimal [&_ol]:ps-5 [&_li>ul]:mt-0.5 [&_li>ol]:mt-0.5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
         style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
 
