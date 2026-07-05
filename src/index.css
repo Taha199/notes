@@ -150,20 +150,33 @@ body {
 
 .note-content .note-img-frame,
 [contenteditable] .note-img-frame {
-  display: flex;
-  flex-direction: column;
+  display: block;
+  width: fit-content;
   max-width: 100%;
   margin: 0.5rem 0;
   overflow: hidden;
   border-radius: 0.75rem;
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  background: rgba(248, 250, 252, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(248, 250, 252, 0.25);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.note-content .note-img-frame--active,
+[contenteditable] .note-img-frame--active {
+  border-color: rgba(83, 74, 183, 0.45);
+  box-shadow: 0 1px 6px rgba(83, 74, 183, 0.12);
 }
 
 .dark .note-content .note-img-frame,
 .dark [contenteditable] .note-img-frame {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(17, 24, 39, 0.35);
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(17, 24, 39, 0.28);
+}
+
+.dark .note-content .note-img-frame--active,
+.dark [contenteditable] .note-img-frame--active {
+  border-color: rgba(129, 140, 248, 0.35);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
 }
 
 .note-content .note-img-frame img,
@@ -173,6 +186,16 @@ body {
   height: auto;
   margin: 0;
   border-radius: 0;
+}
+
+.note-content .note-img-frame__toolbar-host,
+[contenteditable] .note-img-frame__toolbar-host {
+  display: none;
+}
+
+.note-content .note-img-frame--active .note-img-frame__toolbar-host,
+[contenteditable] .note-img-frame--active .note-img-frame__toolbar-host {
+  display: block;
 }
 
 .note-content table tr,

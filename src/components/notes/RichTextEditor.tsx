@@ -13,6 +13,8 @@ const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
 const TAB_INDENT = '    ';
 const NOTE_IMG_FRAME = 'note-img-frame';
+const NOTE_IMG_TOOLBAR = 'note-img-frame__toolbar';
+const NOTE_IMG_TOOLBAR_HOST = 'note-img-frame__toolbar-host';
 interface Props {
   html: string;
   onChange: (html: string) => void;
@@ -34,7 +36,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
 
   const ensureImageFrame = (img: HTMLImageElement, _ed: HTMLElement): HTMLElement => {
     const existing = img.closest(`.${NOTE_IMG_FRAME}`);
-    if (existing instanceof HTMLElement) return existing;
+    if (existing instanceof HTMLElement) {
+      getToolbarHost(existing);
+      return existing;
+    }
     const frame = document.createElement('div');
     frame.className = NOTE_IMG_FRAME;
     frame.setAttribute('contenteditable', 'false');
@@ -48,14 +53,43 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     if (!img.style.height) img.style.height = 'auto';
     img.style.margin = '0';
     img.style.borderRadius = '0';
+    frame.style.display = 'block';
+    frame.style.width = 'fit-content';
+    frame.style.maxWidth = '100%';
+    getToolbarHost(frame);
     return frame;
   };
 
+  const getToolbarHost = (frame: HTMLElement): HTMLElement => {
+    const existing = frame.querySelector(`.${NOTE_IMG_TOOLBAR_HOST}`);
+    if (existing instanceof HTMLElement) return existing;
+    const host = document.createElement('div');
+    host.className = NOTE_IMG_TOOLBAR_HOST;
+    host.setAttribute('contenteditable', 'false');
+    frame.appendChild(host);
+    return host;
+  };
+
+  const stripImageToolbars = (root: ParentNode) => {
+    root.querySelectorAll(`.${NOTE_IMG_TOOLBAR}`).forEach((el) => el.remove());
+    root.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}`).forEach((el) => el.remove());
+  };
+
+  const serializeEditorHtml = (ed: HTMLElement): string => {
+    const clone = ed.cloneNode(true) as HTMLElement;
+    stripImageToolbars(clone);
+    return clone.innerHTML;
+  };
+
   const normalizeEditorImages = (ed: HTMLElement) => {
+    stripImageToolbars(ed);
     ed.querySelectorAll('img').forEach((node) => {
       if (node instanceof HTMLImageElement && !node.closest(`.${NOTE_IMG_FRAME}`)) {
         ensureImageFrame(node, ed);
       }
+    });
+    ed.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((frame) => {
+      if (frame instanceof HTMLElement) getToolbarHost(frame);
     });
   };
 
@@ -90,20 +124,24 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
-  const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; frame: HTMLElement; rect: DOMRect } | null>(null);
+  const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; frame: HTMLElement; host: HTMLElement; rect: DOMRect } | null>(null);
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
   const isResizingImg = useRef(false);
+  const activeFrameRef = useRef<HTMLElement | null>(null);
 
   const syncHoveredImg = (img: HTMLImageElement, frame: HTMLElement) => ({
     el: img,
     frame,
+    host: getToolbarHost(frame),
     rect: img.getBoundingClientRect(),
   });
 
   const hideImageToolbar = () => {
     if (isResizingImg.current || imgResizeModeRef.current) return;
+    activeFrameRef.current?.classList.remove('note-img-frame--active');
+    activeFrameRef.current = null;
     setHoveredImg(null);
     setImgResizeMode(false);
   };
@@ -112,7 +150,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const ed = editorRef.current;
     if (!ed) return;
     const frame = ensureImageFrame(img, ed);
-    setHoveredImg(syncHoveredImg(img, frame));
+    if (activeFrameRef.current && activeFrameRef.current !== frame) {
+      activeFrameRef.current.classList.remove('note-img-frame--active');
+    }
+    frame.classList.add('note-img-frame--active');
+    activeFrameRef.current = frame;
+    const next = syncHoveredImg(img, frame);
+    setHoveredImg((prev) => (prev?.el === img ? { ...next, rect: prev.rect } : next));
   };
   const colorWrapRef = useRef<HTMLDivElement>(null);
   const hlWrapRef = useRef<HTMLDivElement>(null);
@@ -129,7 +173,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const selectionRafRef = useRef<number | null>(null);
   const EMIT_DEBOUNCE_MS = 280;
 
-  const emitHtml = (next: string) => {
+  const emitHtml = (raw?: string) => {
+    const ed = editorRef.current;
+    const next = ed ? serializeEditorHtml(ed) : (raw ?? '');
     lastLocalHtmlRef.current = next;
     onLiveChangeRef.current?.(next);
     if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
@@ -142,7 +188,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const flushEmitHtml = () => {
     const ed = editorRef.current;
     if (!ed) return;
-    const next = ed.innerHTML;
+    const next = serializeEditorHtml(ed);
     lastLocalHtmlRef.current = next;
     onLiveChangeRef.current?.(next);
     if (emitTimerRef.current) {
@@ -534,7 +580,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       parent.appendChild(tail);
     }
 
-    const nextHtml = ed.innerHTML;
+    const nextHtml = serializeEditorHtml(ed);
     lastLocalHtmlRef.current = nextHtml;
     onChange(nextHtml);
     requestAnimationFrame(() => {
@@ -1597,31 +1643,31 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
           }
         }}
         suppressContentEditableWarning
-        className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:flex [&_.note-img-frame]:max-w-full [&_.note-img-frame]:flex-col [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/60 [&_.note-img-frame]:bg-app-bg/30 dark:[&_.note-img-frame]:border-white/15 dark:[&_.note-img-frame]:bg-gray-900/40 [&_.note-img-frame_img]:max-w-full' + (resizable && editable ? ' resize-y' : '')}
+        className={'overflow-y-auto px-4 py-3 leading-normal text-app-text outline-none dark:text-gray-100 [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:pr-5 [&_ol]:list-decimal [&_ol]:pr-5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame]:transition-colors [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full' + (resizable && editable ? ' resize-y' : '')}
         style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
 
       {/* Image toolbar — portaled inside the image frame */}
       {editable && hoveredImg && createPortal((() => {
-        const imgBtn = 'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-app-bg text-[10px] text-app-text shadow-sm ring-1 ring-app-border hover:bg-primary/10 dark:bg-gray-800 dark:text-gray-100 dark:ring-white/15';
+        const imgBtn = 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] text-app-text hover:bg-primary/10 dark:text-gray-100';
         return (
           <div
-            className="note-img-frame__toolbar flex w-full items-center justify-center gap-0.5 overflow-x-auto border-t border-app-border/70 bg-white/95 px-1.5 py-0.5 dark:border-white/10 dark:bg-gray-900/95"
+            className={`${NOTE_IMG_TOOLBAR} flex w-full flex-nowrap items-center justify-center gap-0.5 overflow-x-auto border-t border-app-border/60 bg-white/96 px-1 py-1 dark:border-white/10 dark:bg-gray-900/96`}
             onMouseDown={(e) => e.preventDefault()}
           >
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
-            <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/70 dark:bg-white/15" />
+            <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'up'); }} className={imgBtn} title={t.titleMoveImageUp}>↑</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
-            <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/70 dark:bg-white/15" />
+            <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={imgBtn + (imgResizeMode ? ' !bg-primary/15 !text-primary ring-primary/40' : '')} title={t.titleResizeImage}>↔</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-red-50 text-[10px] font-bold text-red-600 ring-1 ring-red-200 hover:bg-red-100 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30" title="Delete">✕</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(); }} className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15" title="Delete">✕</button>
           </div>
         );
-      })(), hoveredImg.frame)}
+      })(), hoveredImg.host)}
 
       {/* Image resize handles — only after tapping ↔ (avoids accidental resize when viewing) */}
       {editable && hoveredImg && imgResizeMode && (() => {
