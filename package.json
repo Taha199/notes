@@ -1,13 +1,19 @@
 {
   "name": "mina-anteckningar",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Taha Note — notes, quiz, and AI chat",
+  "author": "Abdullah Taha",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "desktop:dev": "concurrently -k -n vite,electron -c cyan,magenta \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "desktop:build": "npm run build && electron-builder --mac",
+    "desktop:build:offline": "npm run build && DESKTOP_BUNDLE=1 electron-builder --mac --config.files.1=dist/**/*"
   },
   "dependencies": {
     "@tiptap/extension-character-count": "^3.27.1",
@@ -46,6 +52,34 @@
     "tailwindcss": "^4.3.1",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "concurrently": "^9.2.1",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12",
+    "wait-on": "^8.0.5"
+  },
+  "build": {
+    "appId": "com.tahanote.app",
+    "productName": "Taha Note",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "electron/icons/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "minimumSystemVersion": "12.0"
+    },
+    "dmg": {
+      "title": "Taha Note"
+    }
   }
 }

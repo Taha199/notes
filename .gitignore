@@ -27,3 +27,6 @@ dist-ssr
 node_modules
 .vercel
 .env*
+
+# Electron desktop builds
+release/
