@@ -1028,7 +1028,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     } else if (mode === 'width') {
       const w = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
       img.style.width = `${w}px`;
-      img.style.height = 'auto';
+      img.style.height = `${Math.round(startHeight)}px`;
+      img.style.objectFit = 'fill';
     } else {
       const w = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
       img.style.width = `${w}px`;
