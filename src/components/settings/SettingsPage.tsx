@@ -1,20 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { useNotes, type RecoverableCloudSummary } from '../../contexts/NotesContext';
+import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
 import { getStorageLimitMB, mbToBytes } from '../../lib/storageQuota';
-import {
-  buildFullBackupPayload,
-  downloadBackupJson,
-  isAutoFolderBackupEnabled,
-  pickBackupFolder,
-  setAutoFolderBackupEnabled,
-  supportsFolderBackup,
-  writeBackupToFolder,
-} from '../../lib/externalBackup';
 import { PlatformBackupCard } from '../admin/PlatformBackupCard';
 
 function formatBytes(bytes: number): string {
@@ -41,19 +32,11 @@ export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
-  const { notes, quizzes, quizSets, quizFolders, chats, loaded, listQuizFolderBackups, restoreQuizFolderBackup, listDataBackups, restoreDataBackup, scanRecoverableCloud, emergencyRecoverFromCloud, getLocalBackupSummary, restoreFromLocalBackup } = useNotes();
+  const { notes, quizzes, quizSets, quizFolders, chats, listQuizFolderBackups, restoreQuizFolderBackup, getLocalBackupSummary, restoreFromLocalBackup } = useNotes();
   const [folderBackups, setFolderBackups] = useState<{ key: string; label: string; folderCount: number }[]>([]);
-  const [dataBackups, setDataBackups] = useState<{ key: string; label: string; notes: number; quizzes: number; sets: number; folders: number; chats: number }[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(true);
-  const [loadingDataBackups, setLoadingDataBackups] = useState(true);
   const [localBackup, setLocalBackup] = useState(() => getLocalBackupSummary());
   const [restoringLocal, setRestoringLocal] = useState(false);
-  const [autoFolderBackup, setAutoFolderBackup] = useState(() => isAutoFolderBackupEnabled());
-  const folderBackupSupported = supportsFolderBackup();
-  const [restoringCloudKey, setRestoringCloudKey] = useState<string | null>(null);
-  const [recoverScan, setRecoverScan] = useState<RecoverableCloudSummary | null>(null);
-  const [scanningRecover, setScanningRecover] = useState(false);
-  const [recoveringEmergency, setRecoveringEmergency] = useState(false);
   const [storageLimitMB, setStorageLimitMB] = useState(100);
   const [filesBytes, setFilesBytes] = useState(0);
 
@@ -181,25 +164,6 @@ export function SettingsPage() {
   }, [listQuizFolderBackups]);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoadingDataBackups(true);
-    void listDataBackups()
-      .then((items) => { if (!cancelled) setDataBackups(items); })
-      .finally(() => { if (!cancelled) setLoadingDataBackups(false); });
-    return () => { cancelled = true; };
-  }, [listDataBackups]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    let cancelled = false;
-    setScanningRecover(true);
-    void scanRecoverableCloud()
-      .then((summary) => { if (!cancelled) setRecoverScan(summary); })
-      .finally(() => { if (!cancelled) setScanningRecover(false); });
-    return () => { cancelled = true; };
-  }, [loaded, scanRecoverableCloud, notes.length, quizzes.length]);
-
-  useEffect(() => {
     setLocalBackup(getLocalBackupSummary());
   }, [notes, quizzes, quizSets, quizFolders, chats]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -207,86 +171,10 @@ export function SettingsPage() {
   const photoUrl = photoPreview || profilePhotoURL;
   const isAdmin = user?.email === ADMIN_EMAIL;
   const showPlusProfile = isPlus || isAdmin;
-  const recoverTotal = recoverScan
-    ? recoverScan.totalRecoverable.notes
-      + recoverScan.totalRecoverable.quizzes
-      + recoverScan.totalRecoverable.sets
-      + recoverScan.totalRecoverable.folders
-      + recoverScan.totalRecoverable.chats
-    : 0;
 
   return (
     <div className="mx-auto max-w-xl space-y-5 px-4 py-6 sm:px-6">
       <h1 className="text-lg font-bold text-app-text dark:text-gray-100">{t.settingsTitle}</h1>
-
-      <SectionCard title={t.settingsEmergencyRecovery}>
-        <p className="mb-3 text-sm text-app-text-secondary dark:text-gray-400">{t.settingsEmergencyRecoverySub}</p>
-        {scanningRecover ? (
-          <p className="text-sm text-app-text-secondary dark:text-gray-400">…</p>
-        ) : recoverScan ? (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 text-xs text-app-text-secondary dark:border-white/10 dark:bg-white/5 dark:text-gray-400">
-              <p>{lang === 'sv' ? 'Molnet' : 'Cloud'}: {recoverScan.sources.cloud.notes} notes · {recoverScan.sources.cloud.quizzes} quiz · {recoverScan.sources.cloud.sets} sets</p>
-              <p>{lang === 'sv' ? 'Backup' : 'Backup'}: {recoverScan.sources.dataHistoryBest.notes} notes · {recoverScan.sources.dataHistoryBest.sets} sets</p>
-              <p>{lang === 'sv' ? 'Utkast' : 'Drafts'}: {recoverScan.sources.drafts} · {lang === 'sv' ? 'AI-chatt' : 'AI chat'}: {recoverScan.sources.chatUserMessages} msgs · {lang === 'sv' ? 'Mapp-backups' : 'Folder backups'}: {recoverScan.sources.folderHistoryKeys}</p>
-              <p className="mt-1 font-medium text-app-text dark:text-gray-200">
-                {t.settingsCloudBackupCounts
-                  .replace('{notes}', String(recoverScan.totalRecoverable.notes))
-                  .replace('{quizzes}', String(recoverScan.totalRecoverable.quizzes))
-                  .replace('{folders}', String(recoverScan.totalRecoverable.folders))
-                  .replace('{sets}', String(recoverScan.totalRecoverable.sets))
-                  .replace('{chats}', String(recoverScan.totalRecoverable.chats))}
-              </p>
-              {recoverScan.folderNames.length > 0 && (
-                <p className="mt-1 text-app-text dark:text-gray-300">
-                  {lang === 'sv' ? 'Mappar' : 'Folders'}: {recoverScan.folderNames.join(', ')}
-                </p>
-              )}
-              {recoverScan.totalRecoverable.notes === 0
-                && recoverScan.totalRecoverable.quizzes === 0
-                && recoverScan.totalRecoverable.sets === 0
-                && recoverScan.totalRecoverable.folders > 0 && (
-                <p className="mt-2 rounded-lg border border-amber-300/50 bg-amber-50/80 px-2 py-1.5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                  {t.settingsEmergencyRecoveryPartial.replace('{folders}', recoverScan.folderNames.join(', ') || String(recoverScan.totalRecoverable.folders))}
-                </p>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={scanningRecover}
-                onClick={() => {
-                  setScanningRecover(true);
-                  void scanRecoverableCloud()
-                    .then(setRecoverScan)
-                    .finally(() => setScanningRecover(false));
-                }}
-                className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-semibold text-app-text-secondary hover:bg-app-bg dark:border-white/15 dark:text-gray-300"
-              >
-                {t.settingsEmergencyRecoveryScan}
-              </button>
-              <button
-                type="button"
-                disabled={recoveringEmergency || recoverTotal === 0}
-                onClick={() => {
-                  setRecoveringEmergency(true);
-                  void emergencyRecoverFromCloud()
-                    .then((counts) => {
-                      const total = counts.notes + counts.quizzes + counts.folders + counts.sets + counts.chats;
-                      show(total > 0 ? t.settingsEmergencyRecoveryRestored : t.settingsEmergencyRecoveryEmpty);
-                      return scanRecoverableCloud();
-                    })
-                    .then(setRecoverScan)
-                    .finally(() => setRecoveringEmergency(false));
-                }}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-              >
-                {recoveringEmergency ? '…' : t.settingsEmergencyRecoveryRestore}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </SectionCard>
 
       {/* Profile */}
       <SectionCard title={t.settingsProfile}>
@@ -481,101 +369,6 @@ export function SettingsPage() {
       </SectionCard>
 
       {isAdmin && <PlatformBackupCard />}
-
-      <SectionCard title={t.settingsExternalBackup}>
-        <p className="mb-4 text-sm leading-relaxed text-app-text-secondary dark:text-gray-400">{t.settingsExternalBackupSub}</p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              downloadBackupJson(buildFullBackupPayload({ notes, quizzes, quizSets, quizFolders, chats }));
-              show(t.settingsExternalBackupDownload);
-            }}
-            className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-primary-dark"
-          >
-            {t.settingsExternalBackupDownload}
-          </button>
-          {folderBackupSupported ? (
-            <button
-              type="button"
-              onClick={() => {
-                void pickBackupFolder().then(async (handle) => {
-                  if (!handle) return;
-                  setAutoFolderBackup(true);
-                  setAutoFolderBackupEnabled(true);
-                  const ok = await writeBackupToFolder(buildFullBackupPayload({ notes, quizzes, quizSets, quizFolders, chats }));
-                  show(ok ? t.settingsExternalBackupSaved : t.settingsExternalBackupFolderOff);
-                });
-              }}
-              className={'rounded-lg border px-4 py-2 text-xs font-semibold transition-all ' + (autoFolderBackup ? 'border-emerald-400 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-app-border text-app-text-secondary hover:border-primary/40 dark:border-white/10')}
-            >
-              {autoFolderBackup ? t.settingsExternalBackupFolderOn : t.settingsExternalBackupFolderOff}
-            </button>
-          ) : (
-            <p className="self-center text-xs text-app-text-secondary dark:text-gray-500">{t.settingsExternalBackupUnsupported}</p>
-          )}
-        </div>
-        {folderBackupSupported && (
-          <p className="mt-3 text-xs leading-relaxed text-app-text-secondary/80 dark:text-gray-500">{t.settingsExternalBackupFolderHint}</p>
-        )}
-        {autoFolderBackup && (
-          <button
-            type="button"
-            onClick={() => {
-              setAutoFolderBackup(false);
-              setAutoFolderBackupEnabled(false);
-            }}
-            className="mt-3 text-xs text-app-text-secondary underline hover:text-app-text dark:text-gray-500"
-          >
-            {lang === 'sv' ? 'Stäng av timvis mappbackup' : 'Turn off hourly folder backup'}
-          </button>
-        )}
-      </SectionCard>
-
-      <SectionCard title={t.settingsCloudBackup}>
-        <p className="mb-4 text-sm leading-relaxed text-app-text-secondary dark:text-gray-400">{t.settingsCloudBackupHint}</p>
-        {loadingDataBackups ? (
-          <p className="text-sm text-app-text-secondary dark:text-gray-400">…</p>
-        ) : dataBackups.length === 0 ? (
-          <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/5">
-            <p className="text-sm text-app-text-secondary dark:text-gray-400">{t.settingsCloudBackupEmpty}</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {dataBackups.slice(0, 8).map((backup) => (
-              <div key={backup.key} className="flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 dark:border-primary/30 dark:bg-primary/10">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-app-text dark:text-gray-100">{backup.label}</p>
-                  <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
-                    {t.settingsCloudBackupCounts
-                      .replace('{notes}', String(backup.notes))
-                      .replace('{quizzes}', String(backup.quizzes))
-                      .replace('{folders}', String(backup.folders))
-                      .replace('{sets}', String(backup.sets))
-                      .replace('{chats}', String(backup.chats))}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={restoringCloudKey === backup.key}
-                  onClick={() => {
-                    setRestoringCloudKey(backup.key);
-                    void restoreDataBackup(backup.key)
-                      .then((counts) => {
-                        const total = counts.notes + counts.quizzes + counts.folders + counts.sets + counts.chats;
-                        show(total > 0 ? t.settingsCloudBackupRestored : t.settingsCloudBackupEmpty);
-                      })
-                      .finally(() => setRestoringCloudKey(null));
-                  }}
-                  className="flex-shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
-                >
-                  {restoringCloudKey === backup.key ? '…' : t.settingsCloudBackupRestore}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
 
       <SectionCard title={t.settingsFolderBackup}>
         {loadingBackups ? (
