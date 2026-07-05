@@ -361,6 +361,73 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     stripBlockCenteringStyles(block);
   };
 
+  const applyImageMargins = (img: HTMLImageElement, align: BlockAlign) => {
+    img.style.display = 'block';
+    if (align === 'center') {
+      img.style.marginLeft = 'auto';
+      img.style.marginRight = 'auto';
+    } else if (align === 'right') {
+      img.style.marginLeft = 'auto';
+      img.style.marginRight = '0';
+    } else {
+      img.style.marginLeft = '0';
+      img.style.marginRight = '0';
+    }
+  };
+
+  const ensureStandaloneImageBlock = (img: HTMLImageElement, ed: HTMLElement): HTMLElement => {
+    let block = getLineBlock(img, ed);
+    if (!block || block === ed) {
+      const wrapper = document.createElement('div');
+      wrapper.setAttribute('dir', 'auto');
+      img.parentNode?.insertBefore(wrapper, img);
+      wrapper.appendChild(img);
+      if (img.nextSibling?.nodeName === 'BR') wrapper.appendChild(img.nextSibling);
+      return wrapper;
+    }
+    const clone = block.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('img').forEach((node) => node.remove());
+    const otherText = clone.textContent?.replace(/\u200B/g, '').trim() ?? '';
+    if (!otherText) return block;
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('dir', 'auto');
+    block.parentNode?.insertBefore(wrapper, block.nextSibling);
+    wrapper.appendChild(img);
+    if (wrapper.previousSibling === block && img.nextSibling?.nodeName === 'BR') wrapper.appendChild(img.nextSibling);
+    return wrapper;
+  };
+
+  const applyImageAlignment = (img: HTMLImageElement, align: BlockAlign) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const block = ensureStandaloneImageBlock(img, ed);
+    block.style.display = 'block';
+    block.style.width = '100%';
+    block.style.textAlign = align;
+    block.style.marginLeft = '0';
+    block.style.marginRight = '0';
+    applyImageMargins(img, align);
+    emitHtml(ed.innerHTML);
+    setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+  };
+
+  const moveImageVertically = (img: HTMLImageElement, direction: 'up' | 'down') => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const block = ensureStandaloneImageBlock(img, ed);
+    if (direction === 'up') {
+      const prev = block.previousElementSibling;
+      if (!prev) return;
+      block.parentNode?.insertBefore(block, prev);
+    } else {
+      const next = block.nextElementSibling;
+      if (!next) return;
+      block.parentNode?.insertBefore(next, block);
+    }
+    emitHtml(ed.innerHTML);
+    setHoveredImg({ el: img, rect: img.getBoundingClientRect() });
+  };
+
   const applyBlockAlignment = (align: BlockAlign) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -401,6 +468,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     block.style.marginLeft = '0';
     block.style.marginRight = '0';
     block.removeAttribute('align');
+
+    block.querySelectorAll('img').forEach((img) => applyImageMargins(img, align));
 
     if (align === 'left') placeCaretInBlock(block, true);
 
@@ -676,7 +745,8 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
     if (ed && sel?.rangeCount) {
       const align = readAlignmentAtCaret(ed);
       if (align === 'left') active.add('justifyLeft');
-      else if (align !== 'center') active.add('justifyRight');
+      else if (align === 'center') active.add('justifyCenter');
+      else active.add('justifyRight');
     }
     setActiveCmds(active);
     return active;
@@ -1267,6 +1337,9 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
         <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('left'); }} title={t.titleLeft} className={btnCls(activeCmds.has('justifyLeft'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="3" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="3" y="20" width="12" height="2" rx="1"/></svg>
         </button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('center'); }} title={t.titleCenter} className={btnCls(activeCmds.has('justifyCenter'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="6" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="6" y="20" width="12" height="2" rx="1"/></svg>
+        </button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('right'); }} title={t.titleRight} className={btnCls(activeCmds.has('justifyRight'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="9" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="9" y="20" width="12" height="2" rx="1"/></svg>
         </button>
@@ -1372,14 +1445,20 @@ export function RichTextEditor({ html, onChange, placeholder, editable = true, m
       {/* Image hover buttons */}
       {editable && hoveredImg && (() => {
         const r = hoveredImg.rect;
+        const imgBtn = 'flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-[11px] text-white shadow-lg hover:bg-gray-900';
         return (
           <div
             onMouseEnter={() => setHoveredImg(hoveredImg)}
             onMouseLeave={() => { if (!isResizingImg.current) setHoveredImg(null); }}
-            style={{ position: 'fixed', left: r.right - 56, top: r.top + 4, zIndex: 9999, display: 'flex', gap: 4 }}
+            style={{ position: 'fixed', left: r.left + r.width / 2, top: Math.max(8, r.top - 42), transform: 'translateX(-50%)', zIndex: 9999, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4, maxWidth: Math.min(window.innerWidth - 16, r.width + 120) }}
           >
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; setImgResizeMode(false); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-800/80 text-xs text-white shadow-lg hover:bg-gray-900" title="Zoom">🔍</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={'flex h-6 w-6 items-center justify-center rounded-full text-xs text-white shadow-lg ' + (imgResizeMode ? 'bg-primary hover:bg-primary/90' : 'bg-gray-800/80 hover:bg-gray-900')} title={t.titleResizeImage}>↔</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'up'); }} className={imgBtn} title={t.titleMoveImageUp}>↑</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={imgBtn + (imgResizeMode ? ' !bg-primary hover:!bg-primary/90' : '')} title={t.titleResizeImage}>↔</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const img = hoveredImg.el; const next = img.nextSibling; if (next?.nodeName === 'BR') next.parentNode?.removeChild(next); img.parentNode?.removeChild(img); setHoveredImg(null); setImgResizeMode(false); emitHtml(editorRef.current?.innerHTML ?? ''); }} className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-lg hover:bg-red-700" title="Delete">✕</button>
           </div>
         );
