@@ -62,11 +62,6 @@ body {
   50% { opacity: 0.9; transform: scale(1.15); }
 }
 
-@keyframes noteYtLinkBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
 .animate-fade-in { animation: fadeIn .4s ease both; }
 .animate-menu-pop { animation: menuPop .2s cubic-bezier(.22,1,.36,1) both; }
 .animate-slide-up { animation: slideUp .5s cubic-bezier(.22,1,.36,1) both; }
@@ -277,15 +272,6 @@ body {
   color: #534ab7;
   text-decoration: underline;
   word-break: break-all;
-  animation: noteYtLinkBlink 1.4s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .note-yt-link,
-  .note-content .note-yt-link,
-  [contenteditable] .note-yt-link {
-    animation: none;
-  }
 }
 
 .dark .note-yt-link,
