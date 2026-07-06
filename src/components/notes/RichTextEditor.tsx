@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
+import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
@@ -101,6 +102,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     ed.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((frame) => {
       if (frame instanceof HTMLElement) getToolbarHost(frame);
     });
+    normalizeYouTubeEmbeds(ed);
   };
 
   const removeImageBlock = (img: HTMLImageElement) => {
@@ -2543,14 +2545,30 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             });
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             stripEmptyFontSpans(live);
+            if (normalizeYouTubeEmbeds(live)) emitHtml();
           });
         }}
-        onPaste={() => {
+        onPaste={(e) => {
+          const plain = e.clipboardData.getData('text/plain').trim();
+          const pastedHtml = e.clipboardData.getData('text/html').trim();
+          const videoId = !pastedHtml ? extractYouTubeVideoId(plain) : null;
+          if (videoId) {
+            e.preventDefault();
+            const ed = editorRef.current;
+            const sel = window.getSelection();
+            if (ed && sel?.rangeCount) {
+              insertYouTubeEmbedAtRange(sel.getRangeAt(0), videoId, plain);
+              saveSel();
+              emitHtml();
+            }
+            return;
+          }
           requestAnimationFrame(() => {
             const live = editorRef.current;
             if (!live) return;
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
-            emitHtml();
+            if (normalizeYouTubeEmbeds(live)) emitHtml();
+            else emitHtml();
           });
         }}
         onMouseMove={handleEditorMouseMove}

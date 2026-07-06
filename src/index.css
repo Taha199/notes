@@ -242,6 +242,63 @@ body {
   display: block;
 }
 
+.note-yt-frame,
+.note-content .note-yt-frame,
+[contenteditable] .note-yt-frame {
+  display: block;
+  width: 100%;
+  max-width: 32rem;
+  margin: 0.5rem 0;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(248, 250, 252, 0.25);
+}
+
+.dark .note-yt-frame,
+.dark .note-content .note-yt-frame,
+.dark [contenteditable] .note-yt-frame {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(17, 24, 39, 0.28);
+}
+
+.note-yt-link,
+.note-content .note-yt-link,
+[contenteditable] .note-yt-link {
+  display: block;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #534ab7;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.dark .note-yt-link,
+.dark .note-content .note-yt-link,
+.dark [contenteditable] .note-yt-link {
+  color: #a5b4fc;
+}
+
+.note-yt-player,
+.note-content .note-yt-player,
+[contenteditable] .note-yt-player {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.note-yt-player iframe,
+.note-content .note-yt-player iframe,
+[contenteditable] .note-yt-player iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 .note-content table tr,
 [contenteditable] table tr {
   display: flex;

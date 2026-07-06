@@ -60,6 +60,7 @@ function normalizeQuizName(value: string) {
 // Content is valid if it has visible text OR an embedded image.
 function hasContent(html: string): boolean {
   if (/<img\b/i.test(html)) return true;
+  if (/note-yt-frame/i.test(html)) return true;
   return html.replace(/<[^>]*>/g, '').trim().length > 0;
 }
 
@@ -172,7 +173,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
           <div className="relative w-full min-w-0">
             <span
               dir="auto"
-              className={'block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] transition-all dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
+              className={'block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] transition-all dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
               dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
             />
             {masked && (
