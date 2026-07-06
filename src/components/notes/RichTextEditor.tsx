@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
+import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
@@ -103,6 +104,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       if (frame instanceof HTMLElement) getToolbarHost(frame);
     });
     normalizeYouTubeEmbeds(ed);
+    normalizeAutoLinks(ed);
   };
 
   const removeImageBlock = (img: HTMLImageElement) => {
@@ -2545,29 +2547,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             });
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             stripEmptyFontSpans(live);
-            if (normalizeYouTubeEmbeds(live)) emitHtml();
+            const ytChanged = normalizeYouTubeEmbeds(live);
+            const linkChanged = normalizeAutoLinks(live);
+            if (ytChanged || linkChanged) emitHtml();
           });
         }}
         onPaste={(e) => {
           const plain = e.clipboardData.getData('text/plain').trim();
           const pastedHtml = e.clipboardData.getData('text/html').trim();
-          const videoId = !pastedHtml ? extractYouTubeVideoId(plain) : null;
-          if (videoId) {
-            e.preventDefault();
+          if (!pastedHtml) {
+            const videoId = extractYouTubeVideoId(plain);
             const ed = editorRef.current;
             const sel = window.getSelection();
             if (ed && sel?.rangeCount) {
-              insertYouTubeEmbedAtRange(sel.getRangeAt(0), videoId, plain);
-              saveSel();
-              emitHtml();
+              if (videoId) {
+                e.preventDefault();
+                insertYouTubeEmbedAtRange(sel.getRangeAt(0), videoId, plain);
+                saveSel();
+                emitHtml();
+                return;
+              }
+              if (isPlainUrl(plain)) {
+                e.preventDefault();
+                insertAutoLinkAtRange(sel.getRangeAt(0), plain);
+                saveSel();
+                emitHtml();
+                return;
+              }
             }
-            return;
           }
           requestAnimationFrame(() => {
             const live = editorRef.current;
             if (!live) return;
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
-            if (normalizeYouTubeEmbeds(live)) emitHtml();
+            const ytChanged = normalizeYouTubeEmbeds(live);
+            const linkChanged = normalizeAutoLinks(live);
+            if (ytChanged || linkChanged) emitHtml();
             else emitHtml();
           });
         }}
@@ -2587,7 +2602,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
             setPreviewZoom(1);
             naturalSizeRef.current = null;
             setImgResizeMode(false);
-          } else if (editable) {
+            return;
+          }
+          if (editable) {
+            const link = event.target instanceof HTMLElement ? event.target.closest('a[href]') : null;
+            if (link instanceof HTMLAnchorElement && !link.closest('.note-yt-player')) {
+              event.preventDefault();
+              window.open(link.href, '_blank', 'noopener,noreferrer');
+              return;
+            }
             setHoveredImg(null);
             setImgResizeMode(false);
           }

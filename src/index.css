@@ -299,6 +299,22 @@ body {
   border: 0;
 }
 
+.note-auto-link,
+.note-content a.note-auto-link,
+[contenteditable] a.note-auto-link {
+  color: #534ab7;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.dark .note-auto-link,
+.dark .note-content a.note-auto-link,
+.dark [contenteditable] a.note-auto-link {
+  color: #a5b4fc;
+}
+
 .note-content table tr,
 [contenteditable] table tr {
   display: flex;
