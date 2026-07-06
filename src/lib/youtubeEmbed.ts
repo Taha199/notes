@@ -32,13 +32,7 @@ export function createYouTubeEmbedElement(videoId: string, watchUrl?: string): H
   frame.setAttribute('contenteditable', 'false');
   frame.setAttribute('dir', 'auto');
   frame.dataset.ytVideoId = videoId;
-
-  const link = document.createElement('a');
-  link.className = NOTE_YT_LINK;
-  link.href = url;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  link.textContent = url;
+  frame.dataset.ytWatchUrl = url;
 
   const player = document.createElement('div');
   player.className = NOTE_YT_PLAYER;
@@ -55,7 +49,6 @@ export function createYouTubeEmbedElement(videoId: string, watchUrl?: string): H
   iframe.referrerPolicy = 'strict-origin-when-cross-origin';
 
   player.appendChild(iframe);
-  frame.appendChild(link);
   frame.appendChild(player);
   return frame;
 }
@@ -83,6 +76,14 @@ function upgradeAnchorToEmbed(anchor: HTMLAnchorElement): boolean {
   if (anchor.closest(`.${NOTE_YT_FRAME}`)) return false;
   const videoId = extractYouTubeVideoId(anchor.href);
   if (!videoId) return false;
+  const next = anchor.nextElementSibling;
+  if (next instanceof HTMLElement && next.classList.contains(NOTE_YT_FRAME)) {
+    const existingId = next.dataset.ytVideoId ?? extractYouTubeVideoId(next.dataset.ytWatchUrl ?? '');
+    if (existingId === videoId) {
+      anchor.remove();
+      return true;
+    }
+  }
   anchor.replaceWith(createYouTubeEmbedElement(videoId, anchor.href));
   return true;
 }
@@ -137,11 +138,16 @@ export function normalizeYouTubeEmbeds(root: HTMLElement): boolean {
   root.querySelectorAll(`.${NOTE_YT_FRAME}`).forEach((node) => {
     if (!(node instanceof HTMLElement)) return;
     node.setAttribute('contenteditable', 'false');
-    const videoId = node.dataset.ytVideoId ?? extractYouTubeVideoId(node.querySelector(`.${NOTE_YT_LINK}`)?.textContent ?? '');
+    node.querySelectorAll(`.${NOTE_YT_LINK}`).forEach((link) => link.remove());
+    const videoId =
+      node.dataset.ytVideoId ??
+      extractYouTubeVideoId(node.dataset.ytWatchUrl ?? '') ??
+      extractYouTubeVideoId(node.querySelector('iframe')?.getAttribute('src') ?? '');
     if (!videoId) return;
+    node.dataset.ytVideoId = videoId;
     const iframe = node.querySelector('iframe');
     const expectedSrc = `https://www.youtube-nocookie.com/embed/${videoId}`;
-    if (iframe instanceof HTMLIFrameElement && iframe.src !== expectedSrc) iframe.src = expectedSrc;
+    if (iframe instanceof HTMLIFrameElement && !iframe.getAttribute('src')) iframe.src = expectedSrc;
   });
 
   return changed;

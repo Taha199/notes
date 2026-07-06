@@ -265,21 +265,20 @@ body {
 .note-yt-link,
 .note-content .note-yt-link,
 [contenteditable] .note-yt-link {
-  display: block;
-  padding: 0.45rem 0.65rem;
-  font-size: 0.75rem;
-  line-height: 1.35;
+  display: none !important;
+}
+
+.note-auto-link,
+.note-content a.note-auto-link,
+[contenteditable] a.note-auto-link {
   color: #534ab7;
   text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
   word-break: break-all;
+  animation: none !important;
+  transition: none !important;
 }
-
-.dark .note-yt-link,
-.dark .note-content .note-yt-link,
-.dark [contenteditable] .note-yt-link {
-  color: #a5b4fc;
-}
-
 .note-yt-player,
 .note-content .note-yt-player,
 [contenteditable] .note-yt-player {
@@ -297,16 +296,6 @@ body {
   width: 100%;
   height: 100%;
   border: 0;
-}
-
-.note-auto-link,
-.note-content a.note-auto-link,
-[contenteditable] a.note-auto-link {
-  color: #534ab7;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-  word-break: break-all;
 }
 
 .dark .note-auto-link,
