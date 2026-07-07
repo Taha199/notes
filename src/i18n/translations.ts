@@ -55,6 +55,8 @@ export interface Translation {
   cloudSaved: string;
   cloudSavedMain: string;
   cloudSaveError: string;
+  cloudSavedAt: string;
+  cloudNotSyncedYet: string;
   pageHome: string;
   pageLib: string;
   pageUnread: string;
@@ -518,6 +520,7 @@ export const LANGS: Record<Lang, Translation> = {
     archPill: 'Read & Archived', userName: 'User', userSub: 'My Personal Notes',
     draft: 'Draft', draftTiPh: 'Title (optional)', draftEdPh: 'Write your note here...', saveDraft: 'Save Note',
     cloudSaving: 'Saving...', cloudSaved: 'Saved', cloudSavedMain: 'Saved to cloud', cloudSaveError: 'Cloud save failed — retrying on next edit',
+    cloudSavedAt: 'Saved to cloud: {time}', cloudNotSyncedYet: 'Not saved to cloud yet',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Notes to Study', pageRead: 'Studied Notes',
     pageFav: 'Favourites', pageArch: 'Archive', pageFiles: 'File Uploads', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
@@ -864,6 +867,7 @@ export const LANGS: Record<Lang, Translation> = {
     archPill: 'Läst & Arkiverad', userName: 'Användare', userSub: 'Mina Personliga Anteckningar',
     draft: 'Utkast', draftTiPh: 'Titel (valfri)', draftEdPh: 'Skriv din anteckning här...', saveDraft: 'Spara Anteckning',
     cloudSaving: 'Sparar...', cloudSaved: 'Sparat', cloudSavedMain: 'Sparat i molnet', cloudSaveError: 'Molnet misslyckades — försöker igen vid nästa ändring',
+    cloudSavedAt: 'Sparat i molnet: {time}', cloudNotSyncedYet: 'Inte sparad i molnet ännu',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Att studera', pageRead: 'Studerade',
     pageFav: 'Favoriter', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',

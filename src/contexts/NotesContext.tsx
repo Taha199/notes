@@ -128,6 +128,7 @@ interface NotesCtx {
   chats: ChatConversation[];
   saveChats: (chats: ChatConversation[]) => void;
   cloudStatus: CloudStatus;
+  cloudSyncedAt: number | null;
   loaded: boolean;
   addQuiz: (item: Omit<QuizItem, 'id'>) => number;
   deleteQuiz: (id: number) => void;
@@ -216,6 +217,7 @@ function readLocalJson<T>(key: string): T | null {
 }
 
 const LAST_UID_KEY = 'malacadhati_last_uid';
+const CLOUD_SYNCED_AT_KEY = 'malacadhati_cloud_synced_at';
 
 const LOCAL_DATA_KEYS = [
   'malacadhati',
@@ -889,6 +891,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [tokenUsage, setTokenUsage] = useState<number>(0);
   const draftCounter = useRef(0);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>('idle');
+  const [cloudSyncedAt, setCloudSyncedAt] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
   const loadedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -933,12 +936,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!user) {
       setNotes([]);
       setDrafts([]);
+      setCloudSyncedAt(null);
       loadedRef.current = true;
       setLoaded(true);
       return;
     }
     syncAccountLocalStorage(user.uid);
     const local = readLocalNotesData();
+    const storedCloudSyncAt = Number(localStorage.getItem(CLOUD_SYNCED_AT_KEY));
+    if (storedCloudSyncAt > 0) setCloudSyncedAt(storedCloudSyncAt);
 
     const applyLocalCache = () => {
       if (local.notes.length) setNotes(local.notes);
@@ -968,6 +974,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         if (cloud?.tokenUsage) {
           setTokenUsage(cloud.tokenUsage as number);
+        }
+
+        if (typeof cloud?.cloudSyncAt === 'number' && cloud.cloudSyncAt > 0) {
+          setCloudSyncedAt(cloud.cloudSyncAt);
+          localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(cloud.cloudSyncAt));
         }
 
         const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
@@ -1319,10 +1330,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }),
     )
       .then((res) => {
-        if (!res.ok) throw new Error('cloud-save-failed');
-        saveFailedRef.current = false;
-        lastLocalSaveAt.current = Date.now();
-      })
+          if (!res.ok) throw new Error('cloud-save-failed');
+          saveFailedRef.current = false;
+          const syncedAt = Date.now();
+          lastLocalSaveAt.current = syncedAt;
+          setCloudSyncedAt(syncedAt);
+          localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+        })
       .catch(() => {
         saveFailedRef.current = true;
         setCloudStatus('error');
@@ -2247,6 +2261,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizSets,
         quizFolders,
         cloudStatus,
+        cloudSyncedAt,
         loaded,
         addQuiz,
         deleteQuiz, restoreQuiz, permDeleteQuiz,

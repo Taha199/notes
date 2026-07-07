@@ -2,6 +2,7 @@ import type { Draft } from '../../contexts/NotesContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { RichTextEditor } from './RichTextEditor';
+import { CloudSavedAtLabel } from '../common/CloudSavedAtLabel';
 
 export function DraftEditor({ draft, index, total }: { draft: Draft; index: number; total: number }) {
   const { t } = useLanguage();
@@ -16,11 +17,12 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
   return (
     <div className="animate-fade-in relative">
       <div className="flex flex-col rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-800/60">
-      <div className="flex items-center rounded-t-2xl border-b border-app-border bg-app-bg px-4 py-2 dark:border-white/10 dark:bg-white/5">
+      <div className="flex items-center justify-between gap-2 rounded-t-2xl border-b border-app-border bg-app-bg px-4 py-2 dark:border-white/10 dark:bg-white/5">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-app-text-secondary dark:text-gray-400">
           ✏️ {t.draft}
           {total > 1 ? ' ' + (index + 1) : ''}
         </span>
+        <CloudSavedAtLabel size="xs" showWhenEmpty className="max-w-[58%] justify-end text-right" />
       </div>
       <input
         value={draft.title}
@@ -46,6 +48,7 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
           >
             ✓ {t.saveDraft}
           </button>
+          <CloudSavedAtLabel size="xs" className="sm:hidden" />
         </div>
         <button onClick={() => removeDraft(draft.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10">
           🗑
