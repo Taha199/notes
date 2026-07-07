@@ -18,6 +18,8 @@ const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
 const TAB_INDENT = '    ';
 
+const HIGHLIGHT_INLINE_TAGS = new Set(['SPAN', 'FONT', 'MARK', 'B', 'STRONG', 'EM', 'I', 'U', 'A']);
+
 function unwrapHighlightElement(el: HTMLElement) {
   const parent = el.parentNode;
   if (!parent) return;
@@ -25,11 +27,24 @@ function unwrapHighlightElement(el: HTMLElement) {
   parent.removeChild(el);
 }
 
+function isTransparentBg(color: string) {
+  return !color || color === 'transparent' || color === 'rgba(0, 0, 0, 0)' || /rgba?\(\s*0,\s*0,\s*0/i.test(color);
+}
+
 function elementHasHighlight(el: HTMLElement): boolean {
   if (el.tagName === 'MARK') return true;
   if (el.hasAttribute('bgcolor')) return true;
-  const bg = el.style.getPropertyValue('background-color') || el.style.background;
-  return !!bg && !/transparent|rgba?\(\s*0,\s*0,\s*0|#00000000/i.test(bg);
+  const styleAttr = el.getAttribute('style') || '';
+  if (/mso-highlight/i.test(styleAttr)) return true;
+  const inlineBg = el.style.getPropertyValue('background-color') || el.style.background;
+  if (inlineBg && !isTransparentBg(inlineBg)) return true;
+  if (HIGHLIGHT_INLINE_TAGS.has(el.tagName)) {
+    const computed = window.getComputedStyle(el).backgroundColor;
+    if (isTransparentBg(computed)) return false;
+    const parentBg = el.parentElement ? window.getComputedStyle(el.parentElement).backgroundColor : 'transparent';
+    return computed !== parentBg;
+  }
+  return false;
 }
 
 function clearElementHighlight(el: HTMLElement) {
@@ -39,22 +54,56 @@ function clearElementHighlight(el: HTMLElement) {
   }
   el.style.removeProperty('background-color');
   el.style.removeProperty('background');
+  el.style.removeProperty('mso-highlight');
+  const styleAttr = el.getAttribute('style');
+  if (styleAttr) {
+    const cleaned = styleAttr
+      .replace(/mso-highlight\s*:\s*[^;]+;?/gi, '')
+      .replace(/background(-color)?\s*:\s*[^;]+;?/gi, '')
+      .replace(/;\s*;/g, ';')
+      .trim()
+      .replace(/^;|;$/g, '');
+    if (cleaned) el.setAttribute('style', cleaned);
+    else el.removeAttribute('style');
+  }
   el.removeAttribute('bgcolor');
-  if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+  el.classList.remove('highlight', 'mark', 'hl', 'yellow', 'MsoHighlight');
   if ((el.tagName === 'SPAN' || el.tagName === 'FONT') && el.attributes.length === 0) {
     unwrapHighlightElement(el);
   }
 }
 
-function stripHighlightsFromHolder(holder: HTMLElement) {
-  holder.querySelectorAll('mark').forEach((mark) => {
-    if (mark instanceof HTMLElement) unwrapHighlightElement(mark);
-  });
-  holder.querySelectorAll('font[bgcolor], [style]').forEach((node) => {
-    if (!(node instanceof HTMLElement)) return;
+function collectHighlightedInRange(ed: HTMLElement, range: Range): HTMLElement[] {
+  const highlighted: HTMLElement[] = [];
+  const consider = (node: HTMLElement) => {
+    if (!ed.contains(node)) return;
     if (!elementHasHighlight(node)) return;
-    clearElementHighlight(node);
+    if (!range.intersectsNode(node)) return;
+    if (!highlighted.includes(node)) highlighted.push(node);
+  };
+  ed.querySelectorAll('mark, font[bgcolor], [style]').forEach((node) => {
+    if (node instanceof HTMLElement) consider(node);
   });
+  let probe: HTMLElement | null = range.startContainer.nodeType === Node.TEXT_NODE
+    ? range.startContainer.parentElement
+    : (range.startContainer instanceof HTMLElement ? range.startContainer : null);
+  while (probe && probe !== ed) {
+    consider(probe);
+    probe = probe.parentElement;
+  }
+  probe = range.endContainer.nodeType === Node.TEXT_NODE
+    ? range.endContainer.parentElement
+    : (range.endContainer instanceof HTMLElement ? range.endContainer : null);
+  while (probe && probe !== ed) {
+    consider(probe);
+    probe = probe.parentElement;
+  }
+  highlighted.sort((a, b) => {
+    if (a.contains(b)) return 1;
+    if (b.contains(a)) return -1;
+    return 0;
+  });
+  return highlighted;
 }
 
 function clearHighlightsInRange(ed: HTMLElement, range: Range) {
@@ -72,20 +121,16 @@ function clearHighlightsInRange(ed: HTMLElement, range: Range) {
     return;
   }
 
-  const workRange = range.cloneRange();
-  const extracted = workRange.extractContents();
-  const holder = document.createElement('div');
-  holder.appendChild(extracted);
-  stripHighlightsFromHolder(holder);
-
-  const frag = document.createDocumentFragment();
-  while (holder.firstChild) frag.appendChild(holder.firstChild);
-  workRange.insertNode(frag);
-  workRange.collapse(false);
+  const highlighted = collectHighlightedInRange(ed, range);
+  highlighted.forEach(clearElementHighlight);
 
   const sel = window.getSelection();
   sel?.removeAllRanges();
-  sel?.addRange(workRange);
+  try {
+    sel?.addRange(range);
+  } catch {
+    /* range may be invalid after DOM changes */
+  }
 }
 
 interface Props {
@@ -2197,6 +2242,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     const ed = editorRef.current;
     if (!ed) return;
     setHlColor(c);
+    captureFormattingSelection();
     const range = resolveFormatRange();
     if (!range) return;
 
