@@ -1365,12 +1365,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSets: overrides?.quizSets ?? quizSetsRef.current,
       quizFolders: overrides?.quizFolders ?? quizFoldersRef.current,
     };
+    notesRef.current = snap.notes;
     draftsRef.current = snap.drafts;
+    quizzesRef.current = snap.quizzes;
+    chatsRef.current = snap.chats;
+    quizSetsRef.current = snap.quizSets;
+    quizFoldersRef.current = snap.quizFolders;
     if (localSaveTimer.current) clearTimeout(localSaveTimer.current);
     localSaveTimer.current = setTimeout(() => {
       localSaveTimer.current = null;
       writeLocalCache();
-    }, 600);
+    }, forceCloud ? 0 : 600);
+    if (forceCloud) writeLocalCache();
     if (!user || !loadedRef.current || isApplyingRemoteRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     const delay = forceCloud ? 0 : 1200;
@@ -1526,7 +1532,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const nextNotes = [newNote, ...prevNotes];
       setDrafts((prevDrafts) => {
         const nextDrafts = prevDrafts.filter((d) => d.id !== id);
-        persist({ notes: nextNotes, drafts: nextDrafts });
+        persist({ notes: nextNotes, drafts: nextDrafts }, true);
         return nextDrafts;
       });
       return nextNotes;
