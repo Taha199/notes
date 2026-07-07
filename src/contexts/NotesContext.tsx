@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { onValue, ref as dbRef } from 'firebase/database';
 import type { Note, QuizItem, QuizSet, QuizFolder, ChatConversation } from '../types';
-import { FB_DB_URL } from '../lib/firebase';
+import { database, FB_DB_URL } from '../lib/firebase';
 import { buildFullBackupPayload, shouldRunHourlyFolderBackup, writeBackupToFolder } from '../lib/externalBackup';
 import { setTokenSink } from '../lib/gemini';
 import { useAuth } from './AuthContext';
@@ -939,6 +940,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const savingStartedAt = useRef(0);
   const isApplyingRemoteRef = useRef(false);
   const lastLocalSaveAt = useRef(0);
+  const lastAppliedRemoteSyncAt = useRef(0);
   const saveFailedRef = useRef(false);
   const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const notesRef = useRef(notes);
@@ -1023,6 +1025,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (typeof cloud?.cloudSyncAt === 'number' && cloud.cloudSyncAt > 0) {
           setCloudSyncedAt(cloud.cloudSyncAt);
           localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(cloud.cloudSyncAt));
+          lastAppliedRemoteSyncAt.current = cloud.cloudSyncAt;
         }
 
         const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
@@ -1403,6 +1406,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           saveFailedRef.current = false;
           const syncedAt = Date.now();
           lastLocalSaveAt.current = syncedAt;
+          lastAppliedRemoteSyncAt.current = syncedAt;
           setCloudSyncedAt(syncedAt);
           localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
         })
@@ -1462,7 +1466,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (forceCloud) writeLocalCache();
     if (!user || !loadedRef.current || isApplyingRemoteRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    const delay = forceCloud ? 0 : draftPriority ? 400 : 1200;
+    const delay = forceCloud ? 0 : draftPriority ? 200 : 600;
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
       runCloudSave(forceCloud);
@@ -1470,6 +1474,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const applyRemoteSnapshot = (cloud: Record<string, unknown>) => {
+    if (typeof cloud.cloudSyncAt === 'number' && cloud.cloudSyncAt > 0) {
+      lastAppliedRemoteSyncAt.current = cloud.cloudSyncAt;
+    }
     const remoteNotes = firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>);
     const remoteQuizzes = firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>);
     const remoteChats = firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>)
@@ -1532,7 +1539,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!u || !loadedRef.current || isApplyingRemoteRef.current) return;
     if (saveTimer.current || savesInFlight.current > 0) return;
     const localDraftsEmpty = !hasDraftContent(draftsRef.current);
-    if (!force && !localDraftsEmpty && Date.now() - lastLocalSaveAt.current < 2500) return;
+    if (!force && !localDraftsEmpty && Date.now() - lastLocalSaveAt.current < 800) return;
     try {
       const r = await fetch(await withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()));
       if (!r.ok) return;
@@ -1551,9 +1558,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!user || !loaded) return;
     void pullFromCloud(true);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void pullFromCloud(!hasDraftContent(draftsRef.current));
-      }
+      if (document.visibilityState === 'visible') void pullFromCloud(true);
     };
     const onHide = () => {
       if (document.visibilityState === 'hidden') flushPersist();
@@ -1564,7 +1569,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     window.addEventListener('pagehide', flushPersist);
     pullTimer.current = window.setInterval(() => {
       if (document.visibilityState === 'visible') void pullFromCloud();
-    }, 30_000);
+    }, 12_000);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('visibilitychange', onHide);
@@ -1572,6 +1577,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('pagehide', flushPersist);
       if (pullTimer.current) clearInterval(pullTimer.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, loaded]);
+
+  useEffect(() => {
+    if (!user || !loaded) return;
+    const syncRef = dbRef(database, `users/${user.uid}/cloudSyncAt`);
+    const unsubscribe = onValue(syncRef, (snap) => {
+      const remoteSyncAt = snap.val();
+      if (typeof remoteSyncAt !== 'number' || remoteSyncAt <= 0) return;
+      if (remoteSyncAt <= lastAppliedRemoteSyncAt.current) return;
+      if (savesInFlight.current > 0 || saveTimer.current) return;
+      if (Math.abs(remoteSyncAt - lastLocalSaveAt.current) < 1500) return;
+      lastAppliedRemoteSyncAt.current = remoteSyncAt;
+      void pullFromCloud(true);
+    });
+    return () => unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, loaded]);
 
