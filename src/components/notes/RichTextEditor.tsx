@@ -1791,7 +1791,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   useEffect(() => {
     const flush = () => flushEmitHtml();
     window.addEventListener('pagehide', flush);
-    return () => window.removeEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flushEmitHtml();
+    };
   }, []);
 
   // ── Command state ─────────────────────────────────────────────────────

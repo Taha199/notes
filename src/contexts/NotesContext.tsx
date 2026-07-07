@@ -57,6 +57,27 @@ function pickBetterNote(local: Note, remote: Note) {
   return local;
 }
 
+function draftContentLength(d: Draft) {
+  return (d.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length + (d.title || '').trim().length;
+}
+
+function pickBetterDraft(local: Draft, remote: Draft) {
+  const localLen = draftContentLength(local);
+  const remoteLen = draftContentLength(remote);
+  if (remoteLen !== localLen) return remoteLen > localLen ? remote : local;
+  return local;
+}
+
+function mergeDraftsForSync(local: Draft[], remote: Draft[]) {
+  const map = new Map<string, Draft>();
+  for (const item of local) map.set(item.id, item);
+  for (const item of remote) {
+    const existing = map.get(item.id);
+    map.set(item.id, existing ? pickBetterDraft(existing, item) : item);
+  }
+  return [...map.values()];
+}
+
 function mergeNotesForSync(local: Note[], remote: Note[]) {
   const map = new Map<number, Note>();
   for (const item of local) map.set(item.id, item);
@@ -302,20 +323,32 @@ function maxDraftCounter(drafts: Draft[]) {
   }, 0);
 }
 
+function parseCloudDrafts(cloud: Record<string, unknown> | null): Draft[] {
+  const cloudDrafts = cloud?.drafts;
+  const dc = (cloud?.draftContents as Record<string, { title?: string; html?: string }> | undefined) || {};
+  if (!Array.isArray(cloudDrafts) || !cloudDrafts.length) return [];
+  return cloudDrafts.map((id) => ({
+    id: String(id),
+    title: dc[String(id)]?.title || '',
+    html: dc[String(id)]?.html || '',
+  }));
+}
+
 function resolveDraftsFromSources(
   cloud: Record<string, unknown> | null,
   localDrafts: Draft[],
 ): { drafts: Draft[]; counter: number } {
-  const cloudDrafts = cloud?.drafts;
-  const dc = (cloud?.draftContents as Record<string, { title?: string; html?: string }> | undefined) || {};
-  if (Array.isArray(cloudDrafts) && cloudDrafts.length) {
-    const drafts = cloudDrafts.map((id) => ({
-      id: String(id),
-      title: dc[String(id)]?.title || '',
-      html: dc[String(id)]?.html || '',
-    }));
-    const counter = (cloud?.draftId as number | undefined) || maxDraftCounter(drafts) || drafts.length;
-    return { drafts, counter };
+  const remoteDrafts = parseCloudDrafts(cloud);
+  if (remoteDrafts.length) {
+    const merged = mergeDraftsForSync(localDrafts, remoteDrafts);
+    const mergedMap = new Map(merged.map((d) => [d.id, d]));
+    const remoteIds = new Set(remoteDrafts.map((d) => d.id));
+    const ordered: Draft[] = remoteDrafts.map((d) => mergedMap.get(d.id)!);
+    for (const d of localDrafts) {
+      if (!remoteIds.has(d.id)) ordered.push(mergedMap.get(d.id)!);
+    }
+    const counter = (cloud?.draftId as number | undefined) || maxDraftCounter(ordered) || ordered.length;
+    return { drafts: ordered, counter };
   }
   if (localDrafts.length) {
     return { drafts: localDrafts, counter: maxDraftCounter(localDrafts) || localDrafts.length };
@@ -954,6 +987,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setQuizFolders(ensureRestoredFolder(initializeQuizColors(local.folders)));
       }
       if (local.sets.length) setQuizSets(local.sets);
+      if (local.drafts.length) {
+        setDrafts(local.drafts);
+        draftsRef.current = local.drafts;
+        draftCounter.current = maxDraftCounter(local.drafts) || local.drafts.length;
+      }
     };
 
     const applyLocalFallback = () => {
@@ -1157,10 +1195,33 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        const cloudDrafts = parseCloudDrafts(cloud);
         const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, local.drafts);
+        const cloudDraftContentLen = cloudDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
+        const resolvedDraftContentLen = resolvedDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
+        const draftsRepair = resolvedDraftContentLen > cloudDraftContentLen
+          || resolvedDrafts.length > cloudDrafts.length
+          || (local.drafts.length > 0 && hasDraftContent(resolvedDrafts) && !hasDraftContent(cloudDrafts));
         setDrafts(resolvedDrafts);
+        draftsRef.current = resolvedDrafts;
         draftCounter.current = resolvedCounter;
         localStorage.setItem('malacadhati_drafts', JSON.stringify(resolvedDrafts));
+        if (draftsRepair) {
+          recoveryLog('repairing cloud drafts from local');
+          const draftContents: Record<string, { title: string; html: string }> = {};
+          resolvedDrafts.forEach((d) => {
+            draftContents[d.id] = { title: d.title, html: d.html };
+          });
+          void fetch(`${FB_DB_URL}/users/${user.uid}.json`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              drafts: resolvedDrafts.map((d) => d.id),
+              draftId: resolvedCounter,
+              draftContents,
+            }),
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
       } catch {
         if (cancelled) return;
         recoveryLog('cloud fetch failed, applying local fallback', {
@@ -1408,12 +1469,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const remoteSets = firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>)
       .map((set) => ({ ...set, items: set.items ?? [] }));
     const remoteFolders = firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>);
+    const remoteDrafts = parseCloudDrafts(cloud);
 
     const mergedNotes = mergeNotesForSync(notesRef.current, remoteNotes);
     const mergedQuizzes = mergeQuizzesForSync(quizzesRef.current, remoteQuizzes);
     const mergedChats = mergeChatsForSync(chatsRef.current, remoteChats);
     const mergedSets = mergeQuizSetsForSync(quizSetsRef.current, remoteSets);
     const mergedFolders = mergeById(quizFoldersRef.current, remoteFolders);
+    const mergedDrafts = mergeDraftsForSync(draftsRef.current, remoteDrafts);
 
     const normalizedFolders = finalizeQuizFolders(mergedFolders, mergedSets);
     const normalizedSets = initializeQuizColors(
@@ -1445,6 +1508,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
       setQuizFolders(normalizedFolders);
       localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+      changed = true;
+    }
+    if (JSON.stringify(mergedDrafts) !== JSON.stringify(draftsRef.current)) {
+      setDrafts(mergedDrafts);
+      draftsRef.current = mergedDrafts;
+      localStorage.setItem('malacadhati_drafts', JSON.stringify(mergedDrafts));
       changed = true;
     }
     if (changed) recoveryLog('applied remote cloud snapshot');
@@ -1523,6 +1592,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = draftsRef.current.map((d) => (d.id === id ? { ...d, ...patch } : d));
     draftsRef.current = next;
     setDrafts(next);
+    localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
     persist({ drafts: next });
   };
 
