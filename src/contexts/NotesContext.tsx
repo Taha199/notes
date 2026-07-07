@@ -324,10 +324,16 @@ function maxDraftCounter(drafts: Draft[]) {
 }
 
 function parseCloudDrafts(cloud: Record<string, unknown> | null): Draft[] {
-  const cloudDrafts = cloud?.drafts;
   const dc = (cloud?.draftContents as Record<string, { title?: string; html?: string }> | undefined) || {};
-  if (!Array.isArray(cloudDrafts) || !cloudDrafts.length) return [];
-  return cloudDrafts.map((id) => ({
+  let cloudDraftIds = firebaseToArray<string>(
+    cloud?.drafts as string[] | Record<string, string> | null | undefined,
+  ).map(String).filter(Boolean);
+  // Firebase may omit the drafts list while draftContents still has data.
+  if (!cloudDraftIds.length && dc && typeof dc === 'object') {
+    cloudDraftIds = Object.keys(dc).filter((k) => k && k !== 'null');
+  }
+  if (!cloudDraftIds.length) return [];
+  return cloudDraftIds.map((id) => ({
     id: String(id),
     title: dc[String(id)]?.title || '',
     html: dc[String(id)]?.html || '',
@@ -1433,7 +1439,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     runCloudSave(true, true);
   };
 
-  const persist = (overrides?: PersistSnapshot, forceCloud = false) => {
+  const persist = (overrides?: PersistSnapshot, forceCloud = false, draftPriority = false) => {
     const snap: Required<PersistSnapshot> = {
       notes: overrides?.notes ?? notesRef.current,
       drafts: overrides?.drafts ?? draftsRef.current,
@@ -1456,7 +1462,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (forceCloud) writeLocalCache();
     if (!user || !loadedRef.current || isApplyingRemoteRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    const delay = forceCloud ? 0 : 1200;
+    const delay = forceCloud ? 0 : draftPriority ? 400 : 1200;
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
       runCloudSave(forceCloud);
@@ -1521,11 +1527,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (changed) recoveryLog('applied remote cloud snapshot');
   };
 
-  const pullFromCloud = async () => {
+  const pullFromCloud = async (force = false) => {
     const u = userRef.current;
     if (!u || !loadedRef.current || isApplyingRemoteRef.current) return;
     if (saveTimer.current || savesInFlight.current > 0) return;
-    if (Date.now() - lastLocalSaveAt.current < 2500) return;
+    const localDraftsEmpty = !hasDraftContent(draftsRef.current);
+    if (!force && !localDraftsEmpty && Date.now() - lastLocalSaveAt.current < 2500) return;
     try {
       const r = await fetch(await withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()));
       if (!r.ok) return;
@@ -1542,8 +1549,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user || !loaded) return;
+    void pullFromCloud(true);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void pullFromCloud();
+      if (document.visibilityState === 'visible') {
+        void pullFromCloud(!hasDraftContent(draftsRef.current));
+      }
     };
     const onHide = () => {
       if (document.visibilityState === 'hidden') flushPersist();
@@ -1595,7 +1605,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     draftsRef.current = next;
     setDrafts(next);
     localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
-    persist({ drafts: next });
+    persist({ drafts: next }, false, true);
   };
 
   const submitDraft = (id: string) => {
