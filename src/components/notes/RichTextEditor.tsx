@@ -220,14 +220,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const EMIT_DEBOUNCE_MS = 280;
 
   const emitHtml = () => {
+    const ed = editorRef.current;
+    if (ed && onLiveChangeRef.current) {
+      const live = serializeEditorHtml(ed);
+      lastLocalHtmlRef.current = live;
+      onLiveChangeRef.current(live);
+    }
     if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
     emitTimerRef.current = setTimeout(() => {
       emitTimerRef.current = null;
-      const ed = editorRef.current;
-      if (!ed) return;
-      const next = serializeEditorHtml(ed);
+      const liveEd = editorRef.current;
+      if (!liveEd) return;
+      const next = serializeEditorHtml(liveEd);
       lastLocalHtmlRef.current = next;
-      onLiveChangeRef.current?.(next);
       onChangeRef.current(next);
     }, EMIT_DEBOUNCE_MS);
   };
@@ -1711,6 +1716,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     normalizeEditorImages(ed);
     lastLocalHtmlRef.current = ed.innerHTML;
   }, [html]);
+
+  useEffect(() => {
+    const flush = () => flushEmitHtml();
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, []);
 
   // ── Command state ─────────────────────────────────────────────────────
   const readCommandState = () => {

@@ -219,6 +219,7 @@ const LAST_UID_KEY = 'malacadhati_last_uid';
 
 const LOCAL_DATA_KEYS = [
   'malacadhati',
+  'malacadhati_drafts',
   'malacadhati_quiz',
   'malacadhati_quiz_sets',
   'malacadhati_quiz_folders',
@@ -239,6 +240,7 @@ function syncAccountLocalStorage(uid: string) {
 function readLocalNotesData() {
   return {
     notes: firebaseToArray<Note>(readLocalJson<Note[]>('malacadhati') ?? []),
+    drafts: firebaseToArray<Draft>(readLocalJson<Draft[]>('malacadhati_drafts') ?? []),
     quizzes: firebaseToArray<QuizItem>(readLocalJson<QuizItem[]>('malacadhati_quiz') ?? []),
     chats: firebaseToArray<ChatConversation>(readLocalJson<ChatConversation[]>('malacadhati_chats') ?? []).map((c) => ({
       ...c,
@@ -277,12 +279,46 @@ function isEmptyUserPayload(
   chatList: ChatConversation[],
   qsList: QuizSet[],
   qfList: QuizFolder[],
+  dList: Draft[] = [],
 ) {
   return nextNotes.length === 0
     && qList.length === 0
     && chatList.length === 0
     && countUserQuizSets(qsList) === 0
-    && countUserQuizFolders(qfList) === 0;
+    && countUserQuizFolders(qfList) === 0
+    && !hasDraftContent(dList);
+}
+
+function hasDraftContent(drafts: Draft[]) {
+  return drafts.some((d) => d.title.trim().length > 0 || d.html.replace(/<[^>]*>/g, '').trim().length > 0);
+}
+
+function maxDraftCounter(drafts: Draft[]) {
+  return drafts.reduce((max, d) => {
+    const n = Number.parseInt(d.id.replace(/^d/, ''), 10);
+    return Number.isFinite(n) ? Math.max(max, n) : max;
+  }, 0);
+}
+
+function resolveDraftsFromSources(
+  cloud: Record<string, unknown> | null,
+  localDrafts: Draft[],
+): { drafts: Draft[]; counter: number } {
+  const cloudDrafts = cloud?.drafts;
+  const dc = (cloud?.draftContents as Record<string, { title?: string; html?: string }> | undefined) || {};
+  if (Array.isArray(cloudDrafts) && cloudDrafts.length) {
+    const drafts = cloudDrafts.map((id) => ({
+      id: String(id),
+      title: dc[String(id)]?.title || '',
+      html: dc[String(id)]?.html || '',
+    }));
+    const counter = (cloud?.draftId as number | undefined) || maxDraftCounter(drafts) || drafts.length;
+    return { drafts, counter };
+  }
+  if (localDrafts.length) {
+    return { drafts: localDrafts, counter: maxDraftCounter(localDrafts) || localDrafts.length };
+  }
+  return { drafts: [{ id: 'd1', title: '', html: '' }], counter: 1 };
 }
 
 function countUserQuizFolders(folders: QuizFolder[]) {
@@ -916,8 +952,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const applyLocalFallback = () => {
       applyLocalCache();
-      draftCounter.current = 1;
-      setDrafts([{ id: 'd1', title: '', html: '' }]);
+      const { drafts, counter } = resolveDraftsFromSources(null, local.drafts);
+      draftCounter.current = counter;
+      setDrafts(drafts);
     };
 
     applyLocalCache();
@@ -1109,21 +1146,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        const cloudDrafts = cloud?.drafts;
-        if (Array.isArray(cloudDrafts) && cloudDrafts.length) {
-          const dc = (cloud?.draftContents as Record<string, { title?: string; html?: string }> | undefined) || {};
-          setDrafts(
-            cloudDrafts.map((id) => ({
-              id: String(id),
-              title: dc[String(id)]?.title || '',
-              html: dc[String(id)]?.html || '',
-            })),
-          );
-          draftCounter.current = (cloud?.draftId as number | undefined) || cloudDrafts.length;
-        } else {
-          draftCounter.current = 1;
-          setDrafts([{ id: 'd1', title: '', html: '' }]);
-        }
+        const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, local.drafts);
+        setDrafts(resolvedDrafts);
+        draftCounter.current = resolvedCounter;
+        localStorage.setItem('malacadhati_drafts', JSON.stringify(resolvedDrafts));
       } catch {
         if (cancelled) return;
         recoveryLog('cloud fetch failed, applying local fallback', {
@@ -1240,6 +1266,96 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id);
   }, [user, loaded]);
 
+  const writeLocalCache = () => {
+    localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
+    localStorage.setItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
+  };
+
+  const runCloudSave = (forceCloud: boolean, keepalive = false) => {
+    const u = userRef.current;
+    if (!u || !loadedRef.current || isApplyingRemoteRef.current) return;
+    const nextNotes = notesRef.current;
+    const dList = draftsRef.current;
+    const qList = quizzesRef.current;
+    const chatList = chatsRef.current;
+    const qsList = quizSetsRef.current;
+    const qfList = quizFoldersRef.current;
+    if (!forceCloud && isEmptyUserPayload(nextNotes, qList, chatList, qsList, qfList, dList)) {
+      recoveryLog('skipped cloud sync — empty user payload');
+      return;
+    }
+    void appendDataHistory(u.uid, {
+      notes: nextNotes,
+      quizzes: qList,
+      chats: chatList,
+      quizSets: qsList,
+      quizFolders: qfList,
+    });
+    savesInFlight.current += 1;
+    setCloudStatus('saving');
+    savingStartedAt.current = Date.now();
+    const draftContents: Record<string, { title: string; html: string }> = {};
+    dList.forEach((d) => {
+      draftContents[d.id] = { title: d.title, html: d.html };
+    });
+    void withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()).then((url) =>
+      fetch(url, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          notes: nextNotes,
+          drafts: dList.map((d) => d.id),
+          draftId: draftCounter.current,
+          draftContents,
+          quizzes: qList,
+          chats: chatList,
+          quizSets: qsList,
+          quizFolders: qfList,
+          tokenUsage: tokenUsageRef.current,
+          cloudSyncAt: Date.now(),
+        }),
+        headers: { 'Content-Type': 'application/json' },
+        keepalive,
+      }),
+    )
+      .then((res) => {
+        if (!res.ok) throw new Error('cloud-save-failed');
+        saveFailedRef.current = false;
+        lastLocalSaveAt.current = Date.now();
+      })
+      .catch(() => {
+        saveFailedRef.current = true;
+        setCloudStatus('error');
+      })
+      .finally(() => {
+        savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+        if (savesInFlight.current === 0) {
+          if (saveFailedRef.current) {
+            setCloudStatus('error');
+            return;
+          }
+          const elapsed = Date.now() - savingStartedAt.current;
+          const delay = Math.max(0, MIN_SYNC_VISIBLE_MS - elapsed);
+          const markSaved = () => setCloudStatus('saved');
+          if (delay > 0) setTimeout(markSaved, delay);
+          else markSaved();
+        }
+      });
+  };
+
+  const flushPersist = () => {
+    if (localSaveTimer.current) {
+      clearTimeout(localSaveTimer.current);
+      localSaveTimer.current = null;
+    }
+    writeLocalCache();
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    runCloudSave(true, true);
+  };
+
   const persist = (overrides?: PersistSnapshot, forceCloud = false) => {
     const snap: Required<PersistSnapshot> = {
       notes: overrides?.notes ?? notesRef.current,
@@ -1249,83 +1365,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSets: overrides?.quizSets ?? quizSetsRef.current,
       quizFolders: overrides?.quizFolders ?? quizFoldersRef.current,
     };
+    draftsRef.current = snap.drafts;
     if (localSaveTimer.current) clearTimeout(localSaveTimer.current);
     localSaveTimer.current = setTimeout(() => {
       localSaveTimer.current = null;
-      localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
-      localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
+      writeLocalCache();
     }, 600);
     if (!user || !loadedRef.current || isApplyingRemoteRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
+    const delay = forceCloud ? 0 : 1200;
     saveTimer.current = setTimeout(() => {
-      const u = userRef.current;
-      if (!u || isApplyingRemoteRef.current) return;
-      const nextNotes = notesRef.current;
-      const dList = draftsRef.current;
-      const qList = quizzesRef.current;
-      const chatList = chatsRef.current;
-      const qsList = quizSetsRef.current;
-      const qfList = quizFoldersRef.current;
-      if (!forceCloud && isEmptyUserPayload(nextNotes, qList, chatList, qsList, qfList)) {
-        recoveryLog('skipped cloud sync — empty user payload');
-        return;
-      }
-      void appendDataHistory(u.uid, {
-        notes: nextNotes,
-        quizzes: qList,
-        chats: chatList,
-        quizSets: qsList,
-        quizFolders: qfList,
-      });
-      savesInFlight.current += 1;
-      setCloudStatus('saving');
-      savingStartedAt.current = Date.now();
-      const draftContents: Record<string, { title: string; html: string }> = {};
-      dList.forEach((d) => {
-        draftContents[d.id] = { title: d.title, html: d.html };
-      });
-      void withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()).then((url) =>
-        fetch(url, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            notes: nextNotes,
-            drafts: dList.map((d) => d.id),
-            draftId: draftCounter.current,
-            draftContents,
-            quizzes: qList,
-            chats: chatList,
-            quizSets: qsList,
-            quizFolders: qfList,
-            tokenUsage: tokenUsageRef.current,
-            cloudSyncAt: Date.now(),
-          }),
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      )
-        .then((res) => {
-          if (!res.ok) throw new Error('cloud-save-failed');
-          saveFailedRef.current = false;
-          lastLocalSaveAt.current = Date.now();
-        })
-        .catch(() => {
-          saveFailedRef.current = true;
-          setCloudStatus('error');
-        })
-        .finally(() => {
-          savesInFlight.current = Math.max(0, savesInFlight.current - 1);
-          if (savesInFlight.current === 0) {
-            if (saveFailedRef.current) {
-              setCloudStatus('error');
-              return;
-            }
-            const elapsed = Date.now() - savingStartedAt.current;
-            const delay = Math.max(0, MIN_SYNC_VISIBLE_MS - elapsed);
-            const markSaved = () => setCloudStatus('saved');
-            if (delay > 0) setTimeout(markSaved, delay);
-            else markSaved();
-          }
-        });
-    }, 1200);
+      saveTimer.current = null;
+      runCloudSave(forceCloud);
+    }, delay);
   };
 
   const applyRemoteSnapshot = (cloud: Record<string, unknown>) => {
@@ -1402,14 +1454,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const onVisible = () => {
       if (document.visibilityState === 'visible') void pullFromCloud();
     };
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flushPersist();
+    };
     document.addEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', onHide);
     window.addEventListener('focus', onVisible);
+    window.addEventListener('pagehide', flushPersist);
     pullTimer.current = window.setInterval(() => {
       if (document.visibilityState === 'visible') void pullFromCloud();
     }, 30_000);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
+      window.removeEventListener('pagehide', flushPersist);
       if (pullTimer.current) clearInterval(pullTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1441,11 +1500,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const updateDraft = (id: string, patch: Partial<Draft>) => {
-    setDrafts((prev) => {
-      const next = prev.map((d) => (d.id === id ? { ...d, ...patch } : d));
-      persist({ drafts: next });
-      return next;
-    });
+    const next = draftsRef.current.map((d) => (d.id === id ? { ...d, ...patch } : d));
+    draftsRef.current = next;
+    setDrafts(next);
+    persist({ drafts: next });
   };
 
   const submitDraft = (id: string) => {
