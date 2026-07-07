@@ -1196,26 +1196,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
 
         const cloudDrafts = parseCloudDrafts(cloud);
-        const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, local.drafts);
+        const bestLocalDrafts = mergeDraftsForSync(local.drafts, draftsRef.current);
+        const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, bestLocalDrafts);
+        const finalDrafts = mergeDraftsForSync(resolvedDrafts, draftsRef.current);
         const cloudDraftContentLen = cloudDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
-        const resolvedDraftContentLen = resolvedDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
+        const resolvedDraftContentLen = finalDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const draftsRepair = resolvedDraftContentLen > cloudDraftContentLen
-          || resolvedDrafts.length > cloudDrafts.length
-          || (local.drafts.length > 0 && hasDraftContent(resolvedDrafts) && !hasDraftContent(cloudDrafts));
-        setDrafts(resolvedDrafts);
-        draftsRef.current = resolvedDrafts;
+          || finalDrafts.length > cloudDrafts.length
+          || (bestLocalDrafts.length > 0 && hasDraftContent(finalDrafts) && !hasDraftContent(cloudDrafts));
+        setDrafts(finalDrafts);
+        draftsRef.current = finalDrafts;
         draftCounter.current = resolvedCounter;
-        localStorage.setItem('malacadhati_drafts', JSON.stringify(resolvedDrafts));
+        localStorage.setItem('malacadhati_drafts', JSON.stringify(finalDrafts));
         if (draftsRepair) {
           recoveryLog('repairing cloud drafts from local');
           const draftContents: Record<string, { title: string; html: string }> = {};
-          resolvedDrafts.forEach((d) => {
+          finalDrafts.forEach((d) => {
             draftContents[d.id] = { title: d.title, html: d.html };
           });
           void fetch(`${FB_DB_URL}/users/${user.uid}.json`, {
             method: 'PATCH',
             body: JSON.stringify({
-              drafts: resolvedDrafts.map((d) => d.id),
+              drafts: finalDrafts.map((d) => d.id),
               draftId: resolvedCounter,
               draftContents,
             }),

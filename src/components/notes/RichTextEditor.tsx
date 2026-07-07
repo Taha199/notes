@@ -1793,7 +1793,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     window.addEventListener('pagehide', flush);
     return () => {
       window.removeEventListener('pagehide', flush);
-      flushEmitHtml();
+      // Do not flush on unmount: contenteditable is often cleared during React
+      // teardown and would overwrite draft state with empty html. onLiveChange
+      // already syncs each keystroke to the parent.
     };
   }, []);
 
