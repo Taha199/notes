@@ -164,7 +164,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
               {status === 'known' ? '✓' : '✗'}
             </span>
           )}
-          <span dir="auto" className="block w-full min-w-0 break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(item.question) }} />
+          <div dir="auto" className="note-content block w-full min-w-0 break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(item.question) }} />
         </div>
         <div className="flex min-w-0 flex-col items-start border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6">
           <span className="mb-2 flex items-center gap-1.5 text-[9px] font-bold uppercase text-primary/70">
@@ -173,7 +173,7 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
           <div className="relative w-full min-w-0">
             <span
               dir="auto"
-              className={'block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] transition-all dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
+              className={'note-content block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] transition-all dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
               dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
             />
             {masked && (
@@ -429,6 +429,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             <RichTextEditor
               html={question}
               onChange={onChangeQ}
+              onLiveChange={onChangeQ}
               placeholder={`${t.quizQuestionLabel}...`}
               minHeight="140px"
             />
@@ -490,6 +491,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             <RichTextEditor
               html={answer}
               onChange={onChangeA}
+              onLiveChange={onChangeA}
               placeholder={`${t.quizAnswerLabel}...`}
               minHeight="140px"
             />
@@ -513,7 +515,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
                 <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">🧠 {t.quizAiSuggestion}</span>
                 <button onClick={() => setAiSuggestion(null)} className="text-[12px] text-violet-500/70 hover:text-violet-700">✕</button>
               </div>
-              <div dir="auto" className="px-3 py-2 text-[13px] leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(aiSuggestion) }} />
+              <div dir="auto" className="note-content px-3 py-2 text-[13px] leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(aiSuggestion) }} />
               <div className="flex justify-end gap-2 border-t border-violet-200 px-3 py-2 dark:border-violet-500/20">
                 <button onClick={() => setAiSuggestion(null)} className="rounded-lg border border-app-border px-3 py-1 text-[11px] text-app-text-secondary hover:bg-white/50 dark:border-white/10">{t.quizKeepCurrent}</button>
                 <button onClick={() => { onChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {t.quizReplaceAnswer}</button>
