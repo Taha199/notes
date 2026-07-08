@@ -942,6 +942,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const lastLocalSaveAt = useRef(0);
   const lastAppliedRemoteSyncAt = useRef(0);
   const saveFailedRef = useRef(false);
+  const pendingDeletedDraftIdsRef = useRef<Set<string>>(new Set());
   const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const notesRef = useRef(notes);
   const quizzesRef = useRef(quizzes);
@@ -1404,6 +1405,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       .then((res) => {
           if (!res.ok) throw new Error('cloud-save-failed');
           saveFailedRef.current = false;
+          pendingDeletedDraftIdsRef.current.clear();
           const syncedAt = Date.now();
           lastLocalSaveAt.current = syncedAt;
           lastAppliedRemoteSyncAt.current = syncedAt;
@@ -1491,7 +1493,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const mergedChats = mergeChatsForSync(chatsRef.current, remoteChats);
     const mergedSets = mergeQuizSetsForSync(quizSetsRef.current, remoteSets);
     const mergedFolders = mergeById(quizFoldersRef.current, remoteFolders);
-    const mergedDrafts = mergeDraftsForSync(draftsRef.current, remoteDrafts);
+    const remoteDraftsFiltered = remoteDrafts.filter((draft) => {
+      if (!pendingDeletedDraftIdsRef.current.has(draft.id)) return true;
+      return draftsRef.current.some((localDraft) => localDraft.id === draft.id);
+    });
+    const mergedDrafts = mergeDraftsForSync(draftsRef.current, remoteDraftsFiltered);
 
     const normalizedFolders = finalizeQuizFolders(mergedFolders, mergedSets);
     const normalizedSets = initializeQuizColors(
@@ -1614,11 +1620,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const removeDraft = (id: string) => {
-    setDrafts((prev) => {
-      const next = prev.filter((d) => d.id !== id);
-      persist({ drafts: next });
-      return next;
-    });
+    pendingDeletedDraftIdsRef.current.add(id);
+    const next = draftsRef.current.filter((d) => d.id !== id);
+    draftsRef.current = next;
+    setDrafts(next);
+    localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+    persist({ drafts: next });
   };
 
   const updateDraft = (id: string, patch: Partial<Draft>) => {
