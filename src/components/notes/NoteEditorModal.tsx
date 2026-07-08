@@ -91,6 +91,14 @@ interface NoteEditorModalProps {
   onNavigate?: (page: Page) => void;
 }
 
+type DraftQuizSnapshot = {
+  question: string;
+  answer: string;
+  mcqMode: boolean;
+  mcqOptions: string[];
+  mcqCorrect: number;
+};
+
 export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNote, onClose, onNavigate }: NoteEditorModalProps) {
   const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz } = useNotes();
   const { t } = useLanguage();
@@ -127,6 +135,8 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [mcqMode, setMcqMode] = useState(false);
   const [mcqOptions, setMcqOptions] = useState(['', '', '', '']);
   const [mcqCorrect, setMcqCorrect] = useState(0);
+  const [manualHistory, setManualHistory] = useState<DraftQuizSnapshot[]>([]);
+  const [manualHistoryIndex, setManualHistoryIndex] = useState(-1);
   const [copied, setCopied] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(note?.lastEdited ?? null);
   const [quizPanelW, setQuizPanelW] = useState(readQuizPanelWidth);
@@ -163,6 +173,24 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
 
   const plainText = html.replace(/<[^>]*>/g, '').trim();
   const current = quizItems[quizIndex];
+  const canGoManualBack = manualHistoryIndex > 0;
+  const canGoManualForward = manualHistoryIndex >= 0 && manualHistoryIndex < manualHistory.length - 1;
+
+  const applyManualSnapshot = (snap: DraftQuizSnapshot) => {
+    setManualQ(snap.question);
+    setManualA(snap.answer);
+    setMcqMode(snap.mcqMode);
+    setMcqOptions(snap.mcqOptions.length ? snap.mcqOptions : ['', '', '', '']);
+    setMcqCorrect(Math.max(0, Math.min(snap.mcqCorrect, Math.max(0, snap.mcqOptions.length - 1))));
+  };
+
+  const pushManualHistory = (snap: DraftQuizSnapshot) => {
+    setManualHistory((prev) => {
+      const next = [...prev, snap];
+      setManualHistoryIndex(next.length - 1);
+      return next;
+    });
+  };
 
   const save = () => {
     const liveHtml = htmlLiveRef.current;
@@ -297,8 +325,44 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
               <>
               {/* Form header */}
               <div className="flex items-center justify-between border-b border-emerald-200/70 px-4 py-2.5 dark:border-emerald-500/15">
-                <span className="text-[13px] font-bold text-emerald-700 dark:text-emerald-400">{t.noteCreateQuestion}</span>
-                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[13px] font-bold text-emerald-700 dark:text-emerald-400">{t.noteCreateQuestion}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canGoManualBack) return;
+                      const nextIndex = manualHistoryIndex - 1;
+                      const snap = manualHistory[nextIndex];
+                      if (!snap) return;
+                      applyManualSnapshot(snap);
+                      setManualHistoryIndex(nextIndex);
+                    }}
+                    disabled={!canGoManualBack}
+                    title="Föregående fråga"
+                    aria-label="Föregående fråga"
+                    className="flex h-6 w-6 items-center justify-center rounded-md border border-emerald-300 text-[13px] text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-35 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canGoManualForward) return;
+                      const nextIndex = manualHistoryIndex + 1;
+                      const snap = manualHistory[nextIndex];
+                      if (!snap) return;
+                      applyManualSnapshot(snap);
+                      setManualHistoryIndex(nextIndex);
+                    }}
+                    disabled={!canGoManualForward}
+                    title="Nästa fråga"
+                    aria-label="Nästa fråga"
+                    className="flex h-6 w-6 items-center justify-center rounded-md border border-emerald-300 text-[13px] text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-35 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                  >
+                    →
+                  </button>
+                </div>
+                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); setManualHistory([]); setManualHistoryIndex(-1); }} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
               </div>
 
               <div className="flex flex-1 flex-col gap-4 p-4">
@@ -384,6 +448,13 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         answer = mcqOptions.map((o, i) => `${String.fromCharCode(65 + i)}) ${o.trim()}${i === mcqCorrect ? ' ✓' : ''}`).filter((_, i) => mcqOptions[i].trim()).join('\n');
                       }
                       addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ, answer, date: nowStr() });
+                      pushManualHistory({
+                        question: manualQ,
+                        answer: mcqMode ? answer : manualA,
+                        mcqMode,
+                        mcqOptions: [...mcqOptions],
+                        mcqCorrect,
+                      });
                       show(t.noteSavedQuiz);
                       setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); setManualAiLoading(false); setManualResetKey((k) => k + 1);
                     }}
