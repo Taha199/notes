@@ -240,6 +240,7 @@ function readLocalJson<T>(key: string): T | null {
 
 const LAST_UID_KEY = 'malacadhati_last_uid';
 const CLOUD_SYNCED_AT_KEY = 'malacadhati_cloud_synced_at';
+const DELETED_DRAFT_IDS_KEY = 'malacadhati_deleted_draft_ids';
 
 const LOCAL_DATA_KEYS = [
   'malacadhati',
@@ -276,6 +277,20 @@ function readLocalNotesData() {
       items: set.items ?? [],
     })),
   };
+}
+
+function readDeletedDraftIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_DRAFT_IDS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDeletedDraftIds(ids: Set<string>) {
+  localStorage.setItem(DELETED_DRAFT_IDS_KEY, JSON.stringify([...ids]));
 }
 
 /**
@@ -344,8 +359,9 @@ function parseCloudDrafts(cloud: Record<string, unknown> | null): Draft[] {
 function resolveDraftsFromSources(
   cloud: Record<string, unknown> | null,
   localDrafts: Draft[],
+  deletedDraftIds: Set<string> = new Set(),
 ): { drafts: Draft[]; counter: number } {
-  const remoteDrafts = parseCloudDrafts(cloud);
+  const remoteDrafts = parseCloudDrafts(cloud).filter((draft) => !deletedDraftIds.has(draft.id));
   if (remoteDrafts.length) {
     const merged = mergeDraftsForSync(localDrafts, remoteDrafts);
     const mergedMap = new Map(merged.map((d) => [d.id, d]));
@@ -942,7 +958,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const lastLocalSaveAt = useRef(0);
   const lastAppliedRemoteSyncAt = useRef(0);
   const saveFailedRef = useRef(false);
-  const pendingDeletedDraftIdsRef = useRef<Set<string>>(new Set());
+  const pendingDeletedDraftIdsRef = useRef<Set<string>>(readDeletedDraftIds());
   const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const notesRef = useRef(notes);
   const quizzesRef = useRef(quizzes);
@@ -1005,7 +1021,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const applyLocalFallback = () => {
       applyLocalCache();
-      const { drafts, counter } = resolveDraftsFromSources(null, local.drafts);
+      const { drafts, counter } = resolveDraftsFromSources(null, local.drafts, pendingDeletedDraftIdsRef.current);
       draftCounter.current = counter;
       setDrafts(drafts);
     };
@@ -1207,7 +1223,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         const cloudDrafts = parseCloudDrafts(cloud);
         const bestLocalDrafts = mergeDraftsForSync(local.drafts, draftsRef.current);
-        const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, bestLocalDrafts);
+        const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, bestLocalDrafts, pendingDeletedDraftIdsRef.current);
         const finalDrafts = mergeDraftsForSync(resolvedDrafts, draftsRef.current);
         const cloudDraftContentLen = cloudDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const resolvedDraftContentLen = finalDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
@@ -1486,7 +1502,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const remoteSets = firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>)
       .map((set) => ({ ...set, items: set.items ?? [] }));
     const remoteFolders = firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>);
-    const remoteDrafts = parseCloudDrafts(cloud);
+    const remoteDrafts = parseCloudDrafts(cloud).filter((draft) => !pendingDeletedDraftIdsRef.current.has(draft.id));
 
     const mergedNotes = mergeNotesForSync(notesRef.current, remoteNotes);
     const mergedQuizzes = mergeQuizzesForSync(quizzesRef.current, remoteQuizzes);
@@ -1621,6 +1637,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const removeDraft = (id: string) => {
     pendingDeletedDraftIdsRef.current.add(id);
+    writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
     const next = draftsRef.current.filter((d) => d.id !== id);
     draftsRef.current = next;
     setDrafts(next);
@@ -1655,6 +1672,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setNotes((prevNotes) => {
       const nextNotes = [newNote, ...prevNotes];
       setDrafts((prevDrafts) => {
+        pendingDeletedDraftIdsRef.current.add(id);
+        writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
         const nextDrafts = prevDrafts.filter((d) => d.id !== id);
         persist({ notes: nextNotes, drafts: nextDrafts }, true);
         return nextDrafts;
