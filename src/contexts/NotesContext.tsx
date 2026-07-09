@@ -86,8 +86,12 @@ function writePermDeleted(ids: PermanentlyDeletedIds) {
 }
 
 function parseCloudPermDeleted(cloud: Record<string, unknown> | null | undefined): PermanentlyDeletedIds {
-  const raw = cloud?.permanentlyDeletedIds as Partial<PermanentlyDeletedIds> | null | undefined;
-  if (!raw || typeof raw !== 'object') return emptyPermDeleted();
+  return parsePermDeletedVal(cloud?.permanentlyDeletedIds);
+}
+
+function parsePermDeletedVal(val: unknown): PermanentlyDeletedIds {
+  if (!val || typeof val !== 'object') return emptyPermDeleted();
+  const raw = val as Partial<PermanentlyDeletedIds>;
   return {
     notes: Array.isArray(raw.notes) ? [...new Set(raw.notes.map(Number).filter(Number.isFinite))] : [],
     quizzes: Array.isArray(raw.quizzes) ? [...new Set(raw.quizzes.map(Number).filter(Number.isFinite))] : [],
@@ -1174,6 +1178,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const draftSaveInFlightRef = useRef<Set<string>>(new Set());
   const draftSavePendingAgainRef = useRef<Set<string>>(new Set());
   const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingRemotePullRef = useRef(false);
   const notesRef = useRef(notes);
   const quizzesRef = useRef(quizzes);
   const chatsRef = useRef(chats);
@@ -1813,27 +1818,154 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     writePermDeleted(permDeletedRef.current);
   };
 
-  const pushPermDeletedCloud = async () => {
+  const applyPermDeletedLocally = (): boolean => {
+    const tombstones = permDeletedRef.current;
+    const deadNotes = new Set(tombstones.notes);
+    const deadQuizzes = new Set(tombstones.quizzes);
+    const deadSets = new Set(tombstones.quizSets);
+    const deadFolders = new Set(tombstones.quizFolders);
+
+    const nextNotes = notesRef.current.filter((n) => !deadNotes.has(n.id));
+    const nextQuizzes = quizzesRef.current.filter((q) => !deadQuizzes.has(q.id));
+    const nextSets = stripPermDeletedQuizSets(
+      quizSetsRef.current.filter((s) => !deadSets.has(s.id)),
+      tombstones,
+    );
+    const nextFolders = quizFoldersRef.current.filter((f) => !deadFolders.has(f.id));
+    const normalizedFolders = finalizeQuizFolders(nextFolders, nextSets);
+    const normalizedSets = initializeQuizColors(
+      nextSets,
+      normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
+    );
+
+    let changed = false;
+    if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+      localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+      changed = true;
+    }
+    if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
+      quizzesRef.current = nextQuizzes;
+      setQuizzes(nextQuizzes);
+      localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+      changed = true;
+    }
+    if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
+      quizSetsRef.current = normalizedSets;
+      setQuizSets(normalizedSets);
+      localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+      changed = true;
+    }
+    if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
+      quizFoldersRef.current = normalizedFolders;
+      setQuizFolders(normalizedFolders);
+      localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+      changed = true;
+    }
+    return changed;
+  };
+
+  const runInstantTrashCloudSave = async (
+    nextNotes: Note[],
+    nextQuizzes: QuizItem[],
+    nextSets: QuizSet[],
+    nextFolders: QuizFolder[],
+  ) => {
+    const u = userRef.current;
+    if (!u || !loadedRef.current) return;
+    const syncedAt = Date.now();
+    savesInFlight.current += 1;
+    setCloudStatus('saving');
+    savingStartedAt.current = syncedAt;
+    try {
+      await update(dbRef(database, `users/${u.uid}`), {
+        notes: nextNotes,
+        quizzes: nextQuizzes,
+        quizSets: nextSets,
+        quizFolders: nextFolders,
+        permanentlyDeletedIds: permDeletedRef.current,
+        cloudSyncAt: syncedAt,
+      });
+      await Promise.all([
+        fetch(`${FB_DB_URL}/users/${u.uid}/quizSets.json`, {
+          method: 'PUT',
+          body: JSON.stringify(nextSets),
+          headers: { 'Content-Type': 'application/json' },
+        }),
+        fetch(`${FB_DB_URL}/users/${u.uid}/quizFolders.json`, {
+          method: 'PUT',
+          body: JSON.stringify(nextFolders),
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ]);
+      saveFailedRef.current = false;
+      lastLocalSaveAt.current = syncedAt;
+      lastAppliedRemoteSyncAt.current = syncedAt;
+      setCloudSyncedAt(syncedAt);
+      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+    } catch {
+      saveFailedRef.current = true;
+      setCloudStatus('error');
+    } finally {
+      savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+      if (savesInFlight.current === 0 && !saveFailedRef.current) {
+        const elapsed = Date.now() - savingStartedAt.current;
+        const delay = Math.max(0, MIN_SYNC_VISIBLE_MS - elapsed);
+        const markSaved = () => setCloudStatus('saved');
+        if (delay > 0) setTimeout(markSaved, delay);
+        else markSaved();
+      }
+    }
+  };
+
+  const pushPermDeletedCloud = async (payload?: {
+    notes?: Note[];
+    quizzes?: QuizItem[];
+    quizSets?: QuizSet[];
+    quizFolders?: QuizFolder[];
+  }) => {
     const u = userRef.current;
     if (!u || !loadedRef.current) return;
     const syncedAt = Date.now();
     try {
-      const url = await withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken());
-      const res = await fetch(url, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          permanentlyDeletedIds: permDeletedRef.current,
-          cloudSyncAt: syncedAt,
-        }),
-        headers: { 'Content-Type': 'application/json' },
+      await update(dbRef(database, `users/${u.uid}`), {
+        ...(payload?.notes ? { notes: payload.notes } : {}),
+        ...(payload?.quizzes ? { quizzes: payload.quizzes } : {}),
+        ...(payload?.quizSets ? { quizSets: payload.quizSets } : {}),
+        ...(payload?.quizFolders ? { quizFolders: payload.quizFolders } : {}),
+        permanentlyDeletedIds: permDeletedRef.current,
+        cloudSyncAt: syncedAt,
       });
-      if (!res.ok) throw new Error('perm-deleted-save-failed');
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
       localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
     } catch {
       /* best-effort — full cloud save will retry */
+    }
+  };
+
+  const runInstantDataCloudSave = async (patch: {
+    notes?: Note[];
+    quizzes?: QuizItem[];
+    quizSets?: QuizSet[];
+    quizFolders?: QuizFolder[];
+  }) => {
+    const u = userRef.current;
+    if (!u || !loadedRef.current) return;
+    const syncedAt = Date.now();
+    try {
+      await update(dbRef(database, `users/${u.uid}`), {
+        ...patch,
+        cloudSyncAt: syncedAt,
+      });
+      lastLocalSaveAt.current = syncedAt;
+      lastAppliedRemoteSyncAt.current = syncedAt;
+      setCloudSyncedAt(syncedAt);
+      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+    } catch {
+      /* best-effort */
     }
   };
 
@@ -2174,11 +2306,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const pullFromCloud = async (force = false) => {
     const u = userRef.current;
     if (!u || !loadedRef.current || isApplyingRemoteRef.current) return;
-    if (saveTimer.current || savesInFlight.current > 0 || draftCloudTimer.current) return;
-    const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
-    if (recentDraftEdit && hasDraftContent(draftsRef.current)) return;
-    const localDraftsEmpty = !hasDraftContent(draftsRef.current);
-    if (!force && !localDraftsEmpty && Date.now() - lastLocalSaveAt.current < 800) return;
+    if (force) {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+    } else if (saveTimer.current || savesInFlight.current > 0 || draftCloudTimer.current) {
+      return;
+    }
+    if (!force) {
+      const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
+      if (recentDraftEdit && hasDraftContent(draftsRef.current)) return;
+      const localDraftsEmpty = !hasDraftContent(draftsRef.current);
+      if (!localDraftsEmpty && Date.now() - lastLocalSaveAt.current < 800) return;
+    }
     try {
       const r = await fetch(await withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()));
       if (!r.ok) return;
@@ -2191,6 +2332,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     } finally {
       isApplyingRemoteRef.current = false;
     }
+  };
+
+  const scheduleRemotePull = (force = true) => {
+    if (pendingRemotePullRef.current) return;
+    pendingRemotePullRef.current = true;
+    window.setTimeout(() => {
+      pendingRemotePullRef.current = false;
+      void pullFromCloud(force);
+    }, force ? 0 : 400);
   };
 
   useEffect(() => {
@@ -2259,9 +2409,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user || !loaded) return;
-    void pullFromCloud(false);
+    const uid = user.uid;
+    void pullFromCloud(true);
+    const unsubPermDeleted = onValue(dbRef(database, `users/${uid}/permanentlyDeletedIds`), (snap) => {
+      const remote = parsePermDeletedVal(snap.val());
+      const merged = addPermDeleted(permDeletedRef.current, remote);
+      if (JSON.stringify(merged) === JSON.stringify(permDeletedRef.current)) return;
+      permDeletedRef.current = merged;
+      writePermDeleted(merged);
+      isApplyingRemoteRef.current = true;
+      try {
+        const changed = applyPermDeletedLocally();
+        if (changed) recoveryLog('applied remote permanently-deleted tombstones');
+      } finally {
+        isApplyingRemoteRef.current = false;
+      }
+      scheduleRemotePull(true);
+    });
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void pullFromCloud(false);
+      if (document.visibilityState === 'visible') void pullFromCloud(true);
     };
     const onHide = () => {
       if (document.visibilityState === 'hidden') flushPersist();
@@ -2271,9 +2437,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     window.addEventListener('focus', onVisible);
     window.addEventListener('pagehide', flushPersist);
     pullTimer.current = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void pullFromCloud();
-    }, 12_000);
+      if (document.visibilityState === 'visible') void pullFromCloud(true);
+    }, 5_000);
     return () => {
+      unsubPermDeleted();
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
@@ -2290,11 +2457,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const remoteSyncAt = snap.val();
       if (typeof remoteSyncAt !== 'number' || remoteSyncAt <= 0) return;
       if (remoteSyncAt <= lastAppliedRemoteSyncAt.current) return;
-      if (savesInFlight.current > 0 || saveTimer.current || draftCloudTimer.current) return;
-      if (Math.abs(remoteSyncAt - lastLocalSaveAt.current) < 150) return;
-      lastAppliedRemoteSyncAt.current = remoteSyncAt;
+      const fromOtherDevice = remoteSyncAt > lastLocalSaveAt.current + 50;
+      if (!fromOtherDevice && Math.abs(remoteSyncAt - lastLocalSaveAt.current) < 150) return;
+      if (savesInFlight.current > 0 || saveTimer.current) {
+        scheduleRemotePull(true);
+        return;
+      }
       void pullDraftsFromCloud(true);
-      if (loadedRef.current) void pullFromCloud(false);
+      if (loadedRef.current) scheduleRemotePull(true);
     });
     return () => unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2398,6 +2568,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizzes((prev) => {
       const next = prev.map((q) => q.id === id ? { ...q, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : q);
       persist({ quizzes: next }, true);
+      void runInstantDataCloudSave({ quizzes: next });
       return next;
     });
   };
@@ -2424,7 +2595,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
-    void pushPermDeletedCloud();
+    void pushPermDeletedCloud({ quizzes: nextQuizzes, quizSets: nextSets });
   };
 
   const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => {
@@ -2452,6 +2623,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === id ? { ...s, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : s);
       persistSets(next, true);
+      void runInstantDataCloudSave({ quizSets: next });
       return next;
     });
   };
@@ -2478,7 +2650,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets(nextSets);
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persistSets(nextSets, true);
-    void pushPermDeletedCloud();
+    void pushPermDeletedCloud({ quizSets: nextSets });
   };
 
   const reorderQuizSets = (dragId: string, targetId: string) => {
@@ -2574,22 +2746,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const deleteQuizFolder = (id: string) => {
     if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
     const trashAt = new Date().toISOString();
-    setQuizFolders((prev) => {
-      const next = prev.map((f) => f.id === id ? { ...f, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : f);
-      persistFolders(next, true);
-      return next;
-    });
-    setQuizSets((prev) => {
-      let changed = false;
-      const next = prev.map((s) => {
-        if (s.folderId !== id) return s;
-        changed = true;
-        return { ...s, folderId: undefined };
-      });
-      if (!changed) return prev;
-      persistSets(next, true);
-      return next;
-    });
+    const nextFolders = quizFoldersRef.current.map((f) => (
+      f.id === id ? { ...f, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : f
+    ));
+    const nextSets = quizSetsRef.current.map((s) => (
+      s.folderId === id ? { ...s, folderId: undefined } : s
+    ));
+    quizFoldersRef.current = nextFolders;
+    quizSetsRef.current = nextSets;
+    setQuizFolders(nextFolders);
+    setQuizSets(nextSets);
+    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persist({ quizFolders: nextFolders, quizSets: nextSets }, true);
+    void runInstantDataCloudSave({ quizFolders: nextFolders, quizSets: nextSets });
   };
 
   const restoreQuizFolder = (id: string) => {
@@ -2612,7 +2782,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     persist({ quizSets: nextSets, quizFolders: nextFolders }, true);
-    void pushPermDeletedCloud();
+    void pushPermDeletedCloud({ quizSets: nextSets, quizFolders: nextFolders });
   };
 
   const recoverQuizFolders = async (): Promise<number> => {
@@ -3089,18 +3259,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setNotes((prev) => {
       const next = prev.map((n) => (n.id === id ? { ...n, trashed: true, deletedAt: nowStr(), savedAt } : n));
       persist({ notes: next }, true);
+      void runInstantDataCloudSave({ notes: next });
       return next;
     });
   };
   const restore = (id: number) => updateNote(id, { trashed: false, deletedAt: undefined });
   const permDelete = (id: number) => {
     recordPermDeleted({ notes: [id] });
-    setNotes((prev) => {
-      const next = prev.filter((n) => n.id !== id);
-      persist({ notes: next }, true);
-      return next;
-    });
-    void pushPermDeletedCloud();
+    const nextNotes = notesRef.current.filter((n) => n.id !== id);
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+    persist({ notes: nextNotes }, true);
+    void pushPermDeletedCloud({ notes: nextNotes });
   };
   const emptyTrash = () => {
     const trashedNotes = notesRef.current.filter((n) => n.trashed);
@@ -3143,34 +3314,27 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     localStorage.setItem(TRASH_EMPTIED_AT_KEY, String(Date.now()));
 
-    persist({ notes: nextNotes, quizzes: nextQuizzes, quizSets: nextSets, quizFolders: nextFolders }, true);
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    writeLocalCache();
 
     const u = userRef.current;
     if (u && loadedRef.current) {
-      void fetch(`${FB_DB_URL}/users/${u.uid}/quizSets.json`, {
-        method: 'PUT',
-        body: JSON.stringify(nextSets),
-        headers: { 'Content-Type': 'application/json' },
-      });
-      void fetch(`${FB_DB_URL}/users/${u.uid}/quizFolders.json`, {
-        method: 'PUT',
-        body: JSON.stringify(nextFolders),
-        headers: { 'Content-Type': 'application/json' },
-      });
-      runCloudSave(true);
-      void pushPermDeletedCloud();
+      void runInstantTrashCloudSave(nextNotes, nextQuizzes, nextSets, nextFolders);
     }
   };
   const deleteMany = (ids: number[]) => {
     if (ids.length === 0) return;
     recordPermDeleted({ notes: ids });
-    setNotes((prev) => {
-      const idSet = new Set(ids);
-      const next = prev.filter((n) => !idSet.has(n.id));
-      persist({ notes: next }, true);
-      return next;
-    });
-    void pushPermDeletedCloud();
+    const idSet = new Set(ids);
+    const nextNotes = notesRef.current.filter((n) => !idSet.has(n.id));
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+    persist({ notes: nextNotes }, true);
+    void pushPermDeletedCloud({ notes: nextNotes });
   };
 
   return (
