@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { onValue, ref as dbRef } from 'firebase/database';
+import { onChildAdded, onChildChanged, onChildRemoved, onValue, ref as dbRef, update } from 'firebase/database';
 import type { Note, QuizItem, QuizSet, QuizFolder, ChatConversation } from '../types';
 import { database, FB_DB_URL } from '../lib/firebase';
 import { buildFullBackupPayload, shouldRunHourlyFolderBackup, writeBackupToFolder } from '../lib/externalBackup';
@@ -1051,6 +1051,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const lastCloudDraftIdsRef = useRef<Set<string>>(new Set());
   const pendingDraftCloudSaveRef = useRef(false);
   const draftCloudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftLocalEditAtRef = useRef<Map<string, number>>(new Map());
+  const lastPushedDraftUpdatedAtRef = useRef<Map<string, number>>(new Map());
+  const draftSaveInFlightRef = useRef<Set<string>>(new Set());
+  const draftSavePendingAgainRef = useRef<Set<string>>(new Set());
   const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const notesRef = useRef(notes);
   const quizzesRef = useRef(quizzes);
@@ -1568,6 +1572,104 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const applySingleRemoteDraft = (id: string, remote: { title?: string; html?: string; updatedAt?: number } | null) => {
+    if (!id || pendingDeletedDraftIdsRef.current.has(id)) return;
+    if (remote === null) {
+      const next = draftsRef.current.filter((d) => d.id !== id);
+      if (next.length === draftsRef.current.length) return;
+      draftsRef.current = next;
+      setDrafts(next);
+      localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+      return;
+    }
+    const remoteAt = typeof remote.updatedAt === 'number' ? remote.updatedAt : 0;
+    const lastPushed = lastPushedDraftUpdatedAtRef.current.get(id) ?? 0;
+    if (remoteAt > 0 && remoteAt <= lastPushed) return;
+    const localEditAt = draftLocalEditAtRef.current.get(id) ?? 0;
+    const local = draftsRef.current.find((d) => d.id === id);
+    const localAt = local?.updatedAt ?? 0;
+    if (local && Date.now() - localEditAt < 300 && remoteAt <= localAt) return;
+
+    const remoteDraft: Draft = {
+      id,
+      title: remote.title ?? '',
+      html: remote.html ?? '',
+      updatedAt: remoteAt || undefined,
+    };
+    let next: Draft[];
+    if (local) {
+      const picked = pickBetterDraft(local, remoteDraft);
+      if (JSON.stringify(picked) === JSON.stringify(local)) return;
+      next = draftsRef.current.map((d) => (d.id === id ? picked : d));
+    } else {
+      next = [...draftsRef.current, remoteDraft];
+    }
+    draftsRef.current = next;
+    setDrafts(next);
+    localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+  };
+
+  const runSingleDraftCloudSave = async (draftId: string) => {
+    const u = userRef.current;
+    if (!u || !draftsReadyRef.current || isApplyingRemoteRef.current) return;
+    if (draftSaveInFlightRef.current.has(draftId)) {
+      draftSavePendingAgainRef.current.add(draftId);
+      return;
+    }
+    const draft = draftsRef.current.find((d) => d.id === draftId);
+    if (!draft) return;
+
+    const updatedAt = draft.updatedAt ?? Date.now();
+    lastPushedDraftUpdatedAtRef.current.set(draftId, updatedAt);
+    draftSaveInFlightRef.current.add(draftId);
+    savesInFlight.current += 1;
+    setCloudStatus('saving');
+    savingStartedAt.current = Date.now();
+    const syncedAt = Date.now();
+
+    try {
+      await update(dbRef(database, `users/${u.uid}`), {
+        [`draftContents/${draftId}`]: { title: draft.title, html: draft.html, updatedAt },
+        drafts: draftsRef.current.map((d) => d.id),
+        draftId: draftCounter.current,
+        deletedDraftIds: [...pendingDeletedDraftIdsRef.current],
+        cloudSyncAt: syncedAt,
+      });
+      saveFailedRef.current = false;
+      lastLocalSaveAt.current = syncedAt;
+      lastAppliedRemoteSyncAt.current = syncedAt;
+      setCloudSyncedAt(syncedAt);
+      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+    } catch {
+      saveFailedRef.current = true;
+      setCloudStatus('error');
+    } finally {
+      draftSaveInFlightRef.current.delete(draftId);
+      savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+      if (draftSavePendingAgainRef.current.has(draftId)) {
+        draftSavePendingAgainRef.current.delete(draftId);
+        void runSingleDraftCloudSave(draftId);
+      } else if (savesInFlight.current === 0) {
+        if (saveFailedRef.current) {
+          setCloudStatus('error');
+        } else {
+          const elapsed = Date.now() - savingStartedAt.current;
+          const delay = Math.max(0, MIN_SYNC_VISIBLE_MS - elapsed);
+          const markSaved = () => setCloudStatus('saved');
+          if (delay > 0) setTimeout(markSaved, delay);
+          else markSaved();
+        }
+      }
+    }
+  };
+
+  const scheduleSingleDraftCloudSave = (draftId: string) => {
+    if (!userRef.current || !draftsReadyRef.current || isApplyingRemoteRef.current) return;
+    queueMicrotask(() => {
+      void runSingleDraftCloudSave(draftId);
+    });
+  };
+
   const runDraftCloudSave = (keepalive = false) => {
     const u = userRef.current;
     if (!u || !draftsReadyRef.current || isApplyingRemoteRef.current) return;
@@ -1874,21 +1976,51 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user || !draftsReady) return;
-    const scheduleDraftPull = () => {
-      if (draftPullDebounceRef.current) clearTimeout(draftPullDebounceRef.current);
-      draftPullDebounceRef.current = setTimeout(() => {
-        draftPullDebounceRef.current = null;
-        void pullDraftsFromCloud();
-      }, 120);
+    const uid = user.uid;
+    const contentsRef = dbRef(database, `users/${uid}/draftContents`);
+    const handleRemote = (snap: { key: string | null; val: () => unknown }) => {
+      const id = snap.key;
+      if (!id) return;
+      isApplyingRemoteRef.current = true;
+      try {
+        applySingleRemoteDraft(id, snap.val() as { title?: string; html?: string; updatedAt?: number } | null);
+      } finally {
+        isApplyingRemoteRef.current = false;
+      }
     };
-    const unsubContents = onValue(dbRef(database, `users/${user.uid}/draftContents`), scheduleDraftPull);
-    const unsubDrafts = onValue(dbRef(database, `users/${user.uid}/drafts`), scheduleDraftPull);
-    const unsubDeleted = onValue(dbRef(database, `users/${user.uid}/deletedDraftIds`), scheduleDraftPull);
+    const unsubChanged = onChildChanged(contentsRef, handleRemote);
+    const unsubAdded = onChildAdded(contentsRef, handleRemote);
+    const unsubRemoved = onChildRemoved(contentsRef, (snap) => {
+      const id = snap.key;
+      if (!id) return;
+      isApplyingRemoteRef.current = true;
+      try {
+        applySingleRemoteDraft(id, null);
+      } finally {
+        isApplyingRemoteRef.current = false;
+      }
+    });
+    const unsubDrafts = onValue(dbRef(database, `users/${uid}/drafts`), (snap) => {
+      const ids = firebaseToArray<string>(snap.val() as string[] | Record<string, string> | null).map(String).filter(Boolean);
+      lastCloudDraftIdsRef.current = new Set(ids);
+    });
+    const unsubDeleted = onValue(dbRef(database, `users/${uid}/deletedDraftIds`), (snap) => {
+      const ids = firebaseToArray<string>(snap.val() as string[] | Record<string, string> | null).map(String).filter(Boolean);
+      if (!ids.length) return;
+      pendingDeletedDraftIdsRef.current = mergeDeletedDraftIds(pendingDeletedDraftIdsRef.current, { deletedDraftIds: ids });
+      const next = draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id));
+      if (JSON.stringify(next) !== JSON.stringify(draftsRef.current)) {
+        draftsRef.current = next;
+        setDrafts(next);
+        localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+      }
+    });
     return () => {
-      unsubContents();
+      unsubChanged();
+      unsubAdded();
+      unsubRemoved();
       unsubDrafts();
       unsubDeleted();
-      if (draftPullDebounceRef.current) clearTimeout(draftPullDebounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, draftsReady]);
@@ -1927,7 +2059,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (typeof remoteSyncAt !== 'number' || remoteSyncAt <= 0) return;
       if (remoteSyncAt <= lastAppliedRemoteSyncAt.current) return;
       if (savesInFlight.current > 0 || saveTimer.current || draftCloudTimer.current) return;
-      if (Math.abs(remoteSyncAt - lastLocalSaveAt.current) < 600) return;
+      if (Math.abs(remoteSyncAt - lastLocalSaveAt.current) < 150) return;
       lastAppliedRemoteSyncAt.current = remoteSyncAt;
       void pullDraftsFromCloud(true);
       if (loadedRef.current) void pullFromCloud(false);
@@ -1953,7 +2085,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setDrafts(next);
     localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
     persist({ drafts: next });
-    scheduleDraftCloudSave();
+    scheduleSingleDraftCloudSave(id);
   };
 
   const removeDraft = (id: string) => {
@@ -1974,12 +2106,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateDraft = (id: string, patch: Partial<Draft>) => {
     const now = Date.now();
     lastDraftEditAt.current = now;
+    draftLocalEditAtRef.current.set(id, now);
     const next = draftsRef.current.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: now } : d));
     draftsRef.current = next;
     setDrafts(next);
     localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
     persist({ drafts: next }, false, true);
-    scheduleDraftCloudSave();
+    scheduleSingleDraftCloudSave(id);
   };
 
   const submitDraft = (id: string) => {

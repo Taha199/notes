@@ -138,6 +138,8 @@ interface Props {
   onChange: (html: string) => void;
   /** Fires on every edit immediately — use for save refs without re-rendering each keystroke. */
   onLiveChange?: (html: string) => void;
+  /** Parent draft revision — when newer than local keystrokes, apply remote html even while focused. */
+  syncUpdatedAt?: number;
   placeholder: string;
   editable?: boolean;
   minHeight?: string;
@@ -148,7 +150,7 @@ interface Props {
   stickyToolbar?: boolean;
 }
 
-export function RichTextEditor({ html, onChange, onLiveChange, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
+export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
   const { t, lang } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -326,6 +328,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const lastLocalHtmlRef = useRef(html);
   const lastPropHtmlRef = useRef(html);
+  const lastKeystrokeAtRef = useRef(0);
+  const lastSyncUpdatedAtRef = useRef(syncUpdatedAt);
   const onChangeRef = useRef(onChange);
   const onLiveChangeRef = useRef(onLiveChange);
   onChangeRef.current = onChange;
@@ -336,6 +340,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
   const EMIT_DEBOUNCE_MS = 280;
 
   const emitHtml = () => {
+    lastKeystrokeAtRef.current = Date.now();
     const ed = editorRef.current;
     if (ed && onLiveChangeRef.current) {
       const live = serializeEditorHtml(ed);
@@ -1819,8 +1824,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
     // content (e.g. the "Paste note" button) — always honor it below.
     const propChanged = html !== lastPropHtmlRef.current;
     lastPropHtmlRef.current = html;
+    const syncAt = syncUpdatedAt ?? 0;
+    const remoteSyncAdvance = syncAt > (lastSyncUpdatedAtRef.current ?? 0);
+    lastSyncUpdatedAtRef.current = syncAt;
     const active = document.activeElement;
-    if (active && editorWrapRef.current?.contains(active)) return;
+    if (active && editorWrapRef.current?.contains(active)) {
+      const remoteIsNewer = remoteSyncAdvance && syncAt > lastKeystrokeAtRef.current;
+      if (!remoteIsNewer && Date.now() - lastKeystrokeAtRef.current < 300) return;
+    }
     if (ed.innerHTML === html) {
       lastLocalHtmlRef.current = html;
       return;

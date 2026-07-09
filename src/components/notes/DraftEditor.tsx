@@ -33,6 +33,7 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
       />
       <RichTextEditor
         html={draft.html}
+        syncUpdatedAt={draft.updatedAt}
         onChange={onHtmlChange}
         onLiveChange={onHtmlChange}
         placeholder={t.draftEdPh}
