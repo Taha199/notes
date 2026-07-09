@@ -57,6 +57,8 @@ export interface Translation {
   cloudSaveError: string;
   cloudSavedAt: string;
   cloudNotSyncedYet: string;
+  draftsLoadingCloud: string;
+  draftsWriteWhileLoading: string;
   pageHome: string;
   pageLib: string;
   pageUnread: string;
@@ -521,6 +523,8 @@ export const LANGS: Record<Lang, Translation> = {
     draft: 'Draft', draftTiPh: 'Title (optional)', draftEdPh: 'Write your note here...', saveDraft: 'Save Note',
     cloudSaving: 'Saving...', cloudSaved: 'Saved', cloudSavedMain: 'Saved to cloud', cloudSaveError: 'Cloud save failed — retrying on next edit',
     cloudSavedAt: 'Saved to cloud: {time}', cloudNotSyncedYet: 'Not saved to cloud yet',
+    draftsLoadingCloud: 'Loading your open drafts from the cloud…',
+    draftsWriteWhileLoading: 'You can start a new draft right away while your other drafts sync.',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Notes to Study', pageRead: 'Studied Notes',
     pageFav: 'Favourites', pageArch: 'Archive', pageFiles: 'File Uploads', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
@@ -868,6 +872,8 @@ export const LANGS: Record<Lang, Translation> = {
     draft: 'Utkast', draftTiPh: 'Titel (valfri)', draftEdPh: 'Skriv din anteckning här...', saveDraft: 'Spara Anteckning',
     cloudSaving: 'Sparar...', cloudSaved: 'Sparat', cloudSavedMain: 'Sparat i molnet', cloudSaveError: 'Molnet misslyckades — försöker igen vid nästa ändring',
     cloudSavedAt: 'Sparat i molnet: {time}', cloudNotSyncedYet: 'Inte sparad i molnet ännu',
+    draftsLoadingCloud: 'Hämtar dina öppna utkast från molnet…',
+    draftsWriteWhileLoading: 'Du kan börja skriva ett nytt utkast direkt medan dina andra utkast synkas.',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Att studera', pageRead: 'Studerade',
     pageFav: 'Favoriter', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',

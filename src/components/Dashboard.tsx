@@ -168,7 +168,7 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
 
 export function Dashboard() {
   const { t, lang } = useLanguage();
-  const { notes, drafts, trashedQuizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
+  const { notes, drafts, draftsLoading, trashedQuizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
   const { show } = useToast();
   const [page, setPageState] = useState<Page>(() => pageFromPath(window.location.pathname));
   const setPage = useCallback((next: Page) => {
@@ -281,6 +281,12 @@ export function Dashboard() {
               {active.length > 0 && (
                 <div className="rounded-xl border border-blue-200/80 bg-blue-50/80 px-4 py-3 text-[13px] leading-relaxed text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
                   📚 {t.homeSavedNotesHint}
+                </div>
+              )}
+              {draftsLoading && (
+                <div className="rounded-xl border border-indigo-200/80 bg-indigo-50/90 px-4 py-3 text-[13px] leading-relaxed text-indigo-900 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-100">
+                  <p className="font-medium">☁️ {t.draftsLoadingCloud}</p>
+                  <p className="mt-1 text-[12px] opacity-80">{t.draftsWriteWhileLoading}</p>
                 </div>
               )}
               {drafts.map((d, i) => (
