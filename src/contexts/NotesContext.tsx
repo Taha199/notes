@@ -366,7 +366,7 @@ interface NotesCtx {
   deleteQuiz: (id: number, fromSetId?: string | null) => void;
   restoreQuiz: (id: number) => void;
   permDeleteQuiz: (id: number) => void;
-  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => void;
+  updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud?: boolean) => void;
   addQuizSet: (name: string) => QuizSet;
   deleteQuizSet: (id: string) => void;
   restoreQuizSet: (id: string) => void;
@@ -395,7 +395,7 @@ interface NotesCtx {
   restoreFromLocalBackup: () => Promise<{ notes: number; quizzes: number; sets: number; folders: number; chats: number }>;
   addItemToSet: (setId: string, item: Omit<QuizItem, 'id'>) => number;
   removeItemFromSet: (setId: string, itemId: number) => void;
-  updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes'>>) => void;
+  updateItemInSet: (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud?: boolean) => void;
   moveItemInSet: (setId: string, itemId: number, direction: 'up' | 'down') => void;
   reorderItemInSet: (setId: string, dragId: number, targetId: number) => void;
   setItemsOrderInSet: (setId: string, itemIds: number[]) => void;
@@ -2803,12 +2803,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     void pushPermDeletedCloud({ quizzes: nextQuizzes, quizSets: nextSets });
   };
 
-  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => {
-    setQuizzes((prev) => {
-      const next = prev.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
-      persist({ quizzes: next });
-      return next;
-    });
+  const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
+    const next = quizzesRef.current.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
+    quizzesRef.current = next;
+    setQuizzes(next);
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
+    persist({ quizzes: next }, forceCloud);
+    if (forceCloud) scheduleInstantDataCloudSave({ quizzes: next });
   };
 
   const addQuizSet = (name: string): QuizSet => {
@@ -3366,12 +3367,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => {
-    setQuizSets((prev) => {
-      const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.map((i) => i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i) } : s);
-      persistSets(next);
-      return next;
-    });
+  const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
+    const next = quizSetsRef.current.map((s) => (
+      s.id === setId
+        ? { ...s, items: s.items.map((i) => (i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i)) }
+        : s
+    ));
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    persistSets(next, forceCloud);
+    if (forceCloud) scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const moveItemInSet = (setId: string, itemId: number, direction: 'up' | 'down') => {

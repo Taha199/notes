@@ -565,6 +565,8 @@ export function QuizPage() {
 
   const savedSelection = useMemo(() => loadQuizSelection(), []);
   const [selectedSetId, setSelectedSetId] = useState<string | null>(() => savedSelection.setId);
+  const selectedSetIdRef = useRef<string | null>(selectedSetId);
+  selectedSetIdRef.current = selectedSetId;
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => savedSelection.folderId);
   const dragSetId = useRef<string | null>(null);
   const dragFolderId = useRef<string | null>(null);
@@ -642,12 +644,21 @@ export function QuizPage() {
     };
 
     updateForm(formId, { saveStatus: 'syncing' });
-    if (selectedSetId) updateItemInSet(selectedSetId, form.itemId, patch);
-    else updateQuiz(form.itemId, patch);
+    const setId = selectedSetIdRef.current;
+    if (setId) updateItemInSet(setId, form.itemId, patch, true);
+    else updateQuiz(form.itemId, patch, true);
     window.setTimeout(() => {
       updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
-    }, 650);
+    }, 350);
     return form.itemId;
+  };
+
+  const flushAllOpenForms = () => {
+    for (const form of openFormsRef.current) {
+      if (form.itemId === null) continue;
+      const complete = hasContent(form.question) && hasContent(form.answer);
+      flushForm(form.formId, undefined, !!form.finalized || complete);
+    }
   };
 
   const flushForm = (formId: string, override?: SavePayload, finalize = false) => {
@@ -731,10 +742,25 @@ export function QuizPage() {
         form.formId,
         setTimeout(() => {
           persistForm(form.formId);
-        }, 2000),
+        }, 400),
       );
     });
   }, [openForms, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState !== 'hidden') return;
+      flushAllOpenForms();
+    };
+    const onPageHide = () => flushAllOpenForms();
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onHide);
+      flushAllOpenForms();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     saveQuizSelection(selectedFolderId, selectedSetId);
@@ -1071,9 +1097,6 @@ export function QuizPage() {
     return { known, total: items.length };
   };
 
-  // Group sorted sets by folder. A set whose folder was deleted falls back to ungrouped.
-  const folderIds = new Set(quizFolders.map((f) => f.id));
-  const ungroupedSets = sortedSets.filter((s) => !s.folderId || !folderIds.has(s.folderId));
   const setsInFolder = (fid: string) => sortedSets.filter((s) => s.folderId === fid);
   const userSetsInFolder = (fid: string) => setsInFolder(fid).filter((s) => !s.system);
 
@@ -1083,8 +1106,8 @@ export function QuizPage() {
     setSelectedSetId(folderSets[0]?.id ?? null);
   };
 
-  // Sets shown in the right panel depending on which folder is selected
-  const currentSets = selectedFolderId ? setsInFolder(selectedFolderId) : ungroupedSets;
+  // Sets only appear when a folder is selected — not in "Questions from Notes" view
+  const currentSets = selectedFolderId ? setsInFolder(selectedFolderId) : [];
 
   const renderSetRow = (s: QuizSet) => {
     const { known, total } = progressForSet(s.id);
@@ -1388,7 +1411,7 @@ export function QuizPage() {
             <div className="flex-1 overflow-y-auto px-1">
               {currentSets.length === 0 ? (
                 <p className="py-4 text-center text-[11px] italic text-app-text-secondary/40">
-                  {selectedFolderId ? t.quizFolderEmpty : t.quizNoUngroupedSets}
+                  {selectedFolderId ? t.quizFolderEmpty : isNotesView ? t.quizSelectFolderForSets : t.quizNoUngroupedSets}
                 </p>
               ) : (
                 currentSets.map((s) => renderSetRow(s))
