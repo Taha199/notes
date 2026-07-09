@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { Draft } from '../../contexts/NotesContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -8,10 +9,29 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
   const { t } = useLanguage();
   const { updateDraft, removeDraft, submitDraft } = useNotes();
 
+  const htmlRef = useRef(draft.html);
+  const titleRef = useRef(draft.title);
+
+  useEffect(() => {
+    htmlRef.current = draft.html;
+    titleRef.current = draft.title;
+  }, [draft.html, draft.title]);
+
   const plainText = draft.html.replace(/<[^>]*>/g, '').trim();
 
   const onHtmlChange = (html: string) => {
+    htmlRef.current = html;
     updateDraft(draft.id, { html });
+  };
+
+  const handleClose = () => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    queueMicrotask(() => {
+      const text = htmlRef.current.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+      const hasContent = !!text || !!titleRef.current.trim();
+      if (hasContent) submitDraft(draft.id);
+      else removeDraft(draft.id);
+    });
   };
 
   return (
@@ -26,7 +46,10 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
       </div>
       <input
         value={draft.title}
-        onChange={(e) => updateDraft(draft.id, { title: e.target.value })}
+        onChange={(e) => {
+          titleRef.current = e.target.value;
+          updateDraft(draft.id, { title: e.target.value });
+        }}
         placeholder={t.draftTiPh}
         maxLength={80}
         className="border-b border-app-border bg-transparent px-4 py-2.5 text-sm font-semibold text-app-text outline-none placeholder:font-normal placeholder:text-gray-400 dark:border-white/10 dark:text-gray-100"
@@ -58,7 +81,7 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
       </div>
       <button
         type="button"
-        onClick={() => removeDraft(draft.id)}
+        onClick={handleClose}
         aria-label="Close draft"
         title="Close draft"
         className="absolute -right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border border-app-border bg-white text-sm text-app-text-secondary shadow-md transition-all hover:scale-105 hover:border-red-300 hover:text-red-500 dark:border-white/15 dark:bg-gray-800 dark:text-gray-300"

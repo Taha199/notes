@@ -481,6 +481,9 @@ export interface Translation {
   noteGenerateAnswerPh: string;
   noteMcqCorrectHint: string;
   noteSaveQuestion: string;
+  noteBackToLastQuestion: string;
+  notePrevQuestion: string;
+  noteNextQuestion: string;
   noteSavedQuiz: string;
   noteQuizSavedCount: string;
   noteAiQuestion: string;
@@ -832,6 +835,9 @@ export const LANGS: Record<Lang, Translation> = {
     noteGenerateAnswerPh: 'Generate or write the answer...',
     noteMcqCorrectHint: 'Circle = correct answer',
     noteSaveQuestion: '💾 Save question',
+    noteBackToLastQuestion: '↩ Last question',
+    notePrevQuestion: 'Previous question',
+    noteNextQuestion: 'Next question',
     noteSavedQuiz: 'Question saved to Quiz 🧠',
     noteQuizSavedCount: '{n} questions saved to Quiz 🧠',
     noteAiQuestion: '🤖 AI Question',
@@ -1181,6 +1187,9 @@ export const LANGS: Record<Lang, Translation> = {
     noteGenerateAnswerPh: 'Generera eller skriv svaret...',
     noteMcqCorrectHint: 'Circle = rätt svar',
     noteSaveQuestion: '💾 Spara fråga',
+    noteBackToLastQuestion: '↩ Senaste frågan',
+    notePrevQuestion: 'Föregående fråga',
+    noteNextQuestion: 'Nästa fråga',
     noteSavedQuiz: 'Fråga sparad i Quiz 🧠',
     noteQuizSavedCount: '{n} frågor sparade i Quiz 🧠',
     noteAiQuestion: '🤖 AI Fråga',

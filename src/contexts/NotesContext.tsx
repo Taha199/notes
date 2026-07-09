@@ -211,7 +211,7 @@ function mergeDraftsForPull(
     }
     if (cloudHasMembership && cloudDraftIds.length > 0 && !cloudDraftIds.includes(item.id)) {
       // Removed on another device — keep only if edited locally after last cloud sync.
-      if (!item.updatedAt || item.updatedAt <= cloudSyncAt) continue;
+      if (!item.updatedAt || item.updatedAt < cloudSyncAt) continue;
     }
     map.set(item.id, item);
   }
@@ -2170,8 +2170,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = draftsRef.current.filter((d) => {
       if (idSet.has(d.id)) return true;
       if (pendingDeletedDraftIdsRef.current.has(d.id)) return false;
-      const localEditAt = draftLocalEditAtRef.current.get(d.id) ?? 0;
-      return Date.now() - localEditAt < 3000;
+      if (draftSaveInFlightRef.current.has(d.id)) return true;
+      const localEditAt = draftLocalEditAtRef.current.get(d.id) ?? d.updatedAt ?? 0;
+      return Date.now() - localEditAt < 12_000;
     });
     if (JSON.stringify(next) === JSON.stringify(draftsRef.current)) return;
     draftsRef.current = next;
@@ -2655,6 +2656,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const id = 'd' + ++draftCounter.current;
     const now = Date.now();
     lastDraftEditAt.current = now;
+    draftLocalEditAtRef.current.set(id, now);
     const next = [...draftsRef.current, { id, title: '', html: '', updatedAt: now }];
     draftsRef.current = next;
     setDrafts(next);
@@ -2691,9 +2693,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const submitDraft = (id: string) => {
-    const draft = drafts.find((d) => d.id === id);
+    const draft = draftsRef.current.find((d) => d.id === id);
     if (!draft) return;
-    const text = draft.html.replace(/<[^>]*>/g, '').trim();
+    const text = draft.html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
     if (!text) return;
     const newNote: Note = {
       id: nextId(),

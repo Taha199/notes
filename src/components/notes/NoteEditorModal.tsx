@@ -99,6 +99,23 @@ type DraftQuizSnapshot = {
   mcqCorrect: number;
 };
 
+function snapshotMatchesForm(
+  snap: DraftQuizSnapshot,
+  question: string,
+  answer: string,
+  mcq: boolean,
+  options: string[],
+  correct: number,
+): boolean {
+  return (
+    snap.question === question
+    && snap.answer === answer
+    && snap.mcqMode === mcq
+    && snap.mcqCorrect === correct
+    && JSON.stringify(snap.mcqOptions) === JSON.stringify(options)
+  );
+}
+
 export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNote, onClose, onNavigate }: NoteEditorModalProps) {
   const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz } = useNotes();
   const { t } = useLanguage();
@@ -173,7 +190,13 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
 
   const plainText = html.replace(/<[^>]*>/g, '').trim();
   const current = quizItems[quizIndex];
-  const canGoManualBack = manualHistoryIndex > 0;
+  const manualFormEmpty = !hasContent(manualQ) && (mcqMode ? mcqOptions.every((o) => !o.trim()) : !hasContent(manualA));
+  const lastManualSnapshot = manualHistory.length > 0 ? manualHistory[manualHistory.length - 1] : null;
+  const showingLastSaved = lastManualSnapshot
+    ? snapshotMatchesForm(lastManualSnapshot, manualQ, manualA, mcqMode, mcqOptions, mcqCorrect)
+    : false;
+  const canRestoreLastSaved = lastManualSnapshot != null && !showingLastSaved;
+  const canGoManualBack = manualHistoryIndex > 0 || (manualHistory.length > 0 && manualFormEmpty);
   const canGoManualForward = manualHistoryIndex >= 0 && manualHistoryIndex < manualHistory.length - 1;
 
   const applyManualSnapshot = (snap: DraftQuizSnapshot) => {
@@ -182,6 +205,40 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     setMcqMode(snap.mcqMode);
     setMcqOptions(snap.mcqOptions.length ? snap.mcqOptions : ['', '', '', '']);
     setMcqCorrect(Math.max(0, Math.min(snap.mcqCorrect, Math.max(0, snap.mcqOptions.length - 1))));
+    setManualResetKey((k) => k + 1);
+  };
+
+  const restoreLastSavedQuestion = () => {
+    if (!lastManualSnapshot) return;
+    applyManualSnapshot(lastManualSnapshot);
+    setManualHistoryIndex(manualHistory.length - 1);
+  };
+
+  const goManualBack = () => {
+    if (manualHistoryIndex > 0) {
+      const nextIndex = manualHistoryIndex - 1;
+      const snap = manualHistory[nextIndex];
+      if (!snap) return;
+      applyManualSnapshot(snap);
+      setManualHistoryIndex(nextIndex);
+      return;
+    }
+    if (manualHistory.length > 0 && manualFormEmpty) {
+      const index = manualHistoryIndex >= 0 ? manualHistoryIndex : manualHistory.length - 1;
+      const snap = manualHistory[index];
+      if (!snap) return;
+      applyManualSnapshot(snap);
+      setManualHistoryIndex(index);
+    }
+  };
+
+  const goManualForward = () => {
+    if (!canGoManualForward) return;
+    const nextIndex = manualHistoryIndex + 1;
+    const snap = manualHistory[nextIndex];
+    if (!snap) return;
+    applyManualSnapshot(snap);
+    setManualHistoryIndex(nextIndex);
   };
 
   const pushManualHistory = (snap: DraftQuizSnapshot) => {
@@ -201,6 +258,15 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     setLastSavedAt(ts);
   };
 
+  const handleClose = () => {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = null;
+    }
+    save();
+    onClose();
+  };
+
   // Auto-save 1.5 s after the user stops typing (only in edit mode)
   useEffect(() => {
     if (locked) return;
@@ -210,6 +276,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   }, [html, title, locked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const markDone = () => {
+    save();
     updateNote(note.id, { read: true });
     show(t.tStudied);
     if (nextNoteId !== undefined && onChangeNote) {
@@ -221,12 +288,14 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   };
 
   const markUndone = () => {
+    save();
     updateNote(note.id, { read: false });
     show(t.tUnstudied);
     onClose();
   };
 
   const handleArchive = () => {
+    save();
     archive(note.id);
     show(t.tArched);
     onNavigate?.('archive');
@@ -274,7 +343,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   );
 
   return (
-    <div onClick={(e) => e.target === e.currentTarget && onClose()} className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-1 backdrop-blur-sm sm:p-2">
+    <div onClick={(e) => e.target === e.currentTarget && handleClose()} className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-gray-900/45 p-1 backdrop-blur-sm sm:p-2">
       <button
         type="button"
         onClick={() => previousNoteId !== undefined && onChangeNote?.(previousNoteId)}
@@ -310,7 +379,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
           </div>
           <div className="flex items-center gap-1.5">
             <button onClick={() => toggleFav(note.id)} className={'flex h-8 w-8 items-center justify-center rounded-lg border text-sm transition-all ' + (note.fav ? '!border-amber-400 !bg-amber-100 !text-amber-500 shadow-sm shadow-amber-300/50 ring-1 ring-amber-300/50 dark:!border-amber-500/60 dark:!bg-amber-500/25 dark:!text-amber-300' : 'border-app-border text-app-text-secondary hover:border-amber-300 hover:text-amber-500 dark:hover:border-amber-500/40 dark:hover:bg-amber-500/10 dark:hover:text-amber-300')}>★</button>
-            <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary hover:bg-app-border/60 dark:hover:bg-white/10">✕</button>
+            <button onClick={handleClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary hover:bg-app-border/60 dark:hover:bg-white/10">✕</button>
           </div>
         </div>
 
@@ -329,38 +398,29 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   <span className="text-[13px] font-bold text-emerald-700 dark:text-emerald-400">{t.noteCreateQuestion}</span>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!canGoManualBack) return;
-                      const nextIndex = manualHistoryIndex - 1;
-                      const snap = manualHistory[nextIndex];
-                      if (!snap) return;
-                      applyManualSnapshot(snap);
-                      setManualHistoryIndex(nextIndex);
-                    }}
+                    onClick={goManualBack}
                     disabled={!canGoManualBack}
-                    title="Föregående fråga"
-                    aria-label="Föregående fråga"
+                    title={t.notePrevQuestion}
+                    aria-label={t.notePrevQuestion}
                     className="flex h-6 w-6 items-center justify-center rounded-md border border-emerald-300 text-[13px] text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-35 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
                   >
                     ←
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!canGoManualForward) return;
-                      const nextIndex = manualHistoryIndex + 1;
-                      const snap = manualHistory[nextIndex];
-                      if (!snap) return;
-                      applyManualSnapshot(snap);
-                      setManualHistoryIndex(nextIndex);
-                    }}
+                    onClick={goManualForward}
                     disabled={!canGoManualForward}
-                    title="Nästa fråga"
-                    aria-label="Nästa fråga"
+                    title={t.noteNextQuestion}
+                    aria-label={t.noteNextQuestion}
                     className="flex h-6 w-6 items-center justify-center rounded-md border border-emerald-300 text-[13px] text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-35 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
                   >
                     →
                   </button>
+                  {manualHistory.length > 0 && (
+                    <span className="text-[10px] font-semibold tabular-nums text-emerald-700/60 dark:text-emerald-300/60">
+                      {manualHistoryIndex >= 0 ? manualHistoryIndex + 1 : manualHistory.length}/{manualHistory.length}
+                    </span>
+                  )}
                 </div>
                 <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); setManualHistory([]); setManualHistoryIndex(-1); }} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
               </div>
@@ -436,7 +496,16 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   )}
                 </div>
 
-                <div className="flex justify-end gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
+                  {canRestoreLastSaved && (
+                    <button
+                      type="button"
+                      onClick={restoreLastSavedQuestion}
+                      className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
+                    >
+                      {t.noteBackToLastQuestion}
+                    </button>
+                  )}
                   <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
                   <button
                     onClick={() => {
