@@ -149,6 +149,7 @@ function mergeNotesForSync(local: Note[], remote: Note[]) {
   for (const item of local) map.set(item.id, item);
   for (const item of remote) {
     const existing = map.get(item.id);
+    if (!existing && item.trashed) continue;
     map.set(item.id, existing ? pickBetterNote(existing, item) : item);
   }
   return [...map.values()];
@@ -159,9 +160,15 @@ function mergeQuizzesForSync(local: QuizItem[], remote: QuizItem[]) {
   for (const item of local) map.set(item.id, item);
   for (const item of remote) {
     const existing = map.get(item.id);
+    if (!existing && item.trashed) continue;
     map.set(item.id, existing ? pickNewerQuizItem(existing, item) : item);
   }
   return [...map.values()];
+}
+
+function filterResurrectedTrash<T extends { id: string | number; trashed?: boolean }>(merged: T[], local: T[]): T[] {
+  const localTrashIds = new Set(local.filter((item) => item.trashed).map((item) => String(item.id)));
+  return merged.filter((item) => !item.trashed || localTrashIds.has(String(item.id)));
 }
 
 function chatSyncTime(chat: ChatConversation) {
@@ -1191,13 +1198,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         pendingDeletedDraftIdsRef.current = mergeDeletedDraftIds(pendingDeletedDraftIdsRef.current, cloud);
 
         const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
-        let notes = mergeNotesForSync(local.notes, cloudNotes);
+        let notes = filterResurrectedTrash(mergeNotesForSync(local.notes, cloudNotes), local.notes);
         let notesRepair = notes.length > cloudNotes.length
           || (local.notes.length > 0 && cloudNotes.length === 0)
           || (local.notes.length > 0 && notes.length > cloudNotes.length);
 
         const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
-        let quizzes = mergeQuizzesForSync(local.quizzes, cloudQuizzes);
+        let quizzes = filterResurrectedTrash(mergeQuizzesForSync(local.quizzes, cloudQuizzes), local.quizzes);
         let quizzesRepair = quizzes.length > cloudQuizzes.length
           || (local.quizzes.length > 0 && cloudQuizzes.length === 0);
 
@@ -1234,14 +1241,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const historySnapshots = await fetchAllDataHistorySnapshots(user.uid);
         for (const snapshot of historySnapshots) {
           const before = notes.length;
-          notes = mergeNotesForSync(notes, snapshot.notes);
+          notes = mergeNotesForSync(notes, snapshot.notes.filter((n) => !n.trashed));
           if (notes.length > before) {
             notesRepair = true;
             historyRepair = true;
             recoveryLog('restored notes from dataHistory snapshot', { before, after: notes.length, savedAt: snapshot.savedAt });
           }
           const quizzesBefore = quizzes.length;
-          quizzes = mergeQuizzesForSync(quizzes, snapshot.quizzes);
+          quizzes = mergeQuizzesForSync(quizzes, snapshot.quizzes.filter((q) => !q.trashed));
           if (quizzes.length > quizzesBefore) quizzesRepair = true;
         }
 
@@ -1276,8 +1283,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const dedicatedFoldersEmpty = dedicatedFolders.length === 0;
         const dedicatedSetsEmpty = dedicatedSets.length === 0;
 
-        let rawFolders = mergeById(cloudFolders, dedicatedFolders, local.folders);
-        let rawSets: QuizSet[] = mergeById(cloudSets, dedicatedSets, local.sets);
+        let rawFolders = filterResurrectedTrash(mergeById(cloudFolders, dedicatedFolders, local.folders), local.folders);
+        let rawSets: QuizSet[] = filterResurrectedTrash(mergeById(cloudSets, dedicatedSets, local.sets), local.sets);
         let repairQuizStructure = false;
         if (countUserQuizFolders(rawFolders) === 0 && local.folders.some((folder) => !folder.system)) {
           rawFolders = mergeById(rawFolders, local.folders);
@@ -1428,6 +1435,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const persistSets = (nextSets: QuizSet[], forceCloud = false) => {
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ quizSets: nextSets }, forceCloud);
+    if (user && loadedRef.current && forceCloud) {
+      void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
+        method: 'PUT',
+        body: JSON.stringify(nextSets),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
   };
 
   const persistFolders = (nextFolders: QuizFolder[], forceCloud = false) => {
@@ -2882,22 +2896,45 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const restore = (id: number) => updateNote(id, { trashed: false, deletedAt: undefined });
   const permDelete = (id: number) => mutateNotes((prev) => prev.filter((n) => n.id !== id));
   const emptyTrash = () => {
-    const nextNotes = notes.filter((n) => !n.trashed);
-    const nextQuizzes = quizzes.filter((q) => !q.trashed);
-    const removedFolderIds = new Set(quizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
-    const nextSets = quizSets
+    const nextNotes = notesRef.current.filter((n) => !n.trashed);
+    const nextQuizzes = quizzesRef.current.filter((q) => !q.trashed);
+    const removedFolderIds = new Set(quizFoldersRef.current.filter((folder) => folder.trashed).map((folder) => folder.id));
+    const nextSets = quizSetsRef.current
       .filter((set) => !set.trashed)
       .map((set) => set.folderId && removedFolderIds.has(set.folderId) ? { ...set, folderId: undefined } : set);
-    const nextFolders = quizFolders.filter((folder) => !folder.trashed);
+    const nextFolders = quizFoldersRef.current.filter((folder) => !folder.trashed);
+
+    notesRef.current = nextNotes;
+    quizzesRef.current = nextQuizzes;
+    quizSetsRef.current = nextSets;
+    quizFoldersRef.current = nextFolders;
+
     setNotes(nextNotes);
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
     setQuizFolders(nextFolders);
+
     localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
     localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    persist({ notes: nextNotes, quizzes: nextQuizzes, quizSets: nextSets, quizFolders: nextFolders });
+
+    persist({ notes: nextNotes, quizzes: nextQuizzes, quizSets: nextSets, quizFolders: nextFolders }, true);
+
+    const u = userRef.current;
+    if (u && loadedRef.current) {
+      void fetch(`${FB_DB_URL}/users/${u.uid}/quizSets.json`, {
+        method: 'PUT',
+        body: JSON.stringify(nextSets),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      void fetch(`${FB_DB_URL}/users/${u.uid}/quizFolders.json`, {
+        method: 'PUT',
+        body: JSON.stringify(nextFolders),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      runCloudSave(true);
+    }
   };
   const deleteMany = (ids: number[]) => {
     const idSet = new Set(ids);
