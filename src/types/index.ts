@@ -74,6 +74,7 @@ export interface QuizSet {
   name: string;
   items: QuizItem[];
   createdAt: string;
+  updatedAt?: string;
   color?: string;
   colorInitialized?: boolean;
   trashed?: boolean;
@@ -93,5 +94,6 @@ export interface QuizFolder {
   trashed?: boolean;
   deletedAt?: string;
   createdAt: string;
+  updatedAt?: string;
   system?: 'restored' | 'favorites';
 }

@@ -43,6 +43,7 @@ function quizSyncTime(item: QuizItem) {
 }
 
 function pickNewerQuizItem(a: QuizItem, b: QuizItem) {
+  if (!!a.trashed !== !!b.trashed) return b.trashed ? b : a;
   return quizSyncTime(b) >= quizSyncTime(a) ? b : a;
 }
 
@@ -50,14 +51,19 @@ function noteContentLength(note: Note) {
   return (note.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length + (note.title || '').trim().length;
 }
 
+const TRASH_EMPTIED_AT_KEY = 'malacadhati_trash_emptied_at';
+
+function entitySyncTime(item: { updatedAt?: string; createdAt?: string; savedAt?: string }) {
+  return Date.parse(item.updatedAt || item.savedAt || item.createdAt || '') || 0;
+}
+
 function pickBetterNote(local: Note, remote: Note) {
   if (noteSyncKey(local) === noteSyncKey(remote)) return local;
+  if (local.trashed !== remote.trashed) return remote.trashed ? remote : local;
   const localLen = noteContentLength(local);
   const remoteLen = noteContentLength(remote);
   if (remoteLen !== localLen) return remoteLen > localLen ? remote : local;
-  if (local.trashed && !remote.trashed) return remote;
-  if (!local.trashed && remote.trashed) return local;
-  return local;
+  return entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
 }
 
 function draftContentLength(d: Draft) {
@@ -149,7 +155,6 @@ function mergeNotesForSync(local: Note[], remote: Note[]) {
   for (const item of local) map.set(item.id, item);
   for (const item of remote) {
     const existing = map.get(item.id);
-    if (!existing && item.trashed) continue;
     map.set(item.id, existing ? pickBetterNote(existing, item) : item);
   }
   return [...map.values()];
@@ -160,15 +165,31 @@ function mergeQuizzesForSync(local: QuizItem[], remote: QuizItem[]) {
   for (const item of local) map.set(item.id, item);
   for (const item of remote) {
     const existing = map.get(item.id);
-    if (!existing && item.trashed) continue;
     map.set(item.id, existing ? pickNewerQuizItem(existing, item) : item);
   }
   return [...map.values()];
 }
 
-function filterResurrectedTrash<T extends { id: string | number; trashed?: boolean }>(merged: T[], local: T[]): T[] {
+function filterResurrectedTrash<T extends { id: string | number; trashed?: boolean; updatedAt?: string; createdAt?: string; savedAt?: string }>(merged: T[], local: T[]): T[] {
+  const emptiedAt = Number(localStorage.getItem(TRASH_EMPTIED_AT_KEY)) || 0;
   const localTrashIds = new Set(local.filter((item) => item.trashed).map((item) => String(item.id)));
-  return merged.filter((item) => !item.trashed || localTrashIds.has(String(item.id)));
+  return merged.filter((item) => {
+    if (!item.trashed) return true;
+    if (localTrashIds.has(String(item.id))) return true;
+    if (!emptiedAt) return true;
+    return entitySyncTime(item) > emptiedAt;
+  });
+}
+
+function pickBetterQuizSet(local: QuizSet, remote: QuizSet): QuizSet {
+  if (!!local.trashed !== !!remote.trashed) return remote.trashed ? remote : local;
+  const base = entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
+  return { ...base, items: mergeQuizzesForSync(local.items ?? [], remote.items ?? []) };
+}
+
+function pickBetterQuizFolder(local: QuizFolder, remote: QuizFolder): QuizFolder {
+  if (!!local.trashed !== !!remote.trashed) return remote.trashed ? remote : local;
+  return entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
 }
 
 function chatSyncTime(chat: ChatConversation) {
@@ -191,8 +212,17 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[]) {
   for (const set of local) map.set(set.id, set);
   for (const set of remote) {
     const existing = map.get(set.id);
-    if (!existing) map.set(set.id, set);
-    else map.set(set.id, { ...set, items: mergeQuizzesForSync(existing.items ?? [], set.items ?? []) });
+    map.set(set.id, existing ? pickBetterQuizSet(existing, set) : set);
+  }
+  return [...map.values()];
+}
+
+function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[]) {
+  const map = new Map<string, QuizFolder>();
+  for (const folder of local) map.set(folder.id, folder);
+  for (const folder of remote) {
+    const existing = map.get(folder.id);
+    map.set(folder.id, existing ? pickBetterQuizFolder(existing, folder) : folder);
   }
   return [...map.values()];
 }
@@ -1283,8 +1313,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const dedicatedFoldersEmpty = dedicatedFolders.length === 0;
         const dedicatedSetsEmpty = dedicatedSets.length === 0;
 
-        let rawFolders = filterResurrectedTrash(mergeById(cloudFolders, dedicatedFolders, local.folders), local.folders);
-        let rawSets: QuizSet[] = filterResurrectedTrash(mergeById(cloudSets, dedicatedSets, local.sets), local.sets);
+        let rawFolders = filterResurrectedTrash(
+          mergeFoldersForSync(local.folders, mergeById(cloudFolders, dedicatedFolders)),
+          local.folders,
+        );
+        let rawSets: QuizSet[] = filterResurrectedTrash(
+          mergeQuizSetsForSync(local.sets, mergeQuizSetsForSync(cloudSets, dedicatedSets)),
+          local.sets,
+        );
         let repairQuizStructure = false;
         if (countUserQuizFolders(rawFolders) === 0 && local.folders.some((folder) => !folder.system)) {
           rawFolders = mergeById(rawFolders, local.folders);
@@ -1943,11 +1979,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const remoteDrafts = parseCloudDrafts(cloud).filter((draft) => !pendingDeletedDraftIdsRef.current.has(draft.id));
     lastCloudDraftIdsRef.current = new Set(parseCloudDrafts(cloud).map((d) => d.id));
 
-    const mergedNotes = mergeNotesForSync(notesRef.current, remoteNotes);
-    const mergedQuizzes = mergeQuizzesForSync(quizzesRef.current, remoteQuizzes);
+    const mergedNotes = filterResurrectedTrash(mergeNotesForSync(notesRef.current, remoteNotes), notesRef.current);
+    const mergedQuizzes = filterResurrectedTrash(mergeQuizzesForSync(quizzesRef.current, remoteQuizzes), quizzesRef.current);
     const mergedChats = mergeChatsForSync(chatsRef.current, remoteChats);
-    const mergedSets = mergeQuizSetsForSync(quizSetsRef.current, remoteSets);
-    const mergedFolders = mergeById(quizFoldersRef.current, remoteFolders);
+    const mergedSets = filterResurrectedTrash(
+      mergeQuizSetsForSync(quizSetsRef.current, remoteSets),
+      quizSetsRef.current,
+    );
+    const mergedFolders = filterResurrectedTrash(
+      mergeFoldersForSync(quizFoldersRef.current, remoteFolders),
+      quizFoldersRef.current,
+    );
     const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
     const mergedDrafts = recentDraftEdit && hasDraftContent(draftsRef.current)
       ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
@@ -2235,9 +2277,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteQuiz = (id: number) => {
+    const trashAt = new Date().toISOString();
     setQuizzes((prev) => {
-      const next = prev.map((q) => q.id === id ? { ...q, trashed: true, deletedAt: nowStr() } : q);
-      persist({ quizzes: next });
+      const next = prev.map((q) => q.id === id ? { ...q, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : q);
+      persist({ quizzes: next }, true);
       return next;
     });
   };
@@ -2279,9 +2322,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const deleteQuizSet = (id: string) => {
     if (id === FAVORITES_SET_ID) return;
+    const trashAt = new Date().toISOString();
     setQuizSets((prev) => {
-      const next = prev.map((s) => s.id === id ? { ...s, trashed: true, deletedAt: nowStr() } : s);
-      persistSets(next);
+      const next = prev.map((s) => s.id === id ? { ...s, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : s);
+      persistSets(next, true);
       return next;
     });
   };
@@ -2397,9 +2441,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const deleteQuizFolder = (id: string) => {
     if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
+    const trashAt = new Date().toISOString();
     setQuizFolders((prev) => {
-      const next = prev.map((f) => f.id === id ? { ...f, trashed: true, deletedAt: nowStr() } : f);
-      persistFolders(next);
+      const next = prev.map((f) => f.id === id ? { ...f, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : f);
+      persistFolders(next, true);
       return next;
     });
   };
@@ -2892,7 +2937,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     mutateNotes((prev) => prev.map((n) => (n.id === id ? { ...n, fav: !n.fav } : n)));
   const archive = (id: number) => updateNote(id, { archived: true });
   const unarchive = (id: number) => updateNote(id, { archived: false, read: false });
-  const trash = (id: number) => updateNote(id, { trashed: true, deletedAt: nowStr() });
+  const trash = (id: number) => {
+    const savedAt = new Date().toISOString();
+    setNotes((prev) => {
+      const next = prev.map((n) => (n.id === id ? { ...n, trashed: true, deletedAt: nowStr(), savedAt } : n));
+      persist({ notes: next }, true);
+      return next;
+    });
+  };
   const restore = (id: number) => updateNote(id, { trashed: false, deletedAt: undefined });
   const permDelete = (id: number) => mutateNotes((prev) => prev.filter((n) => n.id !== id));
   const emptyTrash = () => {
@@ -2918,6 +2970,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    localStorage.setItem(TRASH_EMPTIED_AT_KEY, String(Date.now()));
 
     persist({ notes: nextNotes, quizzes: nextQuizzes, quizSets: nextSets, quizFolders: nextFolders }, true);
 

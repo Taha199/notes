@@ -237,7 +237,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
             <div className="w-full max-w-2xl flex flex-col items-center">
               <div className="w-full rounded-[28px] p-8 shadow-2xl ring-1 ring-white/10" style={{ background: 'linear-gradient(160deg,#26304f 0%,#1b2440 60%,#161d36 100%)' }}>
                 <p className="mb-5 text-center text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-300/70">{t.quizQuestionLabel}</p>
-                <div dir="auto" className="mx-auto mb-6 w-full max-w-xl text-center text-[20px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(stemOnly(current.question)) }} />
+                <div dir="auto" className="note-content mx-auto mb-6 w-full max-w-xl text-center text-[20px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(stemOnly(current.question)) }} />
                 <div className="mx-auto flex w-full max-w-xl flex-col gap-2.5">
                   {current.options.map((opt, i) => {
                     const correctIndexes = current.correctIndexes ?? (current.correctIndex !== undefined ? [current.correctIndex] : [0]);
@@ -293,7 +293,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                   className="absolute inset-0 flex flex-col items-center justify-center overflow-y-auto rounded-[28px] p-8 shadow-2xl ring-1 ring-white/10 sm:p-10 [&_img]:my-3 [&_img]:max-h-52 [&_img]:rounded-xl"
                 >
                   <p className="mb-4 text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-300/70">{t.quizQuestionLabel}</p>
-                  <div dir="auto" className="mx-auto w-full max-w-xl px-2 text-center text-[22px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
+                  <div dir="auto" className="note-content mx-auto w-full max-w-xl px-2 text-center text-[22px] font-semibold leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -316,7 +316,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                     </div>
                     <div className="flex min-h-[140px] flex-col rounded-2xl border border-emerald-400/35 bg-emerald-500/10 p-4 text-left">
                       <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-emerald-300/90">{t.quizStudyCorrectAnswer}</p>
-                      <div dir="auto" className="flex-1 text-[15px] leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
+                      <div dir="auto" className="note-content flex-1 text-[15px] leading-relaxed text-white [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
                     </div>
                   </div>
                 </div>
@@ -349,7 +349,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
           <div className="w-full max-w-2xl">
             <div className="mb-4 rounded-2xl border border-app-border bg-white p-6 shadow-lg dark:border-white/10 dark:bg-gray-800">
               <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-app-text-secondary/50">{t.quizQuestionLabel}</p>
-              <div className="text-lg font-semibold leading-relaxed text-app-text dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
+              <div className="note-content text-lg font-semibold leading-relaxed text-app-text dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(current.question) }} />
             </div>
 
             {!revealed ? (
@@ -377,7 +377,7 @@ export function StudyMode({ title, items, mode, initialProgress = {}, onClose, o
                 )}
                 <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
                   <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600">{t.quizStudyCorrectAnswer}</p>
-                  <div className="text-[13px] leading-relaxed text-app-text dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
+                  <div className="note-content text-[13px] leading-relaxed text-app-text dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(current.answer) }} />
                 </div>
                 <div className="flex gap-3">
                   <button onClick={() => saveAndNext(false)} className="flex-1 rounded-xl border border-red-200 bg-red-50 py-3 text-sm font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
