@@ -1825,6 +1825,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, placeholder, edit
       lastLocalHtmlRef.current = html;
       return;
     }
+    // Parent sent emptier/stale html while editor still has user content — keep editor.
+    if (propChanged && html !== lastLocalHtmlRef.current) {
+      const plain = (s: string) => s.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+      if (plain(ed.innerHTML).length > plain(html).length) {
+        onLiveChangeRef.current?.(ed.innerHTML);
+        return;
+      }
+    }
     // Skip only stale echoes of our own edits; deliberate parent updates still apply.
     if (!propChanged && ed.innerHTML === lastLocalHtmlRef.current && html !== lastLocalHtmlRef.current) return;
     hideImageToolbar();
