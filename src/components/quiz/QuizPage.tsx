@@ -963,7 +963,9 @@ export function QuizPage() {
   const isFolderEmptyView = !!selectedFolderId && !selectedSetId;
   const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
-  const displayItems: QuizItem[] = selectedSet ? (selectedSet.items ?? []) : isNotesView ? quizzes : [];
+  const displayItems: QuizItem[] = selectedSet
+    ? (selectedSet.items ?? []).filter((item) => !item.trashed)
+    : isNotesView ? quizzes : [];
 
   const orderedItems = useMemo(() => {
     if (itemSort === 'manual') return displayItems;
@@ -1004,7 +1006,7 @@ export function QuizPage() {
         key={item.id}
         item={item}
         onEdit={startEdit}
-        onDelete={() => selectedSetId ? removeItemFromSet(selectedSetId, item.id) : deleteQuiz(item.id)}
+        onDelete={() => deleteQuiz(item.id, selectedSetId)}
         speakingId={speakingId}
         onSpeak={handleSpeak}
         favs={favs}

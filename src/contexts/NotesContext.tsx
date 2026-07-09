@@ -363,7 +363,7 @@ interface NotesCtx {
   /** Fetching draft bundle from cloud (other devices). */
   draftsLoading: boolean;
   addQuiz: (item: Omit<QuizItem, 'id'>) => number;
-  deleteQuiz: (id: number) => void;
+  deleteQuiz: (id: number, fromSetId?: string | null) => void;
   restoreQuiz: (id: number) => void;
   permDeleteQuiz: (id: number) => void;
   updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>) => void;
@@ -2733,14 +2733,48 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return newId;
   };
 
-  const deleteQuiz = (id: number) => {
+  const deleteQuiz = (id: number, fromSetId?: string | null) => {
     const trashAt = new Date().toISOString();
-    setQuizzes((prev) => {
-      const next = prev.map((q) => q.id === id ? { ...q, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : q);
-      persist({ quizzes: next }, true);
-      scheduleInstantDataCloudSave({ quizzes: next });
-      return next;
-    });
+    let item: QuizItem | undefined;
+    if (fromSetId) {
+      item = quizSetsRef.current.find((set) => set.id === fromSetId)?.items.find((q) => q.id === id);
+    }
+    if (!item) item = quizzesRef.current.find((q) => q.id === id);
+    if (!item) return;
+
+    const trashedItem: QuizItem = {
+      ...item,
+      trashed: true,
+      deletedAt: nowStr(),
+      updatedAt: trashAt,
+    };
+
+    const nextQuizzes = quizzesRef.current.some((q) => q.id === id)
+      ? quizzesRef.current.map((q) => (q.id === id ? trashedItem : q))
+      : [...quizzesRef.current, trashedItem];
+
+    let nextSets = quizSetsRef.current;
+    if (fromSetId) {
+      nextSets = nextSets.map((set) => (
+        set.id === fromSetId
+          ? { ...set, items: set.items.filter((q) => q.id !== id) }
+          : set
+      ));
+    }
+    nextSets = nextSets.map((set) => (
+      set.id === FAVORITES_SET_ID
+        ? { ...set, items: set.items.filter((q) => q.favOf !== id && q.id !== id) }
+        : set
+    ));
+
+    quizzesRef.current = nextQuizzes;
+    quizSetsRef.current = nextSets;
+    setQuizzes(nextQuizzes);
+    setQuizSets(nextSets);
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
+    scheduleInstantDataCloudSave({ quizzes: nextQuizzes, quizSets: nextSets });
   };
 
   const restoreQuiz = (id: number) => {
