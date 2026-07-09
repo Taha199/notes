@@ -14,6 +14,12 @@ interface Props {
   onToggleSelect?: (id: number) => void;
 }
 
+function favBtnClass(active: boolean) {
+  return active
+    ? '!border-amber-400 !bg-amber-100 !text-amber-500 shadow-sm shadow-amber-300/50 ring-1 ring-amber-300/50 dark:!border-amber-500/60 dark:!bg-amber-500/25 dark:!text-amber-300 dark:shadow-amber-500/20 dark:ring-amber-500/30'
+    : 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-500 dark:hover:border-amber-500/40 dark:hover:bg-amber-500/10 dark:hover:text-amber-300';
+}
+
 function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: React.MouseEvent) => void; title?: string; children: React.ReactNode; className?: string }) {
   return (
     <button
@@ -154,13 +160,13 @@ export function NoteCard({ note, onOpen, viewMode = 'grid', selectMode, selected
               </ActionBtn>
               <ActionBtn
                 title={note.fav ? t.titleFavRem : t.titleFavAdd}
-                className={note.fav ? 'border-amber-300 bg-amber-50 text-amber-600' : 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600'}
+                className={favBtnClass(note.fav)}
                 onClick={() => {
                   toggleFav(note.id);
                   show(note.fav ? t.tFavRem : t.tFavAdd);
                 }}
               >
-                ★
+                <span className={note.fav ? 'text-[15px] leading-none' : ''}>★</span>
               </ActionBtn>
               <ActionBtn
                 title={t.titleDel}
@@ -199,13 +205,13 @@ export function NoteCard({ note, onOpen, viewMode = 'grid', selectMode, selected
               )}
               <ActionBtn
                 title={note.fav ? t.titleFavRem : t.titleFavAdd}
-                className={note.fav ? 'border-amber-300 bg-amber-50 text-amber-600' : 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600'}
+                className={favBtnClass(note.fav)}
                 onClick={() => {
                   toggleFav(note.id);
                   show(note.fav ? t.tFavRem : t.tFavAdd);
                 }}
               >
-                ★
+                <span className={note.fav ? 'text-[15px] leading-none' : ''}>★</span>
               </ActionBtn>
               <ActionBtn
                 title={t.titleArch}

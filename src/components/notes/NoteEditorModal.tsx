@@ -309,7 +309,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
             )}
           </div>
           <div className="flex items-center gap-1.5">
-            <button onClick={() => toggleFav(note.id)} className={'flex h-8 w-8 items-center justify-center rounded-lg border text-sm transition-all ' + (note.fav ? 'border-amber-300 bg-amber-50 text-amber-600' : 'border-app-border text-app-text-secondary hover:border-amber-300 hover:text-amber-600')}>★</button>
+            <button onClick={() => toggleFav(note.id)} className={'flex h-8 w-8 items-center justify-center rounded-lg border text-sm transition-all ' + (note.fav ? '!border-amber-400 !bg-amber-100 !text-amber-500 shadow-sm shadow-amber-300/50 ring-1 ring-amber-300/50 dark:!border-amber-500/60 dark:!bg-amber-500/25 dark:!text-amber-300' : 'border-app-border text-app-text-secondary hover:border-amber-300 hover:text-amber-500 dark:hover:border-amber-500/40 dark:hover:bg-amber-500/10 dark:hover:text-amber-300')}>★</button>
             <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary hover:bg-app-border/60 dark:hover:bg-white/10">✕</button>
           </div>
         </div>
