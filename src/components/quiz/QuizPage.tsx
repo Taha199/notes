@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, memo } from 'react';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { RichTextEditor } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
@@ -13,6 +13,8 @@ import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
 import { quizItemCreatedAtMs } from '../../lib/quizSort';
 import { SITE_URL } from '../../lib/seo';
+import { StableNoteHtml } from '../notes/StableNoteHtml';
+import { quizPatchChangesContent } from '../../lib/quizContent';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
@@ -93,7 +95,7 @@ interface QuizItemRowProps {
   onSwapToPosition?: (targetPosition: number) => void;
 }
 
-function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, questionNumber, totalQuestions, onSwapToPosition }: QuizItemRowProps) {
+const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, questionNumber, totalQuestions, onSwapToPosition }: QuizItemRowProps) {
   const { t } = useLanguage();
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
@@ -164,17 +166,19 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
               {status === 'known' ? '✓' : '✗'}
             </span>
           )}
-          <div dir="auto" className="note-content block w-full min-w-0 break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100" dangerouslySetInnerHTML={{ __html: mdToHtml(item.question) }} />
+          <StableNoteHtml
+            html={mdToHtml(item.question)}
+            className="note-content block w-full min-w-0 break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100"
+          />
         </div>
         <div className="flex min-w-0 flex-col items-start border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6">
           <span className="mb-2 flex items-center gap-1.5 text-[9px] font-bold uppercase text-primary/70">
             <span className="h-1.5 w-1.5 rounded-full bg-primary/70" /> {t.quizAnswerLabel}
           </span>
           <div className="relative w-full min-w-0">
-            <span
-              dir="auto"
-              className={'note-content block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] transition-all dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
-              dangerouslySetInnerHTML={{ __html: mdToHtml(item.answer) }}
+            <StableNoteHtml
+              html={mdToHtml(item.answer)}
+              className={'note-content block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
             />
             {masked && (
               <button
@@ -292,7 +296,19 @@ function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onTogg
       </div>
     </div>
   );
-}
+}, (prev, next) => (
+  prev.item.id === next.item.id
+  && prev.item.question === next.item.question
+  && prev.item.answer === next.item.answer
+  && prev.item.explanation === next.item.explanation
+  && prev.hideAnswers === next.hideAnswers
+  && prev.speakingId === next.speakingId
+  && prev.favs.has(prev.item.id) === next.favs.has(next.item.id)
+  && prev.progressMap?.[prev.item.id] === next.progressMap?.[next.item.id]
+  && prev.questionNumber === next.questionNumber
+  && prev.canReorder === next.canReorder
+  && prev.totalQuestions === next.totalQuestions
+));
 
 const OPT_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
@@ -601,6 +617,10 @@ export function QuizPage() {
   const [openForms, setOpenForms] = useState<OpenQuestionForm[]>([]);
   const openFormsRef = useRef(openForms);
   openFormsRef.current = openForms;
+  const quizzesRef = useRef(quizzes);
+  quizzesRef.current = quizzes;
+  const allQuizSetsRef = useRef(allQuizSets);
+  allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus'>>) => {
@@ -643,8 +663,16 @@ export function QuizPage() {
       draft: finalize ? false : (form.finalized ? false : true),
     };
 
-    updateForm(formId, { saveStatus: 'syncing' });
     const setId = selectedSetIdRef.current;
+    const storedItem = setId
+      ? allQuizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === form.itemId)
+      : quizzesRef.current.find((item) => item.id === form.itemId);
+    if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
+      if (form.saveStatus !== 'saved') updateForm(formId, { saveStatus: 'saved' });
+      return form.itemId;
+    }
+
+    updateForm(formId, { saveStatus: 'syncing' });
     if (setId) updateItemInSet(setId, form.itemId, patch, true);
     else updateQuiz(form.itemId, patch, true);
     window.setTimeout(() => {
@@ -733,6 +761,11 @@ export function QuizPage() {
     addNewForm();
   };
 
+  const formSaveSigs = useMemo(
+    () => openForms.map((f) => `${f.formId}:${f.question}:${f.answer}`).join('|'),
+    [openForms],
+  );
+
   useEffect(() => {
     openForms.forEach((form) => {
       if (form.itemId === null) return;
@@ -745,7 +778,7 @@ export function QuizPage() {
         }, 400),
       );
     });
-  }, [openForms, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [formSaveSigs, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onHide = () => {
@@ -782,7 +815,6 @@ export function QuizPage() {
   const isNotesViewRef = useRef(false);
   useEffect(() => {
     if (!loaded) return;
-    flushAllOpenForms();
     autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
     autoSaveTimers.current.clear();
 
@@ -1098,6 +1130,9 @@ export function QuizPage() {
     return { known, total: items.length };
   };
 
+  // Group sorted sets by folder. A set whose folder was deleted falls back to ungrouped.
+  const folderIds = new Set(quizFolders.map((f) => f.id));
+  const ungroupedSets = sortedSets.filter((s) => !s.folderId || !folderIds.has(s.folderId));
   const setsInFolder = (fid: string) => sortedSets.filter((s) => s.folderId === fid);
   const userSetsInFolder = (fid: string) => setsInFolder(fid).filter((s) => !s.system);
 
@@ -1107,8 +1142,8 @@ export function QuizPage() {
     setSelectedSetId(folderSets[0]?.id ?? null);
   };
 
-  // Sets only appear when a folder is selected — not in "Questions from Notes" view
-  const currentSets = selectedFolderId ? setsInFolder(selectedFolderId) : [];
+  // Sets shown in the right panel depending on which folder is selected
+  const currentSets = selectedFolderId ? setsInFolder(selectedFolderId) : ungroupedSets;
 
   const renderSetRow = (s: QuizSet) => {
     const { known, total } = progressForSet(s.id);
@@ -1203,7 +1238,7 @@ export function QuizPage() {
 
       {/* Sidebar — two-column: Folders | Sets */}
       {sidebarOpen && (
-      <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: isNotesView ? folderColW : folderColW + 184 }}>
+      <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: folderColW + 184 }}>
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">{t.quizTitle}</p>
@@ -1371,7 +1406,6 @@ export function QuizPage() {
           </div>
 
           {/* Drag handle to resize folders column */}
-          {!isNotesView && (
           <div
             onMouseDown={startFolderResize}
             className="group/handle relative w-1 flex-shrink-0 cursor-col-resize border-r border-app-border bg-transparent transition-colors hover:bg-primary/30 dark:border-white/10"
@@ -1379,10 +1413,8 @@ export function QuizPage() {
           >
             <span className="absolute inset-y-0 -left-1 -right-1" />
           </div>
-          )}
 
           {/* Right column: Sets */}
-          {!isNotesView && (
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Sort control */}
             <div className="relative flex items-center justify-between px-2 py-1.5">
@@ -1415,33 +1447,29 @@ export function QuizPage() {
             <div className="flex-1 overflow-y-auto px-1">
               {currentSets.length === 0 ? (
                 <p className="py-4 text-center text-[11px] italic text-app-text-secondary/40">
-                  {selectedFolderId ? t.quizFolderEmpty : isNotesView ? t.quizSelectFolderForSets : t.quizNoUngroupedSets}
+                  {selectedFolderId ? t.quizFolderEmpty : t.quizNoUngroupedSets}
                 </p>
               ) : (
                 currentSets.map((s) => renderSetRow(s))
               )}
             </div>
           </div>
-          )}
         </div>
 
         {/* Bottom buttons — aligned with their column */}
         <div className="flex border-t border-app-border dark:border-white/10">
           <button
             onClick={createFolder}
-            className={'flex items-center justify-center gap-1 py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:hover:bg-primary/10 ' +
-              (isNotesView ? 'flex-1' : 'w-[84px] flex-shrink-0 border-r border-app-border dark:border-white/10')}
+            className="flex w-[84px] flex-shrink-0 items-center justify-center gap-1 border-r border-app-border py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:border-white/10 dark:hover:bg-primary/10"
           >
             <span className="text-base leading-none">+</span> {t.quizFolder}
           </button>
-          {!isNotesView && (
           <button
             onClick={handleQuickCreateSet}
             className="flex flex-1 items-center justify-center gap-1 py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:hover:bg-primary/10"
           >
             <span className="text-base leading-none">+</span> {t.quizAddSet}
           </button>
-          )}
         </div>
       </div>
       )}

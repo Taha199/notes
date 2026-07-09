@@ -6,6 +6,7 @@ import { buildFullBackupPayload, shouldRunHourlyFolderBackup, writeBackupToFolde
 import { setTokenSink } from '../lib/gemini';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
+import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 
 export interface Draft {
   id: string;
@@ -1982,14 +1983,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
       }
       if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
+        const prevQuizzes = quizzesRef.current;
         quizzesRef.current = nextQuizzes;
-        setQuizzes(nextQuizzes);
         localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+        if (!quizzesEqualForUI(nextQuizzes, prevQuizzes)) setQuizzes(nextQuizzes);
       }
       if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
+        const prevSets = quizSetsRef.current;
         quizSetsRef.current = normalizedSets;
-        setQuizSets(normalizedSets);
         localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+        if (!quizSetsEqualForUI(normalizedSets, prevSets)) setQuizSets(normalizedSets);
       }
       if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
         quizFoldersRef.current = normalizedFolders;
@@ -2804,6 +2807,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
+    const existing = quizzesRef.current.find((q) => q.id === id);
+    if (!existing || !quizPatchChangesContent(existing, patch)) return;
     const next = quizzesRef.current.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
     quizzesRef.current = next;
     setQuizzes(next);
@@ -3368,6 +3373,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
+    const set = quizSetsRef.current.find((s) => s.id === setId);
+    const existing = set?.items.find((i) => i.id === itemId);
+    if (!existing || !quizPatchChangesContent(existing, patch)) return;
     const next = quizSetsRef.current.map((s) => (
       s.id === setId
         ? { ...s, items: s.items.map((i) => (i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i)) }

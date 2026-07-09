@@ -18,6 +18,12 @@ const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
 const TAB_INDENT = '    ';
 
+function isEquivalentEditorHtml(a: string, b: string): boolean {
+  if (a === b) return true;
+  const normalize = (html: string) => html.replace(/\s+/g, ' ').trim();
+  return normalize(a) === normalize(b);
+}
+
 const HIGHLIGHT_INLINE_TAGS = new Set(['SPAN', 'FONT', 'MARK', 'B', 'STRONG', 'EM', 'I', 'U', 'A']);
 
 function unwrapHighlightElement(el: HTMLElement) {
@@ -1832,8 +1838,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       const remoteIsNewer = remoteSyncAdvance && syncAt > lastKeystrokeAtRef.current;
       if (!remoteIsNewer && Date.now() - lastKeystrokeAtRef.current < 300) return;
     }
-    if (ed.innerHTML === html) {
-      lastLocalHtmlRef.current = html;
+    if (ed.innerHTML === html || isEquivalentEditorHtml(ed.innerHTML, html)) {
+      lastLocalHtmlRef.current = ed.innerHTML;
       return;
     }
     // Parent sent shorter html — keep local DOM during active typing; never push longer html back up.

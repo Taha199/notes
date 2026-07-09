@@ -381,7 +381,6 @@ export interface Translation {
   quizSortHash: string;
   quizFolderEmpty: string;
   quizNoUngroupedSets: string;
-  quizSelectFolderForSets: string;
   quizFolder: string;
   quizAddSet: string;
   quizAddFolder: string;
@@ -733,7 +732,6 @@ export const LANGS: Record<Lang, Translation> = {
     quizSortHash: '#',
     quizFolderEmpty: 'Empty',
     quizNoUngroupedSets: 'No ungrouped sets',
-    quizSelectFolderForSets: 'Select a folder',
     quizFolder: 'Folder',
     quizAddSet: 'Add set',
     quizAddFolder: 'Add folder',
@@ -1083,7 +1081,6 @@ export const LANGS: Record<Lang, Translation> = {
     quizSortHash: '#',
     quizFolderEmpty: 'Tomt',
     quizNoUngroupedSets: 'Inga lösa set',
-    quizSelectFolderForSets: 'Välj en mapp',
     quizFolder: 'Mapp',
     quizAddSet: 'Lägg till set',
     quizAddFolder: 'Lägg till mapp',
