@@ -1238,7 +1238,7 @@ export function QuizPage() {
 
       {/* Sidebar — two-column: Folders | Sets */}
       {sidebarOpen && (
-      <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: folderColW + 184 }}>
+      <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: isNotesView ? folderColW : folderColW + 184 }}>
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">{t.quizTitle}</p>
@@ -1406,6 +1406,7 @@ export function QuizPage() {
           </div>
 
           {/* Drag handle to resize folders column */}
+          {!isNotesView && (
           <div
             onMouseDown={startFolderResize}
             className="group/handle relative w-1 flex-shrink-0 cursor-col-resize border-r border-app-border bg-transparent transition-colors hover:bg-primary/30 dark:border-white/10"
@@ -1413,8 +1414,10 @@ export function QuizPage() {
           >
             <span className="absolute inset-y-0 -left-1 -right-1" />
           </div>
+          )}
 
-          {/* Right column: Sets */}
+          {/* Right column: Sets — only when a folder is selected */}
+          {!isNotesView && (
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Sort control */}
             <div className="relative flex items-center justify-between px-2 py-1.5">
@@ -1454,22 +1457,26 @@ export function QuizPage() {
               )}
             </div>
           </div>
+          )}
         </div>
 
         {/* Bottom buttons — aligned with their column */}
         <div className="flex border-t border-app-border dark:border-white/10">
           <button
             onClick={createFolder}
-            className="flex w-[84px] flex-shrink-0 items-center justify-center gap-1 border-r border-app-border py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:border-white/10 dark:hover:bg-primary/10"
+            className={'flex items-center justify-center gap-1 py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:hover:bg-primary/10 ' +
+              (isNotesView ? 'flex-1' : 'w-[84px] flex-shrink-0 border-r border-app-border dark:border-white/10')}
           >
             <span className="text-base leading-none">+</span> {t.quizFolder}
           </button>
+          {!isNotesView && (
           <button
             onClick={handleQuickCreateSet}
             className="flex flex-1 items-center justify-center gap-1 py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:hover:bg-primary/10"
           >
             <span className="text-base leading-none">+</span> {t.quizAddSet}
           </button>
+          )}
         </div>
       </div>
       )}
