@@ -228,9 +228,12 @@ function mergeDraftsForPull(
 
 function mergeNotesForSync(local: Note[], remote: Note[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
   const dead = new Set(tombstones.notes);
+  const remoteIds = new Set(remote.map((item) => item.id));
   const map = new Map<number, Note>();
   for (const item of local) {
-    if (!dead.has(item.id)) map.set(item.id, item);
+    if (dead.has(item.id)) continue;
+    if (!remoteIds.has(item.id) && item.trashed) continue;
+    map.set(item.id, item);
   }
   for (const item of remote) {
     if (dead.has(item.id)) continue;
@@ -242,9 +245,12 @@ function mergeNotesForSync(local: Note[], remote: Note[], tombstones: Permanentl
 
 function mergeQuizzesForSync(local: QuizItem[], remote: QuizItem[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
   const dead = new Set(tombstones.quizzes);
+  const remoteIds = new Set(remote.map((item) => item.id));
   const map = new Map<number, QuizItem>();
   for (const item of local) {
-    if (!dead.has(item.id)) map.set(item.id, item);
+    if (dead.has(item.id)) continue;
+    if (!remoteIds.has(item.id) && item.trashed) continue;
+    map.set(item.id, item);
   }
   for (const item of remote) {
     if (dead.has(item.id)) continue;
@@ -293,9 +299,12 @@ function mergeChatsForSync(local: ChatConversation[], remote: ChatConversation[]
 
 function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
   const dead = new Set(tombstones.quizSets);
+  const remoteIds = new Set(remote.map((set) => set.id));
   const map = new Map<string, QuizSet>();
   for (const set of local) {
-    if (!dead.has(set.id)) map.set(set.id, set);
+    if (dead.has(set.id)) continue;
+    if (!remoteIds.has(set.id) && set.trashed) continue;
+    map.set(set.id, set);
   }
   for (const set of remote) {
     if (dead.has(set.id)) continue;
@@ -307,9 +316,12 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: P
 
 function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
   const dead = new Set(tombstones.quizFolders);
+  const remoteIds = new Set(remote.map((folder) => folder.id));
   const map = new Map<string, QuizFolder>();
   for (const folder of local) {
-    if (!dead.has(folder.id)) map.set(folder.id, folder);
+    if (dead.has(folder.id)) continue;
+    if (!remoteIds.has(folder.id) && folder.trashed) continue;
+    map.set(folder.id, folder);
   }
   for (const folder of remote) {
     if (dead.has(folder.id)) continue;
@@ -1179,6 +1191,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const draftSavePendingAgainRef = useRef<Set<string>>(new Set());
   const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingRemotePullRef = useRef(false);
+  const lastPushedDataAtRef = useRef(0);
+  const lastPushedPayloadRef = useRef<Partial<Record<'notes' | 'quizzes' | 'quizSets' | 'quizFolders', string>>>({});
+  const pendingInstantDataSaveRef = useRef<{
+    notes?: Note[];
+    quizzes?: QuizItem[];
+    quizSets?: QuizSet[];
+    quizFolders?: QuizFolder[];
+  } | null>(null);
+  const instantDataSaveQueuedRef = useRef(false);
   const notesRef = useRef(notes);
   const quizzesRef = useRef(quizzes);
   const chatsRef = useRef(chats);
@@ -1866,6 +1887,120 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return changed;
   };
 
+  const markPushedData = (patch: {
+    notes?: Note[];
+    quizzes?: QuizItem[];
+    quizSets?: QuizSet[];
+    quizFolders?: QuizFolder[];
+  }, at = Date.now()) => {
+    lastPushedDataAtRef.current = at;
+    if (patch.notes) lastPushedPayloadRef.current.notes = JSON.stringify(patch.notes);
+    if (patch.quizzes) lastPushedPayloadRef.current.quizzes = JSON.stringify(patch.quizzes);
+    if (patch.quizSets) lastPushedPayloadRef.current.quizSets = JSON.stringify(patch.quizSets);
+    if (patch.quizFolders) lastPushedPayloadRef.current.quizFolders = JSON.stringify(patch.quizFolders);
+  };
+
+  const shouldSkipRemoteEcho = (key: 'notes' | 'quizzes' | 'quizSets' | 'quizFolders', json: string) =>
+    Date.now() - lastPushedDataAtRef.current < 450 && lastPushedPayloadRef.current[key] === json;
+
+  const applyRemoteTrashData = (patch: {
+    notes?: unknown;
+    quizzes?: unknown;
+    quizSets?: unknown;
+    quizFolders?: unknown;
+  }) => {
+    if (!loadedRef.current || isApplyingRemoteRef.current) return;
+    const tombstones = permDeletedRef.current;
+    let nextNotes = notesRef.current;
+    let nextQuizzes = quizzesRef.current;
+    let nextSets = quizSetsRef.current;
+    let nextFolders = quizFoldersRef.current;
+    let changed = false;
+
+    if (patch.notes !== undefined) {
+      const remoteNotes = firebaseToArray<Note>(patch.notes as Note[] | Record<string, Note>);
+      const merged = filterResurrectedTrash(
+        mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
+        notesRef.current,
+      );
+      const json = JSON.stringify(merged);
+      if (!shouldSkipRemoteEcho('notes', json) && json !== JSON.stringify(notesRef.current)) {
+        nextNotes = merged;
+        changed = true;
+      }
+    }
+    if (patch.quizzes !== undefined) {
+      const remoteQuizzes = firebaseToArray<QuizItem>(patch.quizzes as QuizItem[] | Record<string, QuizItem>);
+      const merged = filterResurrectedTrash(
+        mergeQuizzesForSync(quizzesRef.current, remoteQuizzes, tombstones),
+        quizzesRef.current,
+      );
+      const json = JSON.stringify(merged);
+      if (!shouldSkipRemoteEcho('quizzes', json) && json !== JSON.stringify(quizzesRef.current)) {
+        nextQuizzes = merged;
+        changed = true;
+      }
+    }
+    if (patch.quizSets !== undefined) {
+      const remoteSets = firebaseToArray<QuizSet>(patch.quizSets as QuizSet[] | Record<string, QuizSet>)
+        .map((set) => ({ ...set, items: set.items ?? [] }));
+      const merged = filterResurrectedTrash(
+        mergeQuizSetsForSync(quizSetsRef.current, remoteSets, tombstones),
+        quizSetsRef.current,
+      );
+      const json = JSON.stringify(merged);
+      if (!shouldSkipRemoteEcho('quizSets', json) && json !== JSON.stringify(quizSetsRef.current)) {
+        nextSets = merged;
+        changed = true;
+      }
+    }
+    if (patch.quizFolders !== undefined) {
+      const remoteFolders = firebaseToArray<QuizFolder>(patch.quizFolders as QuizFolder[] | Record<string, QuizFolder>);
+      const merged = filterResurrectedTrash(
+        mergeFoldersForSync(quizFoldersRef.current, remoteFolders, tombstones),
+        quizFoldersRef.current,
+      );
+      const json = JSON.stringify(merged);
+      if (!shouldSkipRemoteEcho('quizFolders', json) && json !== JSON.stringify(quizFoldersRef.current)) {
+        nextFolders = merged;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+
+    const normalizedFolders = finalizeQuizFolders(nextFolders, nextSets);
+    const normalizedSets = initializeQuizColors(
+      nextSets,
+      normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
+    );
+
+    isApplyingRemoteRef.current = true;
+    try {
+      if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
+        notesRef.current = nextNotes;
+        setNotes(nextNotes);
+        localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+      }
+      if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
+        quizzesRef.current = nextQuizzes;
+        setQuizzes(nextQuizzes);
+        localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+      }
+      if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
+        quizSetsRef.current = normalizedSets;
+        setQuizSets(normalizedSets);
+        localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+      }
+      if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
+        quizFoldersRef.current = normalizedFolders;
+        setQuizFolders(normalizedFolders);
+        localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+      }
+    } finally {
+      isApplyingRemoteRef.current = false;
+    }
+  };
+
   const runInstantTrashCloudSave = async (
     nextNotes: Note[],
     nextQuizzes: QuizItem[],
@@ -1904,6 +2039,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
       localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      markPushedData({ notes: nextNotes, quizzes: nextQuizzes, quizSets: nextSets, quizFolders: nextFolders }, syncedAt);
     } catch {
       saveFailedRef.current = true;
       setCloudStatus('error');
@@ -1941,6 +2077,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
       localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      markPushedData(payload ?? {}, syncedAt);
     } catch {
       /* best-effort — full cloud save will retry */
     }
@@ -1964,9 +2101,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
       localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      markPushedData(patch, syncedAt);
     } catch {
       /* best-effort */
     }
+  };
+
+  const scheduleInstantDataCloudSave = (patch: {
+    notes?: Note[];
+    quizzes?: QuizItem[];
+    quizSets?: QuizSet[];
+    quizFolders?: QuizFolder[];
+  }) => {
+    if (!userRef.current || !loadedRef.current || isApplyingRemoteRef.current) return;
+    pendingInstantDataSaveRef.current = { ...pendingInstantDataSaveRef.current, ...patch };
+    if (instantDataSaveQueuedRef.current) return;
+    instantDataSaveQueuedRef.current = true;
+    queueMicrotask(() => {
+      instantDataSaveQueuedRef.current = false;
+      const nextPatch = pendingInstantDataSaveRef.current;
+      pendingInstantDataSaveRef.current = null;
+      if (nextPatch) void runInstantDataCloudSave(nextPatch);
+    });
   };
 
   const runDraftDeleteCloudSave = async (deletedId: string) => {
@@ -2424,8 +2580,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       } finally {
         isApplyingRemoteRef.current = false;
       }
-      scheduleRemotePull(true);
     });
+    const bindRealtime = <T,>(path: string, key: 'notes' | 'quizzes' | 'quizSets' | 'quizFolders', map?: (val: unknown) => T) =>
+      onValue(dbRef(database, `users/${uid}/${path}`), (snap) => {
+        const val = snap.val();
+        if (val == null) return;
+        applyRemoteTrashData({ [key]: map ? map(val) : val });
+      });
+    const unsubNotes = bindRealtime('notes', 'notes');
+    const unsubQuizzes = bindRealtime('quizzes', 'quizzes');
+    const unsubSets = bindRealtime('quizSets', 'quizSets', (val) =>
+      firebaseToArray<QuizSet>(val as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] })));
+    const unsubFolders = bindRealtime('quizFolders', 'quizFolders');
     const onVisible = () => {
       if (document.visibilityState === 'visible') void pullFromCloud(true);
     };
@@ -2438,9 +2604,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     window.addEventListener('pagehide', flushPersist);
     pullTimer.current = window.setInterval(() => {
       if (document.visibilityState === 'visible') void pullFromCloud(true);
-    }, 5_000);
+    }, 60_000);
     return () => {
       unsubPermDeleted();
+      unsubNotes();
+      unsubQuizzes();
+      unsubSets();
+      unsubFolders();
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
@@ -2568,15 +2738,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizzes((prev) => {
       const next = prev.map((q) => q.id === id ? { ...q, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : q);
       persist({ quizzes: next }, true);
-      void runInstantDataCloudSave({ quizzes: next });
+      scheduleInstantDataCloudSave({ quizzes: next });
       return next;
     });
   };
 
   const restoreQuiz = (id: number) => {
     setQuizzes((prev) => {
-      const next = prev.map((q) => q.id === id ? { ...q, trashed: false, deletedAt: undefined } : q);
-      persist({ quizzes: next });
+      const next = prev.map((q) => q.id === id ? { ...q, trashed: false, deletedAt: undefined, updatedAt: new Date().toISOString() } : q);
+      persist({ quizzes: next }, true);
+      scheduleInstantDataCloudSave({ quizzes: next });
       return next;
     });
   };
@@ -2623,7 +2794,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === id ? { ...s, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : s);
       persistSets(next, true);
-      void runInstantDataCloudSave({ quizSets: next });
+      scheduleInstantDataCloudSave({ quizSets: next });
       return next;
     });
   };
@@ -2632,8 +2803,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets((prev) => {
       const set = prev.find((item) => item.id === id);
       if (!set) return prev;
-      const next = [...prev.filter((item) => item.id !== id), { ...set, trashed: false, deletedAt: undefined, folderId: RESTORED_FOLDER_ID }];
-      persistSets(next);
+      const next = [...prev.filter((item) => item.id !== id), {
+        ...set,
+        trashed: false,
+        deletedAt: undefined,
+        folderId: RESTORED_FOLDER_ID,
+        updatedAt: new Date().toISOString(),
+      }];
+      persistSets(next, true);
+      scheduleInstantDataCloudSave({ quizSets: next });
       return next;
     });
   };
@@ -2759,13 +2937,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ quizFolders: nextFolders, quizSets: nextSets }, true);
-    void runInstantDataCloudSave({ quizFolders: nextFolders, quizSets: nextSets });
+    scheduleInstantDataCloudSave({ quizFolders: nextFolders, quizSets: nextSets });
   };
 
   const restoreQuizFolder = (id: string) => {
     setQuizFolders((prev) => {
-      const next = prev.map((f) => f.id === id ? { ...f, trashed: false, deletedAt: undefined } : f);
-      persistFolders(next);
+      const next = prev.map((f) => f.id === id ? {
+        ...f,
+        trashed: false,
+        deletedAt: undefined,
+        updatedAt: new Date().toISOString(),
+      } : f);
+      persistFolders(next, true);
+      scheduleInstantDataCloudSave({ quizFolders: next });
       return next;
     });
   };
@@ -3259,11 +3443,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setNotes((prev) => {
       const next = prev.map((n) => (n.id === id ? { ...n, trashed: true, deletedAt: nowStr(), savedAt } : n));
       persist({ notes: next }, true);
-      void runInstantDataCloudSave({ notes: next });
+      scheduleInstantDataCloudSave({ notes: next });
       return next;
     });
   };
-  const restore = (id: number) => updateNote(id, { trashed: false, deletedAt: undefined });
+  const restore = (id: number) => {
+    const savedAt = new Date().toISOString();
+    setNotes((prev) => {
+      const next = prev.map((n) => (n.id === id ? { ...n, trashed: false, deletedAt: undefined, savedAt } : n));
+      persist({ notes: next }, true);
+      scheduleInstantDataCloudSave({ notes: next });
+      return next;
+    });
+  };
   const permDelete = (id: number) => {
     recordPermDeleted({ notes: [id] });
     const nextNotes = notesRef.current.filter((n) => n.id !== id);
