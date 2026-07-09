@@ -68,9 +68,6 @@ function pickBetterDraft(local: Draft, remote: Draft) {
   const localAt = local.updatedAt ?? 0;
   const remoteAt = remote.updatedAt ?? 0;
   if (localAt !== remoteAt) return remoteAt > localAt ? remote : local;
-  const localLen = draftContentLength(local);
-  const remoteLen = draftContentLength(remote);
-  if (remoteLen !== localLen) return remoteLen > localLen ? remote : local;
   return local;
 }
 
@@ -1053,6 +1050,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const draftCloudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftLocalEditAtRef = useRef<Map<string, number>>(new Map());
   const lastPushedDraftUpdatedAtRef = useRef<Map<string, number>>(new Map());
+  const lastPushedDraftHtmlRef = useRef<Map<string, string>>(new Map());
   const draftSaveInFlightRef = useRef<Set<string>>(new Set());
   const draftSavePendingAgainRef = useRef<Set<string>>(new Set());
   const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1584,11 +1582,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     const remoteAt = typeof remote.updatedAt === 'number' ? remote.updatedAt : 0;
     const lastPushed = lastPushedDraftUpdatedAtRef.current.get(id) ?? 0;
-    if (remoteAt > 0 && remoteAt <= lastPushed) return;
+    const lastPushedHtml = lastPushedDraftHtmlRef.current.get(id);
+    if (remoteAt > 0 && remoteAt <= lastPushed && remote.html === lastPushedHtml) return;
     const localEditAt = draftLocalEditAtRef.current.get(id) ?? 0;
     const local = draftsRef.current.find((d) => d.id === id);
     const localAt = local?.updatedAt ?? 0;
-    if (local && Date.now() - localEditAt < 300 && remoteAt <= localAt) return;
+    if (local && Date.now() - localEditAt < 800 && remoteAt <= localAt) return;
 
     const remoteDraft: Draft = {
       id,
@@ -1621,6 +1620,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const updatedAt = draft.updatedAt ?? Date.now();
     lastPushedDraftUpdatedAtRef.current.set(draftId, updatedAt);
+    lastPushedDraftHtmlRef.current.set(draftId, draft.html);
     draftSaveInFlightRef.current.add(draftId);
     savesInFlight.current += 1;
     setCloudStatus('saving');

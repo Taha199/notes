@@ -1836,12 +1836,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       lastLocalHtmlRef.current = html;
       return;
     }
-    // Parent sent emptier/stale html while editor still has user content — keep editor.
+    // Parent sent shorter html — keep local DOM during active typing; never push longer html back up.
     if (propChanged && html !== lastLocalHtmlRef.current) {
       const plain = (s: string) => s.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
       if (plain(ed.innerHTML).length > plain(html).length) {
-        onLiveChangeRef.current?.(ed.innerHTML);
-        return;
+        const remoteIsNewer = remoteSyncAdvance && syncAt > lastKeystrokeAtRef.current;
+        if (!remoteIsNewer && Date.now() - lastKeystrokeAtRef.current < 800) return;
       }
     }
     // Skip only stale echoes of our own edits; deliberate parent updates still apply.
