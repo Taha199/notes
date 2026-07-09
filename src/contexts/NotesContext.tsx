@@ -92,6 +92,61 @@ function mergeDraftsForSync(local: Draft[], remote: Draft[]) {
   return [...map.values()];
 }
 
+function parseCloudDeletedDraftIds(cloud: Record<string, unknown> | null): string[] {
+  return firebaseToArray<string>(
+    cloud?.deletedDraftIds as string[] | Record<string, string> | null | undefined,
+  ).map(String).filter(Boolean);
+}
+
+function mergeDeletedDraftIds(local: Set<string>, cloud: Record<string, unknown> | null): Set<string> {
+  const merged = new Set([...local, ...parseCloudDeletedDraftIds(cloud)]);
+  writeDeletedDraftIds(merged);
+  return merged;
+}
+
+/** Merge drafts on pull/load — respect cloud membership so deletes on other devices stick. */
+function mergeDraftsForPull(
+  local: Draft[],
+  remote: Draft[],
+  cloud: Record<string, unknown> | null,
+  deletedIds: Set<string>,
+): Draft[] {
+  const cloudDraftIds = firebaseToArray<string>(
+    cloud?.drafts as string[] | Record<string, string> | null | undefined,
+  ).map(String).filter(Boolean);
+  const cloudHasMembership = !!cloud && 'drafts' in cloud;
+  const cloudSyncAt = typeof cloud?.cloudSyncAt === 'number' ? cloud.cloudSyncAt : 0;
+
+  const map = new Map<string, Draft>();
+  for (const item of remote) {
+    if (deletedIds.has(item.id)) continue;
+    map.set(item.id, item);
+  }
+  for (const item of local) {
+    if (deletedIds.has(item.id)) continue;
+    const existing = map.get(item.id);
+    if (existing) {
+      map.set(item.id, pickBetterDraft(item, existing));
+      continue;
+    }
+    if (cloudHasMembership && cloudDraftIds.length > 0 && !cloudDraftIds.includes(item.id)) {
+      // Removed on another device — keep only if edited locally after last cloud sync.
+      if (!item.updatedAt || item.updatedAt <= cloudSyncAt) continue;
+    }
+    map.set(item.id, item);
+  }
+
+  if (remote.length) {
+    const remoteIdSet = new Set(remote.map((d) => d.id));
+    const ordered: Draft[] = remote.filter((d) => map.has(d.id)).map((d) => map.get(d.id)!);
+    for (const d of map.values()) {
+      if (!remoteIdSet.has(d.id)) ordered.push(d);
+    }
+    return ordered;
+  }
+  return [...map.values()];
+}
+
 function mergeNotesForSync(local: Note[], remote: Note[]) {
   const map = new Map<number, Note>();
   for (const item of local) map.set(item.id, item);
@@ -354,15 +409,17 @@ function maxDraftCounter(drafts: Draft[]) {
 
 function parseCloudDrafts(cloud: Record<string, unknown> | null): Draft[] {
   const dc = (cloud?.draftContents as Record<string, { title?: string; html?: string; updatedAt?: number }> | undefined) || {};
-  let cloudDraftIds = firebaseToArray<string>(
+  const cloudDraftIds = firebaseToArray<string>(
     cloud?.drafts as string[] | Record<string, string> | null | undefined,
   ).map(String).filter(Boolean);
-  // Firebase may omit the drafts list while draftContents still has data.
-  if (!cloudDraftIds.length && dc && typeof dc === 'object') {
-    cloudDraftIds = Object.keys(dc).filter((k) => k && k !== 'null');
+  const hasDraftsList = !!cloud && 'drafts' in cloud;
+  let draftIds = cloudDraftIds;
+  // Only fall back to draftContents keys when cloud never stored a drafts list.
+  if (!draftIds.length && !hasDraftsList && dc && typeof dc === 'object') {
+    draftIds = Object.keys(dc).filter((k) => k && k !== 'null');
   }
-  if (!cloudDraftIds.length) return [];
-  return cloudDraftIds.map((id) => ({
+  if (!draftIds.length) return [];
+  return draftIds.map((id) => ({
     id: String(id),
     title: dc[String(id)]?.title || '',
     html: dc[String(id)]?.html || '',
@@ -376,19 +433,11 @@ function resolveDraftsFromSources(
   deletedDraftIds: Set<string> = new Set(),
 ): { drafts: Draft[]; counter: number } {
   const remoteDrafts = parseCloudDrafts(cloud).filter((draft) => !deletedDraftIds.has(draft.id));
-  if (remoteDrafts.length) {
-    const merged = mergeDraftsForSync(localDrafts, remoteDrafts);
-    const mergedMap = new Map(merged.map((d) => [d.id, d]));
-    const remoteIds = new Set(remoteDrafts.map((d) => d.id));
-    const ordered: Draft[] = remoteDrafts.map((d) => mergedMap.get(d.id)!);
-    for (const d of localDrafts) {
-      if (!remoteIds.has(d.id)) ordered.push(mergedMap.get(d.id)!);
-    }
-    const counter = (cloud?.draftId as number | undefined) || maxDraftCounter(ordered) || ordered.length;
-    return { drafts: ordered, counter };
-  }
+  const merged = mergeDraftsForPull(localDrafts, remoteDrafts, cloud, deletedDraftIds);
+  const counter = (cloud?.draftId as number | undefined) || maxDraftCounter(merged) || merged.length || 1;
+  if (merged.length) return { drafts: merged, counter };
   if (localDrafts.length) {
-    return { drafts: localDrafts, counter: maxDraftCounter(localDrafts) || localDrafts.length };
+    return { drafts: localDrafts.filter((d) => !deletedDraftIds.has(d.id)), counter: maxDraftCounter(localDrafts) || localDrafts.length };
   }
   return { drafts: [{ id: 'd1', title: '', html: '' }], counter: 1 };
 }
@@ -1031,7 +1080,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
       if (local.sets.length) setQuizSets(local.sets);
       if (local.drafts.length) {
-        const stamped = stampDrafts(local.drafts);
+        const stamped = stampDrafts(local.drafts).filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id));
         setDrafts(stamped);
         draftsRef.current = stamped;
         draftCounter.current = maxDraftCounter(stamped) || stamped.length;
@@ -1063,6 +1112,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(cloud.cloudSyncAt));
           lastAppliedRemoteSyncAt.current = cloud.cloudSyncAt;
         }
+
+        pendingDeletedDraftIdsRef.current = mergeDeletedDraftIds(pendingDeletedDraftIdsRef.current, cloud);
 
         const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
         let notes = mergeNotesForSync(local.notes, cloudNotes);
@@ -1242,9 +1293,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         const cloudDrafts = parseCloudDrafts(cloud);
         lastCloudDraftIdsRef.current = new Set(cloudDrafts.map((d) => d.id));
-        const bestLocalDrafts = mergeDraftsForSync(stampDrafts(local.drafts), draftsRef.current);
+        const bestLocalDrafts = mergeDraftsForSync(stampDrafts(local.drafts), draftsRef.current)
+          .filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id));
         const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, bestLocalDrafts, pendingDeletedDraftIdsRef.current);
-        const finalDrafts = mergeDraftsForSync(resolvedDrafts, draftsRef.current);
+        const finalDrafts = mergeDraftsForPull(draftsRef.current, resolvedDrafts, cloud, pendingDeletedDraftIdsRef.current);
         const cloudDraftContentLen = cloudDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const resolvedDraftContentLen = finalDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const draftsRepair = resolvedDraftContentLen > cloudDraftContentLen
@@ -1442,6 +1494,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           drafts: dList.map((d) => d.id),
           draftId: draftCounter.current,
           draftContents,
+          deletedDraftIds: [...pendingDeletedDraftIdsRef.current],
           quizzes: qList,
           chats: chatList,
           quizSets: qsList,
@@ -1548,6 +1601,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (typeof cloud.cloudSyncAt === 'number' && cloud.cloudSyncAt > 0) {
       lastAppliedRemoteSyncAt.current = cloud.cloudSyncAt;
     }
+    pendingDeletedDraftIdsRef.current = mergeDeletedDraftIds(pendingDeletedDraftIdsRef.current, cloud);
     const remoteNotes = firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>);
     const remoteQuizzes = firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>);
     const remoteChats = firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>)
@@ -1563,14 +1617,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const mergedChats = mergeChatsForSync(chatsRef.current, remoteChats);
     const mergedSets = mergeQuizSetsForSync(quizSetsRef.current, remoteSets);
     const mergedFolders = mergeById(quizFoldersRef.current, remoteFolders);
-    const remoteDraftsFiltered = remoteDrafts.filter((draft) => {
-      if (!pendingDeletedDraftIdsRef.current.has(draft.id)) return true;
-      return draftsRef.current.some((localDraft) => localDraft.id === draft.id);
-    });
     const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
     const mergedDrafts = recentDraftEdit && hasDraftContent(draftsRef.current)
-      ? draftsRef.current
-      : mergeDraftsForSync(draftsRef.current, remoteDraftsFiltered);
+      ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
+      : mergeDraftsForPull(draftsRef.current, remoteDrafts, cloud, pendingDeletedDraftIdsRef.current);
 
     const normalizedFolders = finalizeQuizFolders(mergedFolders, mergedSets);
     const normalizedSets = initializeQuizColors(
@@ -1709,7 +1759,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     draftsRef.current = next;
     setDrafts(next);
     localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
-    persist({ drafts: next });
+    if (draftCloudTimer.current) {
+      clearTimeout(draftCloudTimer.current);
+      draftCloudTimer.current = null;
+    }
+    persist({ drafts: next }, true);
+    runCloudSave(true);
   };
 
   const updateDraft = (id: string, patch: Partial<Draft>) => {
