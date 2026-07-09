@@ -782,6 +782,7 @@ export function QuizPage() {
   const isNotesViewRef = useRef(false);
   useEffect(() => {
     if (!loaded) return;
+    flushAllOpenForms();
     autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
     autoSaveTimers.current.clear();
 
