@@ -190,6 +190,7 @@ function mergeDraftsForPull(
   remote: Draft[],
   cloud: Record<string, unknown> | null,
   deletedIds: Set<string>,
+  protectLocalIds: Set<string> = new Set(),
 ): Draft[] {
   const cloudDraftIds = firebaseToArray<string>(
     cloud?.drafts as string[] | Record<string, string> | null | undefined,
@@ -207,6 +208,10 @@ function mergeDraftsForPull(
     const existing = map.get(item.id);
     if (existing) {
       map.set(item.id, pickBetterDraft(item, existing));
+      continue;
+    }
+    if (protectLocalIds.has(item.id)) {
+      map.set(item.id, item);
       continue;
     }
     if (cloudHasMembership && cloudDraftIds.length > 0 && !cloudDraftIds.includes(item.id)) {
@@ -1190,6 +1195,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const lastPushedDraftHtmlRef = useRef<Map<string, string>>(new Map());
   const draftSaveInFlightRef = useRef<Set<string>>(new Set());
   const draftSavePendingAgainRef = useRef<Set<string>>(new Set());
+  const pendingLocalDraftIdsRef = useRef<Set<string>>(new Set());
   const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingRemotePullRef = useRef(false);
   const lastPushedDataAtRef = useRef(0);
@@ -1276,6 +1282,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const ensureSeedDraft = () => {
       if (draftsRef.current.length) return;
       const seed = [{ id: 'd1', title: '', html: '', updatedAt: Date.now() }];
+      pendingLocalDraftIdsRef.current.add('d1');
       setDrafts(seed);
       draftsRef.current = seed;
       draftCounter.current = 1;
@@ -1298,12 +1305,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
         const cloudDrafts = parseCloudDrafts(bundle);
         lastCloudDraftIdsRef.current = new Set(cloudDrafts.map((d) => d.id));
-        const merged = mergeDraftsForPull(
-          draftsRef.current,
-          cloudDrafts.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id)),
-          bundle,
-          pendingDeletedDraftIdsRef.current,
-        );
+        const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
+        const merged = recentDraftEdit
+          ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
+          : mergeDraftsForPull(
+            draftsRef.current,
+            cloudDrafts.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id)),
+            bundle,
+            pendingDeletedDraftIdsRef.current,
+            pendingLocalDraftIdsRef.current,
+          );
         if (JSON.stringify(merged) !== JSON.stringify(draftsRef.current)) {
           setDrafts(merged);
           draftsRef.current = merged;
@@ -1526,7 +1537,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const bestLocalDrafts = mergeDraftsForSync(stampDrafts(local.drafts), draftsRef.current)
           .filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id));
         const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, bestLocalDrafts, pendingDeletedDraftIdsRef.current);
-        const finalDrafts = mergeDraftsForPull(draftsRef.current, resolvedDrafts, cloud, pendingDeletedDraftIdsRef.current);
+        const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
+        const finalDrafts = recentDraftEdit
+          ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
+          : mergeDraftsForPull(
+            draftsRef.current,
+            resolvedDrafts,
+            cloud,
+            pendingDeletedDraftIdsRef.current,
+            pendingLocalDraftIdsRef.current,
+          );
         const cloudDraftContentLen = cloudDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const resolvedDraftContentLen = finalDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const draftsRepair = resolvedDraftContentLen > cloudDraftContentLen
@@ -1718,12 +1738,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     const cloudDrafts = parseCloudDrafts(bundle);
     lastCloudDraftIdsRef.current = new Set(cloudDrafts.map((d) => d.id));
-    const merged = mergeDraftsForPull(
-      draftsRef.current,
-      cloudDrafts.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id)),
-      bundle,
-      pendingDeletedDraftIdsRef.current,
-    );
+    const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
+    const merged = recentDraftEdit
+      ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
+      : mergeDraftsForPull(
+        draftsRef.current,
+        cloudDrafts.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id)),
+        bundle,
+        pendingDeletedDraftIdsRef.current,
+        pendingLocalDraftIdsRef.current,
+      );
     if (JSON.stringify(merged) !== JSON.stringify(draftsRef.current)) {
       setDrafts(merged);
       draftsRef.current = merged;
@@ -1735,6 +1759,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const applySingleRemoteDraft = (id: string, remote: { title?: string; html?: string; updatedAt?: number } | null) => {
     if (!id) return;
     if (remote === null) {
+      if (pendingLocalDraftIdsRef.current.has(id)) return;
       pendingDeletedDraftIdsRef.current.add(id);
       writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
       const next = draftsRef.current.filter((d) => d.id !== id);
@@ -2167,9 +2192,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const applyDraftListFromCloud = (cloudDraftIds: string[]) => {
     const idSet = new Set(cloudDraftIds);
     lastCloudDraftIdsRef.current = idSet;
+    for (const id of idSet) pendingLocalDraftIdsRef.current.delete(id);
     const next = draftsRef.current.filter((d) => {
       if (idSet.has(d.id)) return true;
       if (pendingDeletedDraftIdsRef.current.has(d.id)) return false;
+      if (pendingLocalDraftIdsRef.current.has(d.id)) return true;
       if (draftSaveInFlightRef.current.has(d.id)) return true;
       const localEditAt = draftLocalEditAtRef.current.get(d.id) ?? d.updatedAt ?? 0;
       return Date.now() - localEditAt < 12_000;
@@ -2400,9 +2427,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizFoldersRef.current,
     );
     const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
-    const mergedDrafts = recentDraftEdit && hasDraftContent(draftsRef.current)
+    const mergedDrafts = recentDraftEdit
       ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
-      : mergeDraftsForPull(draftsRef.current, remoteDrafts, cloud, pendingDeletedDraftIdsRef.current);
+      : mergeDraftsForPull(
+        draftsRef.current,
+        remoteDrafts,
+        cloud,
+        pendingDeletedDraftIdsRef.current,
+        pendingLocalDraftIdsRef.current,
+      );
 
     const normalizedFolders = finalizeQuizFolders(mergedFolders, mergedSets);
     const normalizedSets = initializeQuizColors(
@@ -2657,6 +2690,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const now = Date.now();
     lastDraftEditAt.current = now;
     draftLocalEditAtRef.current.set(id, now);
+    pendingLocalDraftIdsRef.current.add(id);
     const next = [...draftsRef.current, { id, title: '', html: '', updatedAt: now }];
     draftsRef.current = next;
     setDrafts(next);
@@ -2666,6 +2700,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const removeDraft = (id: string) => {
+    pendingLocalDraftIdsRef.current.delete(id);
     pendingDeletedDraftIdsRef.current.add(id);
     writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
     const next = draftsRef.current.filter((d) => d.id !== id);
@@ -2711,6 +2746,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setNotes((prevNotes) => {
       const nextNotes = [newNote, ...prevNotes];
       setDrafts((prevDrafts) => {
+        pendingLocalDraftIdsRef.current.delete(id);
         pendingDeletedDraftIdsRef.current.add(id);
         writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
         const nextDrafts = prevDrafts.filter((d) => d.id !== id);
