@@ -558,6 +558,36 @@ function maxDraftCounter(drafts: Draft[]) {
   }, 0);
 }
 
+function maxDeletedDraftCounter(deleted: Set<string>) {
+  return [...deleted].reduce((max, id) => {
+    const n = Number.parseInt(String(id).replace(/^d/, ''), 10);
+    return Number.isFinite(n) ? Math.max(max, n) : max;
+  }, 0);
+}
+
+function syncDraftCounter(counter: number, drafts: Draft[], deleted: Set<string>) {
+  return Math.max(counter, maxDraftCounter(drafts), maxDeletedDraftCounter(deleted));
+}
+
+function allocateDraftId(counter: { current: number }, drafts: Draft[], deleted: Set<string>) {
+  let n = syncDraftCounter(counter.current, drafts, deleted);
+  let id: string;
+  do {
+    id = 'd' + (++n);
+  } while (deleted.has(id));
+  counter.current = n;
+  return id;
+}
+
+function shouldKeepDraft(d: Draft, deleted: Set<string>, pendingLocal: Set<string>) {
+  if (pendingLocal.has(d.id)) return true;
+  return !deleted.has(d.id);
+}
+
+function filterVisibleDrafts(drafts: Draft[], deleted: Set<string>, pendingLocal: Set<string>) {
+  return drafts.filter((d) => shouldKeepDraft(d, deleted, pendingLocal));
+}
+
 function parseCloudDrafts(cloud: Record<string, unknown> | null): Draft[] {
   const dc = (cloud?.draftContents as Record<string, { title?: string; html?: string; updatedAt?: number }> | undefined) || {};
   const cloudDraftIds = firebaseToArray<string>(
@@ -1283,8 +1313,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const ensureSeedDraft = () => {
       if (draftsRef.current.length) return;
-      const seed = [{ id: 'd1', title: '', html: '', updatedAt: Date.now() }];
-      pendingLocalDraftIdsRef.current.add('d1');
+      const id = allocateDraftId(draftCounter, [], pendingDeletedDraftIdsRef.current);
+      pendingDeletedDraftIdsRef.current.delete(id);
+      const seed = [{ id, title: '', html: '', updatedAt: Date.now() }];
+      pendingLocalDraftIdsRef.current.add(id);
       setDrafts(seed);
       draftsRef.current = seed;
       draftCounter.current = 1;
@@ -1309,7 +1341,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         lastCloudDraftIdsRef.current = new Set(cloudDrafts.map((d) => d.id));
         const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
         const merged = recentDraftEdit
-          ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
+          ? filterVisibleDrafts(draftsRef.current, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current)
           : mergeDraftsForPull(
             draftsRef.current,
             cloudDrafts.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id)),
@@ -1320,7 +1352,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (JSON.stringify(merged) !== JSON.stringify(draftsRef.current)) {
           setDrafts(merged);
           draftsRef.current = merged;
-          draftCounter.current = (bundle.draftId as number | undefined) || maxDraftCounter(merged) || merged.length;
+          draftCounter.current = syncDraftCounter(
+            (bundle.draftId as number | undefined) || 0,
+            merged,
+            pendingDeletedDraftIdsRef.current,
+          );
           localStorage.setItem('malacadhati_drafts', JSON.stringify(merged));
         }
       } catch {
@@ -1540,8 +1576,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           .filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id));
         const { drafts: resolvedDrafts, counter: resolvedCounter } = resolveDraftsFromSources(cloud, bestLocalDrafts, pendingDeletedDraftIdsRef.current);
         const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
-        const finalDrafts = recentDraftEdit
-          ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
+        let finalDrafts = recentDraftEdit
+          ? filterVisibleDrafts(draftsRef.current, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current)
           : mergeDraftsForPull(
             draftsRef.current,
             resolvedDrafts,
@@ -1549,6 +1585,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             pendingDeletedDraftIdsRef.current,
             pendingLocalDraftIdsRef.current,
           );
+        for (const d of draftsRef.current) {
+          if (pendingLocalDraftIdsRef.current.has(d.id) && !finalDrafts.some((item) => item.id === d.id)) {
+            finalDrafts = [...finalDrafts, d];
+          }
+        }
+        finalDrafts = filterVisibleDrafts(finalDrafts, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current);
         const cloudDraftContentLen = cloudDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const resolvedDraftContentLen = finalDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const draftsRepair = resolvedDraftContentLen > cloudDraftContentLen
@@ -1556,7 +1598,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           || (bestLocalDrafts.length > 0 && hasDraftContent(finalDrafts) && !hasDraftContent(cloudDrafts));
         setDrafts(finalDrafts);
         draftsRef.current = finalDrafts;
-        draftCounter.current = resolvedCounter;
+        draftCounter.current = syncDraftCounter(
+          resolvedCounter,
+          finalDrafts,
+          pendingDeletedDraftIdsRef.current,
+        );
         localStorage.setItem('malacadhati_drafts', JSON.stringify(finalDrafts));
         if (draftsRepair) {
           recoveryLog('repairing cloud drafts from local');
@@ -1742,7 +1788,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     lastCloudDraftIdsRef.current = new Set(cloudDrafts.map((d) => d.id));
     const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
     const merged = recentDraftEdit
-      ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
+      ? filterVisibleDrafts(draftsRef.current, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current)
       : mergeDraftsForPull(
         draftsRef.current,
         cloudDrafts.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id)),
@@ -1753,7 +1799,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (JSON.stringify(merged) !== JSON.stringify(draftsRef.current)) {
       setDrafts(merged);
       draftsRef.current = merged;
-      draftCounter.current = (bundle.draftId as number | undefined) || maxDraftCounter(merged) || merged.length;
+      draftCounter.current = syncDraftCounter(
+        (bundle.draftId as number | undefined) || 0,
+        merged,
+        pendingDeletedDraftIdsRef.current,
+      );
       localStorage.setItem('malacadhati_drafts', JSON.stringify(merged));
     }
   };
@@ -2432,7 +2482,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
     const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
     const mergedDrafts = recentDraftEdit
-      ? draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id))
+      ? filterVisibleDrafts(draftsRef.current, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current)
       : mergeDraftsForPull(
         draftsRef.current,
         remoteDrafts,
@@ -2587,7 +2637,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const ids = firebaseToArray<string>(snap.val() as string[] | Record<string, string> | null).map(String).filter(Boolean);
       pendingDeletedDraftIdsRef.current = new Set([...pendingDeletedDraftIdsRef.current, ...ids]);
       writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
-      const next = draftsRef.current.filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id));
+      const next = filterVisibleDrafts(draftsRef.current, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current);
       if (JSON.stringify(next) !== JSON.stringify(draftsRef.current)) {
         draftsRef.current = next;
         setDrafts(next);
@@ -2690,7 +2740,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const addDraft = () => {
-    const id = 'd' + ++draftCounter.current;
+    const id = allocateDraftId(draftCounter, draftsRef.current, pendingDeletedDraftIdsRef.current);
+    pendingDeletedDraftIdsRef.current.delete(id);
     const now = Date.now();
     lastDraftEditAt.current = now;
     draftLocalEditAtRef.current.set(id, now);
