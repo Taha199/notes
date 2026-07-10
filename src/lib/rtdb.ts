@@ -1,7 +1,26 @@
+import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, FB_DB_URL } from './firebase';
 
+/** Wait for Firebase auth on slow mobile Safari cold starts. */
+export async function waitForAuthUser(maxMs = 8000): Promise<User | null> {
+  if (auth.currentUser) return auth.currentUser;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      unsub();
+      resolve(auth.currentUser);
+    }, maxMs);
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (u) {
+        clearTimeout(timer);
+        unsub();
+        resolve(u);
+      }
+    });
+  });
+}
+
 export async function getRtdbAuthToken(forceRefresh = false): Promise<string | null> {
-  const user = auth.currentUser;
+  const user = auth.currentUser ?? await waitForAuthUser(5000);
   if (!user) return null;
   try {
     return await user.getIdToken(forceRefresh);

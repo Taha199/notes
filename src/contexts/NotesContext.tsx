@@ -1206,6 +1206,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [draftsReady, setDraftsReady] = useState(false);
   const [draftsLoading, setDraftsLoading] = useState(false);
   const loadedRef = useRef(false);
+  const cloudLoadSucceededRef = useRef(false);
   const draftsReadyRef = useRef(false);
   const draftPullDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1269,6 +1270,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     loadedRef.current = false;
+    cloudLoadSucceededRef.current = false;
     draftsReadyRef.current = false;
     setDraftsReady(false);
     setDraftsLoading(false);
@@ -1371,6 +1373,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       try {
         const r = await rtdbFetch(`/users/${user.uid}`);
         if (!r.ok) throw new Error('cloud-fetch-failed');
+        cloudLoadSucceededRef.current = true;
         const cloud = (await r.json()) as Record<string, unknown> | null;
         if (cancelled) return;
 
@@ -1455,11 +1458,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         let dedicatedFolders: QuizFolder[] = [];
         let dedicatedSets: QuizSet[] = [];
         try {
-          const folderRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`);
+          const folderRes = await rtdbFetch(`/users/${user.uid}/quizFolders`);
           if (folderRes.ok) dedicatedFolders = firebaseToArray<QuizFolder>(await folderRes.json());
         } catch { /* ignore */ }
         try {
-          const setRes = await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`);
+          const setRes = await rtdbFetch(`/users/${user.uid}/quizSets`);
           if (setRes.ok) {
             dedicatedSets = firebaseToArray<QuizSet>(await setRes.json()).map((set) => ({ ...set, items: set.items ?? [] }));
           }
@@ -1543,7 +1546,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         });
         if (needsRepair) {
           recoveryLog('repairing cloud from local/history');
-          void fetch(`${FB_DB_URL}/users/${user.uid}.json`, {
+          void rtdbFetch(`/users/${user.uid}`, {
             method: 'PATCH',
             body: JSON.stringify({
               notes,
@@ -1555,14 +1558,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             headers: { 'Content-Type': 'application/json' },
           });
           if (repairQuizStructure || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)) {
-            void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
+            void rtdbFetch(`/users/${user.uid}/quizSets`, {
               method: 'PUT',
               body: JSON.stringify(normalizedSets),
               headers: { 'Content-Type': 'application/json' },
             });
           }
           if (repairQuizStructure || (cloudFoldersEmpty && dedicatedFoldersEmpty && local.folders.length > 0)) {
-            void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
+            void rtdbFetch(`/users/${user.uid}/quizFolders`, {
               method: 'PUT',
               body: JSON.stringify(normalizedFolders),
               headers: { 'Content-Type': 'application/json' },
@@ -1610,10 +1613,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           finalDrafts.forEach((d) => {
             draftContents[d.id] = { title: d.title, html: d.html, updatedAt: d.updatedAt ?? Date.now() };
           });
-          for (const id of lastCloudDraftIdsRef.current) {
-            if (!finalDrafts.some((d) => d.id === id)) draftContents[id] = null as unknown as { title: string; html: string; updatedAt?: number };
+          for (const id of pendingDeletedDraftIdsRef.current) {
+            draftContents[id] = null as unknown as { title: string; html: string; updatedAt?: number };
           }
-          void fetch(`${FB_DB_URL}/users/${user.uid}.json`, {
+          void rtdbFetch(`/users/${user.uid}`, {
             method: 'PATCH',
             body: JSON.stringify({
               drafts: finalDrafts.map((d) => d.id),
@@ -1636,7 +1639,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           loadedRef.current = true;
           setLoaded(true);
-          if (user) setCloudStatus('saved');
+          if (user) {
+            if (cloudLoadSucceededRef.current) {
+              setCloudStatus('saved');
+            } else if (
+              isEmptyUserPayload(
+                notesRef.current,
+                quizzesRef.current,
+                chatsRef.current,
+                quizSetsRef.current,
+                quizFoldersRef.current,
+                draftsRef.current,
+              )
+            ) {
+              setCloudStatus('error');
+            } else {
+              setCloudStatus('idle');
+            }
+          }
           if (hasDraftContent(draftsRef.current)) {
             pendingDraftCloudSaveRef.current = true;
           }
@@ -1652,7 +1672,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ quizSets: nextSets }, forceCloud);
     if (user && loadedRef.current && forceCloud) {
-      void fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
+      void rtdbFetch(`/users/${user.uid}/quizSets`, {
         method: 'PUT',
         body: JSON.stringify(nextSets),
         headers: { 'Content-Type': 'application/json' },
@@ -1664,7 +1684,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     persist({ quizFolders: nextFolders }, forceCloud);
     if (user && loadedRef.current && (forceCloud || countUserQuizFolders(nextFolders) > 0 || countUserQuizSets(quizSets) > 0)) {
-      void fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
+      void rtdbFetch(`/users/${user.uid}/quizFolders`, {
         method: 'PUT',
         body: JSON.stringify(nextFolders),
         headers: { 'Content-Type': 'application/json' },
@@ -1762,11 +1782,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
     for (const id of pendingDeletedDraftIdsRef.current) {
       draftContents[id] = null;
-    }
-    for (const id of lastCloudDraftIdsRef.current) {
-      if (!dList.some((d) => d.id === id) && !pendingDeletedDraftIdsRef.current.has(id)) {
-        draftContents[id] = null;
-      }
     }
     lastCloudDraftIdsRef.current = new Set(dList.map((d) => d.id));
     return {
@@ -2269,6 +2284,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const u = userRef.current;
     if (!u || !draftsReadyRef.current || isApplyingRemoteRef.current) return;
     const dList = draftsRef.current;
+    if (!hasDraftContent(dList) && pendingDeletedDraftIdsRef.current.size === 0) return;
     const draftPayload = buildDraftCloudPayload(dList);
     savesInFlight.current += 1;
     setCloudStatus('saving');
@@ -2320,7 +2336,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const chatList = chatsRef.current;
     const qsList = quizSetsRef.current;
     const qfList = quizFoldersRef.current;
-    if (!forceCloud && isEmptyUserPayload(nextNotes, qList, chatList, qsList, qfList, dList)) {
+    if (isEmptyUserPayload(nextNotes, qList, chatList, qsList, qfList, dList)) {
       recoveryLog('skipped cloud sync — empty user payload');
       return;
     }
@@ -2406,8 +2422,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       clearTimeout(draftCloudTimer.current);
       draftCloudTimer.current = null;
     }
-    if (loadedRef.current) runCloudSave(true, true);
-    else if (draftsReadyRef.current) runDraftCloudSave(true);
+    const nextNotes = notesRef.current;
+    const dList = draftsRef.current;
+    const qList = quizzesRef.current;
+    const chatList = chatsRef.current;
+    const qsList = quizSetsRef.current;
+    const qfList = quizFoldersRef.current;
+    if (
+      loadedRef.current
+      && !isEmptyUserPayload(nextNotes, qList, chatList, qsList, qfList, dList)
+    ) {
+      runCloudSave(true, true);
+    } else if (draftsReadyRef.current && (hasDraftContent(dList) || pendingDeletedDraftIdsRef.current.size > 0)) {
+      runDraftCloudSave(true);
+    }
   };
 
   const persist = (overrides?: PersistSnapshot, forceCloud = false, draftPriority = false) => {
