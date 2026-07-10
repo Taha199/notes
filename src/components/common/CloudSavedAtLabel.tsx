@@ -30,30 +30,25 @@ export function CloudSavedAtLabel({
   if (!user) return null;
 
   const syncing = cloudStatus === 'saving';
-  const failed = cloudStatus === 'error';
   const locale = lang === 'sv' ? 'sv-SE' : 'en-GB';
 
-  if (!cloudSyncedAt && !syncing && !failed && !showWhenEmpty) return null;
+  if (!cloudSyncedAt && !syncing && !showWhenEmpty) return null;
 
   const text = syncing
     ? t.cloudSaving
-    : failed
-      ? t.cloudSaveError
-      : cloudSyncedAt
-        ? t.cloudSavedAt.replace('{time}', formatCloudTime(cloudSyncedAt, locale))
-        : t.cloudNotSyncedYet;
+    : cloudSyncedAt
+      ? t.cloudSavedAt.replace('{time}', formatCloudTime(cloudSyncedAt, locale))
+      : t.cloudNotSyncedYet;
 
-  const badgeStatus = syncing ? 'syncing' : failed ? 'error' : cloudSyncedAt ? 'saved' : 'none';
+  const badgeStatus = syncing ? 'syncing' : cloudSyncedAt ? 'saved' : 'none';
 
   return (
     <span
       className={
         `inline-flex min-w-0 items-center gap-1.5 text-[11px] leading-tight ` +
-        (failed
-          ? 'text-amber-700 dark:text-amber-300'
-          : syncing
-            ? 'text-primary'
-            : 'text-emerald-700 dark:text-emerald-300') +
+        (syncing
+          ? 'text-primary'
+          : 'text-emerald-700 dark:text-emerald-300') +
         (className ? ` ${className}` : '')
       }
       title={text}
