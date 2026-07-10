@@ -15,6 +15,7 @@ import {
 } from 'firebase/auth';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { auth, googleProvider, EmailAuthProvider, FB_DB_URL, storage } from '../lib/firebase';
+import { rtdbFetch } from '../lib/rtdb';
 import { hasAiAccess, isPlusUser } from '../lib/userPlan';
 
 async function sendVerificationEmailDirect(email: string): Promise<void> {
@@ -100,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileLoading(true);
     (async () => {
       try {
-        const r = await fetch(`${FB_DB_URL}/users/${user.uid}/profile.json`);
+        const r = await rtdbFetch(`/users/${user.uid}/profile`);
         const profileData = ((await r.json()) ?? {}) as Record<string, unknown>;
         if (!cancelled) {
           setProfile(profileData);
@@ -128,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
       if (ip) patch.ip = ip;
       try {
-        await fetch(`${FB_DB_URL}/users/${user.uid}/profile.json`, {
+        await rtdbFetch(`/users/${user.uid}/profile`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(patch),

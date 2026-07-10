@@ -7,6 +7,7 @@ import { setTokenSink } from '../lib/gemini';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
+import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 
 export interface Draft {
   id: string;
@@ -32,6 +33,8 @@ async function withAuth(url: string, getToken: () => Promise<string | null>): Pr
     const token = await getToken();
     if (token) return `${url}${url.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`;
   } catch { /* ignore */ }
+  const fallback = await getRtdbAuthToken();
+  if (fallback) return `${url}${url.includes('?') ? '&' : '?'}auth=${encodeURIComponent(fallback)}`;
   return url;
 }
 
@@ -590,10 +593,9 @@ function resolveDraftsFromSources(
   return { drafts: [{ id: 'd1', title: '', html: '' }], counter: 1 };
 }
 
-async function fetchCloudDraftBundle(uid: string, getToken: () => Promise<string | null>) {
-  const base = `${FB_DB_URL}/users/${uid}`;
+async function fetchCloudDraftBundle(uid: string, _getToken: () => Promise<string | null>) {
   const get = async (field: string) => {
-    const r = await fetch(await withAuth(`${base}/${field}.json`, getToken));
+    const r = await rtdbFetch(`/users/${uid}/${field}`);
     if (!r.ok) return null;
     return r.json();
   };
@@ -1331,7 +1333,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const r = await fetch(await withAuth(`${FB_DB_URL}/users/${user.uid}.json`, () => user.getIdToken()));
+        const r = await rtdbFetch(`/users/${user.uid}`);
         if (!r.ok) throw new Error('cloud-fetch-failed');
         const cloud = (await r.json()) as Record<string, unknown> | null;
         if (cancelled) return;
@@ -1818,13 +1820,29 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const syncedAt = Date.now();
 
     try {
-      await update(dbRef(database, `users/${u.uid}`), {
-        [`draftContents/${draftId}`]: { title: draft.title, html: draft.html, updatedAt },
-        drafts: draftsRef.current.map((d) => d.id),
-        draftId: draftCounter.current,
-        deletedDraftIds: [...pendingDeletedDraftIdsRef.current],
-        cloudSyncAt: syncedAt,
-      });
+      await getRtdbAuthToken(true);
+      try {
+        await update(dbRef(database, `users/${u.uid}`), {
+          [`draftContents/${draftId}`]: { title: draft.title, html: draft.html, updatedAt },
+          drafts: draftsRef.current.map((d) => d.id),
+          draftId: draftCounter.current,
+          deletedDraftIds: [...pendingDeletedDraftIdsRef.current],
+          cloudSyncAt: syncedAt,
+        });
+      } catch {
+        const res = await rtdbFetch(`/users/${u.uid}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            [`draftContents/${draftId}`]: { title: draft.title, html: draft.html, updatedAt },
+            drafts: draftsRef.current.map((d) => d.id),
+            draftId: draftCounter.current,
+            deletedDraftIds: [...pendingDeletedDraftIdsRef.current],
+            cloudSyncAt: syncedAt,
+          }),
+        });
+        if (!res.ok) throw new Error('cloud-draft-save-failed');
+      }
       saveFailedRef.current = false;
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
@@ -2042,6 +2060,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setCloudStatus('saving');
     savingStartedAt.current = syncedAt;
     try {
+      await getRtdbAuthToken(true);
       await update(dbRef(database, `users/${u.uid}`), {
         notes: nextNotes,
         quizzes: nextQuizzes,
@@ -2050,18 +2069,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         permanentlyDeletedIds: permDeletedRef.current,
         cloudSyncAt: syncedAt,
       });
-      await Promise.all([
-        fetch(`${FB_DB_URL}/users/${u.uid}/quizSets.json`, {
-          method: 'PUT',
-          body: JSON.stringify(nextSets),
-          headers: { 'Content-Type': 'application/json' },
-        }),
-        fetch(`${FB_DB_URL}/users/${u.uid}/quizFolders.json`, {
-          method: 'PUT',
-          body: JSON.stringify(nextFolders),
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      ]);
       saveFailedRef.current = false;
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
@@ -2121,6 +2128,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!u || !loadedRef.current) return;
     const syncedAt = Date.now();
     try {
+      await getRtdbAuthToken(true);
       await update(dbRef(database, `users/${u.uid}`), {
         ...patch,
         cloudSyncAt: syncedAt,
@@ -2216,17 +2224,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setCloudStatus('saving');
     savingStartedAt.current = Date.now();
     const syncedAt = Date.now();
-    void withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()).then((url) =>
-      fetch(url, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          ...draftPayload,
-          cloudSyncAt: syncedAt,
-        }),
-        headers: { 'Content-Type': 'application/json' },
-        keepalive,
+    void rtdbFetch(`/users/${u.uid}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...draftPayload,
+        cloudSyncAt: syncedAt,
       }),
-    )
+      headers: { 'Content-Type': 'application/json' },
+      keepalive,
+    })
       .then((res) => {
         if (!res.ok) throw new Error('cloud-draft-save-failed');
         saveFailedRef.current = false;
@@ -2279,24 +2285,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setCloudStatus('saving');
     savingStartedAt.current = Date.now();
     const draftPayload = buildDraftCloudPayload(dList);
-    void withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()).then((url) =>
-      fetch(url, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          notes: nextNotes,
-          ...draftPayload,
-          quizzes: qList,
-          chats: chatList,
-          quizSets: qsList,
-          quizFolders: qfList,
-          permanentlyDeletedIds: permDeletedRef.current,
-          tokenUsage: tokenUsageRef.current,
-          cloudSyncAt: Date.now(),
-        }),
-        headers: { 'Content-Type': 'application/json' },
-        keepalive,
+    void rtdbFetch(`/users/${u.uid}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        notes: nextNotes,
+        ...draftPayload,
+        quizzes: qList,
+        chats: chatList,
+        quizSets: qsList,
+        quizFolders: qfList,
+        permanentlyDeletedIds: permDeletedRef.current,
+        tokenUsage: tokenUsageRef.current,
+        cloudSyncAt: Date.now(),
       }),
-    )
+      headers: { 'Content-Type': 'application/json' },
+      keepalive,
+    })
       .then((res) => {
           if (!res.ok) throw new Error('cloud-save-failed');
           saveFailedRef.current = false;
@@ -2514,7 +2518,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!localDraftsEmpty && Date.now() - lastLocalSaveAt.current < 800) return;
     }
     try {
-      const r = await fetch(await withAuth(`${FB_DB_URL}/users/${u.uid}.json`, () => u.getIdToken()));
+      const r = await rtdbFetch(`/users/${u.uid}`);
       if (!r.ok) return;
       const cloud = (await r.json()) as Record<string, unknown> | null;
       if (!cloud) return;
