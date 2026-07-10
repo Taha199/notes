@@ -137,9 +137,16 @@ function entitySyncTime(item: { updatedAt?: string; createdAt?: string; savedAt?
   return Date.parse(item.updatedAt || item.savedAt || item.createdAt || '') || 0;
 }
 
+function noteContentKey(note: Note) {
+  return `${note.title}\0${note.html}`;
+}
+
 function pickBetterNote(local: Note, remote: Note) {
   if (noteSyncKey(local) === noteSyncKey(remote)) return local;
   if (local.trashed !== remote.trashed) return remote.trashed ? remote : local;
+  if (noteContentKey(local) === noteContentKey(remote)) {
+    return entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
+  }
   const localLen = noteContentLength(local);
   const remoteLen = noteContentLength(remote);
   if (remoteLen !== localLen) return remoteLen > localLen ? remote : local;
@@ -2759,10 +2766,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, draftsReady]);
 
-  const mutateNotes = (fn: (prev: Note[]) => Note[]) => {
+  const mutateNotes = (fn: (prev: Note[]) => Note[], instantCloud = false) => {
     setNotes((prev) => {
       const next = fn(prev);
-      persist({ notes: next });
+      persist({ notes: next }, instantCloud);
+      if (instantCloud) scheduleInstantDataCloudSave({ notes: next });
       return next;
     });
   };
@@ -2843,8 +2851,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateNote = (id: number, patch: Partial<Note>) =>
-    mutateNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)));
+  const noteMetaChanged = (patch: Partial<Note>) =>
+    'read' in patch || 'archived' in patch || 'fav' in patch || 'trashed' in patch;
+
+  const updateNote = (id: number, patch: Partial<Note>) => {
+    const instant = noteMetaChanged(patch);
+    mutateNotes((prev) => prev.map((n) => {
+      if (n.id !== id) return n;
+      const next = { ...n, ...patch };
+      if (instant && !patch.savedAt) {
+        return { ...next, savedAt: new Date().toISOString() };
+      }
+      return next;
+    }), instant);
+  };
 
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
     const newId = Date.now();
@@ -3604,7 +3624,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const toggleRead = (id: number) => updateNote(id, { read: true });
   const toggleUnread = (id: number) => updateNote(id, { read: false });
   const toggleFav = (id: number) =>
-    mutateNotes((prev) => prev.map((n) => (n.id === id ? { ...n, fav: !n.fav } : n)));
+    mutateNotes((prev) => prev.map((n) => (
+      n.id === id ? { ...n, fav: !n.fav, savedAt: new Date().toISOString() } : n
+    )), true);
   const archive = (id: number) => updateNote(id, { archived: true });
   const unarchive = (id: number) => updateNote(id, { archived: false, read: false });
   const trash = (id: number) => {
