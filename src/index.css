@@ -304,31 +304,48 @@ body {
   color: #a5b4fc;
 }
 
-.note-content table tr,
-[contenteditable] table tr {
-  display: flex;
-  flex-direction: row-reverse;
+.note-content table.note-table,
+[contenteditable] table.note-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: inherit;
 }
 
-.note-content table td,
-.note-content table th,
-[contenteditable] table td,
-[contenteditable] table th {
-  min-width: 0;
+.note-content .note-table-wrap,
+[contenteditable] .note-table-wrap {
+  margin: 0.75rem 0;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
-.note-content table td:first-child,
-.note-content table th:first-child,
-[contenteditable] table td:first-child,
-[contenteditable] table th:first-child {
-  flex: 1.55 1 0;
+.note-content table.note-table th,
+.note-content table.note-table td,
+[contenteditable] table.note-table th,
+[contenteditable] table.note-table td {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  min-width: 80px;
+  padding: 8px 10px;
+  text-align: start;
+  vertical-align: top;
 }
 
-.note-content table td:last-child,
-.note-content table th:last-child,
-[contenteditable] table td:last-child,
-[contenteditable] table th:last-child {
-  flex: 1 1 0;
+.note-content table.note-table th,
+[contenteditable] table.note-table th {
+  background: rgba(108, 99, 255, 0.08);
+  font-weight: 600;
+}
+
+.dark .note-content table.note-table th,
+.dark .note-content table.note-table td,
+.dark [contenteditable] table.note-table th,
+.dark [contenteditable] table.note-table td {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.dark .note-content table.note-table th,
+.dark [contenteditable] table.note-table th {
+  background: rgba(108, 99, 255, 0.15);
 }
 
 .otter-launcher-wrap {

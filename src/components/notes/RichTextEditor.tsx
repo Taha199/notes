@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml } from '../../lib/noteTable';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
@@ -1818,6 +1819,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (editorRef.current && editorRef.current.innerHTML !== html) {
       editorRef.current.innerHTML = html;
       normalizeEditorImages(editorRef.current);
+      normalizeTablesInEditor(editorRef.current);
       lastLocalHtmlRef.current = editorRef.current.innerHTML;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1855,6 +1857,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     hideImageToolbar();
     ed.innerHTML = html;
     normalizeEditorImages(ed);
+    normalizeTablesInEditor(ed);
     lastLocalHtmlRef.current = ed.innerHTML;
   }, [html]);
 
@@ -2381,6 +2384,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
+  const insertTable = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ensureFocus(true);
+    document.execCommand('insertHTML', false, buildEmptyTableHtml(3, 2));
+    saveSel();
+    const live = editorRef.current;
+    if (live) normalizeTablesInEditor(live);
+    emitHtml();
+  };
+
   const formatTodayHeaderLabel = () => new Date().toLocaleDateString(lang === 'sv' ? 'sv-SE' : 'en-GB', {
     day: 'numeric',
     month: 'long',
@@ -2642,6 +2656,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); imgInputRef.current?.click(); }} title="Insert image" className={btnCls(false)}>🖼</button>
         <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImage(f); e.target.value = ''; }} />
 
+        {/* Table */}
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); saveSel(); insertTable(); }}
+          title={t.titleInsertTable}
+          className={btnCls(false)}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.75" />
+            <path d="M3 10h18M3 15h18M9 4v16M15 4v16" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
+
         {/* Divider line + new paragraph */}
         <button type="button" onMouseDown={(e) => { e.preventDefault(); insertDivider(); }} title="Avdelare (linje + ny rad)" className={btnCls(false)}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="11" width="18" height="2" rx="1"/></svg>
@@ -2706,27 +2733,49 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             stripEmptyFontSpans(live);
             const ytChanged = normalizeYouTubeEmbeds(live);
             const linkChanged = normalizeAutoLinks(live);
-            if (ytChanged || linkChanged) emitHtml();
+            const tableChanged = normalizeTablesInEditor(live);
+            if (ytChanged || linkChanged || tableChanged) emitHtml();
           });
         }}
         onPaste={(e) => {
-          const plain = e.clipboardData.getData('text/plain').trim();
           const pastedHtml = e.clipboardData.getData('text/html').trim();
+          const plain = e.clipboardData.getData('text/plain');
+          const tableFromHtml = pastedHtml ? extractTableHtmlFromClipboard(pastedHtml) : null;
+          if (tableFromHtml) {
+            e.preventDefault();
+            ensureFocus(true);
+            document.execCommand('insertHTML', false, tableFromHtml);
+            saveSel();
+            const live = editorRef.current;
+            if (live) normalizeTablesInEditor(live);
+            emitHtml();
+            return;
+          }
+          const tableFromPlain = plain ? plainTextToTableHtml(plain) : null;
+          if (tableFromPlain) {
+            e.preventDefault();
+            ensureFocus(true);
+            document.execCommand('insertHTML', false, tableFromPlain);
+            saveSel();
+            emitHtml();
+            return;
+          }
+          const plainTrimmed = plain.trim();
           if (!pastedHtml) {
-            const videoId = extractYouTubeVideoId(plain);
+            const videoId = extractYouTubeVideoId(plainTrimmed);
             const ed = editorRef.current;
             const sel = window.getSelection();
             if (ed && sel?.rangeCount) {
               if (videoId) {
                 e.preventDefault();
-                insertYouTubeEmbedAtRange(sel.getRangeAt(0), videoId, plain);
+                insertYouTubeEmbedAtRange(sel.getRangeAt(0), videoId, plainTrimmed);
                 saveSel();
                 emitHtml();
                 return;
               }
-              if (isPlainUrl(plain)) {
+              if (isPlainUrl(plainTrimmed)) {
                 e.preventDefault();
-                insertAutoLinkAtRange(sel.getRangeAt(0), plain);
+                insertAutoLinkAtRange(sel.getRangeAt(0), plainTrimmed);
                 saveSel();
                 emitHtml();
                 return;
@@ -2739,7 +2788,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             const ytChanged = normalizeYouTubeEmbeds(live);
             const linkChanged = normalizeAutoLinks(live);
-            if (ytChanged || linkChanged) emitHtml();
+            const tableChanged = normalizeTablesInEditor(live);
+            if (ytChanged || linkChanged || tableChanged) emitHtml();
             else emitHtml();
           });
         }}

@@ -125,6 +125,7 @@ export interface Translation {
   titleUnline: string;
   titleStrike: string;
   titleInsertDateHeader: string;
+  titleInsertTable: string;
   titleRight: string;
   titleLeft: string;
   titleCenter: string;
@@ -548,7 +549,7 @@ export const LANGS: Record<Lang, Translation> = {
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
-    titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header",
+    titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
     titleRight: 'Align Right', titleLeft: 'Align Left', titleCenter: 'Align Center', titleMoveImageUp: 'Move image up', titleMoveImageDown: 'Move image down', titleClr: 'Clear Formatting', titleColor: 'Text Color', titleResizeImage: 'Drag to resize (keep ratio)', titleResizeWidth: 'Drag to change width', titleResizeHeight: 'Drag to change height',
     titleBulletList: 'Bullet list', titleNumberedList: 'Numbered list', titleRemoveList: 'Remove list', titleSubList: 'Sub-list', titleOutdentSubList: 'Back to parent list',
     titleUnarch: 'Unarchive', titleDone: 'Mark as Read', titleUnread: 'Move to Unread', titleArch: 'Archive',
@@ -900,7 +901,7 @@ export const LANGS: Record<Lang, Translation> = {
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
-    titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik',
+    titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',
     titleRight: 'Höger', titleLeft: 'Vänster', titleCenter: 'Centrera', titleMoveImageUp: 'Flytta bild uppåt', titleMoveImageDown: 'Flytta bild nedåt', titleClr: 'Ta bort formatering', titleColor: 'Textfärg', titleResizeImage: 'Dra för att ändra storlek (behåll proportioner)', titleResizeWidth: 'Dra för att ändra bredd', titleResizeHeight: 'Dra för att ändra höjd',
     titleBulletList: 'Punktlista', titleNumberedList: 'Numrerad lista', titleRemoveList: 'Ta bort lista', titleSubList: 'Underlista', titleOutdentSubList: 'Tillbaka till överliggande lista',
     titleUnarch: 'Avarkivera', titleDone: 'Markera som Läst', titleUnread: 'Flytta till Olästa', titleArch: 'Arkivera',
