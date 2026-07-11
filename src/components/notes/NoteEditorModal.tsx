@@ -97,6 +97,7 @@ type DraftQuizSnapshot = {
   mcqMode: boolean;
   mcqOptions: string[];
   mcqCorrect: number;
+  quizId?: number;
 };
 
 function snapshotMatchesForm(
@@ -117,7 +118,7 @@ function snapshotMatchesForm(
 }
 
 export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNote, onClose, onNavigate }: NoteEditorModalProps) {
-  const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz } = useNotes();
+  const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz, updateQuiz } = useNotes();
   const { t } = useLanguage();
   const { show } = useToast();
   const { hasAi } = useAuth();
@@ -154,6 +155,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [mcqCorrect, setMcqCorrect] = useState(0);
   const [manualHistory, setManualHistory] = useState<DraftQuizSnapshot[]>([]);
   const [manualHistoryIndex, setManualHistoryIndex] = useState(-1);
+  const [manualStashedDraft, setManualStashedDraft] = useState<DraftQuizSnapshot | null>(null);
   const [copied, setCopied] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(note?.lastEdited ?? null);
   const [quizPanelW, setQuizPanelW] = useState(readQuizPanelWidth);
@@ -196,8 +198,19 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     ? snapshotMatchesForm(lastManualSnapshot, manualQ, manualA, mcqMode, mcqOptions, mcqCorrect)
     : false;
   const canRestoreLastSaved = lastManualSnapshot != null && !showingLastSaved;
-  const canGoManualBack = manualHistoryIndex > 0 || (manualHistory.length > 0 && manualFormEmpty);
-  const canGoManualForward = manualHistoryIndex >= 0 && manualHistoryIndex < manualHistory.length - 1;
+  const isOnNewDraftSlot = manualHistoryIndex < 0;
+  const totalManualSlots = manualHistory.length + (isOnNewDraftSlot || manualStashedDraft ? 1 : 0);
+  const currentManualSlot = isOnNewDraftSlot ? totalManualSlots : manualHistoryIndex + 1;
+  const canGoManualBack = manualHistoryIndex > 0 || (isOnNewDraftSlot && manualHistory.length > 0);
+  const canGoManualForward = manualHistoryIndex >= 0 && manualHistoryIndex < manualHistory.length;
+
+  const captureManualFormSnapshot = (): DraftQuizSnapshot => ({
+    question: manualQ,
+    answer: manualA,
+    mcqMode,
+    mcqOptions: [...mcqOptions],
+    mcqCorrect,
+  });
 
   const applyManualSnapshot = (snap: DraftQuizSnapshot) => {
     setManualQ(snap.question);
@@ -215,38 +228,105 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   };
 
   const goManualBack = () => {
+    if (isOnNewDraftSlot && manualHistory.length > 0) {
+      if (!manualFormEmpty) setManualStashedDraft(captureManualFormSnapshot());
+      const snap = manualHistory[manualHistory.length - 1];
+      if (!snap) return;
+      applyManualSnapshot(snap);
+      setManualHistoryIndex(manualHistory.length - 1);
+      return;
+    }
     if (manualHistoryIndex > 0) {
       const nextIndex = manualHistoryIndex - 1;
       const snap = manualHistory[nextIndex];
       if (!snap) return;
       applyManualSnapshot(snap);
       setManualHistoryIndex(nextIndex);
-      return;
-    }
-    if (manualHistory.length > 0 && manualFormEmpty) {
-      const index = manualHistoryIndex >= 0 ? manualHistoryIndex : manualHistory.length - 1;
-      const snap = manualHistory[index];
-      if (!snap) return;
-      applyManualSnapshot(snap);
-      setManualHistoryIndex(index);
     }
   };
 
   const goManualForward = () => {
-    if (!canGoManualForward) return;
-    const nextIndex = manualHistoryIndex + 1;
-    const snap = manualHistory[nextIndex];
-    if (!snap) return;
-    applyManualSnapshot(snap);
-    setManualHistoryIndex(nextIndex);
+    if (manualHistoryIndex >= 0 && manualHistoryIndex < manualHistory.length - 1) {
+      const nextIndex = manualHistoryIndex + 1;
+      const snap = manualHistory[nextIndex];
+      if (!snap) return;
+      applyManualSnapshot(snap);
+      setManualHistoryIndex(nextIndex);
+      return;
+    }
+    if (manualHistoryIndex === manualHistory.length - 1) {
+      if (manualStashedDraft) {
+        applyManualSnapshot(manualStashedDraft);
+        setManualStashedDraft(null);
+      } else {
+        setManualQ('');
+        setManualA('');
+        setMcqMode(false);
+        setMcqOptions(['', '', '', '']);
+        setMcqCorrect(0);
+        setManualResetKey((k) => k + 1);
+      }
+      setManualHistoryIndex(-1);
+    }
   };
 
   const pushManualHistory = (snap: DraftQuizSnapshot) => {
-    setManualHistory((prev) => {
-      const next = [...prev, snap];
-      setManualHistoryIndex(next.length - 1);
-      return next;
+    setManualHistory((prev) => [...prev, snap]);
+    setManualHistoryIndex(-1);
+    setManualStashedDraft(null);
+  };
+
+  const buildManualAnswer = (): string | null => {
+    if (!hasContent(manualQ)) return null;
+    if (mcqMode) {
+      const filled = mcqOptions.filter((o) => o.trim());
+      if (filled.length < 2) return null;
+      return mcqOptions
+        .map((o, i) => `${String.fromCharCode(65 + i)}) ${o.trim()}${i === mcqCorrect ? ' ✓' : ''}`)
+        .filter((_, i) => mcqOptions[i].trim())
+        .join('\n');
+    }
+    return manualA;
+  };
+
+  const saveManualQuestion = () => {
+    const answer = buildManualAnswer();
+    if (answer === null) return;
+
+    const snap: DraftQuizSnapshot = {
+      question: manualQ,
+      answer: mcqMode ? answer : manualA,
+      mcqMode,
+      mcqOptions: [...mcqOptions],
+      mcqCorrect,
+    };
+
+    const editingExisting = manualHistoryIndex >= 0;
+    const existingQuizId = editingExisting ? manualHistory[manualHistoryIndex]?.quizId : undefined;
+
+    if (editingExisting && existingQuizId != null) {
+      updateQuiz(existingQuizId, { question: manualQ, answer }, true);
+      setManualHistory((prev) => prev.map((item, i) => (i === manualHistoryIndex ? { ...snap, quizId: existingQuizId } : item)));
+      show(t.noteSavedQuiz);
+      return;
+    }
+
+    const quizId = addQuiz({
+      noteId: note.id,
+      noteTitle: note.title || note.text.slice(0, 50),
+      question: manualQ,
+      answer,
+      date: nowStr(),
     });
+    pushManualHistory({ ...snap, quizId });
+    show(t.noteSavedQuiz);
+    setManualQ('');
+    setManualA('');
+    setMcqMode(false);
+    setMcqOptions(['', '', '', '']);
+    setMcqCorrect(0);
+    setManualAiLoading(false);
+    setManualResetKey((k) => k + 1);
   };
 
   const save = () => {
@@ -416,13 +496,13 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   >
                     →
                   </button>
-                  {manualHistory.length > 0 && (
+                  {totalManualSlots > 0 && (
                     <span className="text-[10px] font-semibold tabular-nums text-emerald-700/60 dark:text-emerald-300/60">
-                      {manualHistoryIndex >= 0 ? manualHistoryIndex + 1 : manualHistory.length}/{manualHistory.length}
+                      {currentManualSlot}/{totalManualSlots}
                     </span>
                   )}
                 </div>
-                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); setManualHistory([]); setManualHistoryIndex(-1); }} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
+                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); setManualHistory([]); setManualHistoryIndex(-1); setManualStashedDraft(null); }} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
               </div>
 
               <div className="flex flex-1 flex-col gap-4 p-4">
@@ -508,25 +588,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   )}
                   <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
                   <button
-                    onClick={() => {
-                      if (!hasContent(manualQ)) return;
-                      let answer = mcqMode ? '' : manualA;
-                      if (mcqMode) {
-                        const filled = mcqOptions.filter((o) => o.trim());
-                        if (filled.length < 2) return;
-                        answer = mcqOptions.map((o, i) => `${String.fromCharCode(65 + i)}) ${o.trim()}${i === mcqCorrect ? ' ✓' : ''}`).filter((_, i) => mcqOptions[i].trim()).join('\n');
-                      }
-                      addQuiz({ noteId: note.id, noteTitle: note.title || note.text.slice(0, 50), question: manualQ, answer, date: nowStr() });
-                      pushManualHistory({
-                        question: manualQ,
-                        answer: mcqMode ? answer : manualA,
-                        mcqMode,
-                        mcqOptions: [...mcqOptions],
-                        mcqCorrect,
-                      });
-                      show(t.noteSavedQuiz);
-                      setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); setManualAiLoading(false); setManualResetKey((k) => k + 1);
-                    }}
+                    onClick={saveManualQuestion}
                     disabled={!hasContent(manualQ) || (mcqMode && mcqOptions.filter((o) => o.trim()).length < 2)}
                     className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
                   >{t.noteSaveQuestion}</button>
