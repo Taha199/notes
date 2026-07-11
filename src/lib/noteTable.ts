@@ -1,5 +1,99 @@
 export const NOTE_TABLE_CLASS = 'note-table';
 export const NOTE_TABLE_WRAP = 'note-table-wrap';
+export const NOTE_TABLE_ACTIVE_WRAP = 'note-table-wrap--active';
+
+export type TableCellContext = {
+  table: HTMLTableElement;
+  wrap: HTMLElement;
+  cell: HTMLTableCellElement;
+  row: HTMLTableRowElement;
+  rowIndex: number;
+  colIndex: number;
+};
+
+function emptyCell(tag: 'th' | 'td') {
+  const cell = document.createElement(tag);
+  cell.setAttribute('dir', 'auto');
+  cell.innerHTML = '&nbsp;';
+  return cell;
+}
+
+function tableRows(table: HTMLTableElement) {
+  return [...table.querySelectorAll('tr')];
+}
+
+function rowCells(row: HTMLTableRowElement) {
+  return [...row.querySelectorAll('th, td')];
+}
+
+export function resolveTableContext(node: Node | null, root?: HTMLElement | null): TableCellContext | null {
+  if (!node) return null;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement);
+  const cell = el?.closest('td, th');
+  if (!(cell instanceof HTMLTableCellElement)) return null;
+  const table = cell.closest(`table.${NOTE_TABLE_CLASS}`);
+  if (!(table instanceof HTMLTableElement)) return null;
+  if (root && !root.contains(table)) return null;
+  const wrap = table.parentElement;
+  if (!wrap?.classList.contains(NOTE_TABLE_WRAP)) return null;
+  const row = cell.closest('tr');
+  if (!(row instanceof HTMLTableRowElement)) return null;
+  const rows = tableRows(table);
+  const rowIndex = rows.indexOf(row);
+  const colIndex = rowCells(row).indexOf(cell);
+  if (rowIndex < 0 || colIndex < 0) return null;
+  return { table, wrap, cell, row, rowIndex, colIndex };
+}
+
+export function addTableRow(ctx: TableCellContext, position: 'above' | 'below') {
+  const cells = rowCells(ctx.row);
+  const newRow = document.createElement('tr');
+  cells.forEach((refCell) => {
+    const tag = refCell.tagName === 'TH' ? 'th' : 'td';
+    newRow.appendChild(emptyCell(tag));
+  });
+  if (position === 'above') ctx.row.before(newRow);
+  else ctx.row.after(newRow);
+}
+
+export function removeTableRow(ctx: TableCellContext) {
+  if (tableRows(ctx.table).length <= 1) return false;
+  ctx.row.remove();
+  return true;
+}
+
+export function addTableColumn(ctx: TableCellContext, position: 'before' | 'after') {
+  tableRows(ctx.table).forEach((row) => {
+    const cells = rowCells(row);
+    const refCell = cells[ctx.colIndex];
+    if (!refCell) return;
+    const tag = refCell.tagName === 'TH' ? 'th' : 'td';
+    const newCell = emptyCell(tag);
+    if (position === 'before') refCell.before(newCell);
+    else refCell.after(newCell);
+  });
+}
+
+export function removeTableColumn(ctx: TableCellContext) {
+  const firstRow = tableRows(ctx.table)[0];
+  if (!firstRow || rowCells(firstRow).length <= 1) return false;
+  tableRows(ctx.table).forEach((row) => {
+    const cell = rowCells(row)[ctx.colIndex];
+    cell?.remove();
+  });
+  return true;
+}
+
+export function deleteTable(ctx: TableCellContext) {
+  ctx.wrap.remove();
+}
+
+export function setActiveTableWrap(wrap: HTMLElement | null) {
+  document.querySelectorAll(`.${NOTE_TABLE_ACTIVE_WRAP}`).forEach((el) => {
+    el.classList.remove(NOTE_TABLE_ACTIVE_WRAP);
+  });
+  if (wrap) wrap.classList.add(NOTE_TABLE_ACTIVE_WRAP);
+}
 
 function escapeHtml(text: string) {
   return text

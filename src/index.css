@@ -348,6 +348,17 @@ body {
   background: rgba(108, 99, 255, 0.15);
 }
 
+.note-content .note-table-wrap--active,
+[contenteditable] .note-table-wrap--active {
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.28);
+}
+
+.dark .note-content .note-table-wrap--active,
+.dark [contenteditable] .note-table-wrap--active {
+  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.42);
+}
+
 .otter-launcher-wrap {
   transition: right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }

@@ -4,7 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, setActiveTableWrap, type TableCellContext } from '../../lib/noteTable';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
@@ -264,6 +264,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const [previewZoom, setPreviewZoom] = useState(1);
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; frame: HTMLElement; host: HTMLElement; rect: DOMRect } | null>(null);
+  const [activeTableCtx, setActiveTableCtx] = useState<(TableCellContext & { rect: DOMRect }) | null>(null);
+  const activeTableWrapRef = useRef<HTMLElement | null>(null);
+  const tableToolbarClickRef = useRef(false);
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
@@ -288,7 +291,54 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     setImgResizeMode(false);
   };
 
+  const hideTableToolbar = () => {
+    if (activeTableWrapRef.current) {
+      activeTableWrapRef.current.classList.remove('note-table-wrap--active');
+      activeTableWrapRef.current = null;
+    }
+    setActiveTableWrap(null);
+    setActiveTableCtx(null);
+  };
+
+  const showTableToolbar = (ctx: TableCellContext) => {
+    hideImageToolbar();
+    if (activeTableWrapRef.current && activeTableWrapRef.current !== ctx.wrap) {
+      activeTableWrapRef.current.classList.remove('note-table-wrap--active');
+    }
+    activeTableWrapRef.current = ctx.wrap;
+    setActiveTableWrap(ctx.wrap);
+    setActiveTableCtx({ ...ctx, rect: ctx.wrap.getBoundingClientRect() });
+  };
+
+  const refreshActiveTableToolbar = () => {
+    const ed = editorRef.current;
+    const sel = window.getSelection();
+    if (!ed || !sel?.rangeCount) {
+      hideTableToolbar();
+      return;
+    }
+    const ctx = resolveTableContext(sel.anchorNode, ed);
+    if (!ctx) {
+      hideTableToolbar();
+      return;
+    }
+    showTableToolbar(ctx);
+  };
+
+  const runTableAction = (action: (ctx: TableCellContext) => void) => {
+    const ed = editorRef.current;
+    const sel = window.getSelection();
+    const ctx = (ed && sel?.rangeCount ? resolveTableContext(sel.anchorNode, ed) : null) ?? activeTableCtx;
+    if (!ctx) return;
+    action(ctx);
+    ed?.focus({ preventScroll: true });
+    saveSel();
+    refreshActiveTableToolbar();
+    emitHtml();
+  };
+
   const showImageToolbar = (img: HTMLImageElement) => {
+    hideTableToolbar();
     const ed = editorRef.current;
     if (!ed) return;
     const frame = ensureImageFrame(img, ed);
@@ -2498,6 +2548,32 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   }, [listPalOpen]);
 
   useEffect(() => {
+    if (!editable) return;
+    const onSelectionChange = () => {
+      if (document.activeElement !== editorRef.current && !editorRef.current?.contains(document.activeElement)) return;
+      refreshActiveTableToolbar();
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, [editable]);
+
+  useEffect(() => {
+    if (!activeTableCtx) return;
+    const reposition = () => {
+      if (!activeTableWrapRef.current) return;
+      setActiveTableCtx((prev) => (
+        prev ? { ...prev, rect: activeTableWrapRef.current!.getBoundingClientRect() } : prev
+      ));
+    };
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [activeTableCtx?.wrap]);
+
+  useEffect(() => {
     if (!previewImage) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setPreviewImage(null); };
     window.addEventListener('keydown', handler);
@@ -2698,12 +2774,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           const ed = editorRef.current;
           if (ed) sanitizeCaretFontContext(ed);
         }}
-        onBlur={() => { hideImageToolbar(); flushEmitHtml(); }}
+        onBlur={() => {
+          hideImageToolbar();
+          if (tableToolbarClickRef.current) {
+            tableToolbarClickRef.current = false;
+            flushEmitHtml();
+            return;
+          }
+          hideTableToolbar();
+          flushEmitHtml();
+        }}
         onScroll={() => {
           if (hoveredImg?.el.isConnected) {
             setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame));
           } else if (hoveredImg) {
             hideImageToolbar();
+          }
+          if (activeTableWrapRef.current) {
+            setActiveTableCtx((prev) => (
+              prev ? { ...prev, rect: activeTableWrapRef.current!.getBoundingClientRect() } : prev
+            ));
           }
         }}
         onKeyDown={(e) => {
@@ -2812,6 +2902,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             return;
           }
           if (editable) {
+            const tableCtx = resolveTableContext(event.target as Node, editorRef.current);
+            if (tableCtx) {
+              showTableToolbar(tableCtx);
+            } else if (!(event.target instanceof Node && activeTableWrapRef.current?.contains(event.target as Node))) {
+              hideTableToolbar();
+            }
             const link = event.target instanceof HTMLElement ? event.target.closest('a[href]') : null;
             if (link instanceof HTMLAnchorElement && !link.closest('.note-yt-player')) {
               event.preventDefault();
@@ -2897,6 +2993,30 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             <span className="w-4 text-center text-[10px] leading-none">↰</span>
             <span>{t.titleOutdentSubList}</span>
           </button>
+        </div>,
+        document.body,
+      )}
+
+      {/* Table toolbar */}
+      {editable && activeTableCtx && createPortal(
+        <div
+          data-note-table-toolbar
+          onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
+          className="fixed z-[9998] flex max-w-[min(96vw,520px)] flex-wrap items-center gap-1 rounded-xl border border-app-border bg-white/96 px-2 py-1.5 shadow-xl backdrop-blur-sm dark:border-white/10 dark:bg-gray-900/96"
+          style={{
+            left: Math.max(8, Math.min(activeTableCtx.rect.left, window.innerWidth - 320)),
+            top: Math.max(8, activeTableCtx.rect.top - 44),
+          }}
+        >
+          <button type="button" title={t.tableAddRowAbove} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => addTableRow(ctx, 'above'))} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↑ {t.tableAddRowAbove}</button>
+          <button type="button" title={t.tableAddRowBelow} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => addTableRow(ctx, 'below'))} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↓ {t.tableAddRowBelow}</button>
+          <button type="button" title={t.tableRemoveRow} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => { removeTableRow(ctx); })} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveRow}</button>
+          <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+          <button type="button" title={t.tableAddColBefore} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => addTableColumn(ctx, 'before'))} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">← {t.tableAddColBefore}</button>
+          <button type="button" title={t.tableAddColAfter} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => addTableColumn(ctx, 'after'))} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">{t.tableAddColAfter} →</button>
+          <button type="button" title={t.tableRemoveCol} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => { removeTableColumn(ctx); })} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveCol}</button>
+          <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+          <button type="button" title={t.tableDelete} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => { deleteTable(ctx); hideTableToolbar(); })} className="rounded-md px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">✕ {t.tableDelete}</button>
         </div>,
         document.body,
       )}

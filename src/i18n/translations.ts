@@ -126,6 +126,13 @@ export interface Translation {
   titleStrike: string;
   titleInsertDateHeader: string;
   titleInsertTable: string;
+  tableAddRowAbove: string;
+  tableAddRowBelow: string;
+  tableRemoveRow: string;
+  tableAddColBefore: string;
+  tableAddColAfter: string;
+  tableRemoveCol: string;
+  tableDelete: string;
   titleRight: string;
   titleLeft: string;
   titleCenter: string;
@@ -550,6 +557,8 @@ export const LANGS: Record<Lang, Translation> = {
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
+    tableAddRowAbove: 'Row above', tableAddRowBelow: 'Row below', tableRemoveRow: 'Delete row',
+    tableAddColBefore: 'Column left', tableAddColAfter: 'Column right', tableRemoveCol: 'Delete column', tableDelete: 'Delete table',
     titleRight: 'Align Right', titleLeft: 'Align Left', titleCenter: 'Align Center', titleMoveImageUp: 'Move image up', titleMoveImageDown: 'Move image down', titleClr: 'Clear Formatting', titleColor: 'Text Color', titleResizeImage: 'Drag to resize (keep ratio)', titleResizeWidth: 'Drag to change width', titleResizeHeight: 'Drag to change height',
     titleBulletList: 'Bullet list', titleNumberedList: 'Numbered list', titleRemoveList: 'Remove list', titleSubList: 'Sub-list', titleOutdentSubList: 'Back to parent list',
     titleUnarch: 'Unarchive', titleDone: 'Mark as Read', titleUnread: 'Move to Unread', titleArch: 'Archive',
@@ -902,6 +911,8 @@ export const LANGS: Record<Lang, Translation> = {
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',
+    tableAddRowAbove: 'Rad ovanför', tableAddRowBelow: 'Rad under', tableRemoveRow: 'Ta bort rad',
+    tableAddColBefore: 'Kolumn vänster', tableAddColAfter: 'Kolumn höger', tableRemoveCol: 'Ta bort kolumn', tableDelete: 'Ta bort tabell',
     titleRight: 'Höger', titleLeft: 'Vänster', titleCenter: 'Centrera', titleMoveImageUp: 'Flytta bild uppåt', titleMoveImageDown: 'Flytta bild nedåt', titleClr: 'Ta bort formatering', titleColor: 'Textfärg', titleResizeImage: 'Dra för att ändra storlek (behåll proportioner)', titleResizeWidth: 'Dra för att ändra bredd', titleResizeHeight: 'Dra för att ändra höjd',
     titleBulletList: 'Punktlista', titleNumberedList: 'Numrerad lista', titleRemoveList: 'Ta bort lista', titleSubList: 'Underlista', titleOutdentSubList: 'Tillbaka till överliggande lista',
     titleUnarch: 'Avarkivera', titleDone: 'Markera som Läst', titleUnread: 'Flytta till Olästa', titleArch: 'Arkivera',
