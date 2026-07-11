@@ -212,6 +212,27 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     mcqCorrect,
   });
 
+  const clearManualForm = () => {
+    setManualQ('');
+    setManualA('');
+    setMcqMode(false);
+    setMcqOptions(['', '', '', '']);
+    setMcqCorrect(0);
+    setManualResetKey((k) => k + 1);
+  };
+
+  const resetManualQuizNavigation = () => {
+    setManualHistory([]);
+    setManualHistoryIndex(-1);
+    setManualStashedDraft(null);
+  };
+
+  const closeManualQuiz = () => {
+    setManualQuiz(false);
+    clearManualForm();
+    resetManualQuizNavigation();
+  };
+
   const applyManualSnapshot = (snap: DraftQuizSnapshot) => {
     setManualQ(snap.question);
     setManualA(snap.answer);
@@ -223,6 +244,9 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
 
   const restoreLastSavedQuestion = () => {
     if (!lastManualSnapshot) return;
+    if (isOnNewDraftSlot && !manualFormEmpty) {
+      setManualStashedDraft(captureManualFormSnapshot());
+    }
     applyManualSnapshot(lastManualSnapshot);
     setManualHistoryIndex(manualHistory.length - 1);
   };
@@ -259,12 +283,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
         applyManualSnapshot(manualStashedDraft);
         setManualStashedDraft(null);
       } else {
-        setManualQ('');
-        setManualA('');
-        setMcqMode(false);
-        setMcqOptions(['', '', '', '']);
-        setMcqCorrect(0);
-        setManualResetKey((k) => k + 1);
+        clearManualForm();
       }
       setManualHistoryIndex(-1);
     }
@@ -320,13 +339,8 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
     });
     pushManualHistory({ ...snap, quizId });
     show(t.noteSavedQuiz);
-    setManualQ('');
-    setManualA('');
-    setMcqMode(false);
-    setMcqOptions(['', '', '', '']);
-    setMcqCorrect(0);
+    clearManualForm();
     setManualAiLoading(false);
-    setManualResetKey((k) => k + 1);
   };
 
   const save = () => {
@@ -502,7 +516,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                     </span>
                   )}
                 </div>
-                <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); setManualHistory([]); setManualHistoryIndex(-1); setManualStashedDraft(null); }} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
+                <button onClick={closeManualQuiz} className="text-[11px] text-app-text-secondary hover:text-app-text">{t.noteClose}</button>
               </div>
 
               <div className="flex flex-1 flex-col gap-4 p-4">
@@ -586,7 +600,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       {t.noteBackToLastQuestion}
                     </button>
                   )}
-                  <button onClick={() => { setManualQuiz(false); setManualQ(''); setManualA(''); setMcqMode(false); setMcqOptions(['', '', '', '']); setMcqCorrect(0); }} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
+                  <button onClick={closeManualQuiz} className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
                   <button
                     onClick={saveManualQuestion}
                     disabled={!hasContent(manualQ) || (mcqMode && mcqOptions.filter((o) => o.trim()).length < 2)}
@@ -848,14 +862,33 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
               {copied ? '✓ Copied!' : `📋 ${t.mCopy}`}
             </button>
             <button
-              onClick={() => { setManualQuiz((o) => !o); setAiMode(false); setAiQ(''); setAiA(''); setQuizOpen(false); }}
+              onClick={() => {
+                if (manualQuiz) closeManualQuiz();
+                else {
+                  setManualQuiz(true);
+                  setAiMode(false);
+                  setAiQ('');
+                  setAiA('');
+                  setQuizOpen(false);
+                }
+              }}
               className={'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ' + (manualQuiz ? 'border-emerald-400 bg-emerald-100 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/20 dark:text-emerald-300' : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300')}
             >
               ✏️ {t.mAddQ}
             </button>
             {hasAi && (
             <button
-              onClick={() => { setAiMode((o) => !o); setManualQuiz(false); setManualQ(''); setManualA(''); setQuizOpen(false); }}
+              onClick={() => {
+                if (aiMode) {
+                  setAiMode(false);
+                  setAiQ('');
+                  setAiA('');
+                } else {
+                  closeManualQuiz();
+                  setAiMode(true);
+                  setQuizOpen(false);
+                }
+              }}
               className={'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ' + (aiMode ? 'border-violet-400 bg-violet-100 text-violet-800 dark:border-violet-500/50 dark:bg-violet-500/20 dark:text-violet-300' : 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300')}
             >
               {t.noteAiQuestion}
