@@ -2,6 +2,7 @@ export const NOTE_TABLE_CLASS = 'note-table';
 export const NOTE_TABLE_WRAP = 'note-table-wrap';
 export const NOTE_TABLE_ACTIVE_WRAP = 'note-table-wrap--active';
 export const NOTE_TABLE_TOOLBAR_HOST = 'note-table-toolbar-host';
+export const NOTE_TABLE_BODY = 'note-table-body';
 
 export type TableCellContext = {
   table: HTMLTableElement;
@@ -36,8 +37,8 @@ export function resolveTableContext(node: Node | null, root?: HTMLElement | null
   if (!(table instanceof HTMLTableElement)) return null;
   if (!table.classList.contains(NOTE_TABLE_CLASS)) table.classList.add(NOTE_TABLE_CLASS);
   if (root && !root.contains(table)) return null;
-  const wrap = table.parentElement;
-  if (!wrap?.classList.contains(NOTE_TABLE_WRAP)) return null;
+  const wrap = table.closest(`.${NOTE_TABLE_WRAP}`);
+  if (!(wrap instanceof HTMLElement)) return null;
   const row = cell.closest('tr');
   if (!(row instanceof HTMLTableRowElement)) return null;
   const rows = tableRows(table);
@@ -54,8 +55,8 @@ export function resolveTableContextAt(
   root?: HTMLElement | null,
 ): TableCellContext | null {
   if (root && !root.contains(table)) return null;
-  const wrap = table.parentElement;
-  if (!wrap?.classList.contains(NOTE_TABLE_WRAP)) return null;
+  const wrap = table.closest(`.${NOTE_TABLE_WRAP}`);
+  if (!(wrap instanceof HTMLElement)) return null;
   const rows = tableRows(table);
   const row = rows[Math.max(0, Math.min(rowIndex, rows.length - 1))];
   if (!row) return null;
@@ -157,14 +158,38 @@ export function deleteTable(ctx: TableCellContext) {
   ctx.wrap.remove();
 }
 
+export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTMLElement; table: HTMLTableElement | null } {
+  const existingHost = wrap.querySelector(`:scope > .${NOTE_TABLE_TOOLBAR_HOST}`);
+  let toolbarHost: HTMLElement;
+  if (existingHost instanceof HTMLElement) {
+    toolbarHost = existingHost;
+  } else {
+    toolbarHost = document.createElement('div');
+    toolbarHost.className = NOTE_TABLE_TOOLBAR_HOST;
+    toolbarHost.setAttribute('contenteditable', 'false');
+    wrap.insertBefore(toolbarHost, wrap.firstChild);
+  }
+
+  const table = wrap.querySelector(`:scope > table.${NOTE_TABLE_CLASS}`)
+    ?? wrap.querySelector(`:scope > .${NOTE_TABLE_BODY} > table.${NOTE_TABLE_CLASS}`);
+
+  if (table instanceof HTMLTableElement) {
+    let body = wrap.querySelector(`:scope > .${NOTE_TABLE_BODY}`);
+    if (!(body instanceof HTMLElement)) {
+      body = document.createElement('div');
+      body.className = NOTE_TABLE_BODY;
+      wrap.appendChild(body);
+    }
+    if (table.parentElement !== body) body.appendChild(table);
+    if (toolbarHost.nextElementSibling !== body) wrap.insertBefore(body, toolbarHost.nextSibling);
+    if (wrap.firstElementChild !== toolbarHost) wrap.insertBefore(toolbarHost, wrap.firstChild);
+  }
+
+  return { toolbarHost, table: table instanceof HTMLTableElement ? table : null };
+}
+
 export function getTableToolbarHost(wrap: HTMLElement): HTMLElement {
-  const existing = wrap.querySelector(`.${NOTE_TABLE_TOOLBAR_HOST}`);
-  if (existing instanceof HTMLElement) return existing;
-  const host = document.createElement('div');
-  host.className = NOTE_TABLE_TOOLBAR_HOST;
-  host.setAttribute('contenteditable', 'false');
-  wrap.insertBefore(host, wrap.firstChild);
-  return host;
+  return ensureTableWrapStructure(wrap).toolbarHost;
 }
 
 export function setActiveTableWrap(wrap: HTMLElement | null) {
@@ -319,12 +344,19 @@ export function normalizeTablesInEditor(root: HTMLElement): boolean {
     }
 
     const parent = table.parentElement;
-    if (!parent?.classList.contains(NOTE_TABLE_WRAP)) {
-      const wrap = document.createElement('div');
-      wrap.className = NOTE_TABLE_WRAP;
-      wrap.setAttribute('dir', 'auto');
-      table.parentNode?.insertBefore(wrap, table);
-      wrap.appendChild(table);
+    const wrap = table.closest(`.${NOTE_TABLE_WRAP}`) ?? (parent?.classList.contains(NOTE_TABLE_WRAP) ? parent : null);
+    if (!(wrap instanceof HTMLElement)) {
+      const newWrap = document.createElement('div');
+      newWrap.className = NOTE_TABLE_WRAP;
+      newWrap.setAttribute('dir', 'auto');
+      table.parentNode?.insertBefore(newWrap, table);
+      newWrap.appendChild(table);
+      changed = true;
+    }
+
+    const activeWrap = table.closest(`.${NOTE_TABLE_WRAP}`);
+    if (activeWrap instanceof HTMLElement) {
+      ensureTableWrapStructure(activeWrap);
       changed = true;
     }
 

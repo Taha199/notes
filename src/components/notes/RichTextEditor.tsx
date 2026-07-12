@@ -4,7 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_TOOLBAR_HOST, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
@@ -211,7 +211,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         node.remove();
       }
     });
+    const unwrappedBodies: { wrap: HTMLElement; table: HTMLTableElement }[] = [];
+    ed.querySelectorAll(`.${NOTE_TABLE_BODY}`).forEach((node) => {
+      if (!(node instanceof HTMLElement) || !(node.parentElement instanceof HTMLElement)) return;
+      const table = node.querySelector(`table.${NOTE_TABLE_CLASS}`);
+      if (!(table instanceof HTMLTableElement)) return;
+      unwrappedBodies.push({ wrap: node.parentElement, table });
+      node.parentElement.insertBefore(table, node);
+      node.remove();
+    });
     const html = ed.innerHTML;
+    unwrappedBodies.forEach(({ wrap, table }) => {
+      const nextBody = document.createElement('div');
+      nextBody.className = NOTE_TABLE_BODY;
+      wrap.insertBefore(nextBody, table);
+      nextBody.appendChild(table);
+    });
     detached.forEach(({ parent, host }) => parent.appendChild(host));
     return html;
   };
@@ -309,7 +324,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     activeTableWrapRef.current = ctx.wrap;
     setActiveTableWrap(ctx.wrap);
-    getTableToolbarHost(ctx.wrap);
+    ensureTableWrapStructure(ctx.wrap);
     activeTableCtxRef.current = ctx;
     setActiveTableCtx(ctx);
   };
@@ -3023,12 +3038,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         document.body,
       )}
 
-      {/* Table toolbar — inline above the active table */}
+      {/* Table toolbar — control box inside the active table wrap */}
       {editable && activeTableCtx && createPortal(
         <div
           data-note-table-toolbar
+          className="note-table-toolbar"
           onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
-          className="flex w-full max-w-full flex-wrap items-center gap-1 rounded-xl border border-app-border bg-white/96 px-2 py-1.5 shadow-md backdrop-blur-sm dark:border-white/10 dark:bg-gray-900/96"
         >
           <button type="button" title={t.tableAddRowAbove} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableRow(ctx, 'above')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↑ {t.tableAddRowAbove}</button>
           <button type="button" title={t.tableAddRowBelow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableRow(ctx, 'below')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↓ {t.tableAddRowBelow}</button>

@@ -314,20 +314,52 @@ body {
 
 .note-content .note-table-wrap,
 [contenteditable] .note-table-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   margin: 0.75rem 0;
   max-width: 100%;
-  overflow-x: auto;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .note-content .note-table-toolbar-host,
 [contenteditable] .note-table-toolbar-host {
-  margin-bottom: 0.5rem;
+  display: block;
+  flex: 0 0 auto;
+  position: relative;
+  width: 100%;
+  margin: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(108, 99, 255, 0.06);
 }
 
 .note-content .note-table-toolbar-host:empty,
 [contenteditable] .note-table-toolbar-host:empty {
   display: none;
-  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.note-content .note-table-toolbar,
+[contenteditable] .note-table-toolbar {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0.625rem;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.note-content .note-table-body,
+[contenteditable] .note-table-body {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  overflow-x: auto;
 }
 
 .note-content table.note-table th,
@@ -361,13 +393,26 @@ body {
 
 .note-content .note-table-wrap--active,
 [contenteditable] .note-table-wrap--active {
-  border-radius: 10px;
-  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.28);
+  border-color: rgba(108, 99, 255, 0.45);
+  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.2);
+}
+
+.dark .note-content .note-table-wrap,
+.dark [contenteditable] .note-table-wrap {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(17, 24, 39, 0.96);
+}
+
+.dark .note-content .note-table-toolbar-host,
+.dark [contenteditable] .note-table-toolbar-host {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  background: rgba(108, 99, 255, 0.14);
 }
 
 .dark .note-content .note-table-wrap--active,
 .dark [contenteditable] .note-table-wrap--active {
-  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.42);
+  border-color: rgba(108, 99, 255, 0.55);
+  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.32);
 }
 
 .otter-launcher-wrap {
