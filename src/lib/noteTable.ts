@@ -22,8 +22,8 @@ function tableRows(table: HTMLTableElement) {
   return [...table.querySelectorAll('tr')];
 }
 
-function rowCells(row: HTMLTableRowElement) {
-  return [...row.querySelectorAll('th, td')];
+function rowCells(row: HTMLTableRowElement): HTMLTableCellElement[] {
+  return [...row.querySelectorAll<HTMLTableCellElement>('th, td')];
 }
 
 export function resolveTableContext(node: Node | null, root?: HTMLElement | null): TableCellContext | null {
@@ -31,8 +31,9 @@ export function resolveTableContext(node: Node | null, root?: HTMLElement | null
   const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement);
   const cell = el?.closest('td, th');
   if (!(cell instanceof HTMLTableCellElement)) return null;
-  const table = cell.closest(`table.${NOTE_TABLE_CLASS}`);
+  const table = cell.closest('table');
   if (!(table instanceof HTMLTableElement)) return null;
+  if (!table.classList.contains(NOTE_TABLE_CLASS)) table.classList.add(NOTE_TABLE_CLASS);
   if (root && !root.contains(table)) return null;
   const wrap = table.parentElement;
   if (!wrap?.classList.contains(NOTE_TABLE_WRAP)) return null;
@@ -45,24 +46,85 @@ export function resolveTableContext(node: Node | null, root?: HTMLElement | null
   return { table, wrap, cell, row, rowIndex, colIndex };
 }
 
-export function addTableRow(ctx: TableCellContext, position: 'above' | 'below') {
-  const cells = rowCells(ctx.row);
+export function resolveTableContextAt(
+  table: HTMLTableElement,
+  rowIndex: number,
+  colIndex: number,
+  root?: HTMLElement | null,
+): TableCellContext | null {
+  if (root && !root.contains(table)) return null;
+  const wrap = table.parentElement;
+  if (!wrap?.classList.contains(NOTE_TABLE_WRAP)) return null;
+  const rows = tableRows(table);
+  const row = rows[Math.max(0, Math.min(rowIndex, rows.length - 1))];
+  if (!row) return null;
+  const cells = rowCells(row);
+  const cell = cells[Math.max(0, Math.min(colIndex, cells.length - 1))];
+  if (!cell) return null;
+  return {
+    table,
+    wrap,
+    cell,
+    row,
+    rowIndex: rows.indexOf(row),
+    colIndex: cells.indexOf(cell),
+  };
+}
+
+export function placeCaretInTableCell(cell: HTMLTableCellElement) {
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
+export type TableEditPosition = { rowIndex: number; colIndex: number };
+
+function newRowFromReference(refRow: HTMLTableRowElement, forceBody = false) {
   const newRow = document.createElement('tr');
-  cells.forEach((refCell) => {
-    const tag = refCell.tagName === 'TH' ? 'th' : 'td';
+  rowCells(refRow).forEach((refCell) => {
+    const tag = forceBody ? 'td' : (refCell.tagName === 'TH' ? 'th' : 'td');
     newRow.appendChild(emptyCell(tag));
   });
+  return newRow;
+}
+
+function tableBody(table: HTMLTableElement) {
+  return table.tBodies[0] ?? table.createTBody();
+}
+
+export function addTableRow(ctx: TableCellContext, position: 'above' | 'below'): TableEditPosition {
+  const inHead = ctx.row.parentElement?.tagName === 'THEAD';
+  if (position === 'below' && inHead) {
+    const tbody = tableBody(ctx.table);
+    const newRow = newRowFromReference(ctx.row, true);
+    tbody.insertBefore(newRow, tbody.firstChild);
+    const rows = tableRows(ctx.table);
+    const rowIndex = rows.indexOf(newRow);
+    return { rowIndex, colIndex: ctx.colIndex };
+  }
+  const newRow = newRowFromReference(ctx.row, false);
   if (position === 'above') ctx.row.before(newRow);
   else ctx.row.after(newRow);
+  const rows = tableRows(ctx.table);
+  return {
+    rowIndex: rows.indexOf(newRow),
+    colIndex: ctx.colIndex,
+  };
 }
 
-export function removeTableRow(ctx: TableCellContext) {
-  if (tableRows(ctx.table).length <= 1) return false;
+export function removeTableRow(ctx: TableCellContext): TableEditPosition | false {
+  const rows = tableRows(ctx.table);
+  if (rows.length <= 1) return false;
+  const nextIndex = Math.min(ctx.rowIndex, rows.length - 2);
+  const nextCol = ctx.colIndex;
   ctx.row.remove();
-  return true;
+  return { rowIndex: Math.max(0, nextIndex), colIndex: nextCol };
 }
 
-export function addTableColumn(ctx: TableCellContext, position: 'before' | 'after') {
+export function addTableColumn(ctx: TableCellContext, position: 'before' | 'after'): TableEditPosition {
   tableRows(ctx.table).forEach((row) => {
     const cells = rowCells(row);
     const refCell = cells[ctx.colIndex];
@@ -72,16 +134,22 @@ export function addTableColumn(ctx: TableCellContext, position: 'before' | 'afte
     if (position === 'before') refCell.before(newCell);
     else refCell.after(newCell);
   });
+  return {
+    rowIndex: ctx.rowIndex,
+    colIndex: position === 'before' ? ctx.colIndex + 1 : ctx.colIndex,
+  };
 }
 
-export function removeTableColumn(ctx: TableCellContext) {
+export function removeTableColumn(ctx: TableCellContext): TableEditPosition | false {
   const firstRow = tableRows(ctx.table)[0];
   if (!firstRow || rowCells(firstRow).length <= 1) return false;
   tableRows(ctx.table).forEach((row) => {
-    const cell = rowCells(row)[ctx.colIndex];
-    cell?.remove();
+    rowCells(row)[ctx.colIndex]?.remove();
   });
-  return true;
+  return {
+    rowIndex: ctx.rowIndex,
+    colIndex: Math.max(0, ctx.colIndex - 1),
+  };
 }
 
 export function deleteTable(ctx: TableCellContext) {

@@ -4,7 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, setActiveTableWrap, type TableCellContext } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, setActiveTableWrap, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
@@ -265,6 +265,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; frame: HTMLElement; host: HTMLElement; rect: DOMRect } | null>(null);
   const [activeTableCtx, setActiveTableCtx] = useState<(TableCellContext & { rect: DOMRect }) | null>(null);
+  const activeTableCtxRef = useRef<(TableCellContext & { rect: DOMRect }) | null>(null);
   const activeTableWrapRef = useRef<HTMLElement | null>(null);
   const tableToolbarClickRef = useRef(false);
   const [imgResizeMode, setImgResizeMode] = useState(false);
@@ -296,6 +297,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       activeTableWrapRef.current.classList.remove('note-table-wrap--active');
       activeTableWrapRef.current = null;
     }
+    activeTableCtxRef.current = null;
     setActiveTableWrap(null);
     setActiveTableCtx(null);
   };
@@ -307,33 +309,78 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     activeTableWrapRef.current = ctx.wrap;
     setActiveTableWrap(ctx.wrap);
-    setActiveTableCtx({ ...ctx, rect: ctx.wrap.getBoundingClientRect() });
+    const next = { ...ctx, rect: ctx.wrap.getBoundingClientRect() };
+    activeTableCtxRef.current = next;
+    setActiveTableCtx(next);
+  };
+
+  const getWorkingTableContext = (): TableCellContext | null => {
+    const ed = editorRef.current;
+    if (!ed) return null;
+    const sel = window.getSelection();
+    if (sel?.rangeCount) {
+      const fromSel = resolveTableContext(sel.anchorNode, ed);
+      if (fromSel) return fromSel;
+    }
+    const cached = activeTableCtxRef.current;
+    if (!cached?.table.isConnected) return null;
+    return resolveTableContextAt(cached.table, cached.rowIndex, cached.colIndex, ed) ?? cached;
   };
 
   const refreshActiveTableToolbar = () => {
     const ed = editorRef.current;
+    if (!ed) {
+      hideTableToolbar();
+      return;
+    }
     const sel = window.getSelection();
-    if (!ed || !sel?.rangeCount) {
-      hideTableToolbar();
+    if (sel?.rangeCount) {
+      const ctx = resolveTableContext(sel.anchorNode, ed);
+      if (ctx) {
+        showTableToolbar(ctx);
+        return;
+      }
+      if (!(document.activeElement instanceof HTMLElement && document.activeElement.closest('[data-note-table-toolbar]'))) {
+        hideTableToolbar();
+      }
       return;
     }
-    const ctx = resolveTableContext(sel.anchorNode, ed);
-    if (!ctx) {
-      hideTableToolbar();
-      return;
+    const cached = activeTableCtxRef.current;
+    if (cached?.table.isConnected) {
+      const resolved = resolveTableContextAt(cached.table, cached.rowIndex, cached.colIndex, ed);
+      if (resolved) {
+        showTableToolbar(resolved);
+        return;
+      }
     }
-    showTableToolbar(ctx);
+    hideTableToolbar();
   };
 
-  const runTableAction = (action: (ctx: TableCellContext) => void) => {
+  const runTableAction = (
+    action: (ctx: TableCellContext) => TableEditPosition | false | 'deleted' | void,
+  ) => {
+    tableToolbarClickRef.current = true;
     const ed = editorRef.current;
-    const sel = window.getSelection();
-    const ctx = (ed && sel?.rangeCount ? resolveTableContext(sel.anchorNode, ed) : null) ?? activeTableCtx;
-    if (!ctx) return;
-    action(ctx);
-    ed?.focus({ preventScroll: true });
+    const ctx = getWorkingTableContext();
+    if (!ctx || !ed) return;
+    const result = action(ctx);
+    if (result === false) return;
+    if (result === 'deleted') {
+      hideTableToolbar();
+      ed.focus({ preventScroll: true });
+      saveSel();
+      emitHtml();
+      return;
+    }
+    if (result && typeof result === 'object') {
+      const next = resolveTableContextAt(ctx.table, result.rowIndex, result.colIndex, ed);
+      if (next) {
+        placeCaretInTableCell(next.cell);
+        showTableToolbar(next);
+      }
+    }
+    ed.focus({ preventScroll: true });
     saveSel();
-    refreshActiveTableToolbar();
     emitHtml();
   };
 
@@ -3008,15 +3055,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             top: Math.max(8, activeTableCtx.rect.top - 44),
           }}
         >
-          <button type="button" title={t.tableAddRowAbove} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => addTableRow(ctx, 'above'))} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↑ {t.tableAddRowAbove}</button>
-          <button type="button" title={t.tableAddRowBelow} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => addTableRow(ctx, 'below'))} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↓ {t.tableAddRowBelow}</button>
-          <button type="button" title={t.tableRemoveRow} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => { removeTableRow(ctx); })} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveRow}</button>
+          <button type="button" title={t.tableAddRowAbove} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableRow(ctx, 'above')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↑ {t.tableAddRowAbove}</button>
+          <button type="button" title={t.tableAddRowBelow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableRow(ctx, 'below')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↓ {t.tableAddRowBelow}</button>
+          <button type="button" title={t.tableRemoveRow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => removeTableRow(ctx)); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveRow}</button>
           <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
-          <button type="button" title={t.tableAddColBefore} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => addTableColumn(ctx, 'before'))} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">← {t.tableAddColBefore}</button>
-          <button type="button" title={t.tableAddColAfter} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => addTableColumn(ctx, 'after'))} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">{t.tableAddColAfter} →</button>
-          <button type="button" title={t.tableRemoveCol} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => { removeTableColumn(ctx); })} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveCol}</button>
+          <button type="button" title={t.tableAddColBefore} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableColumn(ctx, 'before')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">← {t.tableAddColBefore}</button>
+          <button type="button" title={t.tableAddColAfter} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableColumn(ctx, 'after')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">{t.tableAddColAfter} →</button>
+          <button type="button" title={t.tableRemoveCol} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => removeTableColumn(ctx)); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveCol}</button>
           <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
-          <button type="button" title={t.tableDelete} onMouseDown={(e) => e.preventDefault()} onClick={() => runTableAction((ctx) => { deleteTable(ctx); hideTableToolbar(); })} className="rounded-md px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">✕ {t.tableDelete}</button>
+          <button type="button" title={t.tableDelete} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => { deleteTable(ctx); return 'deleted'; }); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">✕ {t.tableDelete}</button>
         </div>,
         document.body,
       )}
