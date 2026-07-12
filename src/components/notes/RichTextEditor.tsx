@@ -1539,7 +1539,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (idx < 0) return;
 
     if (direction === 'up') {
-      if (idx <= 0) return;
+      if (idx <= 0) {
+        insertEmptyLineAboveBlock(ed, frame);
+        requestAnimationFrame(() => {
+          if (img.isConnected) setHoveredImg(syncHoveredImg(img, ensureImageFrame(img, ed)));
+        });
+        return;
+      }
       parent.insertBefore(frame, siblings[idx - 1]);
     } else if (idx < siblings.length - 1) {
       parent.insertBefore(siblings[idx + 1], frame);
@@ -1556,6 +1562,31 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     requestAnimationFrame(() => {
       if (img.isConnected) setHoveredImg(syncHoveredImg(img, ensureImageFrame(img, ed)));
     });
+  };
+
+  const isEmptyTextLine = (el: HTMLElement) => {
+    const text = el.textContent?.replace(/\u200B/g, '').trim() ?? '';
+    return !text && !el.querySelector('img, table, iframe, .note-table-wrap, .note-img-frame, .note-yt-frame');
+  };
+
+  const insertEmptyLineAboveBlock = (ed: HTMLElement, block: HTMLElement) => {
+    if (!block.parentElement || !ed.contains(block)) return;
+    const prev = block.previousElementSibling;
+    if (prev instanceof HTMLElement && BLOCK_TAGS.has(prev.tagName) && isEmptyTextLine(prev)) {
+      placeCaretInBlock(prev, true);
+      ed.focus({ preventScroll: true });
+      saveSel();
+      emitHtml();
+      return;
+    }
+    const line = document.createElement('div');
+    line.setAttribute('dir', 'auto');
+    line.innerHTML = '<br>';
+    block.parentElement.insertBefore(line, block);
+    placeCaretInBlock(line, true);
+    ed.focus({ preventScroll: true });
+    saveSel();
+    emitHtml();
   };
 
   const applyBlockAlignment = (align: BlockAlign) => {
@@ -2500,7 +2531,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return;
     ensureFocus(true);
-    document.execCommand('insertHTML', false, buildEmptyTableHtml(3, 2));
+    const sel = window.getSelection();
+    let prefix = '';
+    if (sel?.rangeCount) {
+      const range = sel.getRangeAt(0);
+      if (range.collapsed) {
+        const atEditorStart = range.startContainer === ed && range.startOffset === 0;
+        const block = resolveBlockAtRange(range, ed);
+        const blockIsFirst = !!block && block === ed.firstElementChild;
+        if (atEditorStart || blockIsFirst) prefix = '<div dir="auto"><br></div>';
+      }
+    }
+    document.execCommand('insertHTML', false, prefix + buildEmptyTableHtml(3, 2));
     saveSel();
     const live = editorRef.current;
     if (live) normalizeTablesInEditor(live);
@@ -3045,6 +3087,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           className="note-table-toolbar"
           onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
         >
+          <button type="button" title={t.titleInsertLineAboveBlock} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); const ed = editorRef.current; if (ed && activeTableCtx) insertEmptyLineAboveBlock(ed, activeTableCtx.wrap); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10 dark:text-primary-200">↵ {t.insertLineAboveBlock}</button>
+          <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
           <button type="button" title={t.tableAddRowAbove} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableRow(ctx, 'above')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↑ {t.tableAddRowAbove}</button>
           <button type="button" title={t.tableAddRowBelow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableRow(ctx, 'below')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↓ {t.tableAddRowBelow}</button>
           <button type="button" title={t.tableRemoveRow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => removeTableRow(ctx)); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveRow}</button>
@@ -3070,6 +3114,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
             <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, hoveredImg.frame); }} className={imgBtn} title={t.titleInsertLineAboveBlock}>↵</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'up'); }} className={imgBtn} title={t.titleMoveImageUp}>↑</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
             <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
