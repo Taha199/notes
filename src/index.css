@@ -319,6 +319,17 @@ body {
   overflow-x: auto;
 }
 
+.note-content .note-table-toolbar-host,
+[contenteditable] .note-table-toolbar-host {
+  margin-bottom: 0.5rem;
+}
+
+.note-content .note-table-toolbar-host:empty,
+[contenteditable] .note-table-toolbar-host:empty {
+  display: none;
+  margin-bottom: 0;
+}
+
 .note-content table.note-table th,
 .note-content table.note-table td,
 [contenteditable] table.note-table th,

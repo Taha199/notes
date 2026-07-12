@@ -1,6 +1,7 @@
 export const NOTE_TABLE_CLASS = 'note-table';
 export const NOTE_TABLE_WRAP = 'note-table-wrap';
 export const NOTE_TABLE_ACTIVE_WRAP = 'note-table-wrap--active';
+export const NOTE_TABLE_TOOLBAR_HOST = 'note-table-toolbar-host';
 
 export type TableCellContext = {
   table: HTMLTableElement;
@@ -154,6 +155,16 @@ export function removeTableColumn(ctx: TableCellContext): TableEditPosition | fa
 
 export function deleteTable(ctx: TableCellContext) {
   ctx.wrap.remove();
+}
+
+export function getTableToolbarHost(wrap: HTMLElement): HTMLElement {
+  const existing = wrap.querySelector(`.${NOTE_TABLE_TOOLBAR_HOST}`);
+  if (existing instanceof HTMLElement) return existing;
+  const host = document.createElement('div');
+  host.className = NOTE_TABLE_TOOLBAR_HOST;
+  host.setAttribute('contenteditable', 'false');
+  wrap.insertBefore(host, wrap.firstChild);
+  return host;
 }
 
 export function setActiveTableWrap(wrap: HTMLElement | null) {
