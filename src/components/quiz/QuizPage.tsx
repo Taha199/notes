@@ -5,6 +5,7 @@ import { answerQuestion } from '../../lib/gemini';
 import { useAuth } from '../../contexts/AuthContext';
 import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { AutoFitText } from '../common/AutoFitText';
 import { BrandedAlert } from '../common/BrandedAlert';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { SaveStatusBadge } from '../common/SaveStatusIcon';
@@ -264,7 +265,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                                     className="flex w-full items-center gap-3 border-b border-app-border/20 px-6 py-2.5 text-left transition-colors last:border-b-0 hover:bg-primary/5 dark:border-white/5 dark:hover:bg-primary/10"
                                   >
                                     <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
-                                    <span className="flex-1 truncate text-[13px] text-app-text dark:text-gray-100">{s.name}</span>
+                                    <AutoFitText text={s.name} maxSize={13} minSize={9} className="flex-1 text-app-text dark:text-gray-100" />
                                     <span className="text-[11px] text-app-text-secondary/40">{s.items.length} {t.quizItemsShort}</span>
                                   </button>
                                 ))}
@@ -1232,7 +1233,12 @@ export function QuizPage({
             <div className="flex w-full items-center">
               <span className="flex-shrink-0 select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100">{s.system === 'favorites' ? '⭐' : '⠿'}</span>
               <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
-                <span className={'flex-1 truncate ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>{s.name}</span>
+                <AutoFitText
+                  text={s.name}
+                  maxSize={13}
+                  minSize={8}
+                  className={'flex-1 ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}
+                />
                 <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items?.length ?? 0}</span>
               </button>
               {!s.system && (
@@ -1425,9 +1431,12 @@ export function QuizPage({
                     {!f.system && (
                       <span className="absolute right-1 bottom-1 select-none text-[12px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover/fl:opacity-100">⠿</span>
                     )}
-                    <span title={f.system === 'favorites' ? t.quizFavorites : f.system ? t.quizRestoredSets : f.name} className={'block truncate text-[11px] font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}>
-                      {f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
-                    </span>
+                    <AutoFitText
+                      text={f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
+                      maxSize={11}
+                      minSize={7}
+                      className={'block w-full font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}
+                    />
                     <span className="block text-[9px] text-app-text-secondary/50">{t.quizSetsCount.replace('{n}', String(userSetsInFolder(f.id).length))}</span>
                     {!f.system && (
                       <span
