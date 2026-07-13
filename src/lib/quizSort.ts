@@ -9,3 +9,16 @@ export function quizItemCreatedAtMs(item: QuizItem): number {
 export function sortQuizItemsByCreatedDesc(items: QuizItem[]): QuizItem[] {
   return [...items].sort((a, b) => quizItemCreatedAtMs(b) - quizItemCreatedAtMs(a));
 }
+
+/** Active questions shown in the set/list UI (excludes trashed and in-progress drafts). */
+export function isVisibleQuizItem(item: QuizItem): boolean {
+  return !item.trashed && !item.draft;
+}
+
+export function visibleQuizItems(items: QuizItem[] | undefined | null): QuizItem[] {
+  return (items ?? []).filter(isVisibleQuizItem);
+}
+
+export function countVisibleQuizItems(items: QuizItem[] | undefined | null): number {
+  return visibleQuizItems(items).length;
+}

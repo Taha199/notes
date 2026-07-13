@@ -12,7 +12,7 @@ import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
-import { quizItemCreatedAtMs } from '../../lib/quizSort';
+import { countVisibleQuizItems, quizItemCreatedAtMs, visibleQuizItems } from '../../lib/quizSort';
 import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { quizPatchChangesContent } from '../../lib/quizContent';
@@ -267,7 +267,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                                   >
                                     <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
                                     <AutoFitText text={s.name} maxSize={13} minSize={9} className="flex-1 text-app-text dark:text-gray-100" />
-                                    <span className="text-[11px] text-app-text-secondary/40">{s.items.length} {t.quizItemsShort}</span>
+                                    <span className="text-[11px] text-app-text-secondary/40">{countVisibleQuizItems(s.items)} {t.quizItemsShort}</span>
                                   </button>
                                 ))}
                               </div>
@@ -1118,7 +1118,7 @@ export function QuizPage({
   const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet
-    ? (selectedSet.items ?? []).filter((item) => !item.trashed && !item.draft)
+    ? visibleQuizItems(selectedSet.items)
     : isNotesView ? quizzes : [];
 
   const orderedItems = useMemo(() => {
@@ -1232,12 +1232,14 @@ export function QuizPage({
     : [...quizSets].sort((a, b) =>
         setSort === 'name'
           ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-          : (b.items?.length ?? 0) - (a.items?.length ?? 0));
+          : countVisibleQuizItems(b.items) - countVisibleQuizItems(a.items));
 
   const progressForSet = (setId: string | null) => {
     const key = setId ?? 'all';
     const prog = allProgress[key] ?? {};
-    const items = setId ? (quizSets.find((s) => s.id === setId)?.items ?? []) : quizzes;
+    const items = setId
+      ? visibleQuizItems(quizSets.find((s) => s.id === setId)?.items)
+      : quizzes;
     const known = items.filter((i) => prog[i.id] === 'known').length;
     return { known, total: items.length };
   };
@@ -1314,7 +1316,7 @@ export function QuizPage({
                   minSize={8}
                   className={'flex-1 ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}
                 />
-                <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{s.items?.length ?? 0}</span>
+                <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{countVisibleQuizItems(s.items)}</span>
               </button>
               {!s.system && (
                 <button
