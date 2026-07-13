@@ -5,7 +5,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { HighlightedText } from '../common/HighlightedText';
-import { getNoteSearchPlainText, type SearchHitCounter } from '../../lib/noteSearch';
+import { getNoteSearchPlainText, highlightHtmlContent, type SearchHitCounter } from '../../lib/noteSearch';
 
 interface Props {
   note: Note;
@@ -91,16 +91,14 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
             </p>
           )}
           {expanded ? (
-            hasSearch ? (
-              <div className="whitespace-pre-wrap text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300">
-                <HighlightedText text={bodyText} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
-              </div>
-            ) : (
-              <div
-                className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100 [&_img]:mx-auto [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-lg [&_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
-                dangerouslySetInnerHTML={{ __html: previewHtml }}
-              />
-            )
+            <div
+              className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100 [&_img]:mx-auto [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-lg [&_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+              dangerouslySetInnerHTML={{
+                __html: hasSearch
+                  ? highlightHtmlContent(previewHtml, search, hitCounter, activeSearchHitIndex)
+                  : previewHtml,
+              }}
+            />
           ) : (
             <p className={'mt-0.5 text-[13px] leading-relaxed ' + (hasSearch ? '' : 'line-clamp-3 ') + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
               <HighlightedText text={bodyPreview} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
