@@ -780,8 +780,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return probe.toString().replace(/\u200B/g, '').length === 0;
   };
 
-  const isLiEmpty = (li: HTMLLIElement) =>
-    !(li.textContent?.replace(/\u200B/g, '').trim() ?? '') && !li.querySelector('img');
+  const isLiEmpty = (li: HTMLLIElement) => {
+    const scratch = li.cloneNode(true) as HTMLLIElement;
+    scratch.querySelectorAll('br').forEach((br) => br.remove());
+    const text = (scratch.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
+    return !text && !li.querySelector('img');
+  };
 
   const insertNewListItemAfter = (li: HTMLLIElement) => {
     const newLi = document.createElement('li');
@@ -882,8 +886,30 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const handleEmptyListItemEnter = (li: HTMLLIElement) => {
     const ed = editorRef.current;
     if (!ed) return;
-    if (isNestedListItem(li)) returnToParentListItem(li);
-    else exitListItem(li, ed, true);
+    handleEmptyListItemBackspace(li, ed);
+  };
+
+  const handleEmptyListItemBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
+    const list = li.parentElement;
+    const prevLi = li.previousElementSibling;
+
+    if (prevLi instanceof HTMLLIElement) {
+      li.remove();
+      if (list && list.children.length === 0) list.remove();
+      placeCaretInBlock(prevLi, false);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
+    if (isNestedListItem(li)) {
+      returnToParentListItem(li);
+    } else if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1) {
+      unwrapList(list as HTMLUListElement | HTMLOListElement);
+    } else {
+      exitListItem(li, ed, true);
+    }
     saveSel();
     readCommandState();
     emitHtml();
@@ -1922,12 +1948,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     });
   };
 
-  const handleEditorBackspace = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Backspace' || e.nativeEvent.isComposing) return;
+  const runEditorBackspace = (e: { key: string; preventDefault: () => void; nativeEvent?: { isComposing?: boolean } }) => {
+    if (e.key !== 'Backspace' || e.nativeEvent?.isComposing) return false;
     const ed = editorRef.current;
-    if (!ed) return;
+    if (!ed) return false;
     const sel = window.getSelection();
-    if (!sel?.rangeCount || !sel.isCollapsed) return;
+    if (!sel?.rangeCount || !sel.isCollapsed) return false;
     const range = sel.getRangeAt(0);
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
@@ -1935,12 +1961,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
       if (isLiEmpty(li)) {
         e.preventDefault();
-        if (isNestedListItem(li)) returnToParentListItem(li);
-        else exitListItem(li, ed, true);
-        saveSel();
-        readCommandState();
-        emitHtml();
-        return;
+        handleEmptyListItemBackspace(li, ed);
+        return true;
       }
 
       if (atStart) {
@@ -1950,8 +1972,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         saveSel();
         readCommandState();
         emitHtml();
+        return true;
       }
-      return;
+      return false;
     }
 
     const block = getLineBlock(range.startContainer, ed);
@@ -1961,7 +1984,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       saveSel();
       readCommandState();
       emitHtml();
+      return true;
     }
+    return false;
+  };
+
+  const handleEditorBackspace = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    runEditorBackspace(e);
   };
 
   // ── Initial content ───────────────────────────────────────────────────
@@ -2099,6 +2128,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   useEffect(() => {
     if (!editable) return;
     const onDocKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Backspace') {
+        const ed = editorRef.current;
+        if (!ed || document.activeElement !== ed) return;
+        if (runEditorBackspace(e)) {
+          e.stopImmediatePropagation();
+        }
+        return;
+      }
       if (e.key !== 'Tab') return;
       const ed = editorRef.current;
       if (!ed || document.activeElement !== ed) return;
