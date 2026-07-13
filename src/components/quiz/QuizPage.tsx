@@ -130,7 +130,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
   const studyMore = status !== 'known';
   return (
     <div id={`quiz-item-${item.id}`} className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
-      <div className={'grid grid-cols-1 ' + (questionNumber ? 'sm:grid-cols-[52px_minmax(0,0.8fr)_minmax(0,1.2fr)_44px]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]')}>
+      <div className={'grid grid-cols-1 ' + (questionNumber ? 'sm:grid-cols-[52px_minmax(0,0.8fr)_minmax(0,1.2fr)_56px]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_56px]')}>
         {questionNumber != null && (
           <div className="flex flex-row items-center justify-center gap-1.5 border-b border-app-border px-1.5 py-3 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
             <span className="flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
@@ -168,24 +168,17 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
               </span>
             )}
           </span>
-          {status && (
-            <span className={`flex-shrink-0 text-[10px] font-bold ${status === 'known' ? 'text-emerald-500' : 'text-red-400'}`}>
-              {status === 'known' ? '✓' : '✗'}
-            </span>
-          )}
           <StableNoteHtml
             html={mdToHtml(item.question)}
             className="note-content block w-full min-w-0 break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100"
           />
         </div>
-        <div className="flex min-w-0 flex-col items-start border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6">
-          <span className="mb-2 flex items-center gap-1.5 text-[9px] font-bold uppercase text-primary/70">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary/70" /> {t.quizAnswerLabel}
-          </span>
-          <div className="relative w-full min-w-0">
+        <div className="flex min-w-0 flex-col items-start border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:pr-4 sm:pl-6">
+          <span className="mb-2 text-[9px] font-bold uppercase text-primary/70">{t.quizAnswerLabel}</span>
+          <div className="relative w-full min-w-0 pr-1">
             <StableNoteHtml
               html={mdToHtml(item.answer)}
-              className={'note-content block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
+              className={'note-content block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&>ul:first-child]:mt-0 [&>ol:first-child]:mt-0 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
             />
             {masked && (
               <button
@@ -203,7 +196,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
             </div>
           )}
         </div>
-        <div className="flex items-center justify-end gap-4 border-t border-app-border px-4 py-2 dark:border-white/10 sm:flex-col sm:justify-center sm:gap-2 sm:border-l sm:border-t-0 sm:px-2">
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 border-t border-app-border px-3 py-2 dark:border-white/10 sm:flex-col sm:flex-nowrap sm:justify-center sm:gap-1.5 sm:border-l sm:border-t-0 sm:px-1.5 sm:py-3">
           {onSetStatus && (
             status === 'known' ? (
               <button
