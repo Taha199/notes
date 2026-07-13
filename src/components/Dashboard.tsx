@@ -19,7 +19,7 @@ import { SettingsPage } from './settings/SettingsPage';
 import { DownloadPage } from './download/DownloadPage';
 import { AdminPanel } from './admin/AdminPanel';
 import { ConfirmDialog } from './common/ConfirmDialog';
-import { filterNotesBySearch, normalizeSearch, noteMatchesSearch } from '../lib/noteSearch';
+import { filterNotesBySearch, normalizeSearch, noteMatchesSearch, buildSearchHitStarts, nextSearchHitIndex } from '../lib/noteSearch';
 
 function EmptyState({ text, hint }: { text: string; hint?: string }) {
   return (
@@ -50,9 +50,11 @@ function NoteSectionBar({
   );
 }
 
-function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect }: {
+function NoteList({ notes, search, searchHitStarts, activeSearchHitIndex, emptySearchText, emptyText, emptyHint, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect }: {
   notes: Note[];
   search: string;
+  searchHitStarts?: Record<number, number>;
+  activeSearchHitIndex?: number | null;
   emptySearchText: string;
   emptyText: string;
   emptyHint?: string;
@@ -74,7 +76,18 @@ function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen
         : 'grid grid-cols-1 gap-3.5 px-3 pb-6 sm:grid-cols-2 sm:px-5 lg:grid-cols-3 xl:grid-cols-4'
     }>
       {sorted.map((n) => (
-        <NoteCard key={n.id} note={n} search={hasSearch ? search : ''} onOpen={onOpen} viewMode={viewMode} selectMode={selectMode} selected={selected?.has(n.id)} onToggleSelect={onToggleSelect} />
+        <NoteCard
+          key={n.id}
+          note={n}
+          search={hasSearch ? search : ''}
+          searchHitStart={searchHitStarts?.[n.id] ?? 0}
+          activeSearchHitIndex={hasSearch ? activeSearchHitIndex ?? null : null}
+          onOpen={onOpen}
+          viewMode={viewMode}
+          selectMode={selectMode}
+          selected={selected?.has(n.id)}
+          onToggleSelect={onToggleSelect}
+        />
       ))}
     </div>
   );
@@ -164,6 +177,7 @@ export function Dashboard() {
     }
   }, []);
   const [search, setSearch] = useState('');
+  const [activeSearchHit, setActiveSearchHit] = useState(0);
   const [openNoteId, setOpenNoteId] = useState<number | null>(null);
   const [showSetPassword, setShowSetPassword] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -202,6 +216,48 @@ export function Dashboard() {
   const read = useMemo(() => notes.filter((n) => n.read && !n.archived && !n.trashed), [notes]);
   const archived = useMemo(() => notes.filter((n) => n.archived && !n.trashed), [notes]);
   const trashed = useMemo(() => notes.filter((n) => n.trashed), [notes]);
+  const searchScopeNotes = useMemo(() => {
+    if (!hasSearch) return [] as Note[];
+    const source = page === 'home' || page === 'library' ? nonTrashedNotes
+      : page === 'unread' ? unread
+        : page === 'read' ? read
+          : page === 'archive' ? archived
+            : page === 'fav' ? allFav
+              : page === 'trash' ? trashed
+                : active;
+    return sortNotesByCreatedDesc(filterNotesBySearch(source, search));
+  }, [active, allFav, archived, hasSearch, nonTrashedNotes, page, read, search, trashed, unread]);
+
+  const searchHitMeta = useMemo(
+    () => buildSearchHitStarts(searchScopeNotes, search),
+    [searchScopeNotes, search],
+  );
+
+  useEffect(() => {
+    setActiveSearchHit(0);
+  }, [search, page]);
+
+  useEffect(() => {
+    if (!hasSearch || searchHitMeta.total === 0) return;
+    const safeIndex = Math.min(activeSearchHit, searchHitMeta.total - 1);
+    if (safeIndex !== activeSearchHit) {
+      setActiveSearchHit(safeIndex);
+      return;
+    }
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-search-hit="${safeIndex}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }, [activeSearchHit, hasSearch, searchHitMeta.total, search, noteViewMode]);
+
+  const moveSearchHit = useCallback((direction: 1 | -1) => {
+    if (!searchHitMeta.total) return;
+    setActiveSearchHit((current) => nextSearchHitIndex(current, searchHitMeta.total, direction));
+  }, [searchHitMeta.total]);
+
+  const noteListSearchProps = hasSearch
+    ? { searchHitStarts: searchHitMeta.starts, activeSearchHitIndex: activeSearchHit }
+    : {};
+
   const trashedQuizQuestions = trashedQuizzes;
   const trashedQuizSets = useMemo(() => quizSets.filter((set) => set.trashed), [quizSets]);
   const trashedQuizFolders = useMemo(() => quizFolders.filter((folder) => folder.trashed), [quizFolders]);
@@ -252,6 +308,10 @@ export function Dashboard() {
           page={page}
           search={search}
           setSearch={setSearch}
+          searchHitTotal={searchHitMeta.total}
+          searchHitCurrent={searchHitMeta.total > 0 ? activeSearchHit + 1 : 0}
+          onSearchHitPrev={() => moveSearchHit(-1)}
+          onSearchHitNext={() => moveSearchHit(1)}
           onNewNote={handleNewNote}
           onOpenMenu={() => setMobileMenuOpen(true)}
         />
@@ -260,7 +320,7 @@ export function Dashboard() {
           {page === 'home' && hasSearch && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`🔎 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={nonTrashedNotes} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={nonTrashedNotes} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
@@ -304,7 +364,7 @@ export function Dashboard() {
                 </div>
               )}
               <NoteSectionBar label={`🔎 ${hasSearch ? t.secAll : `📚 ${t.secAll}`}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={hasSearch ? nonTrashedNotes : active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={hasSearch ? nonTrashedNotes : active} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
@@ -317,21 +377,21 @@ export function Dashboard() {
           {page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`📖 ${t.secUnread}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={unread} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={unread} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {page === 'read' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`✓ ${t.secRead}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={read} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={read} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {page === 'archive' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`🗄 ${t.secArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={archived} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={archived} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
@@ -340,16 +400,16 @@ export function Dashboard() {
               {hasSearch ? (
                 <>
                   <NoteSectionBar label={`🔎 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-                  <NoteList notes={allFav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+                  <NoteList notes={allFav} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
                 </>
               ) : (
                 <>
                   <NoteSectionBar label={`★ ${t.secFav}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-                  <NoteList notes={fav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+                  <NoteList notes={fav} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
                   {favArch.length > 0 && (
                     <>
                       <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} showViewToggle={false} />
-                      <NoteList notes={favArch} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+                      <NoteList notes={favArch} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
                     </>
                   )}
                 </>

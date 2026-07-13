@@ -5,11 +5,13 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { HighlightedText } from '../common/HighlightedText';
-import { decodeBasicEntities, highlightHtmlContent } from '../../lib/noteSearch';
+import { getNoteSearchPlainText, type SearchHitCounter } from '../../lib/noteSearch';
 
 interface Props {
   note: Note;
   search?: string;
+  searchHitStart?: number;
+  activeSearchHitIndex?: number | null;
   onOpen: (id: number) => void;
   viewMode?: NoteViewMode;
   selectMode?: boolean;
@@ -41,7 +43,7 @@ function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: 
   );
 }
 
-export function NoteCard({ note, search = '', onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect }: Props) {
+export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHitIndex = null, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect }: Props) {
   const { t, lang } = useLanguage();
   const { toggleRead, toggleUnread, toggleFav, archive, unarchive, trash, restore, permDelete } = useNotes();
   const { show } = useToast();
@@ -54,10 +56,11 @@ export function NoteCard({ note, search = '', onOpen, viewMode = 'grid', selectM
   };
 
   const isTrash = !!note.trashed;
-  const plainPreview = decodeBasicEntities(note.text ?? '').replace(/\s+/g, ' ').trim();
-  const previewHtml = search.trim()
-    ? highlightHtmlContent(note.html || `<p>${plainPreview}</p>`, search)
-    : (note.html || `<p>${plainPreview}</p>`);
+  const hasSearch = search.trim().length > 0;
+  const bodyText = getNoteSearchPlainText(note);
+  const hitCounter: SearchHitCounter = { value: searchHitStart };
+  const previewHtml = note.html || `<p>${bodyText}</p>`;
+  const bodyPreview = hasSearch ? bodyText : bodyText.slice(0, 220);
 
   return (
     <div
@@ -83,18 +86,24 @@ export function NoteCard({ note, search = '', onOpen, viewMode = 'grid', selectM
         )}
         <div className="min-w-0 flex-1">
           {note.title && (
-            <p className={'text-sm font-semibold ' + (expanded ? 'mb-2' : 'truncate') + ' ' + (note.fav ? 'text-amber-900 dark:text-amber-300' : 'text-app-text dark:text-gray-100')}>
-              <HighlightedText text={note.title} search={search} />
+            <p className={'text-sm font-semibold ' + (expanded ? 'mb-2' : hasSearch ? '' : 'truncate') + ' ' + (note.fav ? 'text-amber-900 dark:text-amber-300' : 'text-app-text dark:text-gray-100')}>
+              <HighlightedText text={note.title} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
             </p>
           )}
           {expanded ? (
-            <div
-              className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100 [&_img]:mx-auto [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-lg [&_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
-            />
+            hasSearch ? (
+              <div className="whitespace-pre-wrap text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300">
+                <HighlightedText text={bodyText} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
+              </div>
+            ) : (
+              <div
+                className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100 [&_img]:mx-auto [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-lg [&_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
+            )
           ) : (
-            <p className={'mt-0.5 line-clamp-3 text-[13px] leading-relaxed ' + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
-              <HighlightedText text={plainPreview.slice(0, 220)} search={search} />
+            <p className={'mt-0.5 text-[13px] leading-relaxed ' + (hasSearch ? '' : 'line-clamp-3 ') + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
+              <HighlightedText text={bodyPreview} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
             </p>
           )}
           {!isTrash && (

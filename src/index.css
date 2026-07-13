@@ -410,6 +410,18 @@ body {
   color: #fef3c7;
 }
 
+.note-search-hit--active {
+  background: rgba(251, 191, 36, 0.88) !important;
+  color: #78350f !important;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.45);
+}
+
+.dark .note-search-hit--active {
+  background: rgba(251, 191, 36, 0.72) !important;
+  color: #fff7ed !important;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.35);
+}
+
 .dark .note-content .note-table-wrap,
 .dark [contenteditable] .note-table-wrap {
   border-color: rgba(255, 255, 255, 0.1);

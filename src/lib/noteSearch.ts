@@ -19,6 +19,8 @@ export function decodeBasicEntities(value: string) {
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
+export type SearchHitCounter = { value: number };
+
 function noteSearchHaystack(note: Note) {
   const plainHtml = decodeBasicEntities(note.html.replace(/<[^>]*>/g, ' '));
   return normalizeSearch([note.title, note.text, plainHtml, note.date].join(' '));
@@ -51,6 +53,34 @@ export function buildSearchHighlightPattern(search: string) {
   return new RegExp(`(${tokens.map(escapeRegex).join('|')})`, 'gi');
 }
 
+export function countSearchMatchesInText(text: string, search: string) {
+  const pattern = buildSearchHighlightPattern(search);
+  if (!pattern) return 0;
+  return [...text.matchAll(new RegExp(pattern.source, 'gi'))].length;
+}
+
+export function getNoteSearchPlainText(note: Note) {
+  const plainHtml = decodeBasicEntities(note.html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const plainText = decodeBasicEntities(note.text ?? '').replace(/\s+/g, ' ').trim();
+  return plainText || plainHtml;
+}
+
+export function countNoteSearchHits(note: Note, search: string) {
+  const title = note.title ?? '';
+  const body = getNoteSearchPlainText(note);
+  return countSearchMatchesInText(title, search) + countSearchMatchesInText(body, search);
+}
+
+export function buildSearchHitStarts(notes: Note[], search: string) {
+  const starts: Record<number, number> = {};
+  let total = 0;
+  for (const note of notes) {
+    starts[note.id] = total;
+    total += countNoteSearchHits(note, search);
+  }
+  return { starts, total };
+}
+
 export function isSearchHit(part: string, search: string) {
   const tokens = searchTokens(search);
   const normalized = normalizeSearch(part);
@@ -63,11 +93,28 @@ export function splitForHighlight(text: string, search: string) {
   return text.split(pattern);
 }
 
-export function highlightHtmlContent(html: string, search: string) {
+function markClass(activeHitIndex: number | null, hitIndex: number) {
+  return hitIndex === activeHitIndex ? 'note-search-hit note-search-hit--active' : 'note-search-hit';
+}
+
+export function highlightHtmlContent(
+  html: string,
+  search: string,
+  counter: SearchHitCounter,
+  activeHitIndex: number | null,
+) {
   const pattern = buildSearchHighlightPattern(search);
   if (!pattern) return html;
   return html.replace(/>([^<]+)</g, (_match, text: string) => {
-    const highlighted = text.replace(pattern, '<mark class="note-search-hit">$1</mark>');
+    const highlighted = text.replace(pattern, (match: string) => {
+      const hitIndex = counter.value++;
+      return `<mark class="${markClass(activeHitIndex, hitIndex)}" data-search-hit="${hitIndex}">${match}</mark>`;
+    });
     return `>${highlighted}<`;
   });
+}
+
+export function nextSearchHitIndex(current: number, total: number, direction: 1 | -1) {
+  if (total <= 0) return 0;
+  return (current + direction + total) % total;
 }
