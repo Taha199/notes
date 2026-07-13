@@ -397,6 +397,19 @@ body {
   box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.2);
 }
 
+.note-search-hit {
+  border-radius: 0.2rem;
+  background: rgba(251, 191, 36, 0.45);
+  padding: 0 0.125rem;
+  font-weight: 700;
+  color: #78350f;
+}
+
+.dark .note-search-hit {
+  background: rgba(251, 191, 36, 0.28);
+  color: #fef3c7;
+}
+
 .dark .note-content .note-table-wrap,
 .dark [contenteditable] .note-table-wrap {
   border-color: rgba(255, 255, 255, 0.1);

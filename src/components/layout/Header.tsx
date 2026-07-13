@@ -45,13 +45,27 @@ export function Header({
       </div>
       <div className="flex w-full min-w-0 items-center gap-2 md:w-auto">
         <div className="relative min-w-0 flex-1 md:flex-none">
-          <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-app-text-secondary" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t.searchPh}
-            className="w-full rounded-xl border border-app-border bg-app-bg py-2 pl-3 pr-9 text-[13.5px] outline-none transition-all focus:border-primary/50 focus:bg-white focus:ring-4 focus:ring-primary/10 dark:border-white/10 dark:bg-white/5 dark:text-gray-100 md:w-[180px] md:focus:w-[220px]"
+            className={'w-full rounded-xl border border-app-border bg-app-bg py-2 pl-3 text-[13.5px] outline-none transition-all focus:border-primary/50 focus:bg-white focus:ring-4 focus:ring-primary/10 dark:border-white/10 dark:bg-white/5 dark:text-gray-100 md:w-[180px] md:focus:w-[220px] ' + (search ? 'pr-16' : 'pr-9')}
           />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label={t.clearSearch}
+              title={t.clearSearch}
+              className="absolute right-9 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-app-text-secondary transition-colors hover:bg-app-border/40 hover:text-app-text dark:hover:bg-white/10 dark:hover:text-gray-200"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
+              </svg>
+            </button>
+          )}
+          <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-app-text-secondary" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
         </div>
         <LanguageSwitcher />
         <button onClick={onNewNote} className="flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-primary px-3 py-2 text-[13px] font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark sm:px-4">

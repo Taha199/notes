@@ -19,6 +19,7 @@ import { SettingsPage } from './settings/SettingsPage';
 import { DownloadPage } from './download/DownloadPage';
 import { AdminPanel } from './admin/AdminPanel';
 import { ConfirmDialog } from './common/ConfirmDialog';
+import { filterNotesBySearch, normalizeSearch, noteMatchesSearch } from '../lib/noteSearch';
 
 function EmptyState({ text, hint }: { text: string; hint?: string }) {
   return (
@@ -28,43 +29,6 @@ function EmptyState({ text, hint }: { text: string; hint?: string }) {
       {hint && <p className="mt-3 max-w-sm text-xs leading-relaxed text-app-text-secondary/60 dark:text-gray-500">{hint}</p>}
     </div>
   );
-}
-
-function normalizeSearch(value: string) {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-}
-
-function decodeBasicEntities(value: string) {
-  return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-}
-
-function noteSearchHaystack(note: Note) {
-  const plainHtml = decodeBasicEntities(note.html.replace(/<[^>]*>/g, ' '));
-  return normalizeSearch([note.title, note.text, plainHtml, note.date].join(' '));
-}
-
-function noteMatchesSearch(note: Note, search: string) {
-  const query = normalizeSearch(search);
-  if (!query) return true;
-  const haystack = noteSearchHaystack(note);
-  return query.split(/\s+/).filter(Boolean).every((token) => haystack.includes(token));
-}
-
-function filterNotesBySearch(notes: Note[], search: string) {
-  const query = normalizeSearch(search);
-  if (!query) return notes;
-  return notes.filter((note) => noteMatchesSearch(note, search));
 }
 
 function NoteSectionBar({
@@ -110,7 +74,7 @@ function NoteList({ notes, search, emptySearchText, emptyText, emptyHint, onOpen
         : 'grid grid-cols-1 gap-3.5 px-3 pb-6 sm:grid-cols-2 sm:px-5 lg:grid-cols-3 xl:grid-cols-4'
     }>
       {sorted.map((n) => (
-        <NoteCard key={n.id} note={n} onOpen={onOpen} viewMode={viewMode} selectMode={selectMode} selected={selected?.has(n.id)} onToggleSelect={onToggleSelect} />
+        <NoteCard key={n.id} note={n} search={hasSearch ? search : ''} onOpen={onOpen} viewMode={viewMode} selectMode={selectMode} selected={selected?.has(n.id)} onToggleSelect={onToggleSelect} />
       ))}
     </div>
   );
