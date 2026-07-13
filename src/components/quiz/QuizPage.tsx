@@ -1194,24 +1194,25 @@ export function QuizPage({
   };
 
   const renderItemOrForm = (item: QuizItem, visualIndex: number) => {
-    if (!selectedSetId) {
-      const form = openForms.find((f) => f.itemId === item.id);
-      if (form) return renderOpenForm(form);
-    }
+    const form = openForms.find((f) => f.itemId === item.id);
+    if (form) return renderOpenForm(form, visualIndex, visualIndex + 1);
     return renderItem(item, visualIndex);
   };
 
-  const renderOpenForm = (form: OpenQuestionForm, formIndex = 0) => {
-    const item = form.itemId ? displayItems.find((i) => i.id === form.itemId) : undefined;
-    const draftNumber = selectedSetId && form.itemId === null ? orderedItems.length + formIndex + 1 : null;
+  const renderOpenForm = (form: OpenQuestionForm, formIndex = 0, questionNumber?: number) => {
+    const item = form.itemId
+      ? (displayItems.find((i) => i.id === form.itemId)
+        ?? selectedSet?.items?.find((i) => i.id === form.itemId))
+      : undefined;
+    const showNumber = questionNumber ?? (selectedSetId && form.itemId === null ? orderedItems.length + formIndex + 1 : null);
     return (
-      <div key={form.formId} className={draftNumber ? 'flex items-start gap-2' : undefined}>
-        {draftNumber != null && (
+      <div key={form.formId} className={showNumber ? 'flex items-start gap-2' : undefined}>
+        {showNumber != null && (
           <span className="mt-4 flex h-7 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
-            {draftNumber}
+            {showNumber}
           </span>
         )}
-      <div className={draftNumber ? 'min-w-0 flex-1' : undefined}>
+      <div className={showNumber ? 'min-w-0 flex-1' : undefined}>
       <EditPanel
         question={form.question}
         answer={form.answer}
@@ -1735,7 +1736,7 @@ export function QuizPage({
             {orderedItems.map((item, index) => renderItemOrForm(item, index))}
 
             {openForms
-              .filter((f) => selectedSetId || f.itemId === null || !orderedItems.some((i) => i.id === f.itemId))
+              .filter((f) => f.itemId === null)
               .map((form, formIndex) => renderOpenForm(form, formIndex))}
 
             {/* Add question dashed button — opens another form without closing existing ones */}
