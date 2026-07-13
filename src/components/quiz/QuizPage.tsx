@@ -41,11 +41,17 @@ const ITEM_SORT_OPTIONS: { key: ItemSort; labelKey: 'quizSortManualFull' | 'quiz
   { key: 'study', labelKey: 'quizSortStudy', shortKey: 'quizSortStudyShort' },
 ];
 
-function loadItemSort(): ItemSort {
-  const stored = localStorage.getItem('malacadhati_quiz_itemsort');
+function loadItemSort(forSet: boolean): ItemSort {
+  const key = forSet ? 'malacadhati_quiz_itemsort_set' : 'malacadhati_quiz_itemsort_notes';
+  const stored = localStorage.getItem(key);
   if (stored === 'oldest') return 'newest';
   if (stored === 'manual' || stored === 'newest' || stored === 'study') return stored;
-  return 'newest';
+  if (!forSet) {
+    const legacy = localStorage.getItem('malacadhati_quiz_itemsort');
+    if (legacy === 'oldest') return 'newest';
+    if (legacy === 'manual' || legacy === 'newest' || legacy === 'study') return legacy;
+  }
+  return forSet ? 'manual' : 'newest';
 }
 
 function loadProgress(): Record<string, Record<number, 'known' | 'learning'>> {
@@ -613,11 +619,12 @@ export function QuizPage({
   // Hide answers (self-test): blur all Svar, click a card to reveal it
   const [hideAnswers, setHideAnswers] = useState(false);
   // Question list ordering: manual / oldest-first / studied vs not studied
-  const [itemSort, setItemSort] = useState<ItemSort>(loadItemSort);
+  const [itemSort, setItemSort] = useState<ItemSort>(() => loadItemSort(false));
   const [itemSortMenuOpen, setItemSortMenuOpen] = useState(false);
   const changeItemSort = (mode: ItemSort) => {
     setItemSort(mode);
-    localStorage.setItem('malacadhati_quiz_itemsort', mode);
+    const key = selectedSetId ? 'malacadhati_quiz_itemsort_set' : 'malacadhati_quiz_itemsort_notes';
+    localStorage.setItem(key, mode);
     setItemSortMenuOpen(false);
   };
   // Multiple open question forms (new drafts + in-progress edits)
@@ -835,6 +842,10 @@ export function QuizPage({
   useEffect(() => {
     saveQuizSelection(selectedFolderId, selectedSetId);
   }, [selectedFolderId, selectedSetId]);
+
+  useEffect(() => {
+    setItemSort(loadItemSort(!!selectedSetId));
+  }, [selectedSetId]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -1066,15 +1077,20 @@ export function QuizPage({
   const orderedItems = useMemo(() => {
     if (itemSort === 'manual') return displayItems;
     if (itemSort === 'newest') {
-      return [...displayItems].sort((a, b) => quizItemCreatedAtMs(b) - quizItemCreatedAtMs(a));
+      const sortFn = selectedSetId
+        ? (a: QuizItem, b: QuizItem) => quizItemCreatedAtMs(a) - quizItemCreatedAtMs(b)
+        : (a: QuizItem, b: QuizItem) => quizItemCreatedAtMs(b) - quizItemCreatedAtMs(a);
+      return [...displayItems].sort(sortFn);
     }
     return [...displayItems].sort((a, b) => {
       const aStudied = currentProgress[a.id] === 'known' ? 1 : 0;
       const bStudied = currentProgress[b.id] === 'known' ? 1 : 0;
       if (aStudied !== bStudied) return aStudied - bStudied;
-      return quizItemCreatedAtMs(b) - quizItemCreatedAtMs(a);
+      return selectedSetId
+        ? quizItemCreatedAtMs(a) - quizItemCreatedAtMs(b)
+        : quizItemCreatedAtMs(b) - quizItemCreatedAtMs(a);
     });
-  }, [displayItems, itemSort, currentProgress]);
+  }, [displayItems, itemSort, currentProgress, selectedSetId]);
 
   const studyItems = useMemo(() => orderedItems.filter((item) => !item.draft), [orderedItems]);
 
@@ -1126,8 +1142,10 @@ export function QuizPage({
   };
 
   const renderItemOrForm = (item: QuizItem, visualIndex: number) => {
-    const form = openForms.find((f) => f.itemId === item.id);
-    if (form) return renderOpenForm(form);
+    if (!selectedSetId) {
+      const form = openForms.find((f) => f.itemId === item.id);
+      if (form) return renderOpenForm(form);
+    }
     return renderItem(item, visualIndex);
   };
 
@@ -1656,7 +1674,7 @@ export function QuizPage({
             {orderedItems.map((item, index) => renderItemOrForm(item, index))}
 
             {openForms
-              .filter((f) => f.itemId === null || !orderedItems.some((i) => i.id === f.itemId))
+              .filter((f) => selectedSetId || f.itemId === null || !orderedItems.some((i) => i.id === f.itemId))
               .map((form) => renderOpenForm(form))}
 
             {/* Add question dashed button — opens another form without closing existing ones */}
