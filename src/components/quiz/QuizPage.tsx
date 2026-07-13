@@ -637,7 +637,7 @@ export function QuizPage({
   allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus'>>) => {
+  const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
   };
 
@@ -663,7 +663,7 @@ export function QuizPage({
 
   const persistForm = (formId: string, override?: SavePayload, finalize = false): number | null => {
     const form = openFormsRef.current.find((f) => f.formId === formId);
-    if (!form || form.itemId === null) return null;
+    if (!form) return null;
     const q = override?.question ?? form.question;
     const a = override?.answer ?? form.answer;
     const patch = {
@@ -678,6 +678,46 @@ export function QuizPage({
     };
 
     const setId = selectedSetIdRef.current;
+
+    if (form.itemId === null) {
+      if (!hasContent(q) && !hasContent(a)) return null;
+      if (setId) {
+        if (!finalize) return null;
+        const id = addItemToSet(setId, {
+          noteId: 0,
+          noteTitle: '',
+          question: q,
+          answer: a,
+          date: new Date().toLocaleDateString(),
+          createdAt: new Date().toISOString(),
+          draft: false,
+          options: patch.options,
+          correctIndex: patch.correctIndex,
+          correctIndexes: patch.correctIndexes,
+          explanation: patch.explanation,
+        });
+        updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved', finalized: true });
+        return id;
+      }
+      const id = addQuiz({
+        noteId: 0,
+        noteTitle: '',
+        question: q,
+        answer: a,
+        date: new Date().toLocaleDateString(),
+        createdAt: new Date().toISOString(),
+        draft: !finalize,
+        options: patch.options,
+        correctIndex: patch.correctIndex,
+        correctIndexes: patch.correctIndexes,
+        explanation: patch.explanation,
+      });
+      updateForm(formId, { itemId: id, saveStatus: 'saved', finalized: finalize || undefined });
+      if (!finalize) return id;
+      updateQuiz(id, { ...patch, draft: false }, true);
+      return id;
+    }
+
     const storedItem = setId
       ? allQuizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === form.itemId)
       : quizzesRef.current.find((item) => item.id === form.itemId);
@@ -738,7 +778,20 @@ export function QuizPage({
       createdAt: new Date().toISOString(),
       draft: true,
     };
-    const id = selectedSetId ? addItemToSet(selectedSetId, item) : addQuiz(item);
+    if (selectedSetIdRef.current) {
+      setOpenForms((prev) => [
+        ...prev,
+        {
+          formId: `new-${Date.now()}`,
+          itemId: null,
+          question: '',
+          answer: '',
+          saveStatus: 'empty',
+        },
+      ]);
+      return;
+    }
+    const id = addQuiz(item);
     setOpenForms((prev) => [
       ...prev,
       {
@@ -758,10 +811,9 @@ export function QuizPage({
 
   const handleCancelForm = (formId: string) => {
     const form = openFormsRef.current.find((f) => f.formId === formId);
-    const bothEmpty = form ? (!hasContent(form.question) && !hasContent(form.answer)) : false;
-    // Discard unsaved drafts entirely (even with partial content); only drop an
-    // already-saved question when the user cleared both fields.
-    if (form?.itemId && (!form.finalized || bothEmpty)) {
+    if (!form) return;
+    const bothEmpty = !hasContent(form.question) && !hasContent(form.answer);
+    if (form.itemId && (!form.finalized || bothEmpty)) {
       if (selectedSetId) removeItemFromSet(selectedSetId, form.itemId);
       else permDeleteQuiz(form.itemId);
     }
@@ -1071,7 +1123,7 @@ export function QuizPage({
   const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet
-    ? (selectedSet.items ?? []).filter((item) => !item.trashed)
+    ? (selectedSet.items ?? []).filter((item) => !item.trashed && !item.draft)
     : isNotesView ? quizzes : [];
 
   const orderedItems = useMemo(() => {
@@ -1149,11 +1201,18 @@ export function QuizPage({
     return renderItem(item, visualIndex);
   };
 
-  const renderOpenForm = (form: OpenQuestionForm) => {
+  const renderOpenForm = (form: OpenQuestionForm, formIndex = 0) => {
     const item = form.itemId ? displayItems.find((i) => i.id === form.itemId) : undefined;
+    const draftNumber = selectedSetId && form.itemId === null ? orderedItems.length + formIndex + 1 : null;
     return (
+      <div key={form.formId} className={draftNumber ? 'flex items-start gap-2' : undefined}>
+        {draftNumber != null && (
+          <span className="mt-4 flex h-7 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
+            {draftNumber}
+          </span>
+        )}
+      <div className={draftNumber ? 'min-w-0 flex-1' : undefined}>
       <EditPanel
-        key={form.formId}
         question={form.question}
         answer={form.answer}
         saveStatus={form.saveStatus}
@@ -1167,6 +1226,8 @@ export function QuizPage({
         onSave={(override) => handleSaveForm(form.formId, override)}
         onCancel={() => handleCancelForm(form.formId)}
       />
+      </div>
+      </div>
     );
   };
 
@@ -1675,7 +1736,7 @@ export function QuizPage({
 
             {openForms
               .filter((f) => selectedSetId || f.itemId === null || !orderedItems.some((i) => i.id === f.itemId))
-              .map((form) => renderOpenForm(form))}
+              .map((form, formIndex) => renderOpenForm(form, formIndex))}
 
             {/* Add question dashed button — opens another form without closing existing ones */}
             <button
