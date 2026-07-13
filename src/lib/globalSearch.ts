@@ -1,4 +1,4 @@
-import type { Note, QuizItem, QuizSet, Page } from '../types';
+import type { Note, QuizItem, QuizSet, QuizFolder, Page } from '../types';
 import type { Translation } from '../i18n/translations';
 import {
   noteMatchesSearch,
@@ -25,6 +25,8 @@ export interface GlobalSearchResult {
   quizSetId?: string | null;
   quizSetName?: string | null;
   quizFolderId?: string | null;
+  quizFolderName?: string | null;
+  quizCreatedAt?: string | null;
 }
 
 const SORT_FAVORITE = 0;
@@ -55,6 +57,11 @@ export function quizMatchesSearch(item: QuizItem, search: string) {
 
 export function countQuizSearchHits(item: QuizItem, search: string) {
   return countSearchMatchesInText(getQuizSearchPlainText(item), search);
+}
+
+export function formatQuizItemCreatedAt(item: QuizItem): string {
+  if (item.createdAt) return new Date(item.createdAt).toLocaleString();
+  return new Date(item.id).toLocaleString();
 }
 
 function noteCategory(note: Note, t: Translation): { label: string; page: Page } {
@@ -117,12 +124,17 @@ export function buildGlobalSearchResults(
   notes: Note[],
   quizzes: QuizItem[],
   quizSets: QuizSet[],
+  quizFolders: QuizFolder[],
   search: string,
   t: Translation,
   favQuizIds: Set<number>,
 ): GlobalSearchResult[] {
   const query = normalizeSearch(search);
   if (!query) return [];
+
+  const folderNameById = new Map(
+    quizFolders.filter((folder) => !folder.trashed).map((folder) => [folder.id, folder.name]),
+  );
 
   const results: GlobalSearchResult[] = [];
 
@@ -158,6 +170,12 @@ export function buildGlobalSearchResults(
       categoryLabel = t.searchCategoryQuiz;
     }
     const question = stripHtml(item.question);
+    const folderName = folderId
+      ? (folderNameById.get(folderId) ?? null)
+      : fromNotes
+        ? t.searchCategoryQuiz
+        : null;
+    const displaySetName = setName ?? (fromNotes ? item.noteTitle || null : null);
     results.push({
       type: 'quiz',
       id: item.id,
@@ -166,8 +184,10 @@ export function buildGlobalSearchResults(
       sortOrder: isFavorite ? SORT_FAVORITE : SORT_OTHER,
       quizItem: item,
       quizSetId: setId,
-      quizSetName: setName,
+      quizSetName: displaySetName,
       quizFolderId: folderId,
+      quizFolderName: folderName,
+      quizCreatedAt: formatQuizItemCreatedAt(item),
       title: question.slice(0, 100) || '…',
       snippet: question.slice(0, 220),
     });

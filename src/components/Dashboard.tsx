@@ -23,6 +23,8 @@ import { filterNotesBySearch, normalizeSearch, noteMatchesSearch, nextSearchHitI
 import { buildGlobalSearchResults, buildGlobalSearchHitStarts } from '../lib/globalSearch';
 import { GlobalSearchResults } from './search/GlobalSearchResults';
 
+const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
+
 function EmptyState({ text, hint }: { text: string; hint?: string }) {
   return (
     <div className="animate-fade-in flex flex-col items-center py-20 text-center text-app-text-secondary/70 dark:text-gray-500">
@@ -224,8 +226,8 @@ export function Dashboard() {
     return new Set(favItems.map((i) => i.favOf).filter((x): x is number => x != null));
   }, [quizSets]);
   const globalSearchResults = useMemo(
-    () => (showGlobalSearch ? buildGlobalSearchResults(notes, quizzes, quizSets, search, t, favQuizIds) : []),
-    [showGlobalSearch, notes, quizzes, quizSets, search, t, favQuizIds],
+    () => (showGlobalSearch ? buildGlobalSearchResults(notes, quizzes, quizSets, quizFolders, search, t, favQuizIds) : []),
+    [showGlobalSearch, notes, quizzes, quizSets, quizFolders, search, t, favQuizIds],
   );
   const searchHitMeta = useMemo(
     () => (showGlobalSearch ? buildGlobalSearchHitStarts(globalSearchResults, search) : { starts: {}, total: 0 }),
@@ -258,7 +260,10 @@ export function Dashboard() {
     setOpenNoteId(noteId);
   }, [setPage]);
 
-  const handleOpenQuizFromSearch = useCallback((itemId: number) => {
+  const handleOpenQuizFromSearch = useCallback((itemId: number, setId?: string | null, folderId?: string | null) => {
+    if (setId) {
+      localStorage.setItem(QUIZ_SELECTION_KEY, JSON.stringify({ folderId: folderId ?? null, setId }));
+    }
     setPage('quiz');
     setQuizFocusItemId(itemId);
   }, [setPage]);
