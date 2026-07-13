@@ -180,6 +180,14 @@ export function Dashboard() {
       window.history.pushState({ page: next }, '', `${nextPath}${window.location.search}`);
     }
   }, []);
+
+  const navigateToPage = useCallback((next: Page) => {
+    setSearch('');
+    setActiveSearchHit(0);
+    setOpenNoteId(null);
+    setQuizFocusItemId(null);
+    setPage(next);
+  }, [setPage]);
   const [search, setSearch] = useState('');
   const [activeSearchHit, setActiveSearchHit] = useState(0);
   const [openNoteId, setOpenNoteId] = useState<number | null>(null);
@@ -305,7 +313,7 @@ export function Dashboard() {
   };
 
   const handleNewNote = () => {
-    if (page !== 'home') setPage('home');
+    if (page !== 'home' || hasSearch) navigateToPage('home');
     addDraft();
   };
 
@@ -313,7 +321,7 @@ export function Dashboard() {
     <div className="flex h-[100dvh] overflow-hidden bg-white dark:bg-gray-950">
       <SeoHead page={page} />
       {mobileMenuOpen && <button aria-label="Close menu" onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 z-30 bg-gray-950/35 backdrop-blur-sm md:hidden" />}
-      <Sidebar page={page} setPage={setPage} onOpenSetPassword={() => setShowSetPassword(true)} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
+      <Sidebar page={page} setPage={navigateToPage} onOpenSetPassword={() => setShowSetPassword(true)} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
@@ -578,7 +586,7 @@ export function Dashboard() {
           nextNoteId={nextNoteId}
           onChangeNote={setOpenNoteId}
           onClose={() => setOpenNoteId(null)}
-          onNavigate={(p) => { setPage(p); setOpenNoteId(null); }}
+          onNavigate={navigateToPage}
         />
       )}
       {showSetPassword && <SetPasswordModal onClose={() => setShowSetPassword(false)} />}
