@@ -787,6 +787,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return !text && !li.querySelector('img');
   };
 
+  const isLiEffectivelyEmpty = (li: HTMLLIElement) => {
+    if (isLiEmpty(li)) return true;
+    const scratch = li.cloneNode(true) as HTMLLIElement;
+    scratch.querySelectorAll('br, span:empty, b:empty, u:empty, i:empty, strong:empty, em:empty').forEach((el) => el.remove());
+    const text = (scratch.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
+    return !text && !li.querySelector('img');
+  };
+
   const insertNewListItemAfter = (li: HTMLLIElement) => {
     const newLi = document.createElement('li');
     newLi.setAttribute('dir', 'auto');
@@ -859,13 +867,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return div;
   };
 
-  const unwrapList = (list: HTMLUListElement | HTMLOListElement) => {
+  const unwrapList = (list: HTMLUListElement | HTMLOListElement, caretAtStart = true) => {
     const parent = list.parentNode;
-    if (!parent) return;
+    if (!parent) return null;
     const items = Array.from(list.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
     const divs = items.map((li) => unwrapListItemToDiv(li));
     divs.forEach((div) => parent.insertBefore(div, list));
     list.remove();
+    const target = divs[0] ?? null;
+    if (target) placeCaretInBlock(target, caretAtStart);
+    return target;
   };
 
   const exitListItem = (li: HTMLLIElement, ed: HTMLElement, caretAtStart: boolean) => {
@@ -906,13 +917,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (isNestedListItem(li)) {
       returnToParentListItem(li);
     } else if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1) {
-      unwrapList(list as HTMLUListElement | HTMLOListElement);
+      unwrapList(list as HTMLUListElement | HTMLOListElement, true);
     } else {
       exitListItem(li, ed, true);
     }
     saveSel();
     readCommandState();
     emitHtml();
+  };
+
+  const stripBulletPrefixFromBlock = (block: HTMLElement) => {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    const firstText = walker.nextNode();
+    if (!firstText || firstText.nodeType !== Node.TEXT_NODE) return;
+    const text = firstText.textContent ?? '';
+    const stripped = text.replace(BULLET_PREFIX_RE, '');
+    if (stripped === text) return;
+    firstText.textContent = stripped;
+    if (!block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img')) {
+      block.innerHTML = '<br>';
+    }
   };
 
   const isNestedListItem = (li: HTMLLIElement) => {
@@ -1084,17 +1108,23 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return true;
   };
 
-  const stripBulletPrefixFromBlock = (block: HTMLElement) => {
-    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-    const firstText = walker.nextNode();
-    if (!firstText || firstText.nodeType !== Node.TEXT_NODE) return;
-    const text = firstText.textContent ?? '';
-    const stripped = text.replace(BULLET_PREFIX_RE, '');
-    if (stripped === text) return;
-    firstText.textContent = stripped;
-    if (!block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img')) {
-      block.innerHTML = '<br>';
-    }
+  const stripPseudoBulletLine = (block: HTMLElement) => {
+    stripBulletPrefixFromBlock(block);
+    placeCaretInBlock(block, true);
+    saveSel();
+    readCommandState();
+    emitHtml();
+  };
+
+  const tryPseudoBulletBackspace = (range: Range, ed: HTMLElement) => {
+    const block = getLineBlock(range.startContainer, ed);
+    if (!block || block.tagName === 'LI' || block.closest('li')) return false;
+    const match = getBlockPrefixMatch(block);
+    if (!match) return false;
+    const afterPrefix = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim();
+    if (afterPrefix) return false;
+    stripPseudoBulletLine(block);
+    return true;
   };
 
   const collectBlocksInRange = (ed: HTMLElement, range: Range): HTMLElement[] => {
@@ -1953,13 +1983,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return false;
     const sel = window.getSelection();
-    if (!sel?.rangeCount || !sel.isCollapsed) return false;
+    if (!sel?.rangeCount) return false;
     const range = sel.getRangeAt(0);
+
+    if (tryPseudoBulletBackspace(range, ed)) {
+      e.preventDefault();
+      return true;
+    }
+
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       const atStart = isCaretAtStartOfLi(li, range);
+      const effectivelyEmpty = isLiEffectivelyEmpty(li);
 
-      if (isLiEmpty(li)) {
+      if (!sel.isCollapsed && effectivelyEmpty) {
+        e.preventDefault();
+        handleEmptyListItemBackspace(li, ed);
+        return true;
+      }
+
+      if (effectivelyEmpty) {
         e.preventDefault();
         handleEmptyListItemBackspace(li, ed);
         return true;
@@ -1988,6 +2031,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     return false;
   };
+
+  const runEditorBackspaceRef = useRef(runEditorBackspace);
+  runEditorBackspaceRef.current = runEditorBackspace;
 
   const handleEditorBackspace = (e: React.KeyboardEvent<HTMLDivElement>) => {
     runEditorBackspace(e);
@@ -2131,7 +2177,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (e.key === 'Backspace') {
         const ed = editorRef.current;
         if (!ed || document.activeElement !== ed) return;
-        if (runEditorBackspace(e)) {
+        if (runEditorBackspaceRef.current(e)) {
           e.stopImmediatePropagation();
         }
         return;
