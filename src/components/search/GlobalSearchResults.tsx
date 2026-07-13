@@ -1,6 +1,7 @@
 import type { Page } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { HighlightedText } from '../common/HighlightedText';
+import { NoteSearchContentDisplay } from '../notes/NoteSearchContentDisplay';
 import { QuizItemQaDisplay } from '../quiz/QuizItemQaDisplay';
 import type { GlobalSearchResult } from '../../lib/globalSearch';
 
@@ -78,11 +79,12 @@ export function GlobalSearchResults({
                   <HighlightedText text={result.title} search={search} counter={counter} activeHitIndex={activeSearchHitIndex} />
                 </p>
               )}
-              {result.snippet && (
-                <p className="text-[13px] leading-relaxed text-app-text-secondary dark:text-gray-400">
-                  <HighlightedText text={result.snippet} search={search} counter={counter} activeHitIndex={activeSearchHitIndex} />
-                </p>
-              )}
+              <NoteSearchContentDisplay
+                note={result.note}
+                search={search}
+                hitCounter={counter}
+                activeSearchHitIndex={activeSearchHitIndex}
+              />
             </button>
           );
         }
