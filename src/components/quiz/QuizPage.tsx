@@ -130,73 +130,75 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
   const studyMore = status !== 'known';
   return (
     <div id={`quiz-item-${item.id}`} className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
-      <div className={'grid grid-cols-1 ' + (questionNumber ? 'sm:grid-cols-[52px_minmax(0,0.8fr)_minmax(0,1.2fr)_56px]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_56px]')}>
-        {questionNumber != null && (
-          <div className="flex flex-row items-center justify-center gap-1.5 border-b border-app-border px-1.5 py-3 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
-            <span className="flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
-              {questionNumber}
-            </span>
-            {canReorder && (
-              <input
-                type="number"
-                min={1}
-                max={totalQuestions}
-                value={targetPos}
-                onChange={(e) => setTargetPos(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    commitSwap();
-                  }
-                  if (e.key === 'Escape') setTargetPos('');
-                }}
-                onBlur={commitSwap}
-                placeholder="↔"
-                title={t.quizReorderHint}
-                aria-label={t.quizReorderAria}
-                className="h-7 w-9 rounded-lg border border-app-border bg-white text-center text-[11px] font-semibold tabular-nums text-app-text outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-white/10 dark:bg-gray-900 dark:text-gray-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              />
-            )}
-          </div>
-        )}
-        <div className="flex min-w-0 flex-col items-start px-5 py-4">
-          <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
-            {t.quizQuestionLabel}
-            {studyMore && (
-              <span className={'rounded-full px-2 py-0.5 text-[8px] font-bold normal-case tracking-normal ' + (status === 'learning' ? 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400')}>
-                {t.quizStudyMore}
+      <div className="flex flex-col sm:flex-row sm:items-stretch">
+        <div className={'grid min-w-0 flex-1 grid-cols-1 ' + (questionNumber ? 'sm:grid-cols-[52px_minmax(0,0.8fr)_minmax(0,1.2fr)]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]')}>
+          {questionNumber != null && (
+            <div className="flex min-w-0 flex-row items-center justify-center gap-1.5 border-b border-app-border px-1.5 py-3 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
+              <span className="flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
+                {questionNumber}
               </span>
-            )}
-          </span>
-          <StableNoteHtml
-            html={mdToHtml(item.question)}
-            className="note-content block w-full min-w-0 break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100"
-          />
-        </div>
-        <div className="flex min-w-0 flex-col items-start border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:pr-4 sm:pl-6">
-          <span className="mb-2 text-[9px] font-bold uppercase text-primary/70">{t.quizAnswerLabel}</span>
-          <div className="relative w-full min-w-0 pr-1">
-            <StableNoteHtml
-              html={mdToHtml(item.answer)}
-              className={'note-content block w-full min-w-0 break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&>ul:first-child]:mt-0 [&>ol:first-child]:mt-0 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
-            />
-            {masked && (
-              <button
-                onClick={() => setRevealed(true)}
-                className="absolute inset-0 flex items-center justify-center rounded-lg bg-app-bg/40 text-[11px] font-semibold text-app-text-secondary backdrop-blur-[2px] transition hover:text-primary dark:bg-white/[0.02]"
-              >
-                {t.quizRevealAnswer}
-              </button>
-            )}
-          </div>
-          {item.explanation && (
-            <div className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
-              <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">{t.quizExplanationLabel}</p>
-              <p dir="auto" className="text-[13px] leading-relaxed text-amber-900 dark:text-amber-200">{item.explanation}</p>
+              {canReorder && (
+                <input
+                  type="number"
+                  min={1}
+                  max={totalQuestions}
+                  value={targetPos}
+                  onChange={(e) => setTargetPos(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitSwap();
+                    }
+                    if (e.key === 'Escape') setTargetPos('');
+                  }}
+                  onBlur={commitSwap}
+                  placeholder="↔"
+                  title={t.quizReorderHint}
+                  aria-label={t.quizReorderAria}
+                  className="h-7 w-9 rounded-lg border border-app-border bg-white text-center text-[11px] font-semibold tabular-nums text-app-text outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-white/10 dark:bg-gray-900 dark:text-gray-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+              )}
             </div>
           )}
+          <div className="flex min-w-0 flex-col items-start overflow-hidden px-5 py-4">
+            <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
+              {t.quizQuestionLabel}
+              {studyMore && (
+                <span className={'rounded-full px-2 py-0.5 text-[8px] font-bold normal-case tracking-normal ' + (status === 'learning' ? 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400')}>
+                  {t.quizStudyMore}
+                </span>
+              )}
+            </span>
+            <StableNoteHtml
+              html={mdToHtml(item.question)}
+              className="note-content block w-full max-w-full min-w-0 overflow-hidden break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full"
+            />
+          </div>
+          <div className="flex min-w-0 flex-col items-start overflow-hidden border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6 sm:pr-5">
+            <span className="mb-2 text-[9px] font-bold uppercase text-primary/70">{t.quizAnswerLabel}</span>
+            <div className="relative w-full min-w-0 max-w-full overflow-hidden">
+              <StableNoteHtml
+                html={mdToHtml(item.answer)}
+                className={'note-content block w-full max-w-full min-w-0 overflow-hidden break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&>ul:first-child]:mt-0 [&>ol:first-child]:mt-0 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
+              />
+              {masked && (
+                <button
+                  onClick={() => setRevealed(true)}
+                  className="absolute inset-0 flex items-center justify-center rounded-lg bg-app-bg/40 text-[11px] font-semibold text-app-text-secondary backdrop-blur-[2px] transition hover:text-primary dark:bg-white/[0.02]"
+                >
+                  {t.quizRevealAnswer}
+                </button>
+              )}
+            </div>
+            {item.explanation && (
+              <div className="mt-3 w-full max-w-full overflow-hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
+                <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">{t.quizExplanationLabel}</p>
+                <p dir="auto" className="break-words text-[13px] leading-relaxed text-amber-900 [overflow-wrap:anywhere] dark:text-amber-200">{item.explanation}</p>
+              </div>
+            )}
+          </div>
         </div>
-        <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 border-t border-app-border px-3 py-2 dark:border-white/10 sm:flex-col sm:flex-nowrap sm:justify-center sm:gap-1.5 sm:border-l sm:border-t-0 sm:px-1.5 sm:py-3">
+        <div className="relative z-10 flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-2 border-t border-app-border bg-white px-3 py-2 dark:border-white/10 dark:bg-[#1e1e2e] sm:w-[68px] sm:flex-col sm:flex-nowrap sm:justify-center sm:gap-1.5 sm:border-l sm:border-t-0 sm:px-2 sm:py-3">
           {onSetStatus && (
             status === 'known' ? (
               <button
