@@ -1,6 +1,7 @@
 import type { Page } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { HighlightedText } from '../common/HighlightedText';
+import { QuizItemQaDisplay } from '../quiz/QuizItemQaDisplay';
 import type { GlobalSearchResult } from '../../lib/globalSearch';
 
 function CategoryBadge({ label, favorite }: { label: string; favorite?: boolean }) {
@@ -92,7 +93,7 @@ export function GlobalSearchResults({
             type="button"
             onClick={() => onOpenQuiz(result.id)}
             className={
-              'animate-slide-up flex w-full flex-col gap-2 rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-gray-800/60 ' +
+              'animate-slide-up flex w-full flex-col gap-2.5 rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-gray-800/60 ' +
               (result.isFavorite
                 ? 'border-amber-300 dark:border-amber-500/40'
                 : 'border-app-border dark:border-white/10')
@@ -102,18 +103,18 @@ export function GlobalSearchResults({
               <CategoryBadge label={result.categoryLabel} favorite={result.isFavorite} />
               <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">🧠 {t.searchResultQuiz}</span>
             </div>
-            <p className="text-sm font-semibold text-app-text dark:text-gray-100">
-              <HighlightedText text={result.title} search={search} counter={counter} activeHitIndex={activeSearchHitIndex} />
-            </p>
             {result.quizItem?.noteTitle && (
               <p className="text-[11px] text-app-text-secondary/70 dark:text-gray-500">
                 <HighlightedText text={result.quizItem.noteTitle} search={search} counter={counter} activeHitIndex={activeSearchHitIndex} />
               </p>
             )}
-            {result.snippet && result.snippet !== result.title && (
-              <p className="text-[13px] leading-relaxed text-app-text-secondary dark:text-gray-400">
-                <HighlightedText text={result.snippet} search={search} counter={counter} activeHitIndex={activeSearchHitIndex} />
-              </p>
+            {result.quizItem && (
+              <QuizItemQaDisplay
+                item={result.quizItem}
+                search={search}
+                hitCounter={counter}
+                activeSearchHitIndex={activeSearchHitIndex}
+              />
             )}
           </button>
         );
