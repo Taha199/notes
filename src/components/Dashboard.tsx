@@ -38,12 +38,33 @@ function normalizeSearch(value: string) {
     .trim();
 }
 
+function decodeBasicEntities(value: string) {
+  return value
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+function noteSearchHaystack(note: Note) {
+  const plainHtml = decodeBasicEntities(note.html.replace(/<[^>]*>/g, ' '));
+  return normalizeSearch([note.title, note.text, plainHtml, note.date].join(' '));
+}
+
 function noteMatchesSearch(note: Note, search: string) {
   const query = normalizeSearch(search);
   if (!query) return true;
-  const plainHtml = note.html.replace(/<[^>]*>/g, ' ');
-  const haystack = normalizeSearch([note.title, note.text, plainHtml, note.date].join(' '));
-  return haystack.includes(query);
+  const haystack = noteSearchHaystack(note);
+  return query.split(/\s+/).filter(Boolean).every((token) => haystack.includes(token));
+}
+
+function filterNotesBySearch(notes: Note[], search: string) {
+  const query = normalizeSearch(search);
+  if (!query) return notes;
+  return notes.filter((note) => noteMatchesSearch(note, search));
 }
 
 function NoteSectionBar({
@@ -209,9 +230,11 @@ export function Dashboard() {
   }, []);
 
   const active = useMemo(() => notes.filter((n) => !n.archived && !n.trashed), [notes]);
+  const nonTrashedNotes = useMemo(() => notes.filter((n) => !n.trashed), [notes]);
   const unread = useMemo(() => active.filter((n) => !n.read), [active]);
   const fav = useMemo(() => active.filter((n) => n.fav), [active]);
   const favArch = useMemo(() => notes.filter((n) => n.fav && n.archived && !n.trashed), [notes]);
+  const allFav = useMemo(() => [...fav, ...favArch], [fav, favArch]);
   const read = useMemo(() => notes.filter((n) => n.read && !n.archived && !n.trashed), [notes]);
   const archived = useMemo(() => notes.filter((n) => n.archived && !n.trashed), [notes]);
   const trashed = useMemo(() => notes.filter((n) => n.trashed), [notes]);
@@ -232,10 +255,11 @@ export function Dashboard() {
     const source = page === 'unread' ? unread
       : page === 'read' ? read
         : page === 'archive' ? archived
-          : page === 'fav' ? [...fav, ...favArch]
-            : active;
-    return sortNotesByCreatedDesc(hasSearch ? source.filter((note) => noteMatchesSearch(note, search)) : source);
-  }, [active, archived, fav, favArch, hasSearch, page, read, search, unread]);
+          : page === 'fav' ? allFav
+            : (page === 'home' || page === 'library') && hasSearch ? nonTrashedNotes
+              : active;
+    return sortNotesByCreatedDesc(hasSearch ? filterNotesBySearch(source, search) : source);
+  }, [active, allFav, archived, fav, favArch, hasSearch, nonTrashedNotes, page, read, search, unread]);
   const openNoteIndex = openNoteId === null ? -1 : navigableNotes.findIndex((note) => note.id === openNoteId);
   const previousNoteId = openNoteIndex > 0 ? navigableNotes[openNoteIndex - 1]?.id : undefined;
   const nextNoteId = openNoteIndex >= 0 && openNoteIndex < navigableNotes.length - 1 ? navigableNotes[openNoteIndex + 1]?.id : undefined;
@@ -272,7 +296,7 @@ export function Dashboard() {
           {page === 'home' && hasSearch && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`🔎 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={nonTrashedNotes} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
@@ -301,20 +325,22 @@ export function Dashboard() {
 
           {page === 'library' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {[
-                  { n: active.length, l: t.statActive, c: 'text-primary' },
-                  { n: unread.length, l: t.statUnread, c: 'text-blue-600' },
-                  { n: fav.length, l: t.statFav, c: 'text-amber-600' },
-                ].map((s, i) => (
-                  <div key={i} className="rounded-2xl border border-app-border bg-white p-4 text-center shadow-sm dark:border-white/10 dark:bg-white/5">
-                    <div className={'text-2xl font-bold ' + s.c}>{s.n}</div>
-                    <div className="mt-1 text-[11.5px] font-medium text-app-text-secondary dark:text-gray-400">{s.l}</div>
-                  </div>
-                ))}
-              </div>
-              <NoteSectionBar label={`📚 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              {!hasSearch && (
+                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {[
+                    { n: active.length, l: t.statActive, c: 'text-primary' },
+                    { n: unread.length, l: t.statUnread, c: 'text-blue-600' },
+                    { n: fav.length, l: t.statFav, c: 'text-amber-600' },
+                  ].map((s, i) => (
+                    <div key={i} className="rounded-2xl border border-app-border bg-white p-4 text-center shadow-sm dark:border-white/10 dark:bg-white/5">
+                      <div className={'text-2xl font-bold ' + s.c}>{s.n}</div>
+                      <div className="mt-1 text-[11.5px] font-medium text-app-text-secondary dark:text-gray-400">{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <NoteSectionBar label={`🔎 ${hasSearch ? t.secAll : `📚 ${t.secAll}`}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
+              <NoteList notes={hasSearch ? nonTrashedNotes : active} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
@@ -347,12 +373,21 @@ export function Dashboard() {
 
           {page === 'fav' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              <NoteSectionBar label={`★ ${t.secFav}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={fav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-              {favArch.length > 0 && (
+              {hasSearch ? (
                 <>
-                  <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} showViewToggle={false} />
-                  <NoteList notes={favArch} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+                  <NoteSectionBar label={`🔎 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
+                  <NoteList notes={allFav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+                </>
+              ) : (
+                <>
+                  <NoteSectionBar label={`★ ${t.secFav}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
+                  <NoteList notes={fav} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+                  {favArch.length > 0 && (
+                    <>
+                      <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} showViewToggle={false} />
+                      <NoteList notes={favArch} search={search} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+                    </>
+                  )}
                 </>
               )}
             </div>
