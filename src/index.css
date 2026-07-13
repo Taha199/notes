@@ -148,6 +148,22 @@ body {
   pointer-events: none;
 }
 
+.note-content,
+[contenteditable] {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
+.note-content *,
+[contenteditable] *:not(table):not(tr):not(td):not(th) {
+  max-width: 100%;
+  overflow-wrap: inherit;
+  word-break: inherit;
+  white-space: normal;
+}
+
 [contenteditable] ul,
 [contenteditable] ol {
   margin: 0.25rem 0;

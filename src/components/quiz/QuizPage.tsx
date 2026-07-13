@@ -160,7 +160,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
               )}
             </div>
           )}
-          <div className="flex min-w-0 flex-col items-start overflow-hidden px-5 py-4">
+          <div className="flex min-w-0 flex-col items-start overflow-x-hidden px-5 py-4">
             <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
               {t.quizQuestionLabel}
               {studyMore && (
@@ -171,15 +171,15 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
             </span>
             <StableNoteHtml
               html={mdToHtml(item.question)}
-              className="note-content block w-full max-w-full min-w-0 overflow-hidden break-words text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full"
+              className="note-content block w-full max-w-full min-w-0 break-words whitespace-normal text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal"
             />
           </div>
-          <div className="flex min-w-0 flex-col items-start overflow-hidden border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6 sm:pr-5">
+          <div className="flex min-w-0 flex-col items-start overflow-x-hidden border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6 sm:pr-5">
             <span className="mb-2 text-[9px] font-bold uppercase text-primary/70">{t.quizAnswerLabel}</span>
-            <div className="relative w-full min-w-0 max-w-full overflow-hidden">
+            <div className="relative w-full min-w-0 max-w-full overflow-x-hidden">
               <StableNoteHtml
                 html={mdToHtml(item.answer)}
-                className={'note-content block w-full max-w-full min-w-0 overflow-hidden break-words text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&>ul:first-child]:mt-0 [&>ol:first-child]:mt-0 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
+                className={'note-content block w-full max-w-full min-w-0 break-words whitespace-normal text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-yt-frame]:mx-auto [&>ul:first-child]:mt-0 [&>ol:first-child]:mt-0 [&_img]:mx-auto [&_img]:my-3 [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-xl [&_img]:border [&_img]:border-app-border [&_img]:bg-white [&_img]:object-contain [&_img]:p-1 [&_img]:shadow-sm dark:[&_img]:border-white/10 ' + (masked ? 'select-none blur-sm' : '')}
               />
               {masked && (
                 <button
@@ -191,7 +191,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
               )}
             </div>
             {item.explanation && (
-              <div className="mt-3 w-full max-w-full overflow-hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
+              <div className="mt-3 w-full max-w-full overflow-x-hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
                 <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">{t.quizExplanationLabel}</p>
                 <p dir="auto" className="break-words text-[13px] leading-relaxed text-amber-900 [overflow-wrap:anywhere] dark:text-amber-200">{item.explanation}</p>
               </div>
@@ -440,10 +440,10 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           ☑ {t.quizMcq}
         </button>
       </div>
-      <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 md:items-stretch">
-        <div className="flex min-h-0 flex-col">
-          <div className="flex max-h-[min(55dvh,32rem)] min-h-[200px] flex-1 flex-col rounded-xl border border-app-border dark:border-white/10">
-            <div className="flex min-h-0 flex-1 flex-col">
+      <div className="grid min-w-0 grid-cols-1 gap-3 p-4 md:grid-cols-2 md:items-stretch">
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="flex min-h-[200px] flex-1 flex-col overflow-x-hidden rounded-xl border border-app-border dark:border-white/10">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <RichTextEditor
               html={question}
               onChange={onChangeQ}
@@ -503,9 +503,9 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             </div>
           </div>
         ) : (
-        <div className="flex min-h-0 flex-col">
-          <div className="flex max-h-[min(55dvh,32rem)] min-h-[200px] flex-1 flex-col rounded-xl border border-app-border dark:border-white/10">
-            <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="flex min-h-[200px] flex-1 flex-col overflow-x-hidden rounded-xl border border-app-border dark:border-white/10">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <RichTextEditor
               html={answer}
               onChange={onChangeA}
