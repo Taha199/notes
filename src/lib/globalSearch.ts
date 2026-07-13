@@ -30,6 +30,8 @@ export interface GlobalSearchResult {
 const SORT_FAVORITE = 0;
 const SORT_OTHER = 1;
 
+const FAVORITES_SET_ID = 'system-favorites-set';
+
 function stripHtml(html: string) {
   return decodeBasicEntities(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
@@ -78,10 +80,13 @@ function collectQuizItems(quizzes: QuizItem[], quizSets: QuizSet[]): CollectedQu
 
   for (const set of quizSets) {
     if (set.trashed) continue;
+    const isFavSet = set.id === FAVORITES_SET_ID || set.system === 'favorites';
     for (const item of set.items ?? []) {
-      if (item.trashed || item.favOf != null) continue;
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
+      if (item.trashed) continue;
+      if (item.favOf != null && !isFavSet) continue;
+      const canonicalId = item.favOf ?? item.id;
+      if (seen.has(canonicalId)) continue;
+      seen.add(canonicalId);
       results.push({
         item,
         setId: set.id,
@@ -141,7 +146,7 @@ export function buildGlobalSearchResults(
 
   for (const { item, setId, setName, folderId, fromNotes } of collectQuizItems(quizzes, quizSets)) {
     if (!quizMatchesSearch(item, search)) continue;
-    const isFavorite = favQuizIds.has(item.id);
+    const isFavorite = favQuizIds.has(item.id) || favQuizIds.has(item.favOf ?? -1) || setId === FAVORITES_SET_ID;
     let categoryLabel: string;
     if (isFavorite) {
       categoryLabel = t.searchCategoryQuizFavorites;
