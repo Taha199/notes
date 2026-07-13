@@ -47,10 +47,41 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Base letters -> common precomposed accented variants (NFC text). */
+const ACCENT_GROUPS: Record<string, string> = {
+  a: 'aàáâãäåāăą',
+  e: 'eèéêëēėę',
+  i: 'iìíîïīį',
+  o: 'oòóôõöøōő',
+  u: 'uùúûüūůű',
+  y: 'yýÿỳ',
+  n: 'nñń',
+  c: 'cçćč',
+  s: 'sśšş',
+  z: 'zźżž',
+  l: 'lł',
+  d: 'dđ',
+  g: 'gğ',
+  r: 'rř',
+  t: 'tť',
+};
+
+/** Match a normalized token against raw text that may still contain diacritics. */
+function tokenToAccentInsensitivePattern(token: string) {
+  return token
+    .split('')
+    .map((char) => {
+      const group = ACCENT_GROUPS[char];
+      if (group) return `[${group}${group.toUpperCase()}]`;
+      return escapeRegex(char);
+    })
+    .join('');
+}
+
 export function buildSearchHighlightPattern(search: string) {
   const tokens = searchTokens(search);
   if (!tokens.length) return null;
-  return new RegExp(`(${tokens.map(escapeRegex).join('|')})`, 'gi');
+  return new RegExp(`(${tokens.map(tokenToAccentInsensitivePattern).join('|')})`, 'gi');
 }
 
 export function countSearchMatchesInText(text: string, search: string) {
@@ -84,7 +115,7 @@ export function buildSearchHitStarts(notes: Note[], search: string) {
 export function isSearchHit(part: string, search: string) {
   const tokens = searchTokens(search);
   const normalized = normalizeSearch(part);
-  return tokens.some((token) => normalized === token);
+  return tokens.some((token) => normalized === token || normalized.includes(token));
 }
 
 export function splitForHighlight(text: string, search: string) {
