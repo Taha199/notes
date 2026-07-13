@@ -880,7 +880,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement) => {
-    insertNewListItemAfter(li);
+    const ed = editorRef.current;
+    if (!ed) return;
+    if (isNestedListItem(li)) returnToParentListItem(li);
+    else exitListItem(li, ed, true);
+    saveSel();
+    readCommandState();
+    emitHtml();
   };
 
   const isNestedListItem = (li: HTMLLIElement) => {
@@ -1224,6 +1230,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (caretList) {
       const isOrdered = caretList.tagName === 'OL';
       if (isOrdered === ordered) {
+        removeListFormatting();
         setListPalOpen(false);
         return;
       }
@@ -2633,6 +2640,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   useEffect(() => {
     if (!listPalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        listMenuRangeRef.current = null;
+        listMenuBlockRef.current = null;
+        setListPalOpen(false);
+      }
+    };
     const close = (e: MouseEvent) => {
       const t = e.target as Node;
       if (listWrapRef.current?.contains(t) || listPalRef.current?.contains(t)) return;
@@ -2646,9 +2660,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       setListPalOpen(false);
     };
     document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
     window.addEventListener('resize', closeAll);
     window.addEventListener('scroll', closeAll, true);
-    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('resize', closeAll); window.removeEventListener('scroll', closeAll, true); };
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', onKey); window.removeEventListener('resize', closeAll); window.removeEventListener('scroll', closeAll, true); };
   }, [listPalOpen]);
 
   useEffect(() => {
@@ -3076,6 +3091,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             <span className="w-4 text-center text-[10px] leading-none">↰</span>
             <span>{t.titleOutdentSubList}</span>
           </button>
+          {(activeCmds.has('insertUnorderedList') || activeCmds.has('insertOrderedList')) && (
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); applyList('none'); }}
+              className="flex w-full items-center gap-2 border-t border-app-border px-3 py-2 text-left text-[13px] text-red-600 hover:bg-red-50 dark:border-white/10 dark:text-red-400 dark:hover:bg-red-500/10"
+            >
+              <span className="w-4 text-center">✕</span>
+              <span>{t.titleRemoveList}</span>
+            </button>
+          )}
         </div>,
         document.body,
       )}
