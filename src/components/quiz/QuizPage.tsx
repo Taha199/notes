@@ -574,19 +574,10 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, restoreQuizFolder, recoverQuizFolders, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
-  const trashedUserFolders = useMemo(
-    () => allQuizFolders.filter((folder) => folder.trashed && !folder.system),
-    [allQuizFolders],
-  );
-  const orphanSetCount = useMemo(() => {
-    const folderIds = new Set(allQuizFolders.map((folder) => folder.id));
-    return allQuizSets.filter((set) => !set.trashed && set.folderId && !folderIds.has(set.folderId)).length;
-  }, [allQuizFolders, allQuizSets]);
-
   const savedSelection = useMemo(() => loadQuizSelection(), []);
   const [selectedSetId, setSelectedSetId] = useState<string | null>(() => savedSelection.setId);
   const selectedSetIdRef = useRef<string | null>(selectedSetId);
@@ -1367,36 +1358,6 @@ export function QuizPage({
             className="flex h-6 w-6 items-center justify-center rounded-lg text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
           >«</button>
         </div>
-
-        {(trashedUserFolders.length > 0 || orphanSetCount > 0) && (
-          <div className="mx-2 mb-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-            {trashedUserFolders.map((folder) => (
-              <div key={folder.id} className="flex items-center justify-between gap-2">
-                <span className="truncate">{t.quizFolderInTrash}: <strong>{folder.name}</strong></span>
-                <button
-                  onClick={() => { restoreQuizFolder(folder.id); show(`↩ ${folder.name} ${t.tRestored2.toLowerCase()}`); }}
-                  className="flex-shrink-0 rounded-lg bg-amber-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-amber-700"
-                >
-                  {t.titleRestore}
-                </button>
-              </div>
-            ))}
-            {orphanSetCount > 0 && (
-              <button
-                onClick={() => {
-                  void recoverQuizFolders().then((count) => {
-                    show(count > 0
-                      ? t.quizMissingFoldersRestored.replace('{n}', String(count))
-                      : t.quizNoMoreFoldersFound);
-                  });
-                }}
-                className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-[10px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-100"
-              >
-                {t.quizSearchMissingFolders}
-              </button>
-            )}
-          </div>
-        )}
 
         {/* Questions from Notes — full-width special row */}
         <button
