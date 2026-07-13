@@ -791,7 +791,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (isLiEmpty(li)) return true;
     const scratch = li.cloneNode(true) as HTMLLIElement;
     scratch.querySelectorAll('br, span:empty, b:empty, u:empty, i:empty, strong:empty, em:empty').forEach((el) => el.remove());
-    const text = (scratch.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
+    let text = (scratch.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
+    text = text.replace(BULLET_PREFIX_RE, '').trim();
     return !text && !li.querySelector('img');
   };
 
@@ -1125,6 +1126,53 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (afterPrefix) return false;
     stripPseudoBulletLine(block);
     return true;
+  };
+
+  const isEditorContentEmpty = (ed: HTMLElement) => {
+    const scratch = ed.cloneNode(true) as HTMLElement;
+    scratch.querySelectorAll('br').forEach((br) => br.remove());
+    let text = (scratch.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
+    text = text.replace(BULLET_PREFIX_RE, '').trim();
+    return !text && !ed.querySelector('img');
+  };
+
+  const hasStuckBullet = (range: Range, ed: HTMLElement) => {
+    const block = getLineBlock(range.startContainer, ed);
+    if (block && block.tagName !== 'LI' && !block.closest('li')) {
+      const match = getBlockPrefixMatch(block);
+      if (match) {
+        const afterPrefix = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim();
+        if (!afterPrefix) return true;
+      }
+    }
+    const li = resolveListItemAtSelection(range, ed);
+    if (li && isLiEffectivelyEmpty(li)) return true;
+    const list = li?.parentElement;
+    if (li && list && LIST_TAGS.has(list.tagName) && list.children.length === 1 && isEditorContentEmpty(ed)) {
+      return true;
+    }
+    return false;
+  };
+
+  const tryRemoveStuckBullet = (range: Range, ed: HTMLElement) => {
+    if (tryPseudoBulletBackspace(range, ed)) return true;
+
+    const li = resolveListItemAtSelection(range, ed);
+    if (li) {
+      if (isLiEffectivelyEmpty(li)) {
+        handleEmptyListItemBackspace(li, ed);
+        return true;
+      }
+      const list = li.parentElement;
+      if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1 && isEditorContentEmpty(ed)) {
+        unwrapList(list as HTMLUListElement | HTMLOListElement, true);
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return true;
+      }
+    }
+    return false;
   };
 
   const collectBlocksInRange = (ed: HTMLElement, range: Range): HTMLElement[] => {
@@ -1986,7 +2034,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!sel?.rangeCount) return false;
     const range = sel.getRangeAt(0);
 
-    if (tryPseudoBulletBackspace(range, ed)) {
+    if (tryRemoveStuckBullet(range, ed)) {
       e.preventDefault();
       return true;
     }
@@ -1994,15 +2042,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       const atStart = isCaretAtStartOfLi(li, range);
-      const effectivelyEmpty = isLiEffectivelyEmpty(li);
 
-      if (!sel.isCollapsed && effectivelyEmpty) {
-        e.preventDefault();
-        handleEmptyListItemBackspace(li, ed);
-        return true;
-      }
-
-      if (effectivelyEmpty) {
+      if (!sel.isCollapsed && isLiEffectivelyEmpty(li)) {
         e.preventDefault();
         handleEmptyListItemBackspace(li, ed);
         return true;
@@ -2122,6 +2163,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         if (isNestedListItem(li) || li.querySelector(':scope > ul, :scope > ol')) active.add('nestedList');
         if (canIndentListItem(li)) active.add('canIndentList');
         if (canOutdentListItem(li)) active.add('canOutdentList');
+      } else {
+        const block = getLineBlock(sel.anchorNode, ed);
+        if (block && block.tagName !== 'LI' && !block.closest('li') && getBlockPrefixMatch(block)) {
+          active.add('insertUnorderedList');
+        }
       }
       const align = readAlignmentAtCaret(ed);
       if (align === 'left') active.add('justifyLeft');
@@ -2176,7 +2222,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const onDocKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Backspace') {
         const ed = editorRef.current;
-        if (!ed || document.activeElement !== ed) return;
+        if (!ed || (document.activeElement !== ed && !ed.contains(document.activeElement))) return;
         if (runEditorBackspaceRef.current(e)) {
           e.stopImmediatePropagation();
         }
@@ -2184,7 +2230,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
       if (e.key !== 'Tab') return;
       const ed = editorRef.current;
-      if (!ed || document.activeElement !== ed) return;
+      if (!ed || (document.activeElement !== ed && !ed.contains(document.activeElement))) return;
       const sel = window.getSelection();
       if (sel?.rangeCount) {
         const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
@@ -2487,6 +2533,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const opening = !listPalOpen;
     if (opening) {
       const r = liveRange() ?? savedRange.current;
+      if (ed && r && hasStuckBullet(r, ed)) {
+        tryRemoveStuckBullet(r, ed);
+        return;
+      }
       listMenuRangeRef.current = r ? r.cloneRange() : null;
       listMenuBlockRef.current = r && ed ? resolveBlockAtRange(r, ed) : null;
       positionPalette(e.currentTarget as HTMLElement, setListPalPos);
@@ -2986,6 +3036,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               const ed = editorRef.current;
               if (ed && ensureCaretOnOwnLeftLine(ed)) finishNewLineEditing(ed);
             });
+          }
+        }}
+        onBeforeInput={(e) => {
+          const inputType = (e.nativeEvent as InputEvent).inputType;
+          if (inputType !== 'deleteContentBackward') return;
+          if (runEditorBackspace({
+            key: 'Backspace',
+            preventDefault: () => e.preventDefault(),
+            nativeEvent: { isComposing: (e.nativeEvent as InputEvent).isComposing },
+          })) {
+            e.preventDefault();
           }
         }}
         onInput={() => {
