@@ -335,6 +335,7 @@ export function Dashboard() {
                 searchHitStarts={searchHitMeta.starts}
                 activeSearchHitIndex={activeSearchHit}
                 emptyText={t.emptySearch}
+                noteViewMode={noteViewMode}
                 onOpenNote={handleOpenNoteFromSearch}
                 onOpenQuiz={handleOpenQuizFromSearch}
               />

@@ -1,7 +1,7 @@
-import type { Page } from '../../types';
+import type { NoteViewMode, Page } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { HighlightedText } from '../common/HighlightedText';
-import { NoteSearchContentDisplay } from '../notes/NoteSearchContentDisplay';
+import { NoteCard } from '../notes/NoteCard';
 import { QuizItemQaDisplay } from '../quiz/QuizItemQaDisplay';
 import type { GlobalSearchResult } from '../../lib/globalSearch';
 
@@ -35,6 +35,7 @@ export function GlobalSearchResults({
   searchHitStarts,
   activeSearchHitIndex,
   emptyText,
+  noteViewMode = 'expanded',
   onOpenNote,
   onOpenQuiz,
 }: {
@@ -43,6 +44,7 @@ export function GlobalSearchResults({
   searchHitStarts: Record<string, number>;
   activeSearchHitIndex: number | null;
   emptyText: string;
+  noteViewMode?: NoteViewMode;
   onOpenNote: (noteId: number, page: Page) => void;
   onOpenQuiz: (itemId: number) => void;
 }) {
@@ -59,33 +61,20 @@ export function GlobalSearchResults({
 
         if (result.type === 'note' && result.note) {
           return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onOpenNote(result.note!.id, result.targetPage ?? 'home')}
-              className={
-                'animate-slide-up flex w-full flex-col gap-2 rounded-2xl border bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:bg-gray-800/60 ' +
-                (result.isFavorite
-                  ? 'border-amber-300 dark:border-amber-500/40'
-                  : 'border-app-border dark:border-white/10')
-              }
-            >
-              <div className="flex flex-wrap items-center gap-2">
+            <div key={key} className="animate-slide-up flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2 px-1">
                 <CategoryBadge label={result.categoryLabel} favorite={result.isFavorite} />
                 <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">📝 {t.searchResultNote}</span>
               </div>
-              {result.title && (
-                <p className="text-sm font-semibold text-app-text dark:text-gray-100">
-                  <HighlightedText text={result.title} search={search} counter={counter} activeHitIndex={activeSearchHitIndex} />
-                </p>
-              )}
-              <NoteSearchContentDisplay
+              <NoteCard
                 note={result.note}
                 search={search}
-                hitCounter={counter}
+                searchHitStart={hitStart}
                 activeSearchHitIndex={activeSearchHitIndex}
+                onOpen={(id) => onOpenNote(id, result.targetPage ?? 'home')}
+                viewMode={noteViewMode}
               />
-            </button>
+            </div>
           );
         }
 
