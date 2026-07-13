@@ -35,6 +35,18 @@ export interface Translation {
   searchNoHits: string;
   searchHitPrevious: string;
   searchHitNext: string;
+  searchResultsTitle: string;
+  searchResultNote: string;
+  searchResultQuiz: string;
+  searchCategoryFavorites: string;
+  searchCategoryUnread: string;
+  searchCategoryRead: string;
+  searchCategoryArchive: string;
+  searchCategoryLibrary: string;
+  searchCategoryTrash: string;
+  searchCategoryQuiz: string;
+  searchCategoryQuizFavorites: string;
+  searchCategoryQuizSet: string;
   newNote: string;
   locked: string;
   editing: string;
@@ -535,7 +547,12 @@ export const LANGS: Record<Lang, Translation> = {
     downloadBuildTitle: 'Build from source', downloadBuildDesc: 'Developers can build the Mac app from the project repository:',
     downloadBuildOutput: 'Output: release/mac/Taha Note.app and release/Taha Note-1.0.0-arm64.dmg',
     downloadAlreadyTitle: 'You\'re using the desktop app', downloadAlreadyDesc: 'This window is already the Taha Note Mac app.',
-    searchPh: 'Search...', clearSearch: 'Clear search', searchHitsLabel: '{current}/{total}', searchNoHits: '0 hits', searchHitPrevious: 'Previous hit', searchHitNext: 'Next hit', newNote: 'New Note', locked: 'Locked', editing: 'Editing',
+    searchPh: 'Search...', clearSearch: 'Clear search', searchHitsLabel: '{current}/{total}', searchNoHits: '0 hits', searchHitPrevious: 'Previous hit', searchHitNext: 'Next hit',
+    searchResultsTitle: 'Search results', searchResultNote: 'Note', searchResultQuiz: 'Quiz',
+    searchCategoryFavorites: 'Favourites', searchCategoryUnread: 'Notes to Study', searchCategoryRead: 'Studied Notes',
+    searchCategoryArchive: 'Archive', searchCategoryLibrary: 'Notes Library', searchCategoryTrash: 'Trash',
+    searchCategoryQuiz: 'Quiz', searchCategoryQuizFavorites: 'Quiz · Favourites', searchCategoryQuizSet: 'Quiz · {name}',
+    newNote: 'New Note', locked: 'Locked', editing: 'Editing',
     mDel: 'Delete', mUnarch: 'Unarchive', mDone: 'Mark as Studied', mUndone: 'Mark as Unstudied', mArchive: 'Archive', mSave: 'Save', mCopy: 'Copy', mGenQuiz: 'Generate Quiz', mAddQ: 'Add Question', mTiPh: 'Title (optional)',
     archPill: 'Read & Archived', userName: 'User', userSub: 'My Personal Notes',
     draft: 'Draft', draftTiPh: 'Title (optional)', draftEdPh: 'Write your note here...', saveDraft: 'Save Note',
@@ -890,7 +907,12 @@ export const LANGS: Record<Lang, Translation> = {
     downloadBuildTitle: 'Bygg från källkod', downloadBuildDesc: 'Utvecklare kan bygga Mac-appen från projektets källkod:',
     downloadBuildOutput: 'Resultat: release/mac/Taha Note.app och release/Taha Note-1.0.0-arm64.dmg',
     downloadAlreadyTitle: 'Du använder skrivbordsappen', downloadAlreadyDesc: 'Det här fönstret är redan Taha Note Mac-appen.',
-    searchPh: 'Sök...', clearSearch: 'Töm sökning', searchHitsLabel: '{current}/{total}', searchNoHits: '0 träffar', searchHitPrevious: 'Föregående träff', searchHitNext: 'Nästa träff', newNote: 'Ny Anteckning', locked: 'Låst', editing: 'Redigerar',
+    searchPh: 'Sök...', clearSearch: 'Töm sökning', searchHitsLabel: '{current}/{total}', searchNoHits: '0 träffar', searchHitPrevious: 'Föregående träff', searchHitNext: 'Nästa träff',
+    searchResultsTitle: 'Sökresultat', searchResultNote: 'Anteckning', searchResultQuiz: 'Quiz',
+    searchCategoryFavorites: 'Favoriter', searchCategoryUnread: 'Att studera', searchCategoryRead: 'Studerade',
+    searchCategoryArchive: 'Arkiv', searchCategoryLibrary: 'Anteckningsbibliotek', searchCategoryTrash: 'Papperskorg',
+    searchCategoryQuiz: 'Quiz', searchCategoryQuizFavorites: 'Quiz · Favoriter', searchCategoryQuizSet: 'Quiz · {name}',
+    newNote: 'Ny Anteckning', locked: 'Låst', editing: 'Redigerar',
     mDel: 'Radera', mUnarch: 'Avarkivera', mDone: 'Markera som Studerad', mUndone: 'Markera som Ostuderad', mArchive: 'Arkivera', mSave: 'Spara', mCopy: 'Kopiera', mGenQuiz: 'Generera Quiz', mAddQ: 'Lägg till fråga', mTiPh: 'Titel (valfri)',
     archPill: 'Läst & Arkiverad', userName: 'Användare', userSub: 'Mina Personliga Anteckningar',
     draft: 'Utkast', draftTiPh: 'Titel (valfri)', draftEdPh: 'Skriv din anteckning här...', saveDraft: 'Spara Anteckning',

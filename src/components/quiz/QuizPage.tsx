@@ -122,7 +122,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
       : 'border-l-4 border-l-amber-400';
   const studyMore = status !== 'known';
   return (
-    <div className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
+    <div id={`quiz-item-${item.id}`} className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
       <div className={'grid grid-cols-1 ' + (questionNumber ? 'sm:grid-cols-[52px_minmax(0,0.8fr)_minmax(0,1.2fr)_44px]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_44px]')}>
         {questionNumber != null && (
           <div className="flex flex-row items-center justify-center gap-1.5 border-b border-app-border px-1.5 py-3 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
@@ -562,7 +562,13 @@ function getSetColors(t: ReturnType<typeof useLanguage>['t']) {
   ];
 }
 
-export function QuizPage() {
+export function QuizPage({
+  focusItemId = null,
+  onFocusHandled,
+}: {
+  focusItemId?: number | null;
+  onFocusHandled?: () => void;
+}) {
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
@@ -794,6 +800,36 @@ export function QuizPage() {
       flushAllOpenForms();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!loaded || focusItemId == null) return;
+
+    const orphan = quizzes.find((q) => q.id === focusItemId && !q.trashed);
+    if (orphan) {
+      setSelectedFolderId(null);
+      setSelectedSetId(null);
+    } else {
+      let foundSet: QuizSet | undefined;
+      for (const set of allQuizSets) {
+        if (set.trashed) continue;
+        if (set.items?.some((i) => i.id === focusItemId && !i.trashed)) {
+          foundSet = set;
+          break;
+        }
+      }
+      if (foundSet) {
+        setSelectedFolderId(foundSet.folderId ?? null);
+        setSelectedSetId(foundSet.id);
+      }
+    }
+
+    const scrollTimer = window.setTimeout(() => {
+      document.getElementById(`quiz-item-${focusItemId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      onFocusHandled?.();
+    }, 120);
+
+    return () => window.clearTimeout(scrollTimer);
+  }, [focusItemId, loaded, allQuizSets, quizzes, onFocusHandled]);
 
   useEffect(() => {
     saveQuizSelection(selectedFolderId, selectedSetId);

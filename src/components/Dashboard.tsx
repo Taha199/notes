@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Page, Note, NoteViewMode } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useNotes } from '../contexts/NotesContext';
+import { useNotes, FAVORITES_SET_ID } from '../contexts/NotesContext';
 import { useToast } from '../contexts/ToastContext';
 import { pageFromPath, pathFromPage } from '../lib/pageRoute';
 import { sortNotesByCreatedDesc } from '../lib/noteSort';
@@ -19,7 +19,9 @@ import { SettingsPage } from './settings/SettingsPage';
 import { DownloadPage } from './download/DownloadPage';
 import { AdminPanel } from './admin/AdminPanel';
 import { ConfirmDialog } from './common/ConfirmDialog';
-import { filterNotesBySearch, normalizeSearch, noteMatchesSearch, buildSearchHitStarts, nextSearchHitIndex } from '../lib/noteSearch';
+import { filterNotesBySearch, normalizeSearch, noteMatchesSearch, nextSearchHitIndex } from '../lib/noteSearch';
+import { buildGlobalSearchResults, buildGlobalSearchHitStarts } from '../lib/globalSearch';
+import { GlobalSearchResults } from './search/GlobalSearchResults';
 
 function EmptyState({ text, hint }: { text: string; hint?: string }) {
   return (
@@ -166,7 +168,7 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
 
 export function Dashboard() {
   const { t, lang } = useLanguage();
-  const { notes, drafts, trashedQuizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
+  const { notes, drafts, trashedQuizzes, quizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
   const { show } = useToast();
   const [page, setPageState] = useState<Page>(() => pageFromPath(window.location.pathname));
   const setPage = useCallback((next: Page) => {
@@ -190,7 +192,9 @@ export function Dashboard() {
   const [confirmDelSel, setConfirmDelSel] = useState(false);
   const [confirmQuizTrash, setConfirmQuizTrash] = useState<{ type: 'set' | 'folder' | 'question'; id: string | number } | null>(null);
   const [noteViewMode, setNoteViewMode] = useState<NoteViewMode>(() => readNoteViewMode());
+  const [quizFocusItemId, setQuizFocusItemId] = useState<number | null>(null);
   const hasSearch = normalizeSearch(search).length > 0;
+  const showGlobalSearch = hasSearch && page !== 'files' && page !== 'settings' && page !== 'admin';
 
   const handleNoteViewMode = useCallback((mode: NoteViewMode) => {
     setNoteViewMode(mode);
@@ -208,7 +212,6 @@ export function Dashboard() {
   }, []);
 
   const active = useMemo(() => notes.filter((n) => !n.archived && !n.trashed), [notes]);
-  const nonTrashedNotes = useMemo(() => notes.filter((n) => !n.trashed), [notes]);
   const unread = useMemo(() => active.filter((n) => !n.read), [active]);
   const fav = useMemo(() => active.filter((n) => n.fav), [active]);
   const favArch = useMemo(() => notes.filter((n) => n.fav && n.archived && !n.trashed), [notes]);
@@ -216,21 +219,17 @@ export function Dashboard() {
   const read = useMemo(() => notes.filter((n) => n.read && !n.archived && !n.trashed), [notes]);
   const archived = useMemo(() => notes.filter((n) => n.archived && !n.trashed), [notes]);
   const trashed = useMemo(() => notes.filter((n) => n.trashed), [notes]);
-  const searchScopeNotes = useMemo(() => {
-    if (!hasSearch) return [] as Note[];
-    const source = page === 'home' || page === 'library' ? nonTrashedNotes
-      : page === 'unread' ? unread
-        : page === 'read' ? read
-          : page === 'archive' ? archived
-            : page === 'fav' ? allFav
-              : page === 'trash' ? trashed
-                : active;
-    return sortNotesByCreatedDesc(filterNotesBySearch(source, search));
-  }, [active, allFav, archived, hasSearch, nonTrashedNotes, page, read, search, trashed, unread]);
-
+  const favQuizIds = useMemo(() => {
+    const favItems = quizSets.find((s) => s.id === FAVORITES_SET_ID)?.items ?? [];
+    return new Set(favItems.map((i) => i.favOf).filter((x): x is number => x != null));
+  }, [quizSets]);
+  const globalSearchResults = useMemo(
+    () => (showGlobalSearch ? buildGlobalSearchResults(notes, quizzes, quizSets, search, t, favQuizIds) : []),
+    [showGlobalSearch, notes, quizzes, quizSets, search, t, favQuizIds],
+  );
   const searchHitMeta = useMemo(
-    () => buildSearchHitStarts(searchScopeNotes, search),
-    [searchScopeNotes, search],
+    () => (showGlobalSearch ? buildGlobalSearchHitStarts(globalSearchResults, search) : { starts: {}, total: 0 }),
+    [showGlobalSearch, globalSearchResults, search],
   );
 
   useEffect(() => {
@@ -254,9 +253,15 @@ export function Dashboard() {
     setActiveSearchHit((current) => nextSearchHitIndex(current, searchHitMeta.total, direction));
   }, [searchHitMeta.total]);
 
-  const noteListSearchProps = hasSearch
-    ? { searchHitStarts: searchHitMeta.starts, activeSearchHitIndex: activeSearchHit }
-    : {};
+  const handleOpenNoteFromSearch = useCallback((noteId: number, targetPage: Page) => {
+    setPage(targetPage);
+    setOpenNoteId(noteId);
+  }, [setPage]);
+
+  const handleOpenQuizFromSearch = useCallback((itemId: number) => {
+    setPage('quiz');
+    setQuizFocusItemId(itemId);
+  }, [setPage]);
 
   const trashedQuizQuestions = trashedQuizzes;
   const trashedQuizSets = useMemo(() => quizSets.filter((set) => set.trashed), [quizSets]);
@@ -272,14 +277,16 @@ export function Dashboard() {
     ? { notes: 'Anteckningar', sets: 'Sets', folders: 'Mappar', questions: 'Frågor', restore: 'Återställ', delete: 'Radera permanent', questionsUnit: 'frågor', folderSets: 'sets', created: 'Skapad', deletedAt: 'Raderad', deleted: 'Radera permanent?', empty: 'Papperskorgen är tom', emptyConfirm: 'Radera allt i papperskorgen permanent?' }
     : { notes: 'Notes', sets: 'Sets', folders: 'Folders', questions: 'Questions', restore: 'Restore', delete: 'Delete permanently', questionsUnit: 'questions', folderSets: 'sets', created: 'Created', deletedAt: 'Deleted', deleted: 'Delete permanently?', empty: 'Trash is empty', emptyConfirm: 'Permanently delete everything in trash?' };
   const navigableNotes = useMemo(() => {
+    if (showGlobalSearch) {
+      return globalSearchResults.filter((r) => r.type === 'note' && r.note).map((r) => r.note!);
+    }
     const source = page === 'unread' ? unread
       : page === 'read' ? read
         : page === 'archive' ? archived
           : page === 'fav' ? allFav
-            : (page === 'home' || page === 'library') && hasSearch ? nonTrashedNotes
-              : active;
+            : active;
     return sortNotesByCreatedDesc(hasSearch ? filterNotesBySearch(source, search) : source);
-  }, [active, allFav, archived, fav, favArch, hasSearch, nonTrashedNotes, page, read, search, unread]);
+  }, [active, allFav, archived, globalSearchResults, hasSearch, page, read, search, showGlobalSearch, unread]);
   const openNoteIndex = openNoteId === null ? -1 : navigableNotes.findIndex((note) => note.id === openNoteId);
   const previousNoteId = openNoteIndex > 0 ? navigableNotes[openNoteIndex - 1]?.id : undefined;
   const nextNoteId = openNoteIndex >= 0 && openNoteIndex < navigableNotes.length - 1 ? navigableNotes[openNoteIndex + 1]?.id : undefined;
@@ -317,14 +324,24 @@ export function Dashboard() {
         />
 
         <div className="flex-1 overflow-y-auto">
-          {page === 'home' && hasSearch && (
+          {showGlobalSearch && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              <NoteSectionBar label={`🔎 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={nonTrashedNotes} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <div className="mb-3 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
+                🔎 {t.searchResultsTitle} · {globalSearchResults.length}
+              </div>
+              <GlobalSearchResults
+                results={globalSearchResults}
+                search={search}
+                searchHitStarts={searchHitMeta.starts}
+                activeSearchHitIndex={activeSearchHit}
+                emptyText={t.emptySearch}
+                onOpenNote={handleOpenNoteFromSearch}
+                onOpenQuiz={handleOpenQuizFromSearch}
+              />
             </div>
           )}
 
-          {page === 'home' && !hasSearch && (
+          {!showGlobalSearch && page === 'home' && (
             <div className="flex min-h-full flex-col gap-3.5 bg-app-bg p-3 dark:bg-white/5 sm:p-5">
               {active.length > 0 && (
                 <div className="rounded-xl border border-blue-200/80 bg-blue-50/80 px-4 py-3 text-[13px] leading-relaxed text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
@@ -347,77 +364,71 @@ export function Dashboard() {
             </div>
           )}
 
-          {page === 'library' && (
+          {!showGlobalSearch && page === 'library' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              {!hasSearch && (
-                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  {[
-                    { n: active.length, l: t.statActive, c: 'text-primary' },
-                    { n: unread.length, l: t.statUnread, c: 'text-blue-600' },
-                    { n: fav.length, l: t.statFav, c: 'text-amber-600' },
-                  ].map((s, i) => (
-                    <div key={i} className="rounded-2xl border border-app-border bg-white p-4 text-center shadow-sm dark:border-white/10 dark:bg-white/5">
-                      <div className={'text-2xl font-bold ' + s.c}>{s.n}</div>
-                      <div className="mt-1 text-[11.5px] font-medium text-app-text-secondary dark:text-gray-400">{s.l}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <NoteSectionBar label={`🔎 ${hasSearch ? t.secAll : `📚 ${t.secAll}`}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={hasSearch ? nonTrashedNotes : active} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {[
+                  { n: active.length, l: t.statActive, c: 'text-primary' },
+                  { n: unread.length, l: t.statUnread, c: 'text-blue-600' },
+                  { n: fav.length, l: t.statFav, c: 'text-amber-600' },
+                ].map((s, i) => (
+                  <div key={i} className="rounded-2xl border border-app-border bg-white p-4 text-center shadow-sm dark:border-white/10 dark:bg-white/5">
+                    <div className={'text-2xl font-bold ' + s.c}>{s.n}</div>
+                    <div className="mt-1 text-[11.5px] font-medium text-app-text-secondary dark:text-gray-400">{s.l}</div>
+                  </div>
+                ))}
+              </div>
+              <NoteSectionBar label={`📚 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
+              <NoteList notes={active} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
-          {page === 'files' && <FilesPage search={search} />}
-          {page === 'quiz' && <QuizPage />}
-          {page === 'download' && <DownloadPage />}
-          {page === 'settings' && <SettingsPage />}
-          {page === 'admin' && <AdminPanel />}
+          {!showGlobalSearch && page === 'files' && <FilesPage search={search} />}
+          {!showGlobalSearch && page === 'quiz' && (
+            <QuizPage
+              focusItemId={quizFocusItemId}
+              onFocusHandled={() => setQuizFocusItemId(null)}
+            />
+          )}
+          {!showGlobalSearch && page === 'download' && <DownloadPage />}
+          {!showGlobalSearch && page === 'settings' && <SettingsPage />}
+          {!showGlobalSearch && page === 'admin' && <AdminPanel />}
 
-          {page === 'unread' && (
+          {!showGlobalSearch && page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`📖 ${t.secUnread}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={unread} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={unread} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
-          {page === 'read' && (
+          {!showGlobalSearch && page === 'read' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`✓ ${t.secRead}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={read} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={read} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
-          {page === 'archive' && (
+          {!showGlobalSearch && page === 'archive' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`🗄 ${t.secArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              <NoteList notes={archived} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              <NoteList notes={archived} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
-          {page === 'fav' && (
+          {!showGlobalSearch && page === 'fav' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
-              {hasSearch ? (
+              <NoteSectionBar label={`★ ${t.secFav}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
+              <NoteList notes={fav} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              {favArch.length > 0 && (
                 <>
-                  <NoteSectionBar label={`🔎 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-                  <NoteList notes={allFav} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-                </>
-              ) : (
-                <>
-                  <NoteSectionBar label={`★ ${t.secFav}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-                  <NoteList notes={fav} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-                  {favArch.length > 0 && (
-                    <>
-                      <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} showViewToggle={false} />
-                      <NoteList notes={favArch} search={search} {...noteListSearchProps} emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-                    </>
-                  )}
+                  <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} showViewToggle={false} />
+                  <NoteList notes={favArch} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
                 </>
               )}
             </div>
           )}
 
-          {page === 'trash' && (
+          {!showGlobalSearch && page === 'trash' && (
             <>
               <div className="flex flex-col items-stretch justify-between gap-2 border-b border-app-border bg-white px-3 py-3 dark:border-white/10 dark:bg-gray-900 sm:flex-row sm:items-center sm:px-5">
                 <div className="flex items-center gap-2">
@@ -546,7 +557,7 @@ export function Dashboard() {
                 )}
 
                 {visibleTrashedNotes.length === 0 && trashedQuizQuestions.length === 0 && visibleTrashedSets.length === 0 && visibleTrashedFolders.length === 0 && (
-                  <EmptyState text={hasSearch ? t.emptySearch : trashCopy.empty} />
+                  <EmptyState text={trashCopy.empty} />
                 )}
               </div>
             </>
