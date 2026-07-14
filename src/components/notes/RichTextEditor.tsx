@@ -1566,6 +1566,121 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     });
   };
 
+  const LIST_PASTE_INDENT_PROPS = [
+    'margin-left',
+    'padding-left',
+    'text-indent',
+    'margin-inline-start',
+    'padding-inline-start',
+  ] as const;
+
+  const blockFollowsList = (block: HTMLElement) => {
+    let prev = block.previousElementSibling;
+    while (prev) {
+      if (LIST_TAGS.has(prev.tagName)) return true;
+      if (BLOCK_TAGS.has(prev.tagName) || prev.tagName === 'HR') return false;
+      prev = prev.previousElementSibling;
+    }
+    return false;
+  };
+
+  const stripLeadingIndentChars = (block: HTMLElement) => {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    const first = walker.nextNode();
+    if (!first || first.nodeType !== Node.TEXT_NODE) return false;
+    const text = first.textContent ?? '';
+    const stripped = text.replace(/^[\s\u00a0\u2002\u2003]+/, '');
+    if (stripped === text) return false;
+    first.textContent = stripped;
+    return true;
+  };
+
+  const stripListPasteIndent = (block: HTMLElement, afterList = false): boolean => {
+    if (block.closest('li, ul, ol')) return false;
+    let changed = false;
+    for (const prop of LIST_PASTE_INDENT_PROPS) {
+      if (block.style.getPropertyValue(prop)) {
+        block.style.removeProperty(prop);
+        changed = true;
+      }
+    }
+    if (block.style.listStyleType || block.style.display === 'list-item') {
+      block.style.removeProperty('list-style-type');
+      block.style.removeProperty('display');
+      changed = true;
+    }
+    if ([...block.classList].some((cls) => /mso/i.test(cls))) {
+      block.className = block.className.replace(/\bMso\S+/g, '').trim();
+      changed = true;
+    }
+    if (!block.getAttribute('class')) block.removeAttribute('class');
+    if (!block.getAttribute('style')?.trim()) block.removeAttribute('style');
+    if (afterList && stripLeadingIndentChars(block)) changed = true;
+    return changed;
+  };
+
+  const unwrapTrailingContentFromLastListItem = (ed: HTMLElement) => {
+    ed.querySelectorAll('ul, ol').forEach((list) => {
+      const lastLi = list.querySelector(':scope > li:last-child');
+      if (!(lastLi instanceof HTMLLIElement)) return;
+      let splitNode: ChildNode | null = null;
+      for (const child of [...lastLi.childNodes]) {
+        if (child instanceof HTMLElement && (child.tagName === 'HR' || (BLOCK_TAGS.has(child.tagName) && child !== lastLi.firstElementChild))) {
+          splitNode = child;
+          break;
+        }
+      }
+      if (!splitNode) return;
+      const parent = list.parentNode;
+      if (!parent) return;
+      const moved: ChildNode[] = [];
+      let node: ChildNode | null = splitNode;
+      while (node) {
+        const next: ChildNode | null = node.nextSibling;
+        moved.push(node);
+        node = next;
+      }
+      const fragment = document.createDocumentFragment();
+      moved.forEach((node) => {
+        if (node instanceof HTMLElement && BLOCK_TAGS.has(node.tagName)) {
+          stripListPasteIndent(node, true);
+          fragment.appendChild(node);
+          return;
+        }
+        if (node instanceof HTMLElement && node.tagName === 'HR') {
+          fragment.appendChild(node);
+          return;
+        }
+        const div = document.createElement('div');
+        div.setAttribute('dir', 'auto');
+        div.appendChild(node);
+        stripListPasteIndent(div, true);
+        fragment.appendChild(div);
+      });
+      parent.insertBefore(fragment, list.nextSibling);
+      if (isLiEmpty(lastLi)) {
+        lastLi.remove();
+        if (!list.children.length) list.remove();
+      }
+    });
+  };
+
+  const normalizePastedBlocks = (ed: HTMLElement) => {
+    unwrapTrailingContentFromLastListItem(ed);
+    ed.querySelectorAll<HTMLElement>('div, p').forEach((block) => {
+      if (block.closest('li, ul, ol')) return;
+      stripListPasteIndent(block, blockFollowsList(block));
+    });
+  };
+
+  const ensureLeftMarginAfterList = (block: HTMLElement) => {
+    if (block.closest('li, ul, ol')) return false;
+    if (!blockFollowsList(block) && !LIST_PASTE_INDENT_PROPS.some((prop) => block.style.getPropertyValue(prop))) {
+      return false;
+    }
+    return stripListPasteIndent(block, blockFollowsList(block));
+  };
+
   const normalizeCenterElement = (center: HTMLElement, ed: HTMLElement): HTMLDivElement => {
     const parent = center.parentElement ?? ed;
     const replacement = document.createElement('div');
@@ -1894,6 +2009,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const block = getLineBlock(range.startContainer, ed);
     if (!block) return false;
 
+    if (ensureLeftMarginAfterList(block)) {
+      placeCaretInBlock(block, true);
+      return true;
+    }
+
     const align = readBlockAlignment(block);
     const blockText = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
     const prev = block.previousElementSibling;
@@ -2012,6 +2132,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     clearPendingFontMarker();
 
+    if (block && ensureLeftMarginAfterList(block)) {
+      placeCaretInBlock(block, true);
+      finishNewLineEditing(ed);
+      return;
+    }
+
     if (block && readBlockAlignment(block) !== 'left') {
       createLeftLineFromCaret(block, range);
       finishNewLineEditing(ed);
@@ -2039,6 +2165,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return true;
     }
 
+    const block = getLineBlock(range.startContainer, ed);
+    if (block && block.tagName !== 'LI' && !block.closest('li') && isCaretAtStartOfBlock(block, range)) {
+      if (ensureLeftMarginAfterList(block)) {
+        e.preventDefault();
+        placeCaretInBlock(block, true);
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return true;
+      }
+    }
+
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       const atStart = isCaretAtStartOfLi(li, range);
@@ -2061,7 +2199,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return false;
     }
 
-    const block = getLineBlock(range.startContainer, ed);
     if (block && block.tagName !== 'LI' && !block.closest('li') && isCaretAtStartOfBlock(block, range) && getBlockPrefixMatch(block)) {
       e.preventDefault();
       stripBulletPrefixFromBlock(block);
@@ -3117,6 +3254,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           requestAnimationFrame(() => {
             const live = editorRef.current;
             if (!live) return;
+            normalizePastedBlocks(live);
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             const ytChanged = normalizeYouTubeEmbeds(live);
             const linkChanged = normalizeAutoLinks(live);
