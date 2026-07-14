@@ -61,6 +61,8 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
   const hitCounter: SearchHitCounter = { value: searchHitStart };
   const previewHtml = note.html || `<p>${bodyText}</p>`;
   const bodyPreview = hasSearch ? bodyText : bodyText.slice(0, 220);
+  const favSearchHit =
+    ' [&_.note-search-hit]:!rounded-sm [&_.note-search-hit]:!bg-orange-500 [&_.note-search-hit]:!px-0.5 [&_.note-search-hit]:!font-semibold [&_.note-search-hit]:!text-white [&_.note-search-hit]:shadow-sm dark:[&_.note-search-hit]:!bg-orange-400 dark:[&_.note-search-hit]:!text-white [&_.note-search-hit--active]:!bg-orange-600 [&_.note-search-hit--active]:!text-white [&_.note-search-hit--active]:!shadow-md dark:[&_.note-search-hit--active]:!bg-orange-300 dark:[&_.note-search-hit--active]:!text-gray-900';
 
   return (
     <div
@@ -71,6 +73,7 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
         (note.fav && !isTrash
           ? 'border-amber-300 bg-gradient-to-br from-amber-50 to-white dark:border-amber-500/40 dark:from-amber-500/10'
           : 'border-app-border dark:border-white/10') +
+        (note.fav && !isTrash && hasSearch ? favSearchHit : '') +
         (selected ? ' ring-2 ring-primary border-primary' : '')
       }
     >

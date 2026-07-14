@@ -136,13 +136,16 @@ export function highlightHtmlContent(
 ) {
   const pattern = buildSearchHighlightPattern(search);
   if (!pattern) return html;
-  return html.replace(/>([^<]+)</g, (_match, text: string) => {
-    const highlighted = text.replace(pattern, (match: string) => {
+
+  const highlightText = (text: string) =>
+    text.replace(pattern, (match: string) => {
       const hitIndex = counter.value++;
       return `<mark class="${markClass(activeHitIndex, hitIndex)}" data-search-hit="${hitIndex}">${match}</mark>`;
     });
-    return `>${highlighted}<`;
-  });
+
+  if (!/<[a-z][\s\S]*>/i.test(html)) return highlightText(html);
+
+  return html.replace(/>([^<]+)</g, (_match, text: string) => `>${highlightText(text)}<`);
 }
 
 export function nextSearchHitIndex(current: number, total: number, direction: 1 | -1) {
