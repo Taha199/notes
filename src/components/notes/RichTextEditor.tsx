@@ -1667,7 +1667,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const normalizePastedBlocks = (ed: HTMLElement) => {
     unwrapTrailingContentFromLastListItem(ed);
-    ed.querySelectorAll<HTMLElement>('div, p').forEach((block) => {
+    ed.querySelectorAll<HTMLElement>('div, p, li, ul, ol').forEach((block) => {
+      if (block.tagName === 'UL' || block.tagName === 'OL') return;
+      if (block.style.textAlign === 'right' || block.style.textAlign === 'end' || block.style.textAlign === 'center') {
+        block.style.removeProperty('text-align');
+      }
+      block.removeAttribute('align');
       if (block.closest('li, ul, ol')) return;
       stripListPasteIndent(block, blockFollowsList(block));
     });
@@ -1813,6 +1818,56 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     ed.focus({ preventScroll: true });
     saveSel();
     emitHtml();
+  };
+
+  const editorTopBlock = (ed: HTMLElement, el: HTMLElement): HTMLElement | null => {
+    let node: HTMLElement | null = el;
+    while (node.parentElement && node.parentElement !== ed) {
+      node = node.parentElement;
+    }
+    return node?.parentElement === ed ? node : null;
+  };
+
+  const isSkippableLeadingBlock = (el: Element | null) =>
+    el instanceof HTMLElement && BLOCK_TAGS.has(el.tagName) && isEmptyTextLine(el);
+
+  const canInsertLineAboveAtCaret = (ed: HTMLElement, range: Range): HTMLElement | null => {
+    const li = resolveListItemAtSelection(range, ed);
+    if (li) {
+      if (!isCaretAtStartOfLi(li, range)) return null;
+      if (li !== li.parentElement?.firstElementChild) return null;
+      const list = li.parentElement;
+      if (!list || !LIST_TAGS.has(list.tagName)) return null;
+      const top = editorTopBlock(ed, list);
+      if (!top) return null;
+      let prev = top.previousElementSibling;
+      while (isSkippableLeadingBlock(prev)) prev = prev?.previousElementSibling ?? null;
+      if (prev) return null;
+      return top;
+    }
+
+    const block = getLineBlock(range.startContainer, ed);
+    if (!block || block.closest('li')) return null;
+    if (!isCaretAtStartOfBlock(block, range)) return null;
+    const top = editorTopBlock(ed, block);
+    if (!top) return null;
+    let prev = top.previousElementSibling;
+    while (isSkippableLeadingBlock(prev)) prev = prev?.previousElementSibling ?? null;
+    if (prev) return null;
+    return top;
+  };
+
+  const handleEditorArrowUp = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowUp' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || !sel.isCollapsed) return;
+    const target = canInsertLineAboveAtCaret(ed, sel.getRangeAt(0));
+    if (!target) return;
+    e.preventDefault();
+    insertEmptyLineAboveBlock(ed, target);
+    finishNewLineEditing(ed);
   };
 
   const applyBlockAlignment = (align: BlockAlign) => {
@@ -3168,6 +3223,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
           handleEditorBackspace(e);
           handleEditorEnter(e);
+          handleEditorArrowUp(e);
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             requestAnimationFrame(() => {
               const ed = editorRef.current;
