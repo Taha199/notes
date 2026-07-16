@@ -1010,14 +1010,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     insertParagraphAtMargin(parent, before);
   };
 
-  /** Exit on Enter/Backspace only for a trailing empty bullet after another list item. */
-  const isTrailingEmptyListItem = (li: HTMLLIElement) =>
-    isLastListItem(li) && li.previousElementSibling instanceof HTMLLIElement;
+  /** Exit only when an empty last bullet immediately follows an item with content. */
+  const shouldExitListAfterEmptyItem = (li: HTMLLIElement) => {
+    const prevLi = li.previousElementSibling;
+    if (!isLastListItem(li) || !(prevLi instanceof HTMLLIElement)) return false;
+    return !isLiEffectivelyEmpty(prevLi);
+  };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
     const ed = editorRef.current;
     if (!ed) return false;
-    if (isTrailingEmptyListItem(li)) {
+    if (shouldExitListAfterEmptyItem(li)) {
       exitListAfterLastItem(li);
       saveSel();
       readCommandState();
@@ -1036,7 +1039,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
-    if (isTrailingEmptyListItem(li)) {
+    if (shouldExitListAfterEmptyItem(li)) {
       exitListAfterLastItem(li);
       saveSel();
       readCommandState();
@@ -2332,7 +2335,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         finishNewLineEditing(ed);
       } else if (isCaretAtEffectiveEndOfLi(li, range)) {
         const next = li.nextElementSibling;
-        if (isLastListItem(li) && next instanceof HTMLLIElement && isLiEffectivelyEmpty(next)) {
+        if (isLastListItem(li) && next instanceof HTMLLIElement && shouldExitListAfterEmptyItem(next)) {
           exitListAfterLastItem(next);
           finishNewLineEditing(ed);
         } else {
