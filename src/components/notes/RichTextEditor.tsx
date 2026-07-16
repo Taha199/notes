@@ -2540,7 +2540,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         && pending.contains(li)
         && isLastListItem(li)
         && !isLiEffectivelyEmpty(li)
-        && isCaretAtEffectiveEndOfLi(li, range)
       ) {
         e.preventDefault();
         focusParagraphAfterList(pending, ed);
@@ -2558,6 +2557,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
 
       const atStart = isCaretAtStartOfLi(li, range);
+      if (atStart && isLastListItem(li) && !isLiEffectivelyEmpty(li)) {
+        e.preventDefault();
+        const list = li.parentElement;
+        if (list && LIST_TAGS.has(list.tagName)) {
+          focusParagraphAfterList(list as HTMLUListElement | HTMLOListElement, ed);
+        }
+        pendingListMarginExitRef.current = null;
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return true;
+      }
+
       if (atStart) {
         e.preventDefault();
         if (isNestedListItem(li)) returnToParentListItem(li);
