@@ -921,6 +921,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const isEntireListItemSelected = (li: HTMLLIElement, range: Range): boolean => {
     if (range.collapsed) return false;
+    const startInLi = li.contains(range.startContainer) || range.startContainer === li;
+    const endInLi = li.contains(range.endContainer) || range.endContainer === li;
+    if (!startInLi || !endInLi) return false;
     const startProbe = document.createRange();
     startProbe.selectNodeContents(li);
     startProbe.setEnd(range.startContainer, range.startOffset);
@@ -934,9 +937,75 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   /** True when the highlighted text is all meaningful content in the li (e.g. line select of "v"). */
   const selectionCoversFullLiText = (li: HTMLLIElement, range: Range): boolean => {
     if (range.collapsed) return false;
+    const startInLi = li.contains(range.startContainer) || range.startContainer === li;
+    const endInLi = li.contains(range.endContainer) || range.endContainer === li;
+    if (!startInLi || !endInLi) return false;
     const liText = getLiMeaningfulText(li);
     const selText = range.toString().replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim();
     return liText.length > 0 && selText === liText;
+  };
+
+  const collectListItemsBetween = (startLi: HTMLLIElement, endLi: HTMLLIElement): HTMLLIElement[] => {
+    const list = startLi.parentElement;
+    if (!list || list !== endLi.parentElement) return [startLi];
+    const items: HTMLLIElement[] = [];
+    let collecting = false;
+    for (const child of list.children) {
+      if (child === startLi) collecting = true;
+      if (collecting && child instanceof HTMLLIElement) items.push(child);
+      if (child === endLi) break;
+    }
+    return items.length > 0 ? items : [startLi];
+  };
+
+  const selectionSpansEntireListItems = (
+    startLi: HTMLLIElement,
+    endLi: HTMLLIElement,
+    range: Range,
+  ) => collectListItemsBetween(startLi, endLi).every((item) => {
+    const itemRange = document.createRange();
+    itemRange.selectNodeContents(item);
+    return range.compareBoundaryPoints(Range.START_TO_START, itemRange) <= 0
+      && range.compareBoundaryPoints(Range.END_TO_END, itemRange) >= 0;
+  });
+
+  const removeListItemsInRange = (startLi: HTMLLIElement, endLi: HTMLLIElement) => {
+    pendingListMarginExitRef.current = null;
+    const list = startLi.parentElement;
+    const prevLi = startLi.previousElementSibling;
+    const items = collectListItemsBetween(startLi, endLi);
+    for (let i = items.length - 1; i >= 0; i--) items[i].remove();
+    if (list && LIST_TAGS.has(list.tagName) && list.children.length === 0) list.remove();
+    if (prevLi instanceof HTMLLIElement) {
+      placeCaretInBlock(prevLi, false);
+    } else {
+      const first = list?.querySelector(':scope > li:first-child');
+      if (first instanceof HTMLLIElement) placeCaretInBlock(first, true);
+    }
+    saveSel();
+    readCommandState();
+    emitHtml();
+  };
+
+  const deletePartialListSelection = (range: Range, ed: HTMLElement) => {
+    pendingListMarginExitRef.current = null;
+    const touched = new Set<HTMLLIElement>();
+    const noteLi = (node: Node | null) => {
+      const li = getListItem(node, ed);
+      if (li) touched.add(li);
+    };
+    noteLi(range.startContainer);
+    noteLi(range.endContainer);
+    range.deleteContents();
+    touched.forEach((li) => {
+      if (isLiEffectivelyEmpty(li)) li.remove();
+    });
+    const sel = window.getSelection();
+    if (sel?.rangeCount) saveSel();
+    else selectEditorEnd();
+    saveSel();
+    readCommandState();
+    emitHtml();
   };
 
   const removeListItemOnBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
@@ -2672,6 +2741,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       if (!sel.isCollapsed) {
+        const startLi = getListItem(range.startContainer, ed);
+        const endLi = getListItem(range.endContainer, ed);
+        if (
+          startLi
+          && endLi
+          && startLi !== endLi
+          && startLi.parentElement === endLi.parentElement
+        ) {
+          e.preventDefault();
+          if (selectionSpansEntireListItems(startLi, endLi, range)) {
+            removeListItemsInRange(startLi, endLi);
+          } else {
+            deletePartialListSelection(range, ed);
+          }
+          return handled();
+        }
         if (isEntireListItemSelected(li, range) || selectionCoversFullLiText(li, range)) {
           e.preventDefault();
           removeListItemOnBackspace(li, ed);
