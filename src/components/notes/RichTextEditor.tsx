@@ -1024,15 +1024,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return false;
   };
 
+  const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
+    if (isLastListItem(li)) {
+      exitListAfterLastItem(li);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+    handleEmptyListItemBackspace(li, ed);
+  };
+
   const handleEmptyListItemBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
     const list = li.parentElement;
     const prevLi = li.previousElementSibling;
 
     if (prevLi instanceof HTMLLIElement) {
-      const trailingEmptyLast = isLastListItem(li);
       li.remove();
       if (list && list.children.length === 0) list.remove();
-      placeCaretInBlock(prevLi, trailingEmptyLast);
+      placeCaretInBlock(prevLi, false);
       saveSel();
       readCommandState();
       emitHtml();
@@ -1316,7 +1326,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       if (isLiEffectivelyEmpty(li)) {
-        handleEmptyListItemBackspace(li, ed);
+        backspaceEmptyListItem(li, ed);
         return true;
       }
       const list = li.parentElement;
@@ -2405,7 +2415,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (li) {
       if (isLiEffectivelyEmpty(li)) {
         e.preventDefault();
-        handleEmptyListItemBackspace(li, ed);
+        backspaceEmptyListItem(li, ed);
         return true;
       }
 
@@ -2455,7 +2465,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (!li || !isLiEffectivelyEmpty(li)) return false;
     e.preventDefault();
-    handleEmptyListItemBackspace(li, ed);
+    backspaceEmptyListItem(li, ed);
     return true;
   };
 
