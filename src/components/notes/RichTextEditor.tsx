@@ -456,7 +456,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputCleanupRafRef = useRef<number | null>(null);
   const selectionRafRef = useRef<number | null>(null);
-  /** After removing a trailing empty bullet, the next Backspace exits the list to the left margin. */
+  /** Reserved for staged list margin exit; cleared on most list edits. */
   const pendingListMarginExitRef = useRef<HTMLUListElement | HTMLOListElement | null>(null);
   const EMIT_DEBOUNCE_MS = 280;
 
@@ -1121,15 +1121,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
     if (shouldExitListAfterEmptyItem(li)) {
-      const list = li.parentElement;
-      const prevLi = li.previousElementSibling;
-      li.remove();
-      if (list && LIST_TAGS.has(list.tagName)) {
-        pendingListMarginExitRef.current = list as HTMLUListElement | HTMLOListElement;
-      }
-      if (prevLi instanceof HTMLLIElement) {
-        placeCaretInBlock(prevLi, false);
-      }
+      pendingListMarginExitRef.current = null;
+      exitListAfterLastItem(li);
       saveSel();
       readCommandState();
       emitHtml();
