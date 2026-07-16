@@ -295,6 +295,9 @@ function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: Permanen
 
 function pickBetterQuizFolder(local: QuizFolder, remote: QuizFolder): QuizFolder {
   if (!!local.trashed !== !!remote.trashed) return remote.trashed ? remote : local;
+  const localGeneric = isGenericRecoveredFolderName(local.name);
+  const remoteGeneric = isGenericRecoveredFolderName(remote.name);
+  if (localGeneric !== remoteGeneric) return localGeneric ? remote : local;
   return entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
 }
 
@@ -1152,8 +1155,29 @@ function inferRecoveredFolderName(sets: QuizSet[]): string {
     .join(' ')
     .toLowerCase();
   if (blob.includes('sepsis')) return 'sepsis';
-  if (sets.length === 1 && sets[0].name.trim()) return sets[0].name.trim();
+  const setNames = [...new Set(sets.map((set) => set.name.trim()).filter(Boolean))];
+  if (setNames.length === 1) return setNames[0];
+  if (setNames.length > 1) return setNames[0];
   return 'Återställd mapp';
+}
+
+const GENERIC_RECOVERED_FOLDER_NAMES = new Set([
+  'återställd mapp',
+  'restored folder',
+  'restored sets',
+]);
+
+function isGenericRecoveredFolderName(name: string) {
+  return GENERIC_RECOVERED_FOLDER_NAMES.has(name.trim().toLowerCase());
+}
+
+function recoveredFolderNameFromLocal(folderId: string, setsInFolder: QuizSet[]): string {
+  const localFolders = readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? [];
+  const localFolder = localFolders.find((folder) => folder.id === folderId);
+  if (localFolder?.name && !isGenericRecoveredFolderName(localFolder.name)) {
+    return localFolder.name;
+  }
+  return inferRecoveredFolderName(setsInFolder);
 }
 
 function recoverMissingFoldersFromSets(folders: QuizFolder[], sets: QuizSet[]): QuizFolder[] {
@@ -1172,7 +1196,7 @@ function recoverMissingFoldersFromSets(folders: QuizFolder[], sets: QuizSet[]): 
     const usedColors = [...folders, ...sets].map((item) => item.color).filter((color): color is string => !!color);
     recovered.push({
       id: folderId,
-      name: inferRecoveredFolderName(setsInFolder),
+      name: recoveredFolderNameFromLocal(folderId, setsInFolder),
       createdAt: new Date().toISOString(),
       color: pickSpacedColor(usedColors),
       colorInitialized: true,
@@ -3068,9 +3092,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const renameQuizFolder = (id: string, name: string) => {
     if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
     setQuizFolders((prev) => {
-      const next = prev.map((f) => (f.id === id ? { ...f, name } : f));
-      persistFolders(next);
+      const next = prev.map((f) => (f.id === id ? { ...f, name: trimmed, updatedAt: nowStr() } : f));
+      persistFolders(next, true);
       return next;
     });
   };
