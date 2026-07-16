@@ -1257,24 +1257,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
-    const ed = editorRef.current;
-    if (!ed) return false;
-    if (shouldExitListAfterEmptyItem(li)) {
-      exitListAfterLastItem(li);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return true;
-    }
-    if (isLastListItem(li)) {
-      insertNewListItemAfter(li);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return true;
-    }
-    handleEmptyListItemBackspace(li, ed);
-    return false;
+    insertNewListItemAfter(li);
+    saveSel();
+    readCommandState();
+    emitHtml();
+    return true;
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
