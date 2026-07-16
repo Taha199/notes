@@ -157,6 +157,21 @@ interface Props {
   stickyToolbar?: boolean;
 }
 
+type EditorSelectionBookmark = {
+  startPath: number[];
+  startOffset: number;
+  endPath: number[];
+  endOffset: number;
+  collapsed: boolean;
+};
+
+type EditorSnapshot = {
+  html: string;
+  selection: EditorSelectionBookmark | null;
+};
+
+const EDITOR_UNDO_LIMIT = 80;
+
 export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
   const { t, lang } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
@@ -458,6 +473,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const selectionRafRef = useRef<number | null>(null);
   /** Reserved for staged list margin exit; cleared on most list edits. */
   const pendingListMarginExitRef = useRef<HTMLUListElement | HTMLOListElement | null>(null);
+  const undoStackRef = useRef<EditorSnapshot[]>([]);
+  const redoStackRef = useRef<EditorSnapshot[]>([]);
+  const isRestoringUndoRef = useRef(false);
+  const skipDuplicateBackspaceRef = useRef(false);
   const EMIT_DEBOUNCE_MS = 280;
 
   const emitHtml = () => {
@@ -539,6 +558,145 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const s = window.getSelection();
     s?.removeAllRanges();
     s?.addRange(savedRange.current);
+  };
+
+  const getNodePathFromEditor = (node: Node, root: HTMLElement): number[] | null => {
+    const path: number[] = [];
+    let cur: Node | null = node;
+    while (cur && cur !== root) {
+      const parent: Node | null = cur.parentNode;
+      if (!parent) return null;
+      const idx = Array.from(parent.childNodes).indexOf(cur as ChildNode);
+      if (idx < 0) return null;
+      path.unshift(idx);
+      cur = parent;
+    }
+    return cur === root ? path : null;
+  };
+
+  const resolveNodePathFromEditor = (root: HTMLElement, path: number[]): Node | null => {
+    let node: Node = root;
+    for (const idx of path) {
+      if (idx < 0 || idx >= node.childNodes.length) return null;
+      node = node.childNodes[idx];
+    }
+    return node;
+  };
+
+  const nodeOffsetLimit = (node: Node, offset: number) => {
+    const max = node.nodeType === Node.TEXT_NODE
+      ? (node.textContent?.length ?? 0)
+      : node.childNodes.length;
+    return Math.max(0, Math.min(offset, max));
+  };
+
+  const bookmarkEditorSelection = (ed: HTMLElement): EditorSelectionBookmark | null => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    if (!ed.contains(range.commonAncestorContainer)) return null;
+    const startPath = getNodePathFromEditor(range.startContainer, ed);
+    const endPath = getNodePathFromEditor(range.endContainer, ed);
+    if (!startPath || !endPath) return null;
+    return {
+      startPath,
+      startOffset: range.startOffset,
+      endPath,
+      endOffset: range.endOffset,
+      collapsed: range.collapsed,
+    };
+  };
+
+  const restoreEditorSelection = (ed: HTMLElement, bookmark: EditorSelectionBookmark | null) => {
+    const sel = window.getSelection();
+    if (!sel) return;
+    if (!bookmark) {
+      selectEditorEnd();
+      restoreSel();
+      return;
+    }
+    const startNode = resolveNodePathFromEditor(ed, bookmark.startPath);
+    const endNode = resolveNodePathFromEditor(ed, bookmark.endPath);
+    if (!startNode || !endNode) {
+      selectEditorEnd();
+      restoreSel();
+      return;
+    }
+    try {
+      const range = document.createRange();
+      range.setStart(startNode, nodeOffsetLimit(startNode, bookmark.startOffset));
+      range.setEnd(endNode, nodeOffsetLimit(endNode, bookmark.endOffset));
+      if (bookmark.collapsed) range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      savedRange.current = range.cloneRange();
+    } catch {
+      selectEditorEnd();
+      restoreSel();
+    }
+  };
+
+  const snapshotsEqual = (a: EditorSnapshot, b: EditorSnapshot) =>
+    a.html === b.html && JSON.stringify(a.selection) === JSON.stringify(b.selection);
+
+  const captureEditorSnapshot = (): EditorSnapshot => {
+    const ed = editorRef.current;
+    if (!ed) return { html: '', selection: null };
+    return {
+      html: serializeEditorHtml(ed),
+      selection: bookmarkEditorSelection(ed),
+    };
+  };
+
+  const resetEditorUndoHistory = () => {
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+  };
+
+  const pushUndoCheckpoint = () => {
+    if (isRestoringUndoRef.current || !editorRef.current || !editable) return;
+    const snap = captureEditorSnapshot();
+    const stack = undoStackRef.current;
+    const last = stack[stack.length - 1];
+    if (last && snapshotsEqual(last, snap)) return;
+    stack.push(snap);
+    if (stack.length > EDITOR_UNDO_LIMIT) stack.shift();
+    redoStackRef.current = [];
+  };
+
+  const restoreEditorSnapshot = (snap: EditorSnapshot) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    isRestoringUndoRef.current = true;
+    hideImageToolbar();
+    ed.innerHTML = snap.html;
+    normalizeEditorImages(ed);
+    normalizeTablesInEditor(ed);
+    lastLocalHtmlRef.current = ed.innerHTML;
+    restoreEditorSelection(ed, snap.selection);
+    isRestoringUndoRef.current = false;
+    readCommandState();
+    flushEmitHtml();
+  };
+
+  const performEditorUndo = () => {
+    if (undoStackRef.current.length === 0 || !editorRef.current) return false;
+    const current = captureEditorSnapshot();
+    redoStackRef.current.push(current);
+    const target = undoStackRef.current.pop();
+    if (!target) return false;
+    restoreEditorSnapshot(target);
+    return true;
+  };
+
+  const performEditorRedo = () => {
+    if (redoStackRef.current.length === 0 || !editorRef.current) return false;
+    const current = captureEditorSnapshot();
+    undoStackRef.current.push(current);
+    const target = redoStackRef.current.pop();
+    if (!target) return false;
+    restoreEditorSnapshot(target);
+    return true;
   };
 
   // Ensure the editor has focus. If it already has focus the selection is
@@ -2489,11 +2647,20 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return false;
     const sel = window.getSelection();
     if (!sel?.rangeCount) return false;
+    if (skipDuplicateBackspaceRef.current) {
+      skipDuplicateBackspaceRef.current = false;
+      return false;
+    }
     const range = sel.getRangeAt(0);
+    pushUndoCheckpoint();
+    const handled = () => {
+      skipDuplicateBackspaceRef.current = true;
+      return true as const;
+    };
 
     if (tryRemoveStuckBullet(range, ed)) {
       e.preventDefault();
-      return true;
+      return handled();
     }
 
     const block = getLineBlock(range.startContainer, ed);
@@ -2503,7 +2670,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         saveSel();
         readCommandState();
         emitHtml();
-        return true;
+        return handled();
       }
       if (ensureLeftMarginAfterList(block)) {
         e.preventDefault();
@@ -2511,7 +2678,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         saveSel();
         readCommandState();
         emitHtml();
-        return true;
+        return handled();
       }
     }
 
@@ -2521,7 +2688,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         if (isEntireListItemSelected(li, range) || selectionCoversFullLiText(li, range)) {
           e.preventDefault();
           removeListItemOnBackspace(li, ed);
-          return true;
+          return handled();
         }
         pendingListMarginExitRef.current = null;
         return false;
@@ -2540,13 +2707,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         saveSel();
         readCommandState();
         emitHtml();
-        return true;
+        return handled();
       }
 
       if (isLiEffectivelyEmpty(li)) {
         e.preventDefault();
         backspaceEmptyListItem(li, ed);
-        return true;
+        return handled();
       }
 
       const atStart = isCaretAtStartOfLi(li, range);
@@ -2560,7 +2727,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         saveSel();
         readCommandState();
         emitHtml();
-        return true;
+        return handled();
       }
 
       if (atStart) {
@@ -2570,7 +2737,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         saveSel();
         readCommandState();
         emitHtml();
-        return true;
+        return handled();
       }
       return false;
     }
@@ -2581,7 +2748,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       saveSel();
       readCommandState();
       emitHtml();
-      return true;
+      return handled();
     }
     return false;
   };
@@ -2595,6 +2762,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const range = sel.getRangeAt(0);
     const li = resolveListItemAtSelection(range, ed);
     if (!li || !isLiEffectivelyEmpty(li)) return false;
+    pushUndoCheckpoint();
     e.preventDefault();
     backspaceEmptyListItem(li, ed);
     return true;
@@ -2604,6 +2772,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   runEditorBackspaceRef.current = runEditorBackspace;
   const runEditorForwardDeleteRef = useRef(runEditorForwardDelete);
   runEditorForwardDeleteRef.current = runEditorForwardDelete;
+  const performEditorUndoRef = useRef(performEditorUndo);
+  performEditorUndoRef.current = performEditorUndo;
+  const performEditorRedoRef = useRef(performEditorRedo);
+  performEditorRedoRef.current = performEditorRedo;
 
   const handleEditorBackspace = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (runEditorBackspace(e)) e.preventDefault();
@@ -2662,6 +2834,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     normalizeEditorImages(ed);
     normalizeTablesInEditor(ed);
     lastLocalHtmlRef.current = ed.innerHTML;
+    resetEditorUndoHistory();
   }, [html]);
 
   useEffect(() => {
@@ -2757,9 +2930,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   useEffect(() => {
     if (!editable) return;
     const onDocKeyDown = (e: KeyboardEvent) => {
+      const ed = editorRef.current;
+      const inEditor = !!ed && (document.activeElement === ed || ed.contains(document.activeElement));
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && inEditor) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.shiftKey) performEditorRedoRef.current();
+        else performEditorUndoRef.current();
+        return;
+      }
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        const ed = editorRef.current;
-        if (!ed || (document.activeElement !== ed && !ed.contains(document.activeElement))) return;
+        if (!inEditor) return;
         const handled = e.key === 'Backspace'
           ? runEditorBackspaceRef.current(e)
           : runEditorForwardDeleteRef.current(e);
@@ -2769,8 +2950,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         return;
       }
       if (e.key !== 'Tab') return;
-      const ed = editorRef.current;
-      if (!ed || (document.activeElement !== ed && !ed.contains(document.activeElement))) return;
+      if (!ed || !inEditor) return;
       const sel = window.getSelection();
       if (sel?.rangeCount) {
         const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
@@ -2800,6 +2980,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const exec = (cmd: string, value?: string) => {
     const ed = editorRef.current;
     if (!ed) return;
+    pushUndoCheckpoint();
     // Buttons use e.preventDefault so editor keeps focus & selection intact.
     // Only restore savedRange when editor actually lost focus (e.g. after palette).
     if (document.activeElement !== ed) {
@@ -3581,8 +3762,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           }
         }}
         onBeforeInput={(e) => {
-          const inputType = (e.nativeEvent as InputEvent).inputType;
-          const nativeEvent = { isComposing: (e.nativeEvent as InputEvent).isComposing };
+          const inputEvent = e.nativeEvent as InputEvent;
+          const inputType = inputEvent.inputType;
+          const nativeEvent = { isComposing: inputEvent.isComposing };
+          if (
+            !isRestoringUndoRef.current
+            && !inputEvent.isComposing
+            && inputType !== 'historyUndo'
+            && inputType !== 'historyRedo'
+            && inputType !== 'deleteContentBackward'
+            && inputType !== 'deleteContentForward'
+          ) {
+            pushUndoCheckpoint();
+          }
           if (inputType === 'deleteContentBackward') {
             if (runEditorBackspace({
               key: 'Backspace',
