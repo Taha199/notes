@@ -964,6 +964,40 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return true;
   };
 
+  const cleanupEmptyListShell = (list: HTMLUListElement | HTMLOListElement, ed: HTMLElement) => {
+    if (list.children.length > 0) return;
+    const listParent = list.parentElement;
+    list.remove();
+    if (listParent instanceof HTMLElement && listParent !== ed) {
+      const hasIndent =
+        LIST_EXIT_INDENT_PROPS.some((prop) => listParent.style.getPropertyValue(prop))
+        || [...listParent.classList].some((cls) => /mso/i.test(cls));
+      const isEmpty = [...listParent.childNodes].every((node) => {
+        if (node.nodeType === Node.TEXT_NODE) return !node.textContent?.trim();
+        if (node instanceof HTMLElement) {
+          return !node.textContent?.replace(/\u200B/g, '').trim() && !node.querySelector('img');
+        }
+        return true;
+      });
+      if (hasIndent && isEmpty) listParent.remove();
+    }
+  };
+
+  const insertParagraphAtMargin = (parent: Node, before: Node | null) => {
+    const div = document.createElement('div');
+    div.setAttribute('dir', 'auto');
+    div.innerHTML = '<br>';
+    parent.insertBefore(div, before);
+    stripNewParagraphIndent(div);
+    placeCaretInBlock(div, true);
+    return div;
+  };
+
+  const focusParagraphAfterList = (list: HTMLUListElement | HTMLOListElement, ed: HTMLElement) => {
+    const { parent, before } = getBlockLevelInsertAfterList(list, ed);
+    return insertParagraphAtMargin(parent, before);
+  };
+
   const exitListAfterLastItem = (li: HTMLLIElement) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -971,32 +1005,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!list || !LIST_TAGS.has(list.tagName)) return;
     const listEl = list as HTMLUListElement | HTMLOListElement;
     const { parent, before } = getBlockLevelInsertAfterList(listEl, ed);
-
     li.remove();
-    if (list.children.length === 0) {
-      const listParent = list.parentElement;
-      list.remove();
-      if (listParent instanceof HTMLElement && listParent !== ed) {
-        const hasIndent =
-          LIST_EXIT_INDENT_PROPS.some((prop) => listParent.style.getPropertyValue(prop))
-          || [...listParent.classList].some((cls) => /mso/i.test(cls));
-        const isEmpty = [...listParent.childNodes].every((node) => {
-          if (node.nodeType === Node.TEXT_NODE) return !node.textContent?.trim();
-          if (node instanceof HTMLElement) {
-            return !node.textContent?.replace(/\u200B/g, '').trim() && !node.querySelector('img');
-          }
-          return true;
-        });
-        if (hasIndent && isEmpty) listParent.remove();
-      }
-    }
-
-    const div = document.createElement('div');
-    div.setAttribute('dir', 'auto');
-    div.innerHTML = '<br>';
-    parent.insertBefore(div, before);
-    stripNewParagraphIndent(div);
-    placeCaretInBlock(div, true);
+    cleanupEmptyListShell(listEl, ed);
+    insertParagraphAtMargin(parent, before);
   };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
@@ -1018,9 +1029,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const prevLi = li.previousElementSibling;
 
     if (prevLi instanceof HTMLLIElement) {
+      const trailingEmptyLast = isLastListItem(li);
       li.remove();
       if (list && list.children.length === 0) list.remove();
-      placeCaretInBlock(prevLi, false);
+      placeCaretInBlock(prevLi, trailingEmptyLast);
       saveSel();
       readCommandState();
       emitHtml();
@@ -2398,6 +2410,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
 
       const atStart = isCaretAtStartOfLi(li, range);
+      if (atStart && isLastListItem(li)) {
+        e.preventDefault();
+        const list = li.parentElement;
+        if (list && LIST_TAGS.has(list.tagName)) {
+          focusParagraphAfterList(list as HTMLUListElement | HTMLOListElement, ed);
+        }
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return true;
+      }
+
       if (atStart) {
         e.preventDefault();
         if (isNestedListItem(li)) returnToParentListItem(li);
