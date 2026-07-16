@@ -895,10 +895,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     saveSel();
   };
 
-  const handleEmptyListItemEnter = (li: HTMLLIElement) => {
+  const isLastListItem = (li: HTMLLIElement) => {
+    const list = li.parentElement;
+    if (!list || !LIST_TAGS.has(list.tagName)) return false;
+    let next = li.nextElementSibling;
+    while (next) {
+      if (next.tagName === 'LI') return false;
+      next = next.nextElementSibling;
+    }
+    return true;
+  };
+
+  const exitListAfterLastItem = (li: HTMLLIElement) => {
+    const list = li.parentElement;
+    if (!list || !LIST_TAGS.has(list.tagName)) return;
+    const parent = list.parentNode;
+    li.remove();
+    const div = document.createElement('div');
+    div.setAttribute('dir', 'auto');
+    div.innerHTML = '<br>';
+    parent?.insertBefore(div, list.nextSibling);
+    if (list.children.length === 0) list.remove();
+    placeCaretInBlock(div, true);
+  };
+
+  const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
     const ed = editorRef.current;
-    if (!ed) return;
+    if (!ed) return false;
+    if (isLastListItem(li) && li.previousElementSibling instanceof HTMLLIElement) {
+      exitListAfterLastItem(li);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return true;
+    }
     handleEmptyListItemBackspace(li, ed);
+    return false;
   };
 
   const handleEmptyListItemBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
@@ -2184,14 +2216,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       e.preventDefault();
       if (isLiEmpty(li)) {
         handleEmptyListItemEnter(li);
+        finishNewLineEditing(ed);
       } else if (isCaretAtEffectiveEndOfLi(li, range)) {
         insertNewListItemAfter(li);
+        finishNewLineEditing(ed, { inList: true });
       } else if (isCaretAtStartOfLi(li, range)) {
         splitListItemAtStart(li);
+        finishNewLineEditing(ed, { inList: true });
       } else {
         splitListItemAtCaret(li, range);
+        finishNewLineEditing(ed, { inList: true });
       }
-      finishNewLineEditing(ed, { inList: true });
       return;
     }
 
@@ -2208,10 +2243,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       const items = Array.from(orphanList.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
       const target = items[items.length - 1];
       if (target) {
-        if (isLiEmpty(target)) handleEmptyListItemEnter(target);
-        else insertNewListItemAfter(target);
+        if (isLiEmpty(target)) {
+          handleEmptyListItemEnter(target);
+          finishNewLineEditing(ed);
+        } else {
+          insertNewListItemAfter(target);
+          finishNewLineEditing(ed, { inList: true });
+        }
       }
-      finishNewLineEditing(ed, { inList: true });
       return;
     }
 
