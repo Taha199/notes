@@ -1136,6 +1136,38 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return !text && !ed.querySelector('img');
   };
 
+  /** After select-all delete or paste cleanup, drop empty list shells that still show a bullet. */
+  const cleanupOrphanEmptyLists = (ed: HTMLElement): boolean => {
+    if (ed.querySelector('img')) return false;
+    if (!ed.querySelector('ul, ol')) return false;
+
+    const hasNonEmptyLi = Array.from(ed.querySelectorAll('li')).some(
+      (li) => !isLiEffectivelyEmpty(li as HTMLLIElement),
+    );
+    if (hasNonEmptyLi) return false;
+
+    const hasNonListText = Array.from(ed.childNodes).some((node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        return !!node.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ').replace(BULLET_PREFIX_RE, '').trim();
+      }
+      if (!(node instanceof HTMLElement)) return false;
+      if (LIST_TAGS.has(node.tagName)) return false;
+      const scratch = node.cloneNode(true) as HTMLElement;
+      scratch.querySelectorAll('br').forEach((br) => br.remove());
+      const text = (scratch.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').replace(BULLET_PREFIX_RE, '').trim();
+      return !!text;
+    });
+    if (hasNonListText) return false;
+
+    ed.querySelectorAll('ul, ol').forEach((list) => list.remove());
+    if (isEditorContentEmpty(ed)) {
+      ed.innerHTML = '<div dir="auto"><br></div>';
+      placeCaretInBlock(ed.firstElementChild as HTMLElement, true);
+      return true;
+    }
+    return false;
+  };
+
   const hasStuckBullet = (range: Range, ed: HTMLElement) => {
     const block = getLineBlock(range.startContainer, ed);
     if (block && block.tagName !== 'LI' && !block.closest('li')) {
@@ -2234,14 +2266,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
-      const atStart = isCaretAtStartOfLi(li, range);
-
-      if (!sel.isCollapsed && isLiEffectivelyEmpty(li)) {
+      if (isLiEffectivelyEmpty(li)) {
         e.preventDefault();
         handleEmptyListItemBackspace(li, ed);
         return true;
       }
 
+      const atStart = isCaretAtStartOfLi(li, range);
       if (atStart) {
         e.preventDefault();
         if (isNestedListItem(li)) returnToParentListItem(li);
@@ -2265,11 +2296,31 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return false;
   };
 
+  const runEditorForwardDelete = (e: { key: string; preventDefault: () => void; nativeEvent?: { isComposing?: boolean } }) => {
+    if (e.key !== 'Delete' || e.nativeEvent?.isComposing) return false;
+    const ed = editorRef.current;
+    if (!ed) return false;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || !sel.isCollapsed) return false;
+    const range = sel.getRangeAt(0);
+    const li = resolveListItemAtSelection(range, ed);
+    if (!li || !isLiEffectivelyEmpty(li)) return false;
+    e.preventDefault();
+    handleEmptyListItemBackspace(li, ed);
+    return true;
+  };
+
   const runEditorBackspaceRef = useRef(runEditorBackspace);
   runEditorBackspaceRef.current = runEditorBackspace;
+  const runEditorForwardDeleteRef = useRef(runEditorForwardDelete);
+  runEditorForwardDeleteRef.current = runEditorForwardDelete;
 
   const handleEditorBackspace = (e: React.KeyboardEvent<HTMLDivElement>) => {
     runEditorBackspace(e);
+  };
+
+  const handleEditorDelete = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    runEditorForwardDelete(e);
   };
 
   // ── Initial content ───────────────────────────────────────────────────
@@ -2416,10 +2467,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   useEffect(() => {
     if (!editable) return;
     const onDocKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Backspace') {
+      if (e.key === 'Backspace' || e.key === 'Delete') {
         const ed = editorRef.current;
         if (!ed || (document.activeElement !== ed && !ed.contains(document.activeElement))) return;
-        if (runEditorBackspaceRef.current(e)) {
+        const handled = e.key === 'Backspace'
+          ? runEditorBackspaceRef.current(e)
+          : runEditorForwardDeleteRef.current(e);
+        if (handled) {
           e.stopImmediatePropagation();
         }
         return;
@@ -3226,6 +3280,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         onKeyDown={(e) => {
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
           handleEditorBackspace(e);
+          handleEditorDelete(e);
           handleEditorEnter(e);
           handleEditorArrowUp(e);
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -3237,13 +3292,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         }}
         onBeforeInput={(e) => {
           const inputType = (e.nativeEvent as InputEvent).inputType;
-          if (inputType !== 'deleteContentBackward') return;
-          if (runEditorBackspace({
-            key: 'Backspace',
-            preventDefault: () => e.preventDefault(),
-            nativeEvent: { isComposing: (e.nativeEvent as InputEvent).isComposing },
-          })) {
-            e.preventDefault();
+          const nativeEvent = { isComposing: (e.nativeEvent as InputEvent).isComposing };
+          if (inputType === 'deleteContentBackward') {
+            if (runEditorBackspace({
+              key: 'Backspace',
+              preventDefault: () => e.preventDefault(),
+              nativeEvent,
+            })) {
+              e.preventDefault();
+            }
+            return;
+          }
+          if (inputType === 'deleteContentForward') {
+            if (runEditorForwardDelete({
+              key: 'Delete',
+              preventDefault: () => e.preventDefault(),
+              nativeEvent,
+            })) {
+              e.preventDefault();
+            }
           }
         }}
         onInput={() => {
@@ -3260,10 +3327,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             });
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             stripEmptyFontSpans(live);
+            const listsCleared = cleanupOrphanEmptyLists(live);
             const ytChanged = normalizeYouTubeEmbeds(live);
             const linkChanged = normalizeAutoLinks(live);
             const tableChanged = normalizeTablesInEditor(live);
-            if (ytChanged || linkChanged || tableChanged) emitHtml();
+            if (listsCleared || ytChanged || linkChanged || tableChanged) emitHtml();
           });
         }}
         onPaste={(e) => {
