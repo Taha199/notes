@@ -4,8 +4,9 @@ import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
-import { FB_DB_URL, storage } from '../../lib/firebase';
-import { calculateUserStorageBytes, getStorageLimitBytes } from '../../lib/storageQuota';
+import { storage } from '../../lib/firebase';
+import { rtdbFetch } from '../../lib/rtdb';
+import { calculateFilesStorageBytes, getStorageLimitBytes } from '../../lib/storageQuota';
 
 interface StoredFile {
   id: string;
@@ -221,8 +222,8 @@ export function FilesPage({ search }: { search: string }) {
     (async () => {
       try {
         const [filesRes, foldersRes] = await Promise.all([
-          fetch(`${FB_DB_URL}/users/${user.uid}/files.json`),
-          fetch(`${FB_DB_URL}/users/${user.uid}/fileFolders.json`),
+          rtdbFetch(`/users/${user.uid}/files`),
+          rtdbFetch(`/users/${user.uid}/fileFolders`),
         ]);
         const cloudFiles = await filesRes.json();
         const cloudFolders = await foldersRes.json();
@@ -265,7 +266,7 @@ export function FilesPage({ search }: { search: string }) {
 
   const saveFileMeta = async (file: StoredFile) => {
     if (!user) throw new Error('no-user');
-    const res = await fetch(`${FB_DB_URL}/users/${user.uid}/files/${file.id}.json`, {
+    const res = await rtdbFetch(`/users/${user.uid}/files/${file.id}`, {
       method: 'PUT',
       body: JSON.stringify(file),
       headers: { 'Content-Type': 'application/json' },
@@ -275,7 +276,7 @@ export function FilesPage({ search }: { search: string }) {
 
   const saveFolderMeta = async (folder: FileFolder) => {
     if (!user) throw new Error('no-user');
-    const res = await fetch(`${FB_DB_URL}/users/${user.uid}/fileFolders/${folder.id}.json`, {
+    const res = await rtdbFetch(`/users/${user.uid}/fileFolders/${folder.id}`, {
       method: 'PUT',
       body: JSON.stringify(folder),
       headers: { 'Content-Type': 'application/json' },
@@ -285,12 +286,12 @@ export function FilesPage({ search }: { search: string }) {
 
   const deleteFileMeta = async (fileId: string) => {
     if (!user) return;
-    await fetch(`${FB_DB_URL}/users/${user.uid}/files/${fileId}.json`, { method: 'DELETE' });
+    await rtdbFetch(`/users/${user.uid}/files/${fileId}`, { method: 'DELETE' });
   };
 
   const deleteFolderMeta = async (folderId: string) => {
     if (!user) return;
-    await fetch(`${FB_DB_URL}/users/${user.uid}/fileFolders/${folderId}.json`, { method: 'DELETE' });
+    await rtdbFetch(`/users/${user.uid}/fileFolders/${folderId}`, { method: 'DELETE' });
   };
 
   const q = search.trim().toLowerCase();
@@ -360,10 +361,11 @@ export function FilesPage({ search }: { search: string }) {
     setUploading(true);
     const uploaded: StoredFile[] = [];
     try {
-      const userRes = await fetch(`${FB_DB_URL}/users/${user.uid}.json`);
+      const userRes = await rtdbFetch(`/users/${user.uid}`);
+      if (!userRes.ok) throw new Error('profile-load-failed');
       const userData = (await userRes.json()) ?? {};
       const profile = (userData.profile ?? {}) as Record<string, unknown>;
-      const usedBytes = calculateUserStorageBytes(userData);
+      const usedBytes = calculateFilesStorageBytes(userData);
       const limitBytes = getStorageLimitBytes(profile, user.email);
       const incomingBytes = selected.reduce((sum, file) => sum + file.size, 0);
       if (usedBytes + incomingBytes > limitBytes) {

@@ -8,6 +8,7 @@ export {
   getStorageLimitMB,
   getStorageLimitBytes,
   calculateUserStorageBytes,
+  calculateFilesStorageBytes,
   storageLimitPresetsMB,
   isPlusUser,
   hasAiAccess,

@@ -50,6 +50,17 @@ export function calculateUserStorageBytes(userData: Record<string, unknown> | nu
   return new TextEncoder().encode(JSON.stringify(userData ?? {})).length;
 }
 
+export function calculateFilesStorageBytes(userData: Record<string, unknown> | null | undefined): number {
+  const files = userData?.files;
+  if (!files || typeof files !== 'object') return 0;
+  const list = Array.isArray(files) ? files : Object.values(files as Record<string, { size?: number }>);
+  return list.reduce((sum, file) => {
+    if (!file || typeof file !== 'object') return sum;
+    const size = (file as { size?: number }).size;
+    return sum + (typeof size === 'number' && size > 0 ? size : 0);
+  }, 0);
+}
+
 export function storageLimitPresetsMB(): number[] {
   return [100, 200, 500, 1000, 2000, 5000];
 }
