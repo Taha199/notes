@@ -758,6 +758,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return probe.toString().replace(/\u200B/g, '').length === 0;
   };
 
+  const isEntireListItemSelected = (li: HTMLLIElement, range: Range): boolean => {
+    if (range.collapsed) return false;
+    const startProbe = document.createRange();
+    startProbe.selectNodeContents(li);
+    startProbe.setEnd(range.startContainer, range.startOffset);
+    if (startProbe.toString().replace(/\u200B/g, '').length !== 0) return false;
+    const endProbe = document.createRange();
+    endProbe.selectNodeContents(li);
+    endProbe.setStart(range.endContainer, range.endOffset);
+    return endProbe.toString().replace(/\u200B/g, '').length === 0;
+  };
+
   const isCaretAtEndOfBlock = (block: HTMLElement, range: Range): boolean => {
     const probe = document.createRange();
     probe.selectNodeContents(block);
@@ -2481,6 +2493,31 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
+      if (!sel.isCollapsed) {
+        if (isEntireListItemSelected(li, range)) {
+          e.preventDefault();
+          pendingListMarginExitRef.current = null;
+          const prevLi = li.previousElementSibling;
+          const list = li.parentElement;
+          if (prevLi instanceof HTMLLIElement) {
+            li.remove();
+            if (list && list.children.length === 0) list.remove();
+            placeCaretInBlock(prevLi, false);
+          } else if (isNestedListItem(li)) {
+            returnToParentListItem(li);
+          } else if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1) {
+            unwrapList(list as HTMLUListElement | HTMLOListElement, true);
+          } else {
+            exitListItem(li, ed, true);
+          }
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return true;
+        }
+        return false;
+      }
+
       const pending = pendingListMarginExitRef.current;
       if (
         pending?.isConnected
@@ -2504,19 +2541,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
 
       const atStart = isCaretAtStartOfLi(li, range);
-      if (atStart && isLastListItem(li) && !isLiEffectivelyEmpty(li)) {
-        e.preventDefault();
-        const list = li.parentElement;
-        if (list && LIST_TAGS.has(list.tagName)) {
-          focusParagraphAfterList(list as HTMLUListElement | HTMLOListElement, ed);
-        }
-        pendingListMarginExitRef.current = null;
-        saveSel();
-        readCommandState();
-        emitHtml();
-        return true;
-      }
-
       if (atStart) {
         e.preventDefault();
         if (isNestedListItem(li)) returnToParentListItem(li);
