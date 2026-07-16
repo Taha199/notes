@@ -758,6 +758,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return probe.toString().replace(/\u200B/g, '').length === 0;
   };
 
+  const getLiMeaningfulText = (li: HTMLLIElement) =>
+    (li.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim() ?? '');
+
   const isEntireListItemSelected = (li: HTMLLIElement, range: Range): boolean => {
     if (range.collapsed) return false;
     const startProbe = document.createRange();
@@ -768,6 +771,34 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     endProbe.selectNodeContents(li);
     endProbe.setStart(range.endContainer, range.endOffset);
     return endProbe.toString().replace(/\u200B/g, '').length === 0;
+  };
+
+  /** True when the highlighted text is all meaningful content in the li (e.g. line select of "v"). */
+  const selectionCoversFullLiText = (li: HTMLLIElement, range: Range): boolean => {
+    if (range.collapsed) return false;
+    const liText = getLiMeaningfulText(li);
+    const selText = range.toString().replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim();
+    return liText.length > 0 && selText === liText;
+  };
+
+  const removeListItemOnBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
+    pendingListMarginExitRef.current = null;
+    const prevLi = li.previousElementSibling;
+    const list = li.parentElement;
+    if (prevLi instanceof HTMLLIElement) {
+      li.remove();
+      if (list && list.children.length === 0) list.remove();
+      placeCaretInBlock(prevLi, false);
+    } else if (isNestedListItem(li)) {
+      returnToParentListItem(li);
+    } else if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1) {
+      unwrapList(list as HTMLUListElement | HTMLOListElement, true);
+    } else {
+      exitListItem(li, ed, true);
+    }
+    saveSel();
+    readCommandState();
+    emitHtml();
   };
 
   const isCaretAtEndOfBlock = (block: HTMLElement, range: Range): boolean => {
@@ -2494,27 +2525,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       if (!sel.isCollapsed) {
-        if (isEntireListItemSelected(li, range)) {
+        if (isEntireListItemSelected(li, range) || selectionCoversFullLiText(li, range)) {
           e.preventDefault();
-          pendingListMarginExitRef.current = null;
-          const prevLi = li.previousElementSibling;
-          const list = li.parentElement;
-          if (prevLi instanceof HTMLLIElement) {
-            li.remove();
-            if (list && list.children.length === 0) list.remove();
-            placeCaretInBlock(prevLi, false);
-          } else if (isNestedListItem(li)) {
-            returnToParentListItem(li);
-          } else if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1) {
-            unwrapList(list as HTMLUListElement | HTMLOListElement, true);
-          } else {
-            exitListItem(li, ed, true);
-          }
-          saveSel();
-          readCommandState();
-          emitHtml();
+          removeListItemOnBackspace(li, ed);
           return true;
         }
+        pendingListMarginExitRef.current = null;
         return false;
       }
 
@@ -2524,6 +2540,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         && pending.contains(li)
         && isLastListItem(li)
         && !isLiEffectivelyEmpty(li)
+        && isCaretAtEffectiveEndOfLi(li, range)
       ) {
         e.preventDefault();
         focusParagraphAfterList(pending, ed);
@@ -2584,7 +2601,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   runEditorForwardDeleteRef.current = runEditorForwardDelete;
 
   const handleEditorBackspace = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    runEditorBackspace(e);
+    if (runEditorBackspace(e)) e.preventDefault();
   };
 
   const handleEditorDelete = (e: React.KeyboardEvent<HTMLDivElement>) => {
