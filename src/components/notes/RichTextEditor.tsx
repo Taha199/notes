@@ -456,6 +456,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputCleanupRafRef = useRef<number | null>(null);
   const selectionRafRef = useRef<number | null>(null);
+  /** After removing a trailing empty bullet, the next Backspace exits the list to the left margin. */
+  const pendingListMarginExitRef = useRef<HTMLUListElement | HTMLOListElement | null>(null);
   const EMIT_DEBOUNCE_MS = 280;
 
   const emitHtml = () => {
@@ -998,6 +1000,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return insertParagraphAtMargin(parent, before);
   };
 
+  const findListBeforeBlock = (block: HTMLElement): HTMLUListElement | HTMLOListElement | null => {
+    let prev = block.previousElementSibling;
+    while (prev instanceof HTMLElement) {
+      if (LIST_TAGS.has(prev.tagName)) return prev as HTMLUListElement | HTMLOListElement;
+      if (BLOCK_TAGS.has(prev.tagName) || prev.tagName === 'HR') return null;
+      prev = prev.previousElementSibling;
+    }
+    return null;
+  };
+
+  /** Step 3: from an after-list margin paragraph, move caret to the intro line above the list. */
+  const focusLineAboveAfterListParagraph = (block: HTMLElement): boolean => {
+    if (!blockFollowsList(block)) return false;
+    const listEl = findListBeforeBlock(block);
+    if (!listEl) return false;
+
+    const blockEmpty = !block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img');
+    let target: HTMLElement | null = null;
+    let scan: Element | null = listEl.previousElementSibling;
+    while (scan instanceof HTMLElement) {
+      if (LIST_TAGS.has(scan.tagName)) break;
+      if (BLOCK_TAGS.has(scan.tagName) && scan.tagName !== 'LI') target = scan;
+      scan = scan.previousElementSibling;
+    }
+    if (!target) {
+      const lastLi = listEl.querySelector(':scope > li:last-child');
+      if (lastLi instanceof HTMLLIElement) target = lastLi;
+    }
+    if (!target) return false;
+
+    if (blockEmpty) block.remove();
+    pendingListMarginExitRef.current = null;
+    placeCaretInBlock(target, false);
+    return true;
+  };
+
   const exitListAfterLastItem = (li: HTMLLIElement) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -1040,12 +1078,21 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
     if (shouldExitListAfterEmptyItem(li)) {
-      exitListAfterLastItem(li);
+      const list = li.parentElement;
+      const prevLi = li.previousElementSibling;
+      li.remove();
+      if (list && LIST_TAGS.has(list.tagName)) {
+        pendingListMarginExitRef.current = list as HTMLUListElement | HTMLOListElement;
+      }
+      if (prevLi instanceof HTMLLIElement) {
+        placeCaretInBlock(prevLi, false);
+      }
       saveSel();
       readCommandState();
       emitHtml();
       return;
     }
+    pendingListMarginExitRef.current = null;
     handleEmptyListItemBackspace(li, ed);
   };
 
@@ -2415,6 +2462,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     const block = getLineBlock(range.startContainer, ed);
     if (block && block.tagName !== 'LI' && !block.closest('li') && isCaretAtStartOfBlock(block, range)) {
+      if (focusLineAboveAfterListParagraph(block)) {
+        e.preventDefault();
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return true;
+      }
       if (ensureLeftMarginAfterList(block)) {
         e.preventDefault();
         placeCaretInBlock(block, true);
@@ -2427,6 +2481,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
+      const pending = pendingListMarginExitRef.current;
+      if (
+        pending?.isConnected
+        && pending.contains(li)
+        && isLastListItem(li)
+        && !isLiEffectivelyEmpty(li)
+      ) {
+        e.preventDefault();
+        focusParagraphAfterList(pending, ed);
+        pendingListMarginExitRef.current = null;
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return true;
+      }
+
       if (isLiEffectivelyEmpty(li)) {
         e.preventDefault();
         backspaceEmptyListItem(li, ed);
@@ -2434,12 +2504,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
 
       const atStart = isCaretAtStartOfLi(li, range);
-      if (atStart && isLastListItem(li)) {
+      if (atStart && isLastListItem(li) && !isLiEffectivelyEmpty(li)) {
         e.preventDefault();
         const list = li.parentElement;
         if (list && LIST_TAGS.has(list.tagName)) {
           focusParagraphAfterList(list as HTMLUListElement | HTMLOListElement, ed);
         }
+        pendingListMarginExitRef.current = null;
         saveSel();
         readCommandState();
         emitHtml();
