@@ -61,6 +61,18 @@ body {
   0%, 100% { opacity: 0.15; transform: scale(0.8); }
   50% { opacity: 0.9; transform: scale(1.15); }
 }
+@keyframes filesLoadingShimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+@keyframes filesLoadingDot {
+  0%, 70%, 100% { opacity: 0.25; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-4px); }
+}
+@keyframes filesLoadingFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
 
 .animate-fade-in { animation: fadeIn .4s ease both; }
 .animate-menu-pop { animation: menuPop .2s cubic-bezier(.22,1,.36,1) both; }
@@ -68,6 +80,9 @@ body {
 .animate-float-slow { animation: floatSlow 9s ease-in-out infinite; }
 .animate-float-slower { animation: floatSlower 12s ease-in-out infinite; }
 .animate-twinkle { animation: twinkle 3.5s ease-in-out infinite; }
+.animate-files-loading-shimmer { animation: filesLoadingShimmer 2.4s ease-in-out infinite; }
+.animate-files-loading-dot { animation: filesLoadingDot 1.15s ease-in-out infinite; }
+.animate-files-loading-float { animation: filesLoadingFloat 2.6s ease-in-out infinite; }
 
 .brand-wordmark {
   display: inline-block;
