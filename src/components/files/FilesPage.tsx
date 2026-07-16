@@ -668,7 +668,7 @@ export function FilesPage({ search }: { search: string }) {
         >
           <span className="mb-3 text-5xl opacity-30">{currentFolderId ? '📁' : '📎'}</span>
           <p className="text-sm">
-            {loading ? t.cloudSaving : search ? t.emptySearch : currentFolderId ? t.filesFolderEmpty : t.filesEmpty}
+            {loading ? t.filesLoading : search ? t.emptySearch : currentFolderId ? t.filesFolderEmpty : t.filesEmpty}
           </p>
         </div>
       ) : (
