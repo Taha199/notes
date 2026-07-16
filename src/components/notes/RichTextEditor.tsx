@@ -790,10 +790,68 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const isLiEffectivelyEmpty = (li: HTMLLIElement) => {
     if (isLiEmpty(li)) return true;
     const scratch = li.cloneNode(true) as HTMLLIElement;
-    scratch.querySelectorAll('br, span:empty, b:empty, u:empty, i:empty, strong:empty, em:empty').forEach((el) => el.remove());
+    scratch.querySelectorAll('br').forEach((el) => el.remove());
+    scratch.querySelectorAll('p, div, span, b, u, i, strong, em').forEach((el) => {
+      const text = (el.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
+      if (!text && !el.querySelector('img')) el.remove();
+    });
     let text = (scratch.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
     text = text.replace(BULLET_PREFIX_RE, '').trim();
     return !text && !li.querySelector('img');
+  };
+
+  const LIST_EXIT_INDENT_PROPS = [
+    'margin-left',
+    'padding-left',
+    'text-indent',
+    'margin-inline-start',
+    'padding-inline-start',
+  ] as const;
+
+  const getBlockLevelInsertAfterList = (list: HTMLUListElement | HTMLOListElement, ed: HTMLElement) => {
+    let anchor: HTMLElement = list;
+    let parent: Node | null = list.parentNode;
+    let before: Node | null = list.nextSibling;
+
+    while (parent instanceof HTMLElement && parent !== ed) {
+      const wrapper = parent;
+      const hasIndent =
+        LIST_EXIT_INDENT_PROPS.some((prop) => wrapper.style.getPropertyValue(prop))
+        || [...wrapper.classList].some((cls) => /mso/i.test(cls));
+      const onlyListContent = [...wrapper.children].every((child) => {
+        if (child === anchor) return true;
+        if (child instanceof HTMLElement && LIST_TAGS.has(child.tagName)) return true;
+        if (child instanceof HTMLElement) {
+          const text = child.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim() ?? '';
+          return !text && !child.querySelector('img');
+        }
+        return !(child.textContent?.replace(/\u200B/g, '').trim());
+      });
+      if (hasIndent && onlyListContent && wrapper.parentNode) {
+        before = wrapper.nextSibling;
+        anchor = wrapper;
+        parent = wrapper.parentNode;
+        continue;
+      }
+      break;
+    }
+
+    return { parent: parent ?? ed, before };
+  };
+
+  const stripNewParagraphIndent = (block: HTMLElement) => {
+    for (const prop of LIST_EXIT_INDENT_PROPS) {
+      block.style.removeProperty(prop);
+    }
+    block.style.removeProperty('list-style-type');
+    block.style.removeProperty('display');
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    const first = walker.nextNode();
+    if (first?.nodeType === Node.TEXT_NODE) {
+      const text = first.textContent ?? '';
+      const stripped = text.replace(/^[\s\u00a0\u2002\u2003]+/, '');
+      if (stripped !== text) first.textContent = stripped;
+    }
   };
 
   const insertNewListItemAfter = (li: HTMLLIElement) => {
@@ -907,22 +965,44 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const exitListAfterLastItem = (li: HTMLLIElement) => {
+    const ed = editorRef.current;
+    if (!ed) return;
     const list = li.parentElement;
     if (!list || !LIST_TAGS.has(list.tagName)) return;
-    const parent = list.parentNode;
+    const listEl = list as HTMLUListElement | HTMLOListElement;
+    const { parent, before } = getBlockLevelInsertAfterList(listEl, ed);
+
     li.remove();
+    if (list.children.length === 0) {
+      const listParent = list.parentElement;
+      list.remove();
+      if (listParent instanceof HTMLElement && listParent !== ed) {
+        const hasIndent =
+          LIST_EXIT_INDENT_PROPS.some((prop) => listParent.style.getPropertyValue(prop))
+          || [...listParent.classList].some((cls) => /mso/i.test(cls));
+        const isEmpty = [...listParent.childNodes].every((node) => {
+          if (node.nodeType === Node.TEXT_NODE) return !node.textContent?.trim();
+          if (node instanceof HTMLElement) {
+            return !node.textContent?.replace(/\u200B/g, '').trim() && !node.querySelector('img');
+          }
+          return true;
+        });
+        if (hasIndent && isEmpty) listParent.remove();
+      }
+    }
+
     const div = document.createElement('div');
     div.setAttribute('dir', 'auto');
     div.innerHTML = '<br>';
-    parent?.insertBefore(div, list.nextSibling);
-    if (list.children.length === 0) list.remove();
+    parent.insertBefore(div, before);
+    stripNewParagraphIndent(div);
     placeCaretInBlock(div, true);
   };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
     const ed = editorRef.current;
     if (!ed) return false;
-    if (isLastListItem(li) && li.previousElementSibling instanceof HTMLLIElement) {
+    if (isLastListItem(li)) {
       exitListAfterLastItem(li);
       saveSel();
       readCommandState();
@@ -2214,12 +2294,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       e.preventDefault();
-      if (isLiEmpty(li)) {
+      if (isLiEffectivelyEmpty(li)) {
         handleEmptyListItemEnter(li);
         finishNewLineEditing(ed);
       } else if (isCaretAtEffectiveEndOfLi(li, range)) {
-        insertNewListItemAfter(li);
-        finishNewLineEditing(ed, { inList: true });
+        const next = li.nextElementSibling;
+        if (isLastListItem(li) && next instanceof HTMLLIElement && isLiEffectivelyEmpty(next)) {
+          exitListAfterLastItem(next);
+          finishNewLineEditing(ed);
+        } else {
+          insertNewListItemAfter(li);
+          finishNewLineEditing(ed, { inList: true });
+        }
       } else if (isCaretAtStartOfLi(li, range)) {
         splitListItemAtStart(li);
         finishNewLineEditing(ed, { inList: true });
@@ -2243,7 +2329,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       const items = Array.from(orphanList.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
       const target = items[items.length - 1];
       if (target) {
-        if (isLiEmpty(target)) {
+        if (isLiEffectivelyEmpty(target)) {
           handleEmptyListItemEnter(target);
           finishNewLineEditing(ed);
         } else {
