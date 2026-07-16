@@ -158,9 +158,15 @@ function draftContentLength(d: Draft) {
 }
 
 function pickBetterDraft(local: Draft, remote: Draft) {
+  const localKey = `${local.title}\0${local.html}`;
+  const remoteKey = `${remote.title}\0${remote.html}`;
+  if (localKey === remoteKey) return local;
+  const localLen = draftContentLength(local);
+  const remoteLen = draftContentLength(remote);
+  if (remoteLen !== localLen) return remoteLen > localLen ? remote : local;
   const localAt = local.updatedAt ?? 0;
   const remoteAt = remote.updatedAt ?? 0;
-  if (localAt !== remoteAt) return remoteAt > localAt ? remote : local;
+  if (remoteAt !== localAt) return remoteAt > localAt ? remote : local;
   return local;
 }
 
@@ -1875,7 +1881,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const localEditAt = draftLocalEditAtRef.current.get(id) ?? 0;
     const local = draftsRef.current.find((d) => d.id === id);
     const localAt = local?.updatedAt ?? 0;
-    if (local && Date.now() - localEditAt < 800 && remoteAt <= localAt) return;
+    const recentlyEdited = local && Date.now() - localEditAt < 12_000;
+    if (recentlyEdited && remoteAt <= localAt) return;
+    if (recentlyEdited && local) {
+      const remoteLen = draftContentLength({ id, title: remote.title ?? '', html: remote.html ?? '' });
+      const localLen = draftContentLength(local);
+      if (remoteLen < localLen) return;
+    }
 
     const remoteDraft: Draft = {
       id,

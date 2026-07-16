@@ -427,6 +427,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
       <RichTextEditor
         html={html}
         onChange={(v) => { htmlLiveRef.current = v; setHtml(v); }}
+        onLiveChange={(v) => { htmlLiveRef.current = v; }}
         placeholder=""
         editable={!locked}
         minHeight="180px"

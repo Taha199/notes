@@ -2305,7 +2305,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     // Parent sent shorter html — keep local DOM during active typing; never push longer html back up.
     if (propChanged && html !== lastLocalHtmlRef.current) {
       const plain = (s: string) => s.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-      if (plain(ed.innerHTML).length > plain(html).length) {
+      const localPlainLen = plain(ed.innerHTML).length;
+      const propPlainLen = plain(html).length;
+      if (localPlainLen > propPlainLen) {
+        const focused = active && editorWrapRef.current?.contains(active);
+        if (focused || Date.now() - lastKeystrokeAtRef.current < 12_000) return;
         const remoteIsNewer = remoteSyncAdvance && syncAt > lastKeystrokeAtRef.current;
         if (!remoteIsNewer && Date.now() - lastKeystrokeAtRef.current < 800) return;
       }
