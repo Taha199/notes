@@ -1010,11 +1010,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     insertParagraphAtMargin(parent, before);
   };
 
+  /** Exit on Enter/Backspace only for a trailing empty bullet after another list item. */
+  const isTrailingEmptyListItem = (li: HTMLLIElement) =>
+    isLastListItem(li) && li.previousElementSibling instanceof HTMLLIElement;
+
   const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
     const ed = editorRef.current;
     if (!ed) return false;
-    if (isLastListItem(li)) {
+    if (isTrailingEmptyListItem(li)) {
       exitListAfterLastItem(li);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return true;
+    }
+    if (isLastListItem(li)) {
+      insertNewListItemAfter(li);
       saveSel();
       readCommandState();
       emitHtml();
@@ -1025,7 +1036,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
-    if (isLastListItem(li)) {
+    if (isTrailingEmptyListItem(li)) {
       exitListAfterLastItem(li);
       saveSel();
       readCommandState();
