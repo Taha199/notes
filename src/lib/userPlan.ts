@@ -46,8 +46,45 @@ export function getStorageLimitBytes(
   return mbToBytes(getStorageLimitMB(profile, email));
 }
 
+export function jsonUtf8Bytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value ?? null)).length;
+}
+
+export interface StorageBreakdown {
+  notesBytes: number;
+  quizBytes: number;
+  chatBytes: number;
+  filesBytes: number;
+  total: number;
+}
+
+export function calculateStorageBreakdown(input: {
+  notes: unknown;
+  quizzes: unknown;
+  quizSets: unknown;
+  quizFolders: unknown;
+  chats: unknown;
+  filesUserData?: Record<string, unknown> | null;
+}): StorageBreakdown {
+  const notesBytes = jsonUtf8Bytes(input.notes);
+  const quizBytes = jsonUtf8Bytes([
+    ...(Array.isArray(input.quizzes) ? input.quizzes : []),
+    ...(Array.isArray(input.quizSets) ? input.quizSets : []),
+    ...(Array.isArray(input.quizFolders) ? input.quizFolders : []),
+  ]);
+  const chatBytes = jsonUtf8Bytes(input.chats);
+  const filesBytes = calculateFilesStorageBytes(input.filesUserData);
+  return {
+    notesBytes,
+    quizBytes,
+    chatBytes,
+    filesBytes,
+    total: notesBytes + quizBytes + chatBytes + filesBytes,
+  };
+}
+
 export function calculateUserStorageBytes(userData: Record<string, unknown> | null | undefined): number {
-  return new TextEncoder().encode(JSON.stringify(userData ?? {})).length;
+  return jsonUtf8Bytes(userData ?? {});
 }
 
 export function calculateFilesStorageBytes(userData: Record<string, unknown> | null | undefined): number {

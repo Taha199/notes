@@ -5,7 +5,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
-import { getStorageLimitMB, mbToBytes } from '../../lib/storageQuota';
+import { getStorageLimitMB, mbToBytes, calculateStorageBreakdown } from '../../lib/storageQuota';
 import { PlatformBackupCard } from '../admin/PlatformBackupCard';
 
 function formatBytes(bytes: number): string {
@@ -34,7 +34,7 @@ export function SettingsPage() {
   const { show } = useToast();
   const { notes, quizzes, quizSets, quizFolders, chats } = useNotes();
   const [storageLimitMB, setStorageLimitMB] = useState(100);
-  const [filesBytes, setFilesBytes] = useState(0);
+  const [filesUserData, setFilesUserData] = useState<Record<string, unknown> | null>(null);
 
   // Profile
   const [nameInput, setNameInput] = useState(user?.displayName || '');
@@ -112,14 +112,19 @@ export function SettingsPage() {
     }
   };
 
-  // Storage estimate
-  const storage = useMemo(() => {
-    const notesBytes = new TextEncoder().encode(JSON.stringify(notes)).length;
-    const quizBytes = new TextEncoder().encode(JSON.stringify([...quizzes, ...quizSets, ...quizFolders])).length;
-    const chatBytes = new TextEncoder().encode(JSON.stringify(chats)).length;
-    const total = notesBytes + quizBytes + chatBytes + filesBytes;
-    return { notesBytes, quizBytes, chatBytes, filesBytes, total };
-  }, [notes, quizzes, quizSets, quizFolders, chats, filesBytes]);
+  // Storage estimate — categories must sum to total
+  const storage = useMemo(
+    () =>
+      calculateStorageBreakdown({
+        notes,
+        quizzes,
+        quizSets,
+        quizFolders,
+        chats,
+        filesUserData: filesUserData ?? { files: [] },
+      }),
+    [notes, quizzes, quizSets, quizFolders, chats, filesUserData],
+  );
 
   const storageCapBytes = mbToBytes(storageLimitMB);
   const pct = Math.min(100, (storage.total / storageCapBytes) * 100);
@@ -134,16 +139,14 @@ export function SettingsPage() {
         const data = (await res.json()) ?? {};
         const profile = (data.profile ?? {}) as Record<string, unknown>;
         const filesData = data.files;
-        let filePayload = 0;
-        if (filesData) filePayload = new TextEncoder().encode(JSON.stringify(filesData)).length;
         if (!cancelled) {
           setStorageLimitMB(getStorageLimitMB(profile, user.email));
-          setFilesBytes(filePayload);
+          setFilesUserData({ files: filesData ?? [] });
         }
       } catch {
         if (!cancelled) {
           setStorageLimitMB(100);
-          setFilesBytes(0);
+          setFilesUserData(null);
         }
       }
     })();
@@ -337,6 +340,7 @@ export function SettingsPage() {
             {[
               { label: t.settingsStorageNotes, bytes: storage.notesBytes, icon: '📝' },
               { label: t.settingsStorageQuiz, bytes: storage.quizBytes, icon: '🧠' },
+              { label: t.settingsStorageChat, bytes: storage.chatBytes, icon: '💬' },
               { label: t.settingsStorageFiles, bytes: storage.filesBytes, icon: '📎' },
             ].map(({ label, bytes, icon }) => (
               <div key={label} className="flex items-center justify-between text-[13px]">

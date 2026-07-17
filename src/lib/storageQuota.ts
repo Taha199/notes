@@ -9,8 +9,11 @@ export {
   getStorageLimitBytes,
   calculateUserStorageBytes,
   calculateFilesStorageBytes,
+  calculateStorageBreakdown,
+  jsonUtf8Bytes,
   storageLimitPresetsMB,
   isPlusUser,
   hasAiAccess,
   plusStorageLimitForToggle,
+  type StorageBreakdown,
 } from './userPlan';
