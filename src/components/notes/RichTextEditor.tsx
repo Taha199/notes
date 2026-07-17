@@ -2821,19 +2821,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
 
       const atStart = isCaretAtStartOfLi(li, range);
-      if (atStart && isLastListItem(li) && !isLiEffectivelyEmpty(li)) {
-        e.preventDefault();
-        const list = li.parentElement;
-        if (list && LIST_TAGS.has(list.tagName)) {
-          focusParagraphAfterList(list as HTMLUListElement | HTMLOListElement, ed);
-        }
-        pendingListMarginExitRef.current = null;
-        saveSel();
-        readCommandState();
-        emitHtml();
-        return handled();
-      }
-
       if (atStart) {
         e.preventDefault();
         if (isNestedListItem(li)) returnToParentListItem(li);
