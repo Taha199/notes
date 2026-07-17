@@ -1151,14 +1151,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     placeCaretInBlock(newLi, true);
   };
 
-  const splitListItemAtStart = (li: HTMLLIElement) => {
+  const insertEmptyListItemBefore = (li: HTMLLIElement) => {
     const newLi = document.createElement('li');
     newLi.setAttribute('dir', 'auto');
-    while (li.firstChild) newLi.appendChild(li.firstChild);
-    if (isLiEmpty(newLi)) newLi.innerHTML = '<br>';
-    li.innerHTML = '<br>';
+    newLi.innerHTML = '<br>';
     li.parentNode?.insertBefore(newLi, li);
     placeCaretInBlock(newLi, true);
+  };
+
+  const splitListItemAtStart = (li: HTMLLIElement) => {
+    insertEmptyListItemBefore(li);
   };
 
   const getBlockPrefixMatch = (block: HTMLElement): RegExpMatchArray | null => {
@@ -2312,7 +2314,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       if (!isCaretAtStartOfLi(li, range)) return null;
-      if (li !== li.parentElement?.firstElementChild) return null;
+      if (li !== li.parentElement?.firstElementChild) return li;
       const list = li.parentElement;
       if (!list || !LIST_TAGS.has(list.tagName)) return null;
       const top = editorTopBlock(ed, list);
@@ -2343,8 +2345,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const target = canInsertLineAboveAtCaret(ed, sel.getRangeAt(0));
     if (!target) return;
     e.preventDefault();
-    insertEmptyLineAboveBlock(ed, target);
-    finishNewLineEditing(ed);
+    if (target.tagName === 'LI') insertEmptyListItemBefore(target as HTMLLIElement);
+    else insertEmptyLineAboveBlock(ed, target);
+    finishNewLineEditing(ed, { inList: target.tagName === 'LI' });
   };
 
   const applyBlockAlignment = (align: BlockAlign) => {
