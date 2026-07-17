@@ -288,6 +288,7 @@ export interface Translation {
   settingsPassEmailSent: string;
   settingsStorage: string;
   settingsStorageNotes: string;
+  settingsStorageDrafts: string;
   settingsStorageQuiz: string;
   settingsStorageChat: string;
   settingsStorageFiles: string;
@@ -652,6 +653,7 @@ export const LANGS: Record<Lang, Translation> = {
     settingsPassEmailSent: '✓ Reset email sent',
     settingsStorage: 'Storage',
     settingsStorageNotes: 'Notes',
+    settingsStorageDrafts: 'Drafts',
     settingsStorageQuiz: 'Quiz',
     settingsStorageChat: 'AI Chat',
     settingsStorageFiles: 'Files',
@@ -1012,6 +1014,7 @@ export const LANGS: Record<Lang, Translation> = {
     settingsPassEmailSent: '✓ Återställningsmail skickat',
     settingsStorage: 'Lagring',
     settingsStorageNotes: 'Anteckningar',
+    settingsStorageDrafts: 'Utkast',
     settingsStorageQuiz: 'Quiz',
     settingsStorageChat: 'AI-chatt',
     settingsStorageFiles: 'Filer',

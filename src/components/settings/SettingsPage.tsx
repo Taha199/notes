@@ -1,11 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
-import { getStorageLimitMB, mbToBytes, calculateStorageBreakdown } from '../../lib/storageQuota';
+import { rtdbFetch } from '../../lib/rtdb';
+import { getStorageLimitMB, mbToBytes, calculateStorageBreakdownFromUserData } from '../../lib/storageQuota';
 import { PlatformBackupCard } from '../admin/PlatformBackupCard';
 
 function formatBytes(bytes: number): string {
@@ -32,9 +32,8 @@ export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
-  const { notes, quizzes, quizSets, quizFolders, chats } = useNotes();
   const [storageLimitMB, setStorageLimitMB] = useState(100);
-  const [filesUserData, setFilesUserData] = useState<Record<string, unknown> | null>(null);
+  const [cloudUserData, setCloudUserData] = useState<Record<string, unknown> | null>(null);
 
   // Profile
   const [nameInput, setNameInput] = useState(user?.displayName || '');
@@ -112,18 +111,9 @@ export function SettingsPage() {
     }
   };
 
-  // Storage estimate — categories must sum to total
   const storage = useMemo(
-    () =>
-      calculateStorageBreakdown({
-        notes,
-        quizzes,
-        quizSets,
-        quizFolders,
-        chats,
-        filesUserData: filesUserData ?? { files: [] },
-      }),
-    [notes, quizzes, quizSets, quizFolders, chats, filesUserData],
+    () => calculateStorageBreakdownFromUserData(cloudUserData),
+    [cloudUserData],
   );
 
   const storageCapBytes = mbToBytes(storageLimitMB);
@@ -135,18 +125,16 @@ export function SettingsPage() {
     if (!user?.uid) return;
     (async () => {
       try {
-        const res = await fetch(`${FB_DB_URL}/users/${user.uid}.json`);
-        const data = (await res.json()) ?? {};
-        const profile = (data.profile ?? {}) as Record<string, unknown>;
-        const filesData = data.files;
+        const res = await rtdbFetch(`/users/${user.uid}`);
+        const data = ((await res.json()) ?? {}) as Record<string, unknown>;
         if (!cancelled) {
-          setStorageLimitMB(getStorageLimitMB(profile, user.email));
-          setFilesUserData({ files: filesData ?? [] });
+          setCloudUserData(data);
+          setStorageLimitMB(getStorageLimitMB((data.profile ?? {}) as Record<string, unknown>, user.email));
         }
       } catch {
         if (!cancelled) {
           setStorageLimitMB(100);
-          setFilesUserData(null);
+          setCloudUserData(null);
         }
       }
     })();
@@ -339,6 +327,7 @@ export function SettingsPage() {
           <div className="mt-1 space-y-2 border-t border-app-border pt-3 dark:border-white/10">
             {[
               { label: t.settingsStorageNotes, bytes: storage.notesBytes, icon: '📝' },
+              { label: t.settingsStorageDrafts, bytes: storage.draftsBytes, icon: '✏️' },
               { label: t.settingsStorageQuiz, bytes: storage.quizBytes, icon: '🧠' },
               { label: t.settingsStorageChat, bytes: storage.chatBytes, icon: '💬' },
               { label: t.settingsStorageFiles, bytes: storage.filesBytes, icon: '📎' },

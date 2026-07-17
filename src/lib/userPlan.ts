@@ -54,6 +54,7 @@ export interface StorageBreakdown {
   notesBytes: number;
   quizBytes: number;
   chatBytes: number;
+  draftsBytes: number;
   filesBytes: number;
   total: number;
 }
@@ -67,6 +68,7 @@ export function calculateStorageBreakdownFromUserData(
     quizSets: userData?.quizSets,
     quizFolders: userData?.quizFolders,
     chats: userData?.chats,
+    draftContents: userData?.draftContents,
     filesUserData: userData ?? null,
   });
 }
@@ -77,22 +79,24 @@ export function calculateStorageBreakdown(input: {
   quizSets: unknown;
   quizFolders: unknown;
   chats: unknown;
+  draftContents?: unknown;
   filesUserData?: Record<string, unknown> | null;
 }): StorageBreakdown {
   const notesBytes = jsonUtf8Bytes(input.notes);
-  const quizBytes = jsonUtf8Bytes([
-    ...(Array.isArray(input.quizzes) ? input.quizzes : []),
-    ...(Array.isArray(input.quizSets) ? input.quizSets : []),
-    ...(Array.isArray(input.quizFolders) ? input.quizFolders : []),
-  ]);
+  const quizBytes =
+    jsonUtf8Bytes(input.quizzes)
+    + jsonUtf8Bytes(input.quizSets)
+    + jsonUtf8Bytes(input.quizFolders);
   const chatBytes = jsonUtf8Bytes(input.chats);
+  const draftsBytes = jsonUtf8Bytes(input.draftContents);
   const filesBytes = calculateFilesStorageBytes(input.filesUserData);
   return {
     notesBytes,
     quizBytes,
     chatBytes,
+    draftsBytes,
     filesBytes,
-    total: notesBytes + quizBytes + chatBytes + filesBytes,
+    total: notesBytes + quizBytes + chatBytes + draftsBytes + filesBytes,
   };
 }
 
@@ -101,14 +105,16 @@ export function calculateUserStorageBytes(userData: Record<string, unknown> | nu
 }
 
 export function calculateFilesStorageBytes(userData: Record<string, unknown> | null | undefined): number {
+  const metaBytes = jsonUtf8Bytes(userData?.fileFolders);
   const files = userData?.files;
-  if (!files || typeof files !== 'object') return 0;
+  if (!files || typeof files !== 'object') return metaBytes;
   const list = Array.isArray(files) ? files : Object.values(files as Record<string, { size?: number }>);
-  return list.reduce((sum, file) => {
+  const fileBytes = list.reduce((sum, file) => {
     if (!file || typeof file !== 'object') return sum;
     const size = (file as { size?: number }).size;
     return sum + (typeof size === 'number' && size > 0 ? size : 0);
   }, 0);
+  return metaBytes + fileBytes;
 }
 
 export function storageLimitPresetsMB(): number[] {
