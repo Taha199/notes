@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
+import { getRtdbAuthToken, rtdbFetch, waitForAuthUser } from '../../lib/rtdb';
 import { getStorageLimitMB, MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
 import { isPlusUser } from '../../lib/userPlan';
-import { PlatformBackupCard } from './PlatformBackupCard';
 
 interface UserRow {
   uid: string;
@@ -49,7 +49,7 @@ function fallbackName(uid: string): string {
 }
 
 export function AdminPanel() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const isAdmin = user?.email === ADMIN_EMAIL;
   const [rows, setRows] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,17 +58,22 @@ export function AdminPanel() {
   const [editingLimitUid, setEditingLimitUid] = useState<string | null>(null);
   const [limitInput, setLimitInput] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
+      const authUser = user ?? (await waitForAuthUser());
+      if (!authUser) return;
+
+      const token = await getRtdbAuthToken();
       const [dbRes, authData] = await Promise.all([
-        fetch(`${FB_DB_URL}/users.json`),
-        user?.getIdToken()
-          .then((token) => fetch('/api/admin-users', { headers: { Authorization: `Bearer ${token}` } }))
-          .then((res) => (res.ok ? res.json() : { users: [] }))
-          .catch(() => ({ users: [] })),
+        rtdbFetch('/users'),
+        token
+          ? fetch('/api/admin-users', { headers: { Authorization: `Bearer ${token}` } })
+              .then((res) => (res.ok ? res.json() : { users: [] }))
+              .catch(() => ({ users: [] }))
+          : Promise.resolve({ users: [] }),
       ]);
-      const data = (await dbRes.json()) ?? {};
+      const data = dbRes.ok ? ((await dbRes.json()) ?? {}) : {};
       const authByUid = new Map<string, AuthUserRow>(
         ((authData?.users ?? []) as AuthUserRow[]).map((authUser) => [authUser.uid, authUser])
       );
@@ -98,12 +103,12 @@ export function AdminPanel() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
-    if (isAdmin) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin]);
+    if (authLoading || !isAdmin || !user) return;
+    void load();
+  }, [authLoading, isAdmin, user, load]);
 
   const totalBytes = useMemo(() => rows.reduce((s, r) => s + r.bytes, 0), [rows]);
 
@@ -206,8 +211,6 @@ export function AdminPanel() {
           🔄 Uppdatera
         </button>
       </div>
-
-      <PlatformBackupCard className="mb-5" />
 
       {loading ? (
         <p className="py-10 text-center text-sm text-app-text-secondary">Laddar…</p>
