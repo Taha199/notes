@@ -1011,11 +1011,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const removeListItemOnBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
     pendingListMarginExitRef.current = null;
     const prevLi = li.previousElementSibling;
+    const nextLi = li.nextElementSibling;
     const list = li.parentElement;
     if (prevLi instanceof HTMLLIElement) {
       li.remove();
       if (list && list.children.length === 0) list.remove();
       placeCaretInBlock(prevLi, false);
+    } else if (nextLi instanceof HTMLLIElement) {
+      li.remove();
+      if (list && list.children.length === 0) list.remove();
+      placeCaretInBlock(nextLi, true);
     } else if (isNestedListItem(li)) {
       returnToParentListItem(li);
     } else if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1) {
