@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
 import { getRtdbAuthToken, rtdbFetch, waitForAuthUser } from '../../lib/rtdb';
-import { getStorageLimitMB, MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
+import { calculateStorageBreakdownFromUserData, getStorageLimitMB, MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
 import { isPlusUser } from '../../lib/userPlan';
 
 interface UserRow {
@@ -81,7 +81,7 @@ export function AdminPanel() {
       const list: UserRow[] = Array.from(allUids).map((uid) => {
         const blob = (data[uid] ?? {}) as Record<string, unknown>;
         const profile = (blob?.profile ?? {}) as Record<string, unknown>;
-        const bytes = new TextEncoder().encode(JSON.stringify(blob ?? {})).length;
+        const bytes = calculateStorageBreakdownFromUserData(blob).total;
         const authUser = authByUid.get(uid);
         const email = ((profile.email as string) || authUser?.email || '').trim();
         const displayName = ((profile.displayName as string) || authUser?.displayName || '').trim();

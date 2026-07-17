@@ -10,6 +10,7 @@ export {
   calculateUserStorageBytes,
   calculateFilesStorageBytes,
   calculateStorageBreakdown,
+  calculateStorageBreakdownFromUserData,
   jsonUtf8Bytes,
   storageLimitPresetsMB,
   isPlusUser,

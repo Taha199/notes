@@ -58,6 +58,19 @@ export interface StorageBreakdown {
   total: number;
 }
 
+export function calculateStorageBreakdownFromUserData(
+  userData: Record<string, unknown> | null | undefined,
+): StorageBreakdown {
+  return calculateStorageBreakdown({
+    notes: userData?.notes,
+    quizzes: userData?.quizzes,
+    quizSets: userData?.quizSets,
+    quizFolders: userData?.quizFolders,
+    chats: userData?.chats,
+    filesUserData: userData ?? null,
+  });
+}
+
 export function calculateStorageBreakdown(input: {
   notes: unknown;
   quizzes: unknown;
