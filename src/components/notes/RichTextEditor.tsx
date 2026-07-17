@@ -1348,26 +1348,55 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     handleEmptyListItemBackspace(li, ed);
   };
 
+  const promoteEmptyListItemToMarginParagraph = (li: HTMLLIElement, ed: HTMLElement) => {
+    const list = li.parentElement;
+    if (!list || !LIST_TAGS.has(list.tagName)) return;
+    const parent = list.parentNode;
+    if (!parent) return;
+
+    const listEl = list as HTMLUListElement | HTMLOListElement;
+    const ordered = listEl.tagName === 'OL';
+    const div = document.createElement('div');
+    div.setAttribute('dir', 'auto');
+    div.innerHTML = '<br>';
+    stripNewParagraphIndent(div);
+
+    const beforeItems: HTMLLIElement[] = [];
+    const afterItems: HTMLLIElement[] = [];
+    let passed = false;
+    for (const child of [...list.children]) {
+      if (child === li) { passed = true; continue; }
+      if (child instanceof HTMLLIElement) {
+        if (!passed) beforeItems.push(child);
+        else afterItems.push(child);
+      }
+    }
+    li.remove();
+
+    const makeList = (items: HTMLLIElement[]) => {
+      const el = document.createElement(ordered ? 'ol' : 'ul');
+      el.setAttribute('dir', 'auto');
+      items.forEach((item) => el.appendChild(item));
+      return el;
+    };
+
+    if (beforeItems.length > 0) parent.insertBefore(makeList(beforeItems), list);
+    parent.insertBefore(div, list);
+    if (afterItems.length > 0) parent.insertBefore(makeList(afterItems), list);
+    list.remove();
+    cleanupEmptyListShell(listEl, ed);
+    pendingListMarginExitRef.current = null;
+    placeCaretInBlock(div, true);
+  };
+
   const handleEmptyListItemBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
     const list = li.parentElement;
-    const prevLi = li.previousElementSibling;
-
-    if (prevLi instanceof HTMLLIElement) {
-      li.remove();
-      if (list && list.children.length === 0) list.remove();
-      placeCaretInBlock(prevLi, false);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return;
-    }
-
     if (isNestedListItem(li)) {
       returnToParentListItem(li);
     } else if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1) {
       unwrapList(list as HTMLUListElement | HTMLOListElement, true);
     } else {
-      exitListItem(li, ed, true);
+      promoteEmptyListItemToMarginParagraph(li, ed);
     }
     saveSel();
     readCommandState();
