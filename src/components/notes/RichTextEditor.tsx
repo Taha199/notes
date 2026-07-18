@@ -6,10 +6,9 @@ import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbed
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
-  convertEmptyListItemToParagraph,
+  convertListItemToParagraph,
   insertParagraphAboveList,
   mergeAdjacentLists,
-  removeEmptyListItemSimple,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
   shouldRemoveOrphanEmptyLists,
@@ -1293,17 +1292,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const exitListItem = (li: HTMLLIElement, ed: HTMLElement, caretAtStart: boolean) => {
-    const div = unwrapListItemToDiv(li);
-    const list = li.parentElement;
-    if (!list || !LIST_TAGS.has(list.tagName)) return;
-    const parent = list.parentNode;
-    if (!parent) return;
-
-    const afterList = list.nextSibling;
-    li.remove();
-    if (list.children.length === 0) list.remove();
-    parent.insertBefore(div, afterList);
-    placeCaretInBlock(div, caretAtStart);
+    const div = convertListItemToParagraph(li, (listEl) => cleanupEmptyListShell(listEl, ed));
+    if (div) placeCaretInBlock(div, caretAtStart);
     saveSel();
   };
 
@@ -1427,39 +1417,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
-    // Last empty bullet after content (e.g. deleted "5" under •1 •4 •5):
-    // exit immediately to a normal left-margin line under the list (same as "Hej").
-    if (shouldExitListAfterEmptyItem(li)) {
-      pendingListMarginExitRef.current = null;
-      exitListAfterLastItem(li);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return;
-    }
-
-    const list = li.parentElement;
-    const soleItem = list && LIST_TAGS.has(list.tagName) && list.children.length === 1;
-
-    if (isLastListItem(li) && !soleItem) {
-      // Trailing empty after other empty bullets: remove one; next Backspace can exit via pending.
-      const prevLi = li.previousElementSibling;
-      li.remove();
-      if (list && LIST_TAGS.has(list.tagName)) {
-        cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement, ed);
-        pendingListMarginExitRef.current = list as HTMLUListElement | HTMLOListElement;
-      }
-      if (prevLi instanceof HTMLLIElement) {
-        placeCaretInBlock(prevLi, false);
-      } else {
-        pendingListMarginExitRef.current = null;
-      }
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return;
-    }
-
+    // One Backspace: current empty bullet → empty normal paragraph (split list, keep siblings).
     pendingListMarginExitRef.current = null;
     handleEmptyListItemBackspace(li, ed);
   };
@@ -1532,19 +1490,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (isNestedListItem(li)) {
       returnToParentListItem(li);
     } else {
-      const list = li.parentElement;
-      const soleItem = list && LIST_TAGS.has(list.tagName) && list.children.length === 1;
-      if (soleItem) {
-        const div = convertEmptyListItemToParagraph(li, (listEl) => cleanupEmptyListShell(listEl, ed));
-        if (div) {
-          pendingIndentExitRef.current = div;
-          placeCaretInBlock(div, true);
-        }
-      } else {
-        const caretTarget = removeEmptyListItemSimple(li, (listEl) => cleanupEmptyListShell(listEl, ed));
-        mergeAdjacentLists(ed);
-        if (caretTarget) placeCaretInBlock(caretTarget, false);
-        else selectEditorEnd();
+      const div = convertListItemToParagraph(li, (listEl) => cleanupEmptyListShell(listEl, ed));
+      if (div) {
+        stripNewParagraphIndent(div);
+        placeCaretInBlock(div, true);
       }
     }
     saveSel();
@@ -2985,6 +2934,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         emitHtml();
         return handled();
       }
+      // Empty normal line directly above a list: delete only that line; keep the list intact.
+      if (isEmptyTextLine(block)) {
+        const next = block.nextElementSibling;
+        if (next instanceof HTMLElement && LIST_TAGS.has(next.tagName)) {
+          e.preventDefault();
+          const prev = block.previousElementSibling;
+          block.remove();
+          if (prev instanceof HTMLElement && BLOCK_TAGS.has(prev.tagName) && prev.tagName !== 'LI') {
+            placeCaretInBlock(prev, false);
+          } else {
+            const firstLi = next.querySelector(':scope > li');
+            if (firstLi instanceof HTMLLIElement) placeCaretInBlock(firstLi, true);
+          }
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return handled();
+        }
+      }
       if (focusLineAboveAfterListParagraph(block)) {
         e.preventDefault();
         saveSel();
@@ -3030,23 +2998,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
 
       const atStart = isCaretAtStartOfLi(li, range);
-      if (atStart && isLastListItem(li) && !isLiEffectivelyEmpty(li)) {
-        e.preventDefault();
-        const list = li.parentElement;
-        if (list && LIST_TAGS.has(list.tagName)) {
-          focusParagraphAfterList(list as HTMLUListElement | HTMLOListElement, ed);
-        }
-        pendingListMarginExitRef.current = null;
-        saveSel();
-        readCommandState();
-        emitHtml();
-        return handled();
-      }
-
       if (atStart) {
         e.preventDefault();
-        if (isNestedListItem(li)) returnToParentListItem(li);
-        else if (!mergeListItemWithPrevious(li)) exitListItem(li, ed, true);
+        pendingListMarginExitRef.current = null;
+        if (isNestedListItem(li)) {
+          returnToParentListItem(li);
+        } else {
+          // Remove bullet from current item only; keep text; leave sibling items in the list.
+          exitListItem(li, ed, true);
+        }
         saveSel();
         readCommandState();
         emitHtml();

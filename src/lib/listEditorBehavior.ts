@@ -170,8 +170,11 @@ export function removeEmptyListItemSimple(
   return null;
 }
 
-/** Split list at empty item → margin paragraph (Word step 1: remove bullet, keep line). Returns new paragraph. */
-export function convertEmptyListItemToParagraph(
+/**
+ * Split list at the current item → normal margin paragraph (keep text if any).
+ * Result: [list before?][paragraph][list after?]. Never unwraps sibling items.
+ */
+export function convertListItemToParagraph(
   li: HTMLLIElement,
   cleanupEmptyListShell: (list: HTMLUListElement | HTMLOListElement) => void,
 ): HTMLDivElement | null {
@@ -182,7 +185,12 @@ export function convertEmptyListItemToParagraph(
 
   const listEl = list as HTMLUListElement | HTMLOListElement;
   const ordered = listEl.tagName === 'OL';
-  const div = createEmptyParagraph();
+  const div = document.createElement('div');
+  div.setAttribute('dir', 'auto');
+  while (li.firstChild) div.appendChild(li.firstChild);
+  stripNewParagraphIndent(div);
+  const text = div.textContent?.replace(/\u200B/g, '').trim() ?? '';
+  if (!text && !div.querySelector('img')) div.innerHTML = '<br>';
 
   const beforeItems: HTMLLIElement[] = [];
   const afterItems: HTMLLIElement[] = [];
@@ -208,6 +216,14 @@ export function convertEmptyListItemToParagraph(
   list.remove();
   cleanupEmptyListShell(listEl);
   return div;
+}
+
+/** Split list at empty item → margin paragraph (Word step 1). */
+export function convertEmptyListItemToParagraph(
+  li: HTMLLIElement,
+  cleanupEmptyListShell: (list: HTMLUListElement | HTMLOListElement) => void,
+): HTMLDivElement | null {
+  return convertListItemToParagraph(li, cleanupEmptyListShell);
 }
 
 /** Insert empty paragraph directly above a list (Shift+Enter at first item). */

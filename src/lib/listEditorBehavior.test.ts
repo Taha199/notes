@@ -3,6 +3,7 @@ import {
   BULLET_PREFIX_RE,
   collectListItemsBetween,
   convertEmptyListItemToParagraph,
+  convertListItemToParagraph,
   createEmptyParagraph,
   insertParagraphAboveList,
   isCaretAtStartOfLi,
@@ -75,6 +76,18 @@ describe('listEditorBehavior', () => {
     expect(ed.querySelectorAll('ul').length).toBe(2);
     expect(ed.querySelectorAll('div').length).toBe(1);
     expect(div?.tagName).toBe('DIV');
+    ed.remove();
+  });
+
+  it('convertListItemToParagraph keeps text and leaves sibling bullets', () => {
+    const ed = editorHtml('<ul><li>1</li><li>2</li><li>3</li><li>4</li></ul><div>Bye</div>');
+    const items = [...ed.querySelectorAll('li')] as HTMLLIElement[];
+    const div = convertListItemToParagraph(items[3], () => {});
+    expect(div?.textContent).toBe('4');
+    expect(ed.querySelectorAll('ul').length).toBe(1);
+    expect(ed.querySelectorAll('li').length).toBe(3);
+    expect(ed.textContent).toContain('Bye');
+    expect(div?.nextElementSibling?.textContent).toContain('Bye');
     ed.remove();
   });
 
