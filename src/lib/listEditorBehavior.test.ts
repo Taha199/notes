@@ -15,6 +15,7 @@ import {
   isLiEffectivelyEmpty,
   isLiEmpty,
   mergeAdjacentLists,
+  normalizePseudoListsInHtmlString,
   plainTextToListHtml,
   removeEmptyListItemSimple,
   removeListItemsInRangeDom,
@@ -350,6 +351,25 @@ describe('listEditorBehavior', () => {
     expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
     expect(ed.textContent?.replace(/[\u200B\s]/g, '')).toBe('');
     ed.remove();
+  });
+
+  it('normalizePseudoListsInHtmlString converts pasted • blocks in a string', () => {
+    const out = normalizePseudoListsInHtmlString(
+      '<div>\u2022 <b>Mukosa</b> \u2013 a</div><div>\u2022 <b>Serosa</b> \u2013 b</div>',
+    );
+    expect(out).toContain('<ul');
+    expect((out.match(/<li\b/g) || []).length).toBe(2);
+    expect(out).not.toMatch(/\u2022/);
+  });
+
+  it('normalizePseudoListsInHtmlString leaves normal prose untouched', () => {
+    const html = '<div>Hej det är 3. plats</div><div>Andra raden</div>';
+    expect(normalizePseudoListsInHtmlString(html)).toBe(html);
+  });
+
+  it('normalizePseudoListsInHtmlString keeps real lists intact', () => {
+    const html = '<ul dir="auto"><li dir="auto">a</li><li dir="auto">b</li></ul>';
+    expect(normalizePseudoListsInHtmlString(html)).toBe(html);
   });
 
   it('isCaretInBulletPrefixZone is true between bullet and text', () => {

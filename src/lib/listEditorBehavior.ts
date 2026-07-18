@@ -318,6 +318,23 @@ export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boole
   return changed;
 }
 
+/**
+ * Normalize an HTML *string* so any pseudo bullet/number lines become real
+ * ul/ol/li. Runs on a detached node — safe to call on serialized output.
+ * Returns the original string when nothing needed converting.
+ */
+export function normalizePseudoListsInHtmlString(html: string): string {
+  if (!html) return html;
+  // Cheap gate: only do work when a bullet/number marker could exist outside a list.
+  if (!/[\uF0B7\uF0A7\u2022\u2023\u2043\u2219\u2024\u25E6\u25AA\u25CF\u25CB•●◦▪▫‣⁃·∙・○■□➢➤]|\d+[.)]/.test(html)) {
+    return html;
+  }
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  const changed = convertPseudoBulletBlocksToNativeLists(root);
+  return changed ? root.innerHTML : html;
+}
+
 /** Convert plain-text clipboard lines like "• a\\n• b" into list HTML. */
 export function plainTextToListHtml(plain: string): string | null {
   const lines = plain.replace(/\r\n/g, '\n').split('\n').filter((line) => line.trim());

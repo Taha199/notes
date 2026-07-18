@@ -14,6 +14,7 @@ import {
   insertParagraphAboveList,
   isCaretInBulletPrefixZone,
   mergeAdjacentLists,
+  normalizePseudoListsInHtmlString,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
   shouldRemoveOrphanEmptyLists,
@@ -255,7 +256,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       nextBody.appendChild(table);
     });
     detached.forEach(({ parent, host }) => parent.appendChild(host));
-    return html;
+    // Guarantee any pasted "• …" / "1. …" pseudo-lists persist as real ul/ol.
+    return normalizePseudoListsInHtmlString(html);
   };
 
   const normalizeEditorImages = (ed: HTMLElement) => {
