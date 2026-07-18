@@ -1348,6 +1348,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const focusParagraphAfterList = (list: HTMLUListElement | HTMLOListElement, ed: HTMLElement) => {
+    const next = list.nextElementSibling;
+    if (
+      next instanceof HTMLElement
+      && !LIST_TAGS.has(next.tagName)
+      && BLOCK_TAGS.has(next.tagName)
+      && isEmptyTextLine(next)
+    ) {
+      placeCaretInBlock(next, true);
+      return next;
+    }
     const { parent, before } = getBlockLevelInsertAfterList(list, ed);
     return insertParagraphAtMargin(parent, before);
   };
@@ -1416,8 +1426,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
-    if (shouldExitListAfterEmptyItem(li)) {
-      const list = li.parentElement;
+    const list = li.parentElement;
+    const soleItem = list && LIST_TAGS.has(list.tagName) && list.children.length === 1;
+
+    if (isLastListItem(li) && !soleItem) {
       const prevLi = li.previousElementSibling;
       li.remove();
       if (list && LIST_TAGS.has(list.tagName)) {
@@ -1434,6 +1446,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       emitHtml();
       return;
     }
+
     pendingListMarginExitRef.current = null;
     handleEmptyListItemBackspace(li, ed);
   };
@@ -2963,7 +2976,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         pending?.isConnected
         && pending.contains(li)
         && isLastListItem(li)
-        && !isLiEffectivelyEmpty(li)
       ) {
         e.preventDefault();
         focusParagraphAfterList(pending, ed);
