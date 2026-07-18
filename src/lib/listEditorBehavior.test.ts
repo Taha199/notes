@@ -6,6 +6,7 @@ import {
   convertListItemToParagraph,
   clipboardToNativeListHtml,
   convertPseudoBulletBlocksToNativeLists,
+  isCaretInBulletPrefixZone,
   createEmptyParagraph,
   deleteSelectionRangeContents,
   insertParagraphAboveList,
@@ -316,5 +317,24 @@ describe('listEditorBehavior', () => {
   it('clipboardToNativeListHtml falls back to plain when HTML is empty', () => {
     const out = clipboardToNativeListHtml('', '• One\n• Two');
     expect(out).toBe('<ul dir="auto"><li dir="auto">One</li><li dir="auto">Two</li></ul>');
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists converts a single • line', () => {
+    const ed = editorHtml('<div>• <b>Mukosa</b> – barriär</div>');
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
+    expect(ed.querySelectorAll('li').length).toBe(1);
+    expect(ed.textContent).not.toMatch(/•/);
+    expect(ed.querySelector('li b')?.textContent).toContain('Mukosa');
+    ed.remove();
+  });
+
+  it('isCaretInBulletPrefixZone is true between bullet and text', () => {
+    const ed = editorHtml('<div>• Mukosa</div>');
+    const text = ed.querySelector('div')!.firstChild as Text;
+    const range = caretIn(text, 2); // after "• "
+    expect(isCaretInBulletPrefixZone(ed.querySelector('div')!, range)).toBe(true);
+    const afterM = caretIn(text, 4);
+    expect(isCaretInBulletPrefixZone(ed.querySelector('div')!, afterM)).toBe(false);
+    ed.remove();
   });
 });

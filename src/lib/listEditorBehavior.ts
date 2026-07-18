@@ -4,10 +4,21 @@ export const LIST_TAG_NAMES = new Set(['UL', 'OL']);
 export const BLOCK_TAG_NAMES = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
 /** Leading bullet/number markers from ChatGPT, Word, plain text, etc. */
 export const BULLET_PREFIX_RE =
-  /^[\s\u00a0\u200B\uFEFF\u202F]*(?:[•●◦▪▫‣⁃·∙・○■□➢➤\-–—*+]|\d+[.)])[\s\u00a0\u200B\uFEFF\u202F]*/;
+  /^[\s\u00a0\u200B\uFEFF\u202F]*(?:[\uF0B7\uF0A7\u2022\u2023\u2043\u2219\u2024\u25E6\u25AA\u25CF\u25CB•●◦▪▫‣⁃·∙・○■□➢➤\-–—*+]|\d+[.)])[\s\u00a0\u200B\uFEFF\u202F]*/;
 
 const PSEUDO_LIST_BLOCK_TAGS = new Set(['DIV', 'P', 'H1', 'H2', 'H3']);
-const STRONG_BULLET_RE = /[•●◦▪▫‣⁃·∙・*○■□➢➤]/;
+const STRONG_BULLET_RE = /[\uF0B7\uF0A7\u2022\u2023\u2043\u2219\u2024\u25E6\u25AA\u25CF\u25CB•●◦▪▫‣⁃·∙・*○■□➢➤]/;
+
+/** True when caret sits inside the leading "• " zone (so Backspace can remove the bullet). */
+export function isCaretInBulletPrefixZone(block: HTMLElement, range: Range): boolean {
+  const match = getPseudoListPrefix(block);
+  if (!match) return false;
+  const probe = document.createRange();
+  probe.selectNodeContents(block);
+  probe.setEnd(range.startContainer, range.startOffset);
+  const before = probe.toString().replace(/[\u200B\uFEFF]/g, '');
+  return before.length <= match[0].replace(/[\u200B\uFEFF]/g, '').length;
+}
 
 export function getPseudoListPrefix(block: HTMLElement): RegExpMatchArray | null {
   if (block.closest('li, ul, ol')) return null;

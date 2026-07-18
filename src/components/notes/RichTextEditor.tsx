@@ -12,6 +12,7 @@ import {
   convertPseudoBulletBlocksToNativeLists,
   deleteSelectionRangeContents,
   insertParagraphAboveList,
+  isCaretInBulletPrefixZone,
   mergeAdjacentLists,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
@@ -1736,9 +1737,43 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!block || block.tagName === 'LI' || block.closest('li')) return false;
     const match = getBlockPrefixMatch(block);
     if (!match) return false;
+
     const afterPrefix = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim();
-    if (afterPrefix) return false;
-    stripPseudoBulletLine(block);
+    // Empty "•" line, or caret in the "• " zone / start → remove the stuck bullet marker.
+    if (
+      !afterPrefix
+      || isCaretAtStartOfBlock(block, range)
+      || isCaretInBulletPrefixZone(block, range)
+    ) {
+      stripBulletPrefixFromBlock(block);
+      // Sibling ChatGPT lines become a real ul/ol (same as after "frisätts").
+      convertPseudoBulletBlocksToNativeLists(ed);
+      if (block.isConnected) placeCaretInBlock(block, true);
+      else {
+        const sel = window.getSelection();
+        if (sel?.rangeCount) {
+          const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
+          if (li) placeCaretInBlock(li, true);
+        }
+      }
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return true;
+    }
+    return false;
+  };
+
+  /** Turn any leftover "• text" / "- text" blocks into the same native lists as the toolbar. */
+  const promotePseudoListsToNative = (ed: HTMLElement): boolean => {
+    if (!convertPseudoBulletBlocksToNativeLists(ed)) return false;
+    ed.querySelectorAll('ul, ol, li').forEach((el) => {
+      el.setAttribute('dir', 'auto');
+      if (el instanceof HTMLElement) {
+        el.style.removeProperty('text-align');
+        el.removeAttribute('align');
+      }
+    });
     return true;
   };
 
@@ -3107,6 +3142,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       editorRef.current.innerHTML = html;
       normalizeEditorImages(editorRef.current);
       normalizeTablesInEditor(editorRef.current);
+      promotePseudoListsToNative(editorRef.current);
       lastLocalHtmlRef.current = editorRef.current.innerHTML;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3149,7 +3185,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     ed.innerHTML = html;
     normalizeEditorImages(ed);
     normalizeTablesInEditor(ed);
-    lastLocalHtmlRef.current = ed.innerHTML;
+    if (promotePseudoListsToNative(ed)) {
+      lastLocalHtmlRef.current = serializeEditorHtml(ed);
+      onLiveChangeRef.current?.(lastLocalHtmlRef.current);
+      onChangeRef.current(lastLocalHtmlRef.current);
+    } else {
+      lastLocalHtmlRef.current = ed.innerHTML;
+    }
     resetEditorUndoHistory();
   }, [html]);
 
@@ -4035,7 +4077,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         }}
         onFocus={() => {
           const ed = editorRef.current;
-          if (ed) sanitizeCaretFontContext(ed);
+          if (!ed) return;
+          sanitizeCaretFontContext(ed);
+          // Fix already-pasted ChatGPT "• …" lines into real lists on focus.
+          if (promotePseudoListsToNative(ed)) {
+            readCommandState();
+            emitHtml();
+          }
         }}
         onBlur={() => {
           hideImageToolbar();
@@ -4116,11 +4164,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             });
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             stripEmptyFontSpans(live);
+            const promoted = promotePseudoListsToNative(live);
             const listsCleared = cleanupOrphanEmptyLists(live);
             const ytChanged = normalizeYouTubeEmbeds(live);
             const linkChanged = normalizeAutoLinks(live);
             const tableChanged = normalizeTablesInEditor(live);
-            if (listsCleared || ytChanged || linkChanged || tableChanged) emitHtml();
+            if (promoted || listsCleared || ytChanged || linkChanged || tableChanged) {
+              readCommandState();
+              emitHtml();
+            }
           });
         }}
         onPaste={(e) => {
@@ -4157,14 +4209,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             const live = editorRef.current;
             if (live) {
               normalizePastedBlocks(live);
-              convertPseudoBulletBlocksToNativeLists(live);
-              live.querySelectorAll('ul, ol, li').forEach((el) => {
-                el.setAttribute('dir', 'auto');
-                if (el instanceof HTMLElement) {
-                  el.style.removeProperty('text-align');
-                  el.removeAttribute('align');
-                }
-              });
+              promotePseudoListsToNative(live);
             }
             readCommandState();
             emitHtml();
