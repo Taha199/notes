@@ -2,7 +2,165 @@
 
 export const LIST_TAG_NAMES = new Set(['UL', 'OL']);
 export const BLOCK_TAG_NAMES = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
-export const BULLET_PREFIX_RE = /^[\s\u00a0]*(?:[•●◦▪▫‣⁃·\-–—*+]|\d+[.)])\s*/;
+/** Leading bullet/number markers from ChatGPT, Word, plain text, etc. */
+export const BULLET_PREFIX_RE = /^[\s\u00a0\u200B\uFEFF]*(?:[•●◦▪▫‣⁃·∙・\-–—*+]|\d+[.)])\s*/;
+
+const PSEUDO_LIST_BLOCK_TAGS = new Set(['DIV', 'P', 'H1', 'H2', 'H3']);
+const STRONG_BULLET_RE = /[•●◦▪▫‣⁃·∙・*]/;
+
+export function getPseudoListPrefix(block: HTMLElement): RegExpMatchArray | null {
+  if (block.closest('li, ul, ol')) return null;
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const raw = node.textContent ?? '';
+    if (!raw.replace(/[\u200B\uFEFF\s\u00a0]/g, '')) {
+      node = walker.nextNode();
+      continue;
+    }
+    return raw.match(BULLET_PREFIX_RE);
+  }
+  const text = block.textContent ?? '';
+  return text.match(BULLET_PREFIX_RE);
+}
+
+export function isOrderedPseudoPrefix(match: RegExpMatchArray): boolean {
+  return /\d+[.)]/.test(match[0]);
+}
+
+export function stripBulletPrefixFromElement(el: HTMLElement): void {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const raw = node.textContent ?? '';
+    if (!raw.replace(/[\u200B\uFEFF\s\u00a0]/g, '')) {
+      node = walker.nextNode();
+      continue;
+    }
+    const stripped = raw.replace(BULLET_PREFIX_RE, '');
+    if (stripped !== raw) node.textContent = stripped;
+    return;
+  }
+}
+
+function blockHasNestedPseudoItems(block: HTMLElement): boolean {
+  return [...block.children].some(
+    (child) =>
+      child instanceof HTMLElement
+      && PSEUDO_LIST_BLOCK_TAGS.has(child.tagName)
+      && !!getPseudoListPrefix(child),
+  );
+}
+
+function convertBlockGroupToNativeList(blocks: HTMLElement[], ordered: boolean): HTMLUListElement | HTMLOListElement {
+  const list = document.createElement(ordered ? 'ol' : 'ul');
+  list.setAttribute('dir', 'auto');
+  const parent = blocks[0].parentNode;
+  if (!parent) return list;
+  blocks.forEach((block) => {
+    const li = document.createElement('li');
+    li.setAttribute('dir', 'auto');
+    while (block.firstChild) li.appendChild(block.firstChild);
+    stripBulletPrefixFromElement(li);
+    if (!li.textContent?.replace(/\u200B/g, '').trim() && !li.querySelector('img')) {
+      li.innerHTML = '<br>';
+    }
+    list.appendChild(li);
+  });
+  parent.insertBefore(list, blocks[0]);
+  blocks.forEach((b) => b.remove());
+  return list;
+}
+
+/**
+ * Turn pasted ChatGPT/plain pseudo-lists (`• text` in div/p) into real ul/ol/li
+ * so Enter/Backspace/list toolbar match manually created lists.
+ */
+export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boolean {
+  let changed = false;
+  let guard = 0;
+  while (guard++ < 80) {
+    let start: HTMLElement | null = null;
+    for (const el of root.querySelectorAll<HTMLElement>('div, p, h1, h2, h3')) {
+      if (el.dataset.skipPseudoList === '1') continue;
+      if (el.closest('li, ul, ol')) continue;
+      if (!PSEUDO_LIST_BLOCK_TAGS.has(el.tagName)) continue;
+      if (blockHasNestedPseudoItems(el)) continue;
+      if (!getPseudoListPrefix(el)) continue;
+      start = el;
+      break;
+    }
+    if (!start) break;
+
+    const startPrefix = getPseudoListPrefix(start);
+    if (!startPrefix) break;
+    const ordered = isOrderedPseudoPrefix(startPrefix);
+    const group: HTMLElement[] = [start];
+    let sibling = start.nextElementSibling;
+    while (sibling instanceof HTMLElement) {
+      if (!PSEUDO_LIST_BLOCK_TAGS.has(sibling.tagName)) break;
+      if (sibling.closest('li, ul, ol') && sibling.tagName !== 'LI') break;
+      if (blockHasNestedPseudoItems(sibling)) break;
+      const prefix = getPseudoListPrefix(sibling);
+      if (!prefix || isOrderedPseudoPrefix(prefix) !== ordered) break;
+      group.push(sibling);
+      sibling = sibling.nextElementSibling;
+    }
+
+    const strongBullet = STRONG_BULLET_RE.test(startPrefix[0]);
+    if (group.length < 2 && !strongBullet) {
+      start.dataset.skipPseudoList = '1';
+      continue;
+    }
+
+    convertBlockGroupToNativeList(group, ordered);
+    changed = true;
+  }
+
+  root.querySelectorAll('[data-skip-pseudo-list]').forEach((el) => {
+    el.removeAttribute('data-skip-pseudo-list');
+  });
+  if (changed) mergeAdjacentLists(root);
+  return changed;
+}
+
+/** Convert plain-text clipboard lines like "• a\\n• b" into list HTML. */
+export function plainTextToListHtml(plain: string): string | null {
+  const lines = plain.replace(/\r\n/g, '\n').split('\n').filter((line) => line.trim());
+  if (lines.length === 0) return null;
+  const resolved: { ordered: boolean; content: string; marker: string }[] = [];
+  for (const line of lines) {
+    const match = line.match(BULLET_PREFIX_RE);
+    if (!match) return null;
+    resolved.push({
+      ordered: /\d+[.)]/.test(match[0]),
+      content: line.slice(match[0].length),
+      marker: match[0],
+    });
+  }
+  const strong = resolved.some((item) => STRONG_BULLET_RE.test(item.marker));
+  if (resolved.length < 2 && !strong) return null;
+  const ordered = resolved.every((item) => item.ordered);
+  const unordered = resolved.every((item) => !item.ordered);
+  if (!ordered && !unordered) return null;
+  const tag = ordered ? 'ol' : 'ul';
+  const body = resolved
+    .map((item) => {
+      const text = item.content.trim() || '<br>';
+      const safe = text === '<br>' ? text : escapeHtmlPlain(text);
+      return `<li dir="auto">${safe}</li>`;
+    })
+    .join('');
+  return `<${tag} dir="auto">${body}</${tag}>`;
+}
+
+function escapeHtmlPlain(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 export const LIST_EXIT_INDENT_PROPS = [
   'margin-left',

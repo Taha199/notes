@@ -6,10 +6,13 @@ import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbed
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
+  BULLET_PREFIX_RE,
   convertListItemToParagraph,
+  convertPseudoBulletBlocksToNativeLists,
   deleteSelectionRangeContents,
   insertParagraphAboveList,
   mergeAdjacentLists,
+  plainTextToListHtml,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
   shouldRemoveOrphanEmptyLists,
@@ -21,7 +24,6 @@ const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 36, 42, 48,
 const TOGGLE_COMMANDS = ['bold', 'italic', 'underline', 'strikeThrough'] as const;
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
 const LIST_TAGS = new Set(['UL', 'OL']);
-const BULLET_PREFIX_RE = /^[\s\u00a0]*(?:[•●◦▪▫‣⁃·\-–—*+]|\d+[.)])\s*/;
 type BlockAlign = 'left' | 'center' | 'right';
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
@@ -1273,9 +1275,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const getBlockPrefixMatch = (block: HTMLElement): RegExpMatchArray | null => {
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-    const firstText = walker.nextNode();
-    if (!firstText || firstText.nodeType !== Node.TEXT_NODE) return null;
-    return (firstText.textContent ?? '').match(BULLET_PREFIX_RE);
+    let firstText = walker.nextNode();
+    while (firstText) {
+      const raw = firstText.textContent ?? '';
+      if (!raw.replace(/[\u200B\uFEFF\s\u00a0]/g, '')) {
+        firstText = walker.nextNode();
+        continue;
+      }
+      return raw.match(BULLET_PREFIX_RE);
+    }
+    return (block.textContent ?? '').match(BULLET_PREFIX_RE);
   };
 
   const nextPrefixFromMatch = (match: RegExpMatchArray): string => {
@@ -2002,7 +2011,29 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!activeBlock || activeBlock === ed || activeBlock.tagName === 'LI' || activeBlock.closest('li')) {
       activeBlock = ensureBlockAtRange(ed, sel.getRangeAt(0));
     }
-    convertBlocksToList([activeBlock], ordered, activeBlock);
+    // Expand to adjacent ChatGPT-style "• …" siblings so one toggle covers the whole paste.
+    const blocksForList = (() => {
+      const seedPrefix = getBlockPrefixMatch(activeBlock);
+      if (!seedPrefix) return [activeBlock];
+      const seedOrdered = isNumberedPrefix(seedPrefix);
+      const group: HTMLElement[] = [activeBlock];
+      let prev = activeBlock.previousElementSibling;
+      while (prev instanceof HTMLElement && BLOCK_TAGS.has(prev.tagName) && prev.tagName !== 'LI' && !prev.closest('li')) {
+        const match = getBlockPrefixMatch(prev);
+        if (!match || isNumberedPrefix(match) !== seedOrdered) break;
+        group.unshift(prev);
+        prev = prev.previousElementSibling;
+      }
+      let next = activeBlock.nextElementSibling;
+      while (next instanceof HTMLElement && BLOCK_TAGS.has(next.tagName) && next.tagName !== 'LI' && !next.closest('li')) {
+        const match = getBlockPrefixMatch(next);
+        if (!match || isNumberedPrefix(match) !== seedOrdered) break;
+        group.push(next);
+        next = next.nextElementSibling;
+      }
+      return group;
+    })();
+    convertBlocksToList(blocksForList, ordered, activeBlock);
     saveSel();
     readCommandState();
     emitHtml();
@@ -2317,6 +2348,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (block.closest('li, ul, ol')) return;
       stripListPasteIndent(block, blockFollowsList(block));
     });
+    // ChatGPT/etc. paste bullets as plain "• text" in div/p — promote to real lists.
+    convertPseudoBulletBlocksToNativeLists(ed);
   };
 
   const ensureLeftMarginAfterList = (block: HTMLElement) => {
@@ -4111,6 +4144,24 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             return;
           }
           const plainTrimmed = plain.trim();
+          // Plain-text only: promote bullet lines to a native list (keeps HTML paste for bold/etc.).
+          if (!pastedHtml && plainTrimmed) {
+            const listHtml = plainTextToListHtml(plainTrimmed);
+            if (listHtml) {
+              e.preventDefault();
+              ensureFocus(true);
+              document.execCommand('insertHTML', false, listHtml);
+              saveSel();
+              const live = editorRef.current;
+              if (live) {
+                normalizePastedBlocks(live);
+                live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
+              }
+              readCommandState();
+              emitHtml();
+              return;
+            }
+          }
           if (!pastedHtml) {
             const videoId = extractYouTubeVideoId(plainTrimmed);
             const ed = editorRef.current;
@@ -4137,11 +4188,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             if (!live) return;
             normalizePastedBlocks(live);
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
-            const ytChanged = normalizeYouTubeEmbeds(live);
-            const linkChanged = normalizeAutoLinks(live);
-            const tableChanged = normalizeTablesInEditor(live);
-            if (ytChanged || linkChanged || tableChanged) emitHtml();
-            else emitHtml();
+            normalizeYouTubeEmbeds(live);
+            normalizeAutoLinks(live);
+            normalizeTablesInEditor(live);
+            readCommandState();
+            emitHtml();
           });
         }}
         onMouseMove={handleEditorMouseMove}

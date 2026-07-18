@@ -4,6 +4,7 @@ import {
   collectListItemsBetween,
   convertEmptyListItemToParagraph,
   convertListItemToParagraph,
+  convertPseudoBulletBlocksToNativeLists,
   createEmptyParagraph,
   deleteSelectionRangeContents,
   insertParagraphAboveList,
@@ -11,6 +12,7 @@ import {
   isLiEffectivelyEmpty,
   isLiEmpty,
   mergeAdjacentLists,
+  plainTextToListHtml,
   removeEmptyListItemSimple,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems,
@@ -219,5 +221,40 @@ describe('listEditorBehavior', () => {
     removeListItemsInRangeDom(items[1], items[2], () => {});
     expect([...ed.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['1', '4']);
     ed.remove();
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists turns ChatGPT • lines into ul/li', () => {
+    const ed = editorHtml(
+      '<div><b>• Mukosa</b> – barriär</div><div><b>• Submukosa</b> – kärl</div><div><b>• Serosa</b> – ytterst</div>',
+    );
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
+    expect(ed.querySelectorAll('ul').length).toBe(1);
+    expect(ed.querySelectorAll('li').length).toBe(3);
+    expect(ed.textContent).toContain('Mukosa');
+    expect(ed.textContent).not.toMatch(/•/);
+    expect(ed.querySelector('li b')?.textContent).toContain('Mukosa');
+    ed.remove();
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists promotes nested pasted paragraphs', () => {
+    const ed = editorHtml(
+      '<div><p>• One</p><p>• Two</p></div>',
+    );
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
+    expect(ed.querySelectorAll('li').length).toBe(2);
+    expect(ed.querySelector('li')?.textContent?.trim()).toBe('One');
+    ed.remove();
+  });
+
+  it('plainTextToListHtml builds a ul from bullet lines', () => {
+    const html = plainTextToListHtml('• Alpha\n• Beta\n• Gamma');
+    expect(html).toContain('<ul');
+    expect(html).toContain('<li dir="auto">Alpha</li>');
+    expect(html).toContain('Gamma');
+  });
+
+  it('plainTextToListHtml rejects mixed non-list text', () => {
+    expect(plainTextToListHtml('• Alpha\nplain line')).toBeNull();
+    expect(BULLET_PREFIX_RE.test('• Mukosa')).toBe(true);
   });
 });
