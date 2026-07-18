@@ -4427,12 +4427,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         );
       })(), hoveredImg.host)}
 
-      {/* Image resize handles — only after tapping ↔ (avoids accidental resize when viewing) */}
-      {editable && hoveredImg && imgResizeMode && (() => {
+      {/* Image resize handles — only after tapping ↔ (avoids accidental resize when viewing).
+          Portaled to <body> so position:fixed is viewport-relative even inside
+          transformed ancestors (modals/cards), keeping handles glued to the edges. */}
+      {editable && hoveredImg && imgResizeMode && createPortal((() => {
         const r = hoveredImg.rect;
         const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
         const leave = () => { if (!isResizingImg.current) hideImageToolbar(); };
         const base = 'flex items-center justify-center rounded-full border-2 border-white bg-primary text-white shadow-lg';
+        const H = 26; // handle size (px) — larger = easier to grab on touch
+        const half = H / 2;
         return (
           <>
             <div
@@ -4440,10 +4444,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               onMouseEnter={keep}
               onMouseLeave={leave}
               title={t.titleResizeWidth}
-              style={{ position: 'fixed', left: r.right - 11, top: r.top + r.height / 2 - 11, zIndex: 9999, cursor: 'ew-resize', touchAction: 'none' }}
-              className={base + ' h-[22px] w-[22px]'}
+              style={{ position: 'fixed', left: r.right - half, top: r.top + r.height / 2 - half, width: H, height: H, zIndex: 100000, cursor: 'ew-resize', touchAction: 'none' }}
+              className={base}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 7 L4 12 L9 17 M15 7 L20 12 L15 17" />
               </svg>
             </div>
@@ -4452,10 +4456,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               onMouseEnter={keep}
               onMouseLeave={leave}
               title={t.titleResizeHeight}
-              style={{ position: 'fixed', left: r.left + r.width / 2 - 11, top: r.bottom - 11, zIndex: 9999, cursor: 'ns-resize', touchAction: 'none' }}
-              className={base + ' h-[22px] w-[22px]'}
+              style={{ position: 'fixed', left: r.left + r.width / 2 - half, top: r.bottom - half, width: H, height: H, zIndex: 100000, cursor: 'ns-resize', touchAction: 'none' }}
+              className={base}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M7 9 L12 4 L17 9 M7 15 L12 20 L17 15" />
               </svg>
             </div>
@@ -4464,17 +4468,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               onMouseEnter={keep}
               onMouseLeave={leave}
               title={t.titleResizeImage}
-              style={{ position: 'fixed', left: r.right - 12, top: r.bottom - 12, zIndex: 10000, cursor: 'nwse-resize', touchAction: 'none' }}
-              className={base + ' h-[22px] w-[22px]'}
+              style={{ position: 'fixed', left: r.right - half, top: r.bottom - half, width: H, height: H, zIndex: 100001, cursor: 'nwse-resize', touchAction: 'none' }}
+              className={base}
             >
-              <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                 <path d="M10 3 L3 10" />
                 <path d="M10 7.5 L7.5 10" />
               </svg>
             </div>
           </>
         );
-      })()}
+      })(), document.body)}
 
       {/* Image preview modal */}
       {previewImage && (() => {
