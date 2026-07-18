@@ -2722,8 +2722,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           finishNewLineEditing(ed, { inList: true });
         }
       } else if (isCaretAtStartOfLi(li, range)) {
-        insertNormalLineAboveListItem(li, ed);
-        finishNewLineEditing(ed);
+        const list = li.parentElement;
+        if (list && LIST_TAGS.has(list.tagName) && li === list.firstElementChild) {
+          insertEmptyLineAboveBlock(ed, list);
+          finishNewLineEditing(ed);
+        } else {
+          splitListItemAtStart(li);
+          finishNewLineEditing(ed, { inList: true });
+        }
       } else {
         splitListItemAtCaret(li, range);
         finishNewLineEditing(ed, { inList: true });
@@ -2808,6 +2814,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     pushUndoCheckpoint();
     const handled = () => {
       skipDuplicateBackspaceRef.current = true;
+      queueMicrotask(() => {
+        skipDuplicateBackspaceRef.current = false;
+      });
       return true as const;
     };
 
@@ -3093,16 +3102,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         e.stopImmediatePropagation();
         if (e.shiftKey) performEditorRedoRef.current();
         else performEditorUndoRef.current();
-        return;
-      }
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (!inEditor) return;
-        const handled = e.key === 'Backspace'
-          ? runEditorBackspaceRef.current(e)
-          : runEditorForwardDeleteRef.current(e);
-        if (handled) {
-          e.stopImmediatePropagation();
-        }
         return;
       }
       if (e.key !== 'Tab') return;
