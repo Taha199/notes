@@ -68,13 +68,19 @@ function canPreview(file: StoredFile) {
   return previewModeFor(file) !== 'unsupported';
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => resolve(String(reader.result));
-    reader.readAsDataURL(file);
-  });
+/** Convert a legacy inline base64/text data URL back into a Blob for Storage upload. */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const commaIdx = dataUrl.indexOf(',');
+  const meta = commaIdx === -1 ? '' : dataUrl.slice(5, commaIdx); // strip leading "data:"
+  const payload = commaIdx === -1 ? '' : dataUrl.slice(commaIdx + 1);
+  const contentType = meta.split(';')[0] || 'application/octet-stream';
+  if (/;base64/i.test(meta)) {
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: contentType });
+  }
+  return new Blob([decodeURIComponent(payload)], { type: contentType });
 }
 
 async function loadTextPreview(file: StoredFile, href: string): Promise<string> {
@@ -216,6 +222,7 @@ export function FilesPage({ search }: { search: string }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
+  const migrationStartedRef = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
@@ -278,6 +285,28 @@ export function FilesPage({ search }: { search: string }) {
     }
   }, [currentFolderId, folders]);
 
+  // Background: migrate any legacy inline (base64) files to Storage so future
+  // loads (and the admin panel) stay fast. Runs once, never blocks the UI.
+  useEffect(() => {
+    if (!user || migrationStartedRef.current) return;
+    const legacy = files.filter((f) => f.dataUrl && !f.storagePath);
+    if (legacy.length === 0) return;
+    migrationStartedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      for (const file of legacy) {
+        if (cancelled) break;
+        try {
+          await migrateInlineFileToStorage(file);
+        } catch {
+          /* keep the inline copy on failure — file stays accessible */
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, user]);
+
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
 
   const fileCountInFolder = (folderId: string) =>
@@ -335,7 +364,6 @@ export function FilesPage({ search }: { search: string }) {
   }, [files, currentFolderId, q]);
 
   const MAX_FILE_SIZE = 20 * 1024 * 1024;
-  const MAX_RTDB_FILE_SIZE = 7 * 1024 * 1024;
 
   const uploadOneFile = async (file: File, folderId: string | null): Promise<StoredFile> => {
     if (!user) throw new Error('no-user');
@@ -350,16 +378,29 @@ export function FilesPage({ search }: { search: string }) {
 
     const withFolder = folderId ? { ...base, folderId } : base;
 
-    if (file.size <= MAX_RTDB_FILE_SIZE) {
-      const dataUrl = await readFileAsDataUrl(file);
-      return { ...withFolder, dataUrl };
-    }
-
+    // Always store the blob in Firebase Storage — never inline base64 in the
+    // Realtime Database (inline blobs made the file list download huge/slow).
     const storagePath = `users/${user.uid}/files/${id}/${file.name}`;
     const storageRef = ref(storage, storagePath);
     await uploadBytes(storageRef, file, { contentType: base.type });
     const downloadUrl = await getDownloadURL(storageRef);
     return { ...withFolder, downloadUrl, storagePath };
+  };
+
+  /** Move a legacy inline (base64) file into Storage and drop the heavy dataUrl. */
+  const migrateInlineFileToStorage = async (file: StoredFile) => {
+    if (!user || !file.dataUrl) return;
+    const blob = dataUrlToBlob(file.dataUrl);
+    const storagePath = file.storagePath || `users/${user.uid}/files/${file.id}/${file.name}`;
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, blob, { contentType: file.type || 'application/octet-stream' });
+    const downloadUrl = await getDownloadURL(storageRef);
+    const migrated: StoredFile = { ...file, downloadUrl, storagePath };
+    delete migrated.dataUrl;
+    // Persist the light metadata (removes the inline blob from the DB) only after
+    // the Storage upload succeeded, so the file is never lost.
+    await saveFileMeta(migrated);
+    setFiles((prev) => prev.map((f) => (f.id === file.id ? migrated : f)));
   };
 
   const handleFiles = async (list: FileList | null) => {

@@ -34,17 +34,42 @@ export async function rtdbUrl(path: string, forceRefresh = false): Promise<strin
   const normalized = path.startsWith('http')
     ? path
     : `${FB_DB_URL}${path.startsWith('/') ? path : `/${path}`}`;
-  const withJson = normalized.endsWith('.json') ? normalized : `${normalized}.json`;
-  if (!token) return withJson;
-  return `${withJson}${withJson.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`;
+  // Split any query string so `.json` is inserted before it (e.g. `/users?shallow=true`).
+  const qIndex = normalized.indexOf('?');
+  const base = qIndex === -1 ? normalized : normalized.slice(0, qIndex);
+  const query = qIndex === -1 ? '' : normalized.slice(qIndex + 1);
+  const withJson = base.endsWith('.json') ? base : `${base}.json`;
+  const params = new URLSearchParams(query);
+  if (token) params.set('auth', token);
+  const qs = params.toString();
+  return qs ? `${withJson}?${qs}` : withJson;
 }
 
-/** Authenticated Firebase Realtime Database REST fetch with one 401/403 retry. */
+/** Default network timeout so a stalled connection never leaves pages spinning forever. */
+const RTDB_TIMEOUT_MS = 60000;
+
+async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = RTDB_TIMEOUT_MS): Promise<Response> {
+  // Respect a caller-provided signal while still enforcing our own timeout.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const external = init?.signal;
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Authenticated Firebase Realtime Database REST fetch with timeout + one 401/403 retry. */
 export async function rtdbFetch(path: string, init?: RequestInit): Promise<Response> {
   const url = await rtdbUrl(path);
-  const res = await fetch(url, init);
+  const res = await fetchWithTimeout(url, init);
   if (res.ok || (res.status !== 401 && res.status !== 403)) return res;
   const retryUrl = await rtdbUrl(path, true);
   if (retryUrl === url) return res;
-  return fetch(retryUrl, init);
+  return fetchWithTimeout(retryUrl, init);
 }

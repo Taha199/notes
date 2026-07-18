@@ -65,23 +65,35 @@ export function AdminPanel() {
       if (!authUser) return;
 
       const token = await getRtdbAuthToken();
-      const [dbRes, authData] = await Promise.all([
-        rtdbFetch('/users'),
+      // Phase 1 — lightweight: list of UIDs (shallow) + auth names. No user data blobs.
+      const [shallowRes, authData] = await Promise.all([
+        rtdbFetch('/users?shallow=true'),
         token
           ? fetch('/api/admin-users', { headers: { Authorization: `Bearer ${token}` } })
               .then((res) => (res.ok ? res.json() : { users: [] }))
               .catch(() => ({ users: [] }))
           : Promise.resolve({ users: [] }),
       ]);
-      const data = dbRes.ok ? ((await dbRes.json()) ?? {}) : {};
+      const shallow = shallowRes.ok ? ((await shallowRes.json()) ?? {}) : {};
       const authByUid = new Map<string, AuthUserRow>(
         ((authData?.users ?? []) as AuthUserRow[]).map((authUser) => [authUser.uid, authUser])
       );
-      const allUids = new Set([...Object.keys(data), ...authByUid.keys()]);
-      const list: UserRow[] = Array.from(allUids).map((uid) => {
-        const blob = (data[uid] ?? {}) as Record<string, unknown>;
-        const profile = (blob?.profile ?? {}) as Record<string, unknown>;
-        const bytes = calculateStorageBreakdownFromUserData(blob).total;
+      const allUids = Array.from(new Set([...Object.keys(shallow), ...authByUid.keys()]));
+
+      // Phase 2 — fetch each small profile in parallel (no notes/files blobs) → fast table.
+      const profiles = await Promise.all(
+        allUids.map(async (uid) => {
+          try {
+            const res = await rtdbFetch(`/users/${uid}/profile`);
+            return [uid, res.ok ? ((await res.json()) ?? {}) : {}] as const;
+          } catch {
+            return [uid, {}] as const;
+          }
+        }),
+      );
+      const profByUid = new Map(profiles);
+      const list: UserRow[] = allUids.map((uid) => {
+        const profile = (profByUid.get(uid) ?? {}) as Record<string, unknown>;
         const authUser = authByUid.get(uid);
         const email = ((profile.email as string) || authUser?.email || '').trim();
         const displayName = ((profile.displayName as string) || authUser?.displayName || '').trim();
@@ -94,12 +106,26 @@ export function AdminPanel() {
           provider: (profile.provider as string) || authUser?.provider || '',
           blocked: profile.blocked === true,
           isPlus: isPlusUser(profile, email),
-          bytes,
+          bytes: 0,
           storageLimitMB: getStorageLimitMB(profile, email),
         };
       });
       list.sort((a, b) => b.lastSeen - a.lastSeen);
       setRows(list);
+      setLoading(false);
+
+      // Phase 3 — background: compute each user's storage without blocking the table.
+      for (const uid of allUids) {
+        try {
+          const res = await rtdbFetch(`/users/${uid}`);
+          if (!res.ok) continue;
+          const blob = ((await res.json()) ?? {}) as Record<string, unknown>;
+          const bytes = calculateStorageBreakdownFromUserData(blob).total;
+          setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, bytes } : r)));
+        } catch {
+          /* skip on error; row keeps 0 bytes */
+        }
+      }
     } finally {
       setLoading(false);
     }
