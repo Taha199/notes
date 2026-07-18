@@ -1164,6 +1164,56 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     placeCaretInBlock(newLi, true);
   };
 
+  /** Normal margin line above a list item — keeps the item (with bullet) below the new line. */
+  const insertNormalLineAboveListItem = (li: HTMLLIElement, ed: HTMLElement) => {
+    const list = li.parentElement;
+    if (!list || !LIST_TAGS.has(list.tagName)) return;
+
+    if (li === list.firstElementChild) {
+      insertEmptyLineAboveBlock(ed, list);
+      return;
+    }
+
+    const listEl = list as HTMLUListElement | HTMLOListElement;
+    const parent = list.parentNode;
+    if (!parent) return;
+    const ordered = listEl.tagName === 'OL';
+
+    const beforeItems: HTMLLIElement[] = [];
+    const fromItems: HTMLLIElement[] = [];
+    let reached = false;
+    for (const child of [...list.children]) {
+      if (!(child instanceof HTMLLIElement)) continue;
+      if (child === li) {
+        reached = true;
+        fromItems.push(child);
+      } else if (!reached) {
+        beforeItems.push(child);
+      } else {
+        fromItems.push(child);
+      }
+    }
+
+    const div = document.createElement('div');
+    div.setAttribute('dir', 'auto');
+    div.innerHTML = '<br>';
+    stripNewParagraphIndent(div);
+
+    const makeList = (items: HTMLLIElement[]) => {
+      const el = document.createElement(ordered ? 'ol' : 'ul');
+      el.setAttribute('dir', 'auto');
+      items.forEach((item) => el.appendChild(item));
+      return el;
+    };
+
+    fromItems.forEach((item) => item.remove());
+    parent.insertBefore(div, list.nextSibling);
+    if (fromItems.length > 0) parent.insertBefore(makeList(fromItems), div.nextSibling);
+    if (list.children.length === 0) list.remove();
+    cleanupEmptyListShell(listEl, ed);
+    placeCaretInBlock(div, true);
+  };
+
   const splitListItemAtStart = (li: HTMLLIElement) => {
     insertEmptyListItemBefore(li);
   };
@@ -2672,14 +2722,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           finishNewLineEditing(ed, { inList: true });
         }
       } else if (isCaretAtStartOfLi(li, range)) {
-        const list = li.parentElement;
-        if (list && LIST_TAGS.has(list.tagName) && li === list.firstElementChild) {
-          insertEmptyLineAboveBlock(ed, list);
-          finishNewLineEditing(ed);
-        } else {
-          splitListItemAtStart(li);
-          finishNewLineEditing(ed, { inList: true });
-        }
+        insertNormalLineAboveListItem(li, ed);
+        finishNewLineEditing(ed);
       } else {
         splitListItemAtCaret(li, range);
         finishNewLineEditing(ed, { inList: true });
@@ -2733,6 +2777,21 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       ensureCaretOnOwnLeftLine(ed);
       finishNewLineEditing(ed);
     });
+  };
+
+  const handleEditorShiftEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter' || !e.shiftKey || e.nativeEvent.isComposing) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const li = resolveListItemAtSelection(range, ed);
+    if (!li || !isCaretAtStartOfLi(li, range)) return;
+    e.preventDefault();
+    pushUndoCheckpoint();
+    insertNormalLineAboveListItem(li, ed);
+    finishNewLineEditing(ed);
   };
 
   const runEditorBackspace = (e: { key: string; preventDefault: () => void; nativeEvent?: { isComposing?: boolean } }) => {
@@ -3850,6 +3909,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           handleEditorBackspace(e);
           handleEditorDelete(e);
           handleEditorEnter(e);
+          handleEditorShiftEnter(e);
           handleEditorArrowUp(e);
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             requestAnimationFrame(() => {
