@@ -2407,9 +2407,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       if (!isCaretAtStartOfLi(li, range)) return null;
-      if (li !== li.parentElement?.firstElementChild) return li;
+      // Previous list item exists — let Arrow Up move naturally.
+      if (li.previousElementSibling instanceof HTMLLIElement) return null;
       const list = li.parentElement;
       if (!list || !LIST_TAGS.has(list.tagName)) return null;
+      const top = editorTopBlock(ed, list);
+      if (!top) return null;
+      let prev = top.previousElementSibling;
+      while (isSkippableLeadingBlock(prev)) prev = prev?.previousElementSibling ?? null;
+      if (prev) return null;
       return list;
     }
 
@@ -2433,9 +2439,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const target = canInsertLineAboveAtCaret(ed, sel.getRangeAt(0));
     if (!target) return;
     e.preventDefault();
-    if (target.tagName === 'LI') insertEmptyListItemBefore(target as HTMLLIElement);
-    else insertEmptyLineAboveBlock(ed, target);
-    finishNewLineEditing(ed, { inList: target.tagName === 'LI' });
+    insertEmptyLineAboveBlock(ed, target);
+    finishNewLineEditing(ed);
   };
 
   const applyBlockAlignment = (align: BlockAlign) => {
