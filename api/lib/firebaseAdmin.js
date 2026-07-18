@@ -73,6 +73,30 @@ export async function verifyAdmin(idToken) {
   return user;
 }
 
+/** Verify any signed-in user's ID token and return { uid, email } (null if invalid). */
+export async function verifyUser(idToken) {
+  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  const user = data?.users?.[0];
+  if (!user?.localId) return null;
+  return { uid: user.localId, email: user.email ?? '' };
+}
+
+export async function writeRtdb(accessToken, path, value, method = 'PUT') {
+  const url = `${FB_DB_URL}${path}.json?access_token=${encodeURIComponent(accessToken)}`;
+  const response = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(value),
+  });
+  return response.ok;
+}
+
 export function isAllowedOrigin(origin) {
   return !origin || ALLOWED_ORIGINS.has(origin);
 }

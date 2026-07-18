@@ -5,8 +5,8 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { storage } from '../../lib/firebase';
-import { rtdbFetch } from '../../lib/rtdb';
-import { calculateFilesStorageBytes, getStorageLimitBytes } from '../../lib/storageQuota';
+import { getRtdbAuthToken, rtdbFetch } from '../../lib/rtdb';
+import { getStorageLimitBytes } from '../../lib/storageQuota';
 
 interface StoredFile {
   id: string;
@@ -19,6 +19,8 @@ interface StoredFile {
   folderId?: string | null;
   /** Legacy uploads stored inline in Realtime Database */
   dataUrl?: string;
+  /** Legacy inline file not yet migrated to Storage (blob withheld from the list). */
+  inlinePending?: boolean;
 }
 
 interface FileFolder {
@@ -66,21 +68,6 @@ function previewModeFor(file: StoredFile): PreviewMode {
 
 function canPreview(file: StoredFile) {
   return previewModeFor(file) !== 'unsupported';
-}
-
-/** Convert a legacy inline base64/text data URL back into a Blob for Storage upload. */
-function dataUrlToBlob(dataUrl: string): Blob {
-  const commaIdx = dataUrl.indexOf(',');
-  const meta = commaIdx === -1 ? '' : dataUrl.slice(5, commaIdx); // strip leading "data:"
-  const payload = commaIdx === -1 ? '' : dataUrl.slice(commaIdx + 1);
-  const contentType = meta.split(';')[0] || 'application/octet-stream';
-  if (/;base64/i.test(meta)) {
-    const binary = atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: contentType });
-  }
-  return new Blob([decodeURIComponent(payload)], { type: contentType });
 }
 
 async function loadTextPreview(file: StoredFile, href: string): Promise<string> {
@@ -222,7 +209,6 @@ export function FilesPage({ search }: { search: string }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
-  const migrationStartedRef = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
@@ -246,29 +232,67 @@ export function FilesPage({ search }: { search: string }) {
     }
     setLoading(true);
     (async () => {
+      // Load compact metadata from the server (no base64 blobs sent to the browser);
+      // the server also migrates legacy inline files to Storage, in batches.
+      const fetchOnce = async (): Promise<boolean> => {
+        const token = await getRtdbAuthToken();
+        if (!token) throw new Error('no-token');
+        const res = await fetch('/api/my-files', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error('load-failed');
+        const data = (await res.json()) as {
+          files?: StoredFile[];
+          folders?: FileFolder[];
+          migratedRemaining?: boolean;
+        };
+        if (cancelled) return false;
+        setFiles(
+          (data.files ?? []).sort(
+            (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
+          ),
+        );
+        setFolders(
+          (data.folders ?? []).sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          ),
+        );
+        return data.migratedRemaining === true;
+      };
       try {
-        const [filesRes, foldersRes] = await Promise.all([
-          rtdbFetch(`/users/${user.uid}/files`),
-          rtdbFetch(`/users/${user.uid}/fileFolders`),
-        ]);
-        const cloudFiles = await filesRes.json();
-        const cloudFolders = await foldersRes.json();
-        if (!cancelled) {
-          setFiles(
-            normalizeList<StoredFile>(cloudFiles).sort(
-              (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
-            ),
-          );
-          setFolders(
-            normalizeList<FileFolder>(cloudFolders).sort(
-              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-            ),
-          );
+        let more = await fetchOnce();
+        if (!cancelled) setLoading(false);
+        // Continue migrating remaining legacy files in the background.
+        let guard = 0;
+        while (more && !cancelled && guard++ < 50) {
+          more = await fetchOnce();
         }
       } catch {
         if (!cancelled) {
-          setFiles([]);
-          setFolders([]);
+          // Fallback: read directly from the database (older path).
+          try {
+            const [filesRes, foldersRes] = await Promise.all([
+              rtdbFetch(`/users/${user.uid}/files`),
+              rtdbFetch(`/users/${user.uid}/fileFolders`),
+            ]);
+            const cloudFiles = await filesRes.json();
+            const cloudFolders = await foldersRes.json();
+            if (!cancelled) {
+              setFiles(
+                normalizeList<StoredFile>(cloudFiles).sort(
+                  (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
+                ),
+              );
+              setFolders(
+                normalizeList<FileFolder>(cloudFolders).sort(
+                  (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+                ),
+              );
+            }
+          } catch {
+            if (!cancelled) {
+              setFiles([]);
+              setFolders([]);
+            }
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -284,28 +308,6 @@ export function FilesPage({ search }: { search: string }) {
       setCurrentFolderId(null);
     }
   }, [currentFolderId, folders]);
-
-  // Background: migrate any legacy inline (base64) files to Storage so future
-  // loads (and the admin panel) stay fast. Runs once, never blocks the UI.
-  useEffect(() => {
-    if (!user || migrationStartedRef.current) return;
-    const legacy = files.filter((f) => f.dataUrl && !f.storagePath);
-    if (legacy.length === 0) return;
-    migrationStartedRef.current = true;
-    let cancelled = false;
-    (async () => {
-      for (const file of legacy) {
-        if (cancelled) break;
-        try {
-          await migrateInlineFileToStorage(file);
-        } catch {
-          /* keep the inline copy on failure — file stays accessible */
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, user]);
 
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
 
@@ -387,22 +389,6 @@ export function FilesPage({ search }: { search: string }) {
     return { ...withFolder, downloadUrl, storagePath };
   };
 
-  /** Move a legacy inline (base64) file into Storage and drop the heavy dataUrl. */
-  const migrateInlineFileToStorage = async (file: StoredFile) => {
-    if (!user || !file.dataUrl) return;
-    const blob = dataUrlToBlob(file.dataUrl);
-    const storagePath = file.storagePath || `users/${user.uid}/files/${file.id}/${file.name}`;
-    const storageRef = ref(storage, storagePath);
-    await uploadBytes(storageRef, blob, { contentType: file.type || 'application/octet-stream' });
-    const downloadUrl = await getDownloadURL(storageRef);
-    const migrated: StoredFile = { ...file, downloadUrl, storagePath };
-    delete migrated.dataUrl;
-    // Persist the light metadata (removes the inline blob from the DB) only after
-    // the Storage upload succeeded, so the file is never lost.
-    await saveFileMeta(migrated);
-    setFiles((prev) => prev.map((f) => (f.id === file.id ? migrated : f)));
-  };
-
   const handleFiles = async (list: FileList | null) => {
     if (!list?.length) return;
     if (!user) {
@@ -421,11 +407,15 @@ export function FilesPage({ search }: { search: string }) {
     setUploading(true);
     const uploaded: StoredFile[] = [];
     try {
-      const userRes = await rtdbFetch(`/users/${user.uid}`);
-      if (!userRes.ok) throw new Error('profile-load-failed');
-      const userData = (await userRes.json()) ?? {};
-      const profile = (userData.profile ?? {}) as Record<string, unknown>;
-      const usedBytes = calculateFilesStorageBytes(userData);
+      // Quota: use in-memory file sizes + a small profile read (no full-tree download).
+      let profile: Record<string, unknown> = {};
+      try {
+        const profRes = await rtdbFetch(`/users/${user.uid}/profile`);
+        if (profRes.ok) profile = (await profRes.json()) ?? {};
+      } catch {
+        /* fall back to defaults */
+      }
+      const usedBytes = files.reduce((sum, f) => sum + (typeof f.size === 'number' ? f.size : 0), 0);
       const limitBytes = getStorageLimitBytes(profile, user.email);
       const incomingBytes = selected.reduce((sum, file) => sum + file.size, 0);
       if (usedBytes + incomingBytes > limitBytes) {

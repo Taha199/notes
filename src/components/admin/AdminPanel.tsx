@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
-import { getRtdbAuthToken, rtdbFetch, waitForAuthUser } from '../../lib/rtdb';
-import { calculateStorageBreakdownFromUserData, getStorageLimitMB, MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
-import { isPlusUser } from '../../lib/userPlan';
+import { getRtdbAuthToken, waitForAuthUser } from '../../lib/rtdb';
+import { MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
 
 interface UserRow {
   uid: string;
@@ -16,14 +15,6 @@ interface UserRow {
   isPlus: boolean;
   bytes: number;
   storageLimitMB: number;
-}
-
-interface AuthUserRow {
-  uid: string;
-  email: string;
-  displayName: string;
-  lastLoginAt: number;
-  provider: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -64,68 +55,28 @@ export function AdminPanel() {
       const authUser = user ?? (await waitForAuthUser());
       if (!authUser) return;
 
+      // Everything (names + storage) is computed server-side in one compact request,
+      // instead of downloading the whole database to the browser.
       const token = await getRtdbAuthToken();
-      // Phase 1 — lightweight: list of UIDs (shallow) + auth names. No user data blobs.
-      const [shallowRes, authData] = await Promise.all([
-        rtdbFetch('/users?shallow=true'),
-        token
-          ? fetch('/api/admin-users', { headers: { Authorization: `Bearer ${token}` } })
-              .then((res) => (res.ok ? res.json() : { users: [] }))
-              .catch(() => ({ users: [] }))
-          : Promise.resolve({ users: [] }),
-      ]);
-      const shallow = shallowRes.ok ? ((await shallowRes.json()) ?? {}) : {};
-      const authByUid = new Map<string, AuthUserRow>(
-        ((authData?.users ?? []) as AuthUserRow[]).map((authUser) => [authUser.uid, authUser])
-      );
-      const allUids = Array.from(new Set([...Object.keys(shallow), ...authByUid.keys()]));
-
-      // Phase 2 — fetch each small profile in parallel (no notes/files blobs) → fast table.
-      const profiles = await Promise.all(
-        allUids.map(async (uid) => {
-          try {
-            const res = await rtdbFetch(`/users/${uid}/profile`);
-            return [uid, res.ok ? ((await res.json()) ?? {}) : {}] as const;
-          } catch {
-            return [uid, {}] as const;
-          }
-        }),
-      );
-      const profByUid = new Map(profiles);
-      const list: UserRow[] = allUids.map((uid) => {
-        const profile = (profByUid.get(uid) ?? {}) as Record<string, unknown>;
-        const authUser = authByUid.get(uid);
-        const email = ((profile.email as string) || authUser?.email || '').trim();
-        const displayName = ((profile.displayName as string) || authUser?.displayName || '').trim();
-        return {
-          uid,
-          email,
-          displayName: displayName || email.split('@')[0] || fallbackName(uid),
-          lastSeen: (profile.lastSeen as number) || authUser?.lastLoginAt || 0,
-          ip: (profile.ip as string) ?? '',
-          provider: (profile.provider as string) || authUser?.provider || '',
-          blocked: profile.blocked === true,
-          isPlus: isPlusUser(profile, email),
-          bytes: 0,
-          storageLimitMB: getStorageLimitMB(profile, email),
-        };
+      if (!token) return;
+      const res = await fetch('/api/admin-user-stats', {
+        headers: { Authorization: `Bearer ${token}` },
       });
-      list.sort((a, b) => b.lastSeen - a.lastSeen);
+      if (!res.ok) return;
+      const data = (await res.json()) as { users?: Array<Partial<UserRow>> };
+      const list: UserRow[] = (data.users ?? []).map((u) => ({
+        uid: u.uid ?? '',
+        email: (u.email ?? '').trim(),
+        displayName: (u.displayName ?? '').trim() || (u.email ?? '').split('@')[0] || fallbackName(u.uid ?? ''),
+        lastSeen: u.lastSeen ?? 0,
+        ip: u.ip ?? '',
+        provider: u.provider ?? '',
+        blocked: u.blocked === true,
+        isPlus: u.isPlus === true,
+        bytes: u.bytes ?? 0,
+        storageLimitMB: u.storageLimitMB ?? 0,
+      }));
       setRows(list);
-      setLoading(false);
-
-      // Phase 3 — background: compute each user's storage without blocking the table.
-      for (const uid of allUids) {
-        try {
-          const res = await rtdbFetch(`/users/${uid}`);
-          if (!res.ok) continue;
-          const blob = ((await res.json()) ?? {}) as Record<string, unknown>;
-          const bytes = calculateStorageBreakdownFromUserData(blob).total;
-          setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, bytes } : r)));
-        } catch {
-          /* skip on error; row keeps 0 bytes */
-        }
-      }
     } finally {
       setLoading(false);
     }
