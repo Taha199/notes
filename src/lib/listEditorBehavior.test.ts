@@ -8,6 +8,7 @@ import {
   clipboardToNormalizedHtml,
   convertPseudoBulletBlocksToNativeLists,
   convertSymbolPrefixedRunsToLists,
+  inferPlainListType,
   plainTextToMixedHtml,
   isCaretInBulletPrefixZone,
   wrapLooseInlineChildren,
@@ -343,6 +344,39 @@ describe('listEditorBehavior', () => {
 
   it('clipboardToNormalizedHtml returns null when there is no list', () => {
     expect(clipboardToNormalizedHtml('<p>Bara text</p><p>Rad två</p>', '')).toBeNull();
+  });
+
+  it('inferPlainListType detects numbered vs bulleted vs mixed', () => {
+    expect(inferPlainListType('1. a\n2. b')).toBe('ol');
+    expect(inferPlainListType('• a\n• b')).toBe('ul');
+    expect(inferPlainListType('Rubrik\n1. a\n2. b')).toBeNull();
+    expect(inferPlainListType('- a\n1. b')).toBeNull();
+  });
+
+  it('clipboardToNormalizedHtml keeps numbered list ordered when copied alone (bare li)', () => {
+    const html = '<!--StartFragment--><li><p>TNF-α frisätts</p></li><li><p>TNF-α aktiverar</p></li><!--EndFragment-->';
+    const plain = '1. TNF-α frisätts\n2. TNF-α aktiverar';
+    const out = clipboardToNormalizedHtml(html, plain);
+    expect(out).toBeTruthy();
+    expect(out!).toContain('<ol');
+    expect(out!).not.toContain('<ul');
+    expect((out!.match(/<li\b/g) || []).length).toBe(2);
+  });
+
+  it('clipboardToNormalizedHtml upgrades browser-downgraded ul to ol from plain markers', () => {
+    const html = '<ul><li>TNF-α frisätts</li><li>TNF-α aktiverar</li></ul>';
+    const plain = '1. TNF-α frisätts\n2. TNF-α aktiverar';
+    const out = clipboardToNormalizedHtml(html, plain);
+    expect(out).toContain('<ol');
+    expect(out).not.toContain('<ul');
+  });
+
+  it('clipboardToNormalizedHtml keeps ol when copied with heading/paragraph', () => {
+    const html = '<h3>Rubrik</h3><p>Text</p><ol><li>a</li><li>b</li></ol>';
+    const plain = 'Rubrik\nText\n1. a\n2. b';
+    const out = clipboardToNormalizedHtml(html, plain);
+    expect(out).toContain('Rubrik');
+    expect(out).toContain('<ol');
   });
 
   it('plainTextToMixedHtml keeps prose lines and groups bullet runs', () => {

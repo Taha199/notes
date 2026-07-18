@@ -692,20 +692,90 @@ export function plainTextToMixedHtml(plain: string): string | null {
 }
 
 /**
+ * Infer the list type from plain-text markers. Returns 'ol'/'ul' only when the
+ * WHOLE plain text is a marked list (so mixed content returns null and keeps its
+ * original structure).
+ */
+export function inferPlainListType(plain: string): 'ol' | 'ul' | null {
+  const lines = plain.replace(/\r\n/g, '\n').split('\n').filter((l) => l.trim());
+  if (lines.length === 0) return null;
+  let allNumbered = true;
+  let allBulleted = true;
+  for (const line of lines) {
+    const m = line.match(BULLET_PREFIX_RE);
+    if (!m || !line.slice(m[0].length).trim()) return null;
+    if (/\d+[.)]/.test(m[0])) allBulleted = false;
+    else allNumbered = false;
+  }
+  if (allNumbered) return 'ol';
+  if (allBulleted) return 'ul';
+  return null;
+}
+
+function renameListElement(list: HTMLElement, tag: 'ol' | 'ul'): HTMLElement {
+  if (list.tagName.toLowerCase() === tag) return list;
+  const next = document.createElement(tag);
+  for (const attr of list.attributes) next.setAttribute(attr.name, attr.value);
+  next.setAttribute('dir', 'auto');
+  while (list.firstChild) next.appendChild(list.firstChild);
+  list.parentNode?.replaceChild(next, list);
+  return next;
+}
+
+/** Wrap consecutive bare <li> (not inside ul/ol) into a list of the given type. */
+function wrapBareListItems(root: HTMLElement, tag: 'ol' | 'ul'): boolean {
+  let changed = false;
+  const parents = new Set<HTMLElement>([root]);
+  root.querySelectorAll<HTMLElement>('*').forEach((el) => { if (el.children.length) parents.add(el); });
+  for (const parent of parents) {
+    if (parent.tagName === 'UL' || parent.tagName === 'OL') continue;
+    let child = parent.firstElementChild;
+    while (child) {
+      if (child.tagName === 'LI') {
+        const list = document.createElement(tag);
+        list.setAttribute('dir', 'auto');
+        parent.insertBefore(list, child);
+        let node: Element | null = child;
+        while (node && node.tagName === 'LI') {
+          const next: Element | null = node.nextElementSibling;
+          list.appendChild(node);
+          node = next;
+        }
+        changed = true;
+        child = list.nextElementSibling;
+        continue;
+      }
+      child = child.nextElementSibling;
+    }
+  }
+  return changed;
+}
+
+/**
  * Normalize a whole clipboard payload for insertion: keeps headings/paragraphs
  * AND converts pseudo bullet blocks to real lists. Returns null when there is no
  * list at all (so normal rich/text paste handling can proceed unchanged).
  */
 export function clipboardToNormalizedHtml(html: string, plain: string): string | null {
+  const plainType = inferPlainListType(plain);
   const h = html.trim();
   if (h) {
     const root = document.createElement('div');
     root.innerHTML = extractClipboardFragment(h);
     root.querySelectorAll('script, style, meta, link, title').forEach((el) => el.remove());
     convertPseudoBulletBlocksToNativeLists(root);
+    // Browser can drop the <ol>/<ul> wrapper when a list is copied alone → wrap bare <li>.
+    wrapBareListItems(root, plainType ?? 'ul');
     // Only intercept when there is an actual list — otherwise let default paste run.
     if (!root.querySelector('ul, ol')) return null;
-    // Normalize list items (unwrap <p>, strip leftover markers) but keep all blocks.
+    // Plain text is the source of truth for ordering: if the whole copy is a
+    // numbered/bulleted list, make the top-level lists match (fixes alone-copy
+    // becoming bullets when the browser lost the <ol> wrapper).
+    if (plainType) {
+      [...root.querySelectorAll('ul, ol')]
+        .filter((list) => !list.parentElement?.closest('ul, ol'))
+        .forEach((list) => renameListElement(list as HTMLElement, plainType));
+    }
     normalizeListItemStructure(root);
     mergeAdjacentLists(root);
     const out = root.innerHTML.trim();
