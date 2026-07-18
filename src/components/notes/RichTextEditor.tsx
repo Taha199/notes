@@ -1427,10 +1427,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
+    // Last empty bullet after content (e.g. deleted "5" under •1 •4 •5):
+    // exit immediately to a normal left-margin line under the list (same as "Hej").
+    if (shouldExitListAfterEmptyItem(li)) {
+      pendingListMarginExitRef.current = null;
+      exitListAfterLastItem(li);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
     const list = li.parentElement;
     const soleItem = list && LIST_TAGS.has(list.tagName) && list.children.length === 1;
 
     if (isLastListItem(li) && !soleItem) {
+      // Trailing empty after other empty bullets: remove one; next Backspace can exit via pending.
       const prevLi = li.previousElementSibling;
       li.remove();
       if (list && LIST_TAGS.has(list.tagName)) {
