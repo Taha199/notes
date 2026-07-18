@@ -2351,12 +2351,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (li !== li.parentElement?.firstElementChild) return li;
       const list = li.parentElement;
       if (!list || !LIST_TAGS.has(list.tagName)) return null;
-      const top = editorTopBlock(ed, list);
-      if (!top) return null;
-      let prev = top.previousElementSibling;
-      while (isSkippableLeadingBlock(prev)) prev = prev?.previousElementSibling ?? null;
-      if (prev) return null;
-      return top;
+      return list;
     }
 
     const block = getLineBlock(range.startContainer, ed);
@@ -2677,8 +2672,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           finishNewLineEditing(ed, { inList: true });
         }
       } else if (isCaretAtStartOfLi(li, range)) {
-        splitListItemAtStart(li);
-        finishNewLineEditing(ed, { inList: true });
+        const list = li.parentElement;
+        if (list && LIST_TAGS.has(list.tagName) && li === list.firstElementChild) {
+          insertEmptyLineAboveBlock(ed, list);
+          finishNewLineEditing(ed);
+        } else {
+          splitListItemAtStart(li);
+          finishNewLineEditing(ed, { inList: true });
+        }
       } else {
         splitListItemAtCaret(li, range);
         finishNewLineEditing(ed, { inList: true });
