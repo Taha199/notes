@@ -2086,12 +2086,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const getLineBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
     let el: Node | null = node;
     if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    let nestedBlock: HTMLElement | null = null;
     while (el instanceof HTMLElement && el !== ed) {
       if (el.tagName === 'CENTER') return el;
-      if (BLOCK_TAGS.has(el.tagName)) return el;
+      // Prefer the list item over ChatGPT's nested <p>/<div> inside <li>.
+      if (el.tagName === 'LI') return el;
+      if (BLOCK_TAGS.has(el.tagName) && !nestedBlock) nestedBlock = el;
       el = el.parentElement;
     }
-    return null;
+    return nestedBlock;
   };
 
   const getAlignmentTargetBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
@@ -4183,7 +4186,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               }
             }
           }
-          requestAnimationFrame(() => {
+          // Normalize after the browser inserts clipboard HTML (ChatGPT lists, etc.).
+          const normalizeAfterPaste = () => {
             const live = editorRef.current;
             if (!live) return;
             normalizePastedBlocks(live);
@@ -4193,6 +4197,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             normalizeTablesInEditor(live);
             readCommandState();
             emitHtml();
+          };
+          requestAnimationFrame(() => {
+            normalizeAfterPaste();
+            // Second pass: some browsers finish list/DOM fixes one frame later.
+            requestAnimationFrame(normalizeAfterPaste);
           });
         }}
         onMouseMove={handleEditorMouseMove}

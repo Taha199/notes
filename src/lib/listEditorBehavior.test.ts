@@ -236,6 +236,38 @@ describe('listEditorBehavior', () => {
     ed.remove();
   });
 
+  it('convertPseudoBulletBlocksToNativeLists splits one block with br-separated bullets', () => {
+    const ed = editorHtml(
+      '<div><b>• Mukosa</b> – a<br><b>• Submukosa</b> – b<br><b>• Serosa</b> – c</div>',
+    );
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
+    expect(ed.querySelectorAll('ul').length).toBe(1);
+    expect(ed.querySelectorAll('li').length).toBe(3);
+    expect([...ed.querySelectorAll('li')].map((li) => li.textContent?.includes('Mukosa') || li.textContent?.includes('Submukosa') || li.textContent?.includes('Serosa'))).toEqual([true, true, true]);
+    expect(ed.textContent).not.toMatch(/•/);
+    ed.remove();
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists explodes bullets trapped inside one li', () => {
+    const ed = editorHtml(
+      '<ul><li><b>Mukosa</b> – a<br>• <b>Submukosa</b> – b<br>• <b>Serosa</b> – c</li></ul>',
+    );
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
+    expect(ed.querySelectorAll('li').length).toBe(3);
+    expect(ed.textContent).not.toMatch(/•/);
+    ed.remove();
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists unwraps p inside li like manual lists', () => {
+    const ed = editorHtml(
+      '<ul><li><p><strong>Mukosa</strong> – a</p></li><li><p><strong>Serosa</strong> – b</p></li></ul>',
+    );
+    convertPseudoBulletBlocksToNativeLists(ed);
+    expect(ed.querySelector('li > p')).toBeNull();
+    expect(ed.querySelector('li strong')?.textContent).toBe('Mukosa');
+    ed.remove();
+  });
+
   it('convertPseudoBulletBlocksToNativeLists promotes nested pasted paragraphs', () => {
     const ed = editorHtml(
       '<div><p>• One</p><p>• Two</p></div>',

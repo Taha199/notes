@@ -72,12 +72,159 @@ function convertBlockGroupToNativeList(blocks: HTMLElement[], ordered: boolean):
   return list;
 }
 
+/** Split a block's children into lines at top-level <br> nodes. */
+export function splitNodesByBr(block: HTMLElement): ChildNode[][] {
+  const lines: ChildNode[][] = [[]];
+  for (const child of [...block.childNodes]) {
+    if (child instanceof HTMLElement && child.tagName === 'BR') {
+      lines.push([]);
+      continue;
+    }
+    lines[lines.length - 1].push(child);
+  }
+  return lines;
+}
+
+function lineNodesLookLikePseudoItem(nodes: ChildNode[]): boolean {
+  const probe = document.createElement('div');
+  nodes.forEach((n) => probe.appendChild(n.cloneNode(true)));
+  return !!getPseudoListPrefix(probe);
+}
+
+/**
+ * ChatGPT often pastes one div/p with "• a<br>• b<br>• c".
+ * Split those into sibling blocks so each becomes its own <li>.
+ */
+export function splitBrSeparatedPseudoListBlocks(root: HTMLElement): boolean {
+  let changed = false;
+  const blocks = [...root.querySelectorAll<HTMLElement>('div, p, h1, h2, h3')];
+  for (const block of blocks) {
+    if (!block.isConnected) continue;
+    if (block.closest('li, ul, ol')) continue;
+    if (blockHasNestedPseudoItems(block)) continue;
+    if (!block.querySelector(':scope > br')) continue;
+
+    const lines = splitNodesByBr(block);
+    if (lines.length < 2) continue;
+    const pseudoCount = lines.filter(lineNodesLookLikePseudoItem).length;
+    if (pseudoCount < 2) continue;
+
+    const parent = block.parentNode;
+    if (!parent) continue;
+    const frag = document.createDocumentFragment();
+    for (const nodes of lines) {
+      const div = document.createElement('div');
+      div.setAttribute('dir', 'auto');
+      if (nodes.length === 0) {
+        div.innerHTML = '<br>';
+      } else {
+        nodes.forEach((n) => div.appendChild(n));
+      }
+      frag.appendChild(div);
+    }
+    parent.insertBefore(frag, block);
+    block.remove();
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * If a single <li> still contains "• next<br>• next", explode into sibling <li>s.
+ */
+export function explodePseudoBulletLinesInListItems(root: HTMLElement): boolean {
+  let changed = false;
+  for (const li of [...root.querySelectorAll('li')]) {
+    if (!(li instanceof HTMLLIElement) || !li.isConnected) continue;
+    if (!li.querySelector(':scope > br')) continue;
+
+    const lines = splitNodesByBr(li);
+    if (lines.length < 2) continue;
+    const pseudoCount = lines.filter(lineNodesLookLikePseudoItem).length;
+    // First line may already have had its bullet stripped — still split if later lines are bullets.
+    if (pseudoCount < 1) continue;
+
+    const list = li.parentElement;
+    if (!list || !LIST_TAG_NAMES.has(list.tagName)) continue;
+
+    let insertAfter: Element = li;
+    lines.forEach((nodes, index) => {
+      if (index === 0) {
+        while (li.firstChild) li.removeChild(li.firstChild);
+        if (nodes.length === 0) {
+          li.innerHTML = '<br>';
+        } else {
+          nodes.forEach((n) => li.appendChild(n));
+        }
+        stripBulletPrefixFromElement(li);
+        if (!li.textContent?.replace(/\u200B/g, '').trim() && !li.querySelector('img')) {
+          li.innerHTML = '<br>';
+        }
+        return;
+      }
+      const newLi = document.createElement('li');
+      newLi.setAttribute('dir', 'auto');
+      if (nodes.length === 0) {
+        newLi.innerHTML = '<br>';
+      } else {
+        nodes.forEach((n) => newLi.appendChild(n));
+      }
+      stripBulletPrefixFromElement(newLi);
+      if (!newLi.textContent?.replace(/\u200B/g, '').trim() && !newLi.querySelector('img')) {
+        newLi.innerHTML = '<br>';
+      }
+      list.insertBefore(newLi, insertAfter.nextSibling);
+      insertAfter = newLi;
+      changed = true;
+    });
+  }
+  return changed;
+}
+
+/** Make pasted <li> structure match manually created ones (no wrapping <p>). */
+export function normalizeListItemStructure(root: HTMLElement): boolean {
+  let changed = false;
+  root.querySelectorAll('ul, ol').forEach((list) => {
+    if (!list.getAttribute('dir')) {
+      list.setAttribute('dir', 'auto');
+      changed = true;
+    }
+  });
+  root.querySelectorAll('li').forEach((li) => {
+    if (!(li instanceof HTMLLIElement)) return;
+    if (!li.getAttribute('dir')) {
+      li.setAttribute('dir', 'auto');
+      changed = true;
+    }
+    while (
+      li.children.length === 1
+      && li.firstElementChild instanceof HTMLElement
+      && (li.firstElementChild.tagName === 'P' || li.firstElementChild.tagName === 'DIV')
+      && !li.firstElementChild.querySelector('ul, ol, table, img, .note-table-wrap, .note-img-frame, .note-yt-frame')
+    ) {
+      const wrap = li.firstElementChild;
+      while (wrap.firstChild) li.insertBefore(wrap.firstChild, wrap);
+      wrap.remove();
+      changed = true;
+    }
+    const before = li.textContent;
+    stripBulletPrefixFromElement(li);
+    if (li.textContent !== before) changed = true;
+    if (!li.textContent?.replace(/\u200B/g, '').trim() && !li.querySelector('img, br')) {
+      li.innerHTML = '<br>';
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 /**
  * Turn pasted ChatGPT/plain pseudo-lists (`• text` in div/p) into real ul/ol/li
  * so Enter/Backspace/list toolbar match manually created lists.
  */
 export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boolean {
-  let changed = false;
+  const splitChanged = splitBrSeparatedPseudoListBlocks(root);
+  let changed = splitChanged;
   let guard = 0;
   while (guard++ < 80) {
     let start: HTMLElement | null = null;
@@ -120,6 +267,9 @@ export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boole
   root.querySelectorAll('[data-skip-pseudo-list]').forEach((el) => {
     el.removeAttribute('data-skip-pseudo-list');
   });
+
+  if (explodePseudoBulletLinesInListItems(root)) changed = true;
+  if (normalizeListItemStructure(root)) changed = true;
   if (changed) mergeAdjacentLists(root);
   return changed;
 }
