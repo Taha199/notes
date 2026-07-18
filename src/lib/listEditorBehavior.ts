@@ -153,6 +153,23 @@ export function makeListElement(ordered: boolean): HTMLUListElement | HTMLOListE
   return el;
 }
 
+export function removeEmptyListItemSimple(
+  li: HTMLLIElement,
+  cleanupEmptyListShell: (list: HTMLUListElement | HTMLOListElement) => void,
+): HTMLLIElement | null {
+  const prevLi = li.previousElementSibling;
+  const nextLi = li.nextElementSibling;
+  const list = li.parentElement;
+  li.remove();
+  if (list && LIST_TAG_NAMES.has(list.tagName)) {
+    if (list.children.length === 0) list.remove();
+    else cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement);
+  }
+  if (prevLi instanceof HTMLLIElement) return prevLi;
+  if (nextLi instanceof HTMLLIElement) return nextLi;
+  return null;
+}
+
 /** Split list at empty item → margin paragraph (Word step 1: remove bullet, keep line). Returns new paragraph. */
 export function convertEmptyListItemToParagraph(
   li: HTMLLIElement,

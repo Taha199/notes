@@ -9,6 +9,7 @@ import {
   convertEmptyListItemToParagraph,
   insertParagraphAboveList,
   mergeAdjacentLists,
+  removeEmptyListItemSimple,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
 } from '../../lib/listEditorBehavior';
@@ -1456,10 +1457,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (isNestedListItem(li)) {
       returnToParentListItem(li);
     } else {
-      const div = convertEmptyListItemToParagraph(li, (list) => cleanupEmptyListShell(list, ed));
-      if (div) {
-        pendingIndentExitRef.current = div;
-        placeCaretInBlock(div, true);
+      const list = li.parentElement;
+      const soleItem = list && LIST_TAGS.has(list.tagName) && list.children.length === 1;
+      if (soleItem) {
+        const div = convertEmptyListItemToParagraph(li, (listEl) => cleanupEmptyListShell(listEl, ed));
+        if (div) {
+          pendingIndentExitRef.current = div;
+          placeCaretInBlock(div, true);
+        }
+      } else {
+        const caretTarget = removeEmptyListItemSimple(li, (listEl) => cleanupEmptyListShell(listEl, ed));
+        if (caretTarget) placeCaretInBlock(caretTarget, false);
+        else selectEditorEnd();
       }
     }
     saveSel();

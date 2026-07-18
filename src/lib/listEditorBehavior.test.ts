@@ -9,6 +9,7 @@ import {
   isLiEffectivelyEmpty,
   isLiEmpty,
   mergeAdjacentLists,
+  removeEmptyListItemSimple,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems,
   stripListPasteIndent,
@@ -118,6 +119,15 @@ describe('listEditorBehavior', () => {
     mergeAdjacentLists(ed);
     expect(ed.querySelectorAll('ul').length).toBe(1);
     expect(ed.querySelectorAll('li').length).toBe(2);
+    ed.remove();
+  });
+
+  it('removeEmptyListItemSimple drops trailing empty item only', () => {
+    const ed = editorHtml('<ul><li><br></li><li><br></li><li><br></li></ul>');
+    const items = [...ed.querySelectorAll('li')] as HTMLLIElement[];
+    const caretTarget = removeEmptyListItemSimple(items[2], () => {});
+    expect(ed.querySelectorAll('li').length).toBe(2);
+    expect(caretTarget).toBe(items[1]);
     ed.remove();
   });
 
