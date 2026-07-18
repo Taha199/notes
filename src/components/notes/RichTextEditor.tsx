@@ -1418,14 +1418,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
-    if (isLastListItem(li)) {
-      pendingListMarginExitRef.current = null;
-      exitListAfterLastItem(li);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return true;
-    }
+    // Enter always continues the list with a new bullet. Exit to margin is Backspace-only.
     insertNewListItemAfter(li);
     saveSel();
     readCommandState();
