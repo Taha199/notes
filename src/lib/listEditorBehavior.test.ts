@@ -5,6 +5,7 @@ import {
   convertEmptyListItemToParagraph,
   convertListItemToParagraph,
   createEmptyParagraph,
+  deleteSelectionRangeContents,
   insertParagraphAboveList,
   isCaretAtStartOfLi,
   isLiEffectivelyEmpty,
@@ -180,5 +181,43 @@ describe('listEditorBehavior', () => {
     expect(shouldRemoveOrphanEmptyLists(6, false)).toBe(false);
     expect(shouldRemoveOrphanEmptyLists(1, false)).toBe(true);
     expect(shouldRemoveOrphanEmptyLists(1, true)).toBe(false);
+  });
+
+  it('deleteSelectionRangeContents deletes multi-paragraph selection and keeps list above', () => {
+    const ed = editorHtml('<div>Hej</div><ul><li>1</li></ul><div>2</div><div>3</div>');
+    const two = ed.querySelectorAll('div')[1] as HTMLElement;
+    const three = ed.querySelectorAll('div')[2] as HTMLElement;
+    const range = document.createRange();
+    range.setStart(two, 0);
+    range.setEnd(three, three.childNodes.length);
+    deleteSelectionRangeContents(ed, range);
+    expect(ed.textContent).toContain('Hej');
+    expect(ed.textContent).toContain('1');
+    expect(ed.textContent).not.toContain('2');
+    expect(ed.textContent).not.toContain('3');
+    expect(ed.querySelectorAll('li').length).toBe(1);
+    ed.remove();
+  });
+
+  it('deleteSelectionRangeContents works for backward selection of paragraphs', () => {
+    const ed = editorHtml('<div>Hej</div><div>2</div><div>3</div>');
+    const two = ed.children[1] as HTMLElement;
+    const three = ed.children[2] as HTMLElement;
+    const range = document.createRange();
+    // Normalized range is always start→end; simulate selecting both lines.
+    range.setStartBefore(two);
+    range.setEndAfter(three);
+    deleteSelectionRangeContents(ed, range);
+    expect(ed.textContent?.replace(/\u200B/g, '')).toBe('Hej');
+    expect(ed.querySelectorAll('div').length).toBe(1);
+    ed.remove();
+  });
+
+  it('removeListItemsInRangeDom deletes complete selected list items only', () => {
+    const ed = editorHtml('<ul><li>1</li><li>2</li><li>3</li><li>4</li></ul>');
+    const items = [...ed.querySelectorAll('li')] as HTMLLIElement[];
+    removeListItemsInRangeDom(items[1], items[2], () => {});
+    expect([...ed.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['1', '4']);
+    ed.remove();
   });
 });

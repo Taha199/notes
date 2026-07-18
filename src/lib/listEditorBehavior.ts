@@ -268,3 +268,54 @@ export function removeListItemsInRangeDom(
   const first = list?.querySelector(':scope > li:first-child');
   return first instanceof HTMLLIElement ? first : null;
 }
+
+/** True when range fully covers the element's contents. */
+export function rangeFullyCoversNode(range: Range, el: Node): boolean {
+  const itemRange = document.createRange();
+  itemRange.selectNodeContents(el);
+  return range.compareBoundaryPoints(Range.START_TO_START, itemRange) <= 0
+    && range.compareBoundaryPoints(Range.END_TO_END, itemRange) >= 0;
+}
+
+/**
+ * Delete a non-collapsed selection across paragraphs/list items.
+ * Leaves the caret collapsed at the start of the deleted range.
+ * Removes shells that were fully covered and became empty.
+ */
+export function deleteSelectionRangeContents(
+  root: HTMLElement,
+  range: Range,
+): Range {
+  const fullyCovered: HTMLElement[] = [];
+  root.querySelectorAll<HTMLElement>('div, p, li').forEach((el) => {
+    if (el === root) return;
+    try {
+      if (!range.intersectsNode(el)) return;
+    } catch {
+      return;
+    }
+    // Skip nested blocks inside list items (the li itself is enough).
+    if (el.tagName !== 'LI' && el.closest('li')) return;
+    if (rangeFullyCoversNode(range, el)) fullyCovered.push(el);
+  });
+
+  const del = range.cloneRange();
+  del.deleteContents();
+
+  for (const el of fullyCovered) {
+    if (!el.isConnected) continue;
+    const text = (el.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
+    const hasMedia = !!el.querySelector('img, table, iframe, .note-table-wrap, .note-img-frame, .note-yt-frame');
+    if (text || hasMedia) continue;
+    if (el.tagName === 'LI') {
+      const list = el.parentElement;
+      el.remove();
+      if (list && LIST_TAG_NAMES.has(list.tagName) && list.children.length === 0) list.remove();
+    } else if (!el.closest('li, ul, ol')) {
+      el.remove();
+    }
+  }
+
+  mergeAdjacentLists(root);
+  return del;
+}

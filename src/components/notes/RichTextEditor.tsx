@@ -7,6 +7,7 @@ import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
   convertListItemToParagraph,
+  deleteSelectionRangeContents,
   insertParagraphAboveList,
   mergeAdjacentLists,
   removeListItemsInRangeDom,
@@ -1000,28 +1001,56 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const startLi = getListItem(range.startContainer, ed);
     const endLi = getListItem(range.endContainer, ed);
     const sameLi = startLi && startLi === endLi ? startLi : null;
-    const touched = new Set<HTMLLIElement>();
-    const noteLi = (node: Node | null) => {
-      const li = getListItem(node, ed);
-      if (li) touched.add(li);
-    };
-    noteLi(range.startContainer);
-    noteLi(range.endContainer);
-    range.deleteContents();
+    const del = deleteSelectionRangeContents(ed, range);
     if (sameLi?.isConnected && isLiEffectivelyEmpty(sameLi)) {
       removeListItemOnBackspace(sameLi, ed);
       return;
     }
-    touched.forEach((li) => {
-      if (isLiEffectivelyEmpty(li)) li.remove();
-    });
-    mergeAdjacentLists(ed);
     const sel = window.getSelection();
-    if (sel?.rangeCount) saveSel();
-    else selectEditorEnd();
+    sel?.removeAllRanges();
+    sel?.addRange(del);
+    savedRange.current = del.cloneRange();
     saveSel();
     readCommandState();
     emitHtml();
+  };
+
+  /** Delete any non-collapsed selection; always runs before list Backspace logic. */
+  const deleteEditorSelection = (range: Range, ed: HTMLElement, sel: Selection): boolean => {
+    if (sel.isCollapsed) return false;
+    pendingListMarginExitRef.current = null;
+    pendingIndentExitRef.current = null;
+
+    const startLi = getListItem(range.startContainer, ed);
+    const endLi = getListItem(range.endContainer, ed);
+    if (
+      startLi
+      && endLi
+      && startLi !== endLi
+      && startLi.parentElement === endLi.parentElement
+      && selectionSpansEntireListItemsLib(startLi, endLi, range)
+    ) {
+      removeListItemsInRange(startLi, endLi);
+      return true;
+    }
+    if (
+      startLi
+      && endLi
+      && startLi === endLi
+      && (isEntireListItemSelected(startLi, range) || selectionCoversFullLiText(startLi, range))
+    ) {
+      removeListItemOnBackspace(startLi, ed);
+      return true;
+    }
+
+    const del = deleteSelectionRangeContents(ed, range);
+    sel.removeAllRanges();
+    sel.addRange(del);
+    savedRange.current = del.cloneRange();
+    saveSel();
+    readCommandState();
+    emitHtml();
+    return true;
   };
 
   const removeListItemOnBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
@@ -1362,13 +1391,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return null;
   };
 
-  /** Step 3: from an after-list margin paragraph, move caret to the intro line above the list. */
+  /** Step 3: from an empty after-list margin paragraph, move caret to the intro line above the list. */
   const focusLineAboveAfterListParagraph = (block: HTMLElement): boolean => {
     if (!blockFollowsList(block)) return false;
+    const blockEmpty = !block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img');
+    // Never steal a non-empty selection/line (e.g. selecting "2"/"3" after a list).
+    if (!blockEmpty) return false;
     const listEl = findListBeforeBlock(block);
     if (!listEl) return false;
 
-    const blockEmpty = !block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img');
     let target: HTMLElement | null = null;
     let scan: Element | null = listEl.previousElementSibling;
     while (scan instanceof HTMLElement) {
@@ -1382,7 +1413,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     if (!target) return false;
 
-    if (blockEmpty) block.remove();
+    block.remove();
     pendingListMarginExitRef.current = null;
     placeCaretInBlock(target, false);
     return true;
@@ -1762,6 +1793,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const tryRemoveStuckBullet = (range: Range, ed: HTMLElement) => {
+    // Collapsed caret only — never steal a multi-line selection.
+    if (!range.collapsed) return false;
     if (tryPseudoBulletBackspace(range, ed)) return true;
 
     const li = resolveListItemAtSelection(range, ed);
@@ -2853,41 +2886,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     finishNewLineEditing(ed);
   };
 
-  const runEditorListSelectionDelete = (
-    range: Range,
-    ed: HTMLElement,
-    sel: Selection,
-  ): boolean => {
-    const startLi = getListItem(range.startContainer, ed);
-    const endLi = getListItem(range.endContainer, ed);
-    if (
-      startLi
-      && endLi
-      && startLi !== endLi
-      && startLi.parentElement === endLi.parentElement
-    ) {
-      if (selectionSpansEntireListItemsLib(startLi, endLi, range)) {
-        removeListItemsInRange(startLi, endLi);
-      } else {
-        deletePartialListSelection(range, ed);
-      }
-      return true;
-    }
-    const li = resolveListItemAtSelection(range, ed);
-    if (!li) return false;
-    if (isEntireListItemSelected(li, range) || selectionCoversFullLiText(li, range)) {
-      removeListItemOnBackspace(li, ed);
-      return true;
-    }
-    if (startLi === endLi && startLi === li) {
-      deletePartialListSelection(range, ed);
-      return true;
-    }
-    pendingListMarginExitRef.current = null;
-    pendingIndentExitRef.current = null;
-    return false;
-  };
-
   const runEditorBackspace = (e: { key: string; preventDefault: () => void; nativeEvent?: { isComposing?: boolean } }) => {
     if (e.key !== 'Backspace' || e.nativeEvent?.isComposing) return false;
     const ed = editorRef.current;
@@ -2907,6 +2905,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       });
       return true as const;
     };
+
+    // Priority 1: non-empty selection — delete first; never run list Backspace logic.
+    if (!sel.isCollapsed) {
+      if (deleteEditorSelection(range, ed, sel)) {
+        e.preventDefault();
+        return handled();
+      }
+      return false;
+    }
 
     if (tryCompletePendingListMarginExit(range, ed)) {
       e.preventDefault();
@@ -2972,14 +2979,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
-      if (!sel.isCollapsed) {
-        if (runEditorListSelectionDelete(range, ed, sel)) {
-          e.preventDefault();
-          return handled();
-        }
-        return false;
-      }
-
       const pending = pendingListMarginExitRef.current;
       if (
         pending?.isConnected
@@ -3034,8 +3033,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!sel?.rangeCount) return false;
     const range = sel.getRangeAt(0);
     pushUndoCheckpoint();
+    // Priority 1: non-empty selection — same as Backspace.
     if (!sel.isCollapsed) {
-      if (runEditorListSelectionDelete(range, ed, sel)) {
+      if (deleteEditorSelection(range, ed, sel)) {
         e.preventDefault();
         return true;
       }
