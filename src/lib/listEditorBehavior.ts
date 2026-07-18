@@ -228,6 +228,13 @@ export function mergeAdjacentLists(root: ParentNode): void {
   }
 }
 
+/** Only strip a lone empty list shell; keep multi-item lists even when all items are empty. */
+export function shouldRemoveOrphanEmptyLists(allLiCount: number, hasNonEmptyLi: boolean): boolean {
+  if (hasNonEmptyLi) return false;
+  if (allLiCount > 1) return false;
+  return true;
+}
+
 export function removeListItemsInRangeDom(
   startLi: HTMLLIElement,
   endLi: HTMLLIElement,

@@ -12,6 +12,7 @@ import {
   removeEmptyListItemSimple,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
+  shouldRemoveOrphanEmptyLists,
 } from '../../lib/listEditorBehavior';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
@@ -997,6 +998,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const deletePartialListSelection = (range: Range, ed: HTMLElement) => {
     pendingListMarginExitRef.current = null;
     pendingIndentExitRef.current = null;
+    const startLi = getListItem(range.startContainer, ed);
+    const endLi = getListItem(range.endContainer, ed);
+    const sameLi = startLi && startLi === endLi ? startLi : null;
     const touched = new Set<HTMLLIElement>();
     const noteLi = (node: Node | null) => {
       const li = getListItem(node, ed);
@@ -1005,9 +1009,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     noteLi(range.startContainer);
     noteLi(range.endContainer);
     range.deleteContents();
+    if (sameLi?.isConnected && isLiEffectivelyEmpty(sameLi)) {
+      removeListItemOnBackspace(sameLi, ed);
+      return;
+    }
     touched.forEach((li) => {
       if (isLiEffectivelyEmpty(li)) li.remove();
     });
+    mergeAdjacentLists(ed);
     const sel = window.getSelection();
     if (sel?.rangeCount) saveSel();
     else selectEditorEnd();
@@ -1023,11 +1032,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const list = li.parentElement;
     if (prevLi instanceof HTMLLIElement) {
       li.remove();
-      if (list && list.children.length === 0) list.remove();
+      if (list && LIST_TAGS.has(list.tagName)) {
+        if (list.children.length === 0) list.remove();
+        else cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement, ed);
+      }
+      mergeAdjacentLists(ed);
       placeCaretInBlock(prevLi, false);
     } else if (nextLi instanceof HTMLLIElement) {
       li.remove();
-      if (list && list.children.length === 0) list.remove();
+      if (list && LIST_TAGS.has(list.tagName)) {
+        if (list.children.length === 0) list.remove();
+        else cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement, ed);
+      }
+      mergeAdjacentLists(ed);
       placeCaretInBlock(nextLi, true);
     } else if (isNestedListItem(li)) {
       returnToParentListItem(li);
@@ -1683,10 +1700,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (ed.querySelector('img')) return false;
     if (!ed.querySelector('ul, ol')) return false;
 
-    const hasNonEmptyLi = Array.from(ed.querySelectorAll('li')).some(
+    const allLis = Array.from(ed.querySelectorAll('li'));
+    const hasNonEmptyLi = allLis.some(
       (li) => !isLiEffectivelyEmpty(li as HTMLLIElement),
     );
-    if (hasNonEmptyLi) return false;
+    if (!shouldRemoveOrphanEmptyLists(allLis.length, hasNonEmptyLi)) return false;
 
     const hasNonListText = Array.from(ed.childNodes).some((node) => {
       if (node.nodeType === Node.TEXT_NODE) {
@@ -2840,14 +2858,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return true;
     }
     const li = resolveListItemAtSelection(range, ed);
-    if (li && (isEntireListItemSelected(li, range) || selectionCoversFullLiText(li, range))) {
+    if (!li) return false;
+    if (isEntireListItemSelected(li, range) || selectionCoversFullLiText(li, range)) {
       removeListItemOnBackspace(li, ed);
       return true;
     }
-    if (li) {
-      pendingListMarginExitRef.current = null;
-      pendingIndentExitRef.current = null;
+    if (startLi === endLi && startLi === li) {
+      deletePartialListSelection(range, ed);
+      return true;
     }
+    pendingListMarginExitRef.current = null;
+    pendingIndentExitRef.current = null;
     return false;
   };
 

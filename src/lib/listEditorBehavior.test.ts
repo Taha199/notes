@@ -12,6 +12,7 @@ import {
   removeEmptyListItemSimple,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems,
+  shouldRemoveOrphanEmptyLists,
   stripListPasteIndent,
 } from './listEditorBehavior';
 
@@ -160,5 +161,11 @@ describe('listEditorBehavior', () => {
   it('BULLET_PREFIX_RE matches pseudo bullets', () => {
     expect('• test'.match(BULLET_PREFIX_RE)?.[0]).toBe('• ');
     expect('1. test'.match(BULLET_PREFIX_RE)?.[0]).toBe('1. ');
+  });
+
+  it('shouldRemoveOrphanEmptyLists keeps multi-item lists when all items are empty', () => {
+    expect(shouldRemoveOrphanEmptyLists(6, false)).toBe(false);
+    expect(shouldRemoveOrphanEmptyLists(1, false)).toBe(true);
+    expect(shouldRemoveOrphanEmptyLists(1, true)).toBe(false);
   });
 });
