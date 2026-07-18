@@ -4,6 +4,7 @@ import {
   collectListItemsBetween,
   convertEmptyListItemToParagraph,
   convertListItemToParagraph,
+  clipboardToNativeListHtml,
   convertPseudoBulletBlocksToNativeLists,
   createEmptyParagraph,
   deleteSelectionRangeContents,
@@ -288,5 +289,32 @@ describe('listEditorBehavior', () => {
   it('plainTextToListHtml rejects mixed non-list text', () => {
     expect(plainTextToListHtml('• Alpha\nplain line')).toBeNull();
     expect(BULLET_PREFIX_RE.test('• Mukosa')).toBe(true);
+  });
+
+  it('clipboardToNativeListHtml uses plain bullets when HTML has no markers but keeps bold from HTML', () => {
+    const html = '<p><strong>Mukosa</strong> – a</p><p><strong>Submukosa</strong> – b</p><p><strong>Serosa</strong> – c</p>';
+    const plain = '• Mukosa – a\n• Submukosa – b\n• Serosa – c';
+    const out = clipboardToNativeListHtml(html, plain);
+    expect(out).toBeTruthy();
+    expect(out!).toContain('<ul');
+    expect(out!).toContain('<li dir="auto">');
+    expect((out!.match(/<li\b/g) || []).length).toBe(3);
+    expect(out!).toContain('<strong>Mukosa</strong>');
+    expect(out!).not.toMatch(/•/);
+  });
+
+  it('clipboardToNativeListHtml rebuilds clean lists from ChatGPT ul HTML', () => {
+    const html = '<!--StartFragment--><ul><li><p><b>• Mukosa</b> – a</p></li><li><p><b>• Serosa</b> – b</p></li></ul><!--EndFragment-->';
+    const out = clipboardToNativeListHtml(html, '• Mukosa – a\n• Serosa – b');
+    expect(out).toBeTruthy();
+    expect(out!).toContain('<ul dir="auto">');
+    expect((out!.match(/<li\b/g) || []).length).toBe(2);
+    expect(out!).not.toMatch(/<p>/);
+    expect(out!).not.toMatch(/•/);
+  });
+
+  it('clipboardToNativeListHtml falls back to plain when HTML is empty', () => {
+    const out = clipboardToNativeListHtml('', '• One\n• Two');
+    expect(out).toBe('<ul dir="auto"><li dir="auto">One</li><li dir="auto">Two</li></ul>');
   });
 });

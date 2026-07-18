@@ -3,10 +3,11 @@
 export const LIST_TAG_NAMES = new Set(['UL', 'OL']);
 export const BLOCK_TAG_NAMES = new Set(['DIV', 'P', 'LI', 'H1', 'H2', 'H3']);
 /** Leading bullet/number markers from ChatGPT, Word, plain text, etc. */
-export const BULLET_PREFIX_RE = /^[\s\u00a0\u200B\uFEFF]*(?:[•●◦▪▫‣⁃·∙・\-–—*+]|\d+[.)])\s*/;
+export const BULLET_PREFIX_RE =
+  /^[\s\u00a0\u200B\uFEFF\u202F]*(?:[•●◦▪▫‣⁃·∙・○■□➢➤\-–—*+]|\d+[.)])[\s\u00a0\u200B\uFEFF\u202F]*/;
 
 const PSEUDO_LIST_BLOCK_TAGS = new Set(['DIV', 'P', 'H1', 'H2', 'H3']);
-const STRONG_BULLET_RE = /[•●◦▪▫‣⁃·∙・*]/;
+const STRONG_BULLET_RE = /[•●◦▪▫‣⁃·∙・*○■□➢➤]/;
 
 export function getPseudoListPrefix(block: HTMLElement): RegExpMatchArray | null {
   if (block.closest('li, ul, ol')) return null;
@@ -310,6 +311,177 @@ function escapeHtmlPlain(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function countListItems(html: string): number {
+  return (html.match(/<li\b/gi) || []).length;
+}
+
+function extractClipboardFragment(html: string): string {
+  const start = html.indexOf('<!--StartFragment-->');
+  const end = html.indexOf('<!--EndFragment-->');
+  if (start !== -1 && end !== -1 && end > start) {
+    return html.slice(start + '<!--StartFragment-->'.length, end);
+  }
+  const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  if (body) return body[1];
+  return html;
+}
+
+const INLINE_KEEP = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'A', 'BR', 'SPAN', 'SUB', 'SUP']);
+
+function sanitizeListItemContents(li: HTMLElement): void {
+  li.querySelectorAll('*').forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    if (!INLINE_KEEP.has(node.tagName)) {
+      const parent = node.parentNode;
+      if (!parent) return;
+      while (node.firstChild) parent.insertBefore(node.firstChild, node);
+      parent.removeChild(node);
+      return;
+    }
+    node.removeAttribute('style');
+    node.removeAttribute('class');
+    node.removeAttribute('align');
+    node.removeAttribute('dir');
+    if (node.tagName === 'SPAN' && !node.getAttribute('style') && node.attributes.length === 0) {
+      const parent = node.parentNode;
+      if (!parent) return;
+      while (node.firstChild) parent.insertBefore(node.firstChild, node);
+      parent.removeChild(node);
+    }
+  });
+  li.removeAttribute('style');
+  li.removeAttribute('class');
+  li.removeAttribute('align');
+}
+
+function unwrapSingleBlockWrapper(li: HTMLElement): void {
+  while (
+    li.children.length === 1
+    && li.firstElementChild instanceof HTMLElement
+    && (li.firstElementChild.tagName === 'P' || li.firstElementChild.tagName === 'DIV')
+    && !li.firstElementChild.querySelector('ul, ol, table, img')
+  ) {
+    const wrap = li.firstElementChild;
+    while (wrap.firstChild) li.insertBefore(wrap.firstChild, wrap);
+    wrap.remove();
+  }
+}
+
+function serializeCleanList(list: HTMLElement): string {
+  const ordered = list.tagName === 'OL';
+  const tag = ordered ? 'ol' : 'ul';
+  const items = [...list.querySelectorAll(':scope > li')].map((li) => {
+    const clone = li.cloneNode(true) as HTMLElement;
+    unwrapSingleBlockWrapper(clone);
+    stripBulletPrefixFromElement(clone);
+    sanitizeListItemContents(clone);
+    const inner = clone.innerHTML.trim() || '<br>';
+    return `<li dir="auto">${inner}</li>`;
+  });
+  if (items.length === 0) return '';
+  return `<${tag} dir="auto">${items.join('')}</${tag}>`;
+}
+
+function collectLeafPasteBlocks(root: HTMLElement): HTMLElement[] {
+  splitBrSeparatedPseudoListBlocks(root);
+  const out: HTMLElement[] = [];
+  const walk = (parent: HTMLElement) => {
+    for (const child of [...parent.children]) {
+      if (!(child instanceof HTMLElement)) continue;
+      if (child.tagName === 'UL' || child.tagName === 'OL') {
+        child.querySelectorAll(':scope > li').forEach((li) => {
+          if (li instanceof HTMLElement) out.push(li);
+        });
+        continue;
+      }
+      if (child.tagName === 'LI') {
+        out.push(child);
+        continue;
+      }
+      if (!PSEUDO_LIST_BLOCK_TAGS.has(child.tagName)) continue;
+      if (blockHasNestedPseudoItems(child) || child.querySelector('div, p, li, ul, ol')) {
+        walk(child);
+        continue;
+      }
+      if ((child.textContent ?? '').replace(/\u200B/g, '').trim()) out.push(child);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+/** Build a native list from clipboard HTML (preserves bold/etc. when possible). */
+export function htmlClipboardToListHtml(html: string): string | null {
+  const root = document.createElement('div');
+  root.innerHTML = extractClipboardFragment(html);
+  root.querySelectorAll('script, style, meta, link').forEach((el) => el.remove());
+
+  convertPseudoBulletBlocksToNativeLists(root);
+
+  const lists = [...root.querySelectorAll('ul, ol')].filter(
+    (list) => !list.parentElement?.closest('ul, ol'),
+  );
+  if (lists.length > 0) {
+    const parts = lists.map((list) => serializeCleanList(list as HTMLElement)).filter(Boolean);
+    if (parts.length > 0) return parts.join('');
+  }
+  return null;
+}
+
+/**
+ * When HTML has N paragraphs without "•" but plain text has N bullet lines,
+ * rebuild a native list from the HTML blocks (keeps <b>/<strong>).
+ */
+export function htmlBlocksAlignedToPlainList(html: string, plain: string): string | null {
+  const fromPlain = plainTextToListHtml(plain);
+  if (!fromPlain) return null;
+  const plainCount = countListItems(fromPlain);
+
+  const root = document.createElement('div');
+  root.innerHTML = extractClipboardFragment(html);
+  root.querySelectorAll('script, style, meta, link').forEach((el) => el.remove());
+
+  const blocks = collectLeafPasteBlocks(root).filter((block) => {
+    if (block.tagName === 'LI') return true;
+    return !!(block.textContent ?? '').replace(/\u200B/g, '').trim();
+  });
+  if (blocks.length !== plainCount || plainCount < 1) return null;
+
+  const ordered = fromPlain.startsWith('<ol');
+  const tag = ordered ? 'ol' : 'ul';
+  const items = blocks.map((block) => {
+    const clone = block.cloneNode(true) as HTMLElement;
+    unwrapSingleBlockWrapper(clone);
+    stripBulletPrefixFromElement(clone);
+    sanitizeListItemContents(clone);
+    const inner = clone.innerHTML.trim() || '<br>';
+    return `<li dir="auto">${inner}</li>`;
+  });
+  return `<${tag} dir="auto">${items.join('')}</${tag}>`;
+}
+
+/**
+ * Intercept ChatGPT/Word/etc. clipboard and return clean ul/ol HTML for insertHTML.
+ * Prefer structured HTML (keeps bold); fall back to plain bullet lines.
+ */
+export function clipboardToNativeListHtml(html: string, plain: string): string | null {
+  const plainTrimmed = plain.trim();
+  const fromPlain = plainTrimmed ? plainTextToListHtml(plainTrimmed) : null;
+  const fromHtml = html.trim() ? htmlClipboardToListHtml(html) : null;
+  const aligned = html.trim() && fromPlain ? htmlBlocksAlignedToPlainList(html, plainTrimmed) : null;
+
+  const candidates = [fromHtml, aligned, fromPlain].filter((x): x is string => !!x);
+  if (candidates.length === 0) return null;
+
+  // Prefer the candidate with the most list items; tie-break toward richer HTML.
+  candidates.sort((a, b) => {
+    const diff = countListItems(b) - countListItems(a);
+    if (diff !== 0) return diff;
+    return b.length - a.length;
+  });
+  return candidates[0];
 }
 
 export const LIST_EXIT_INDENT_PROPS = [

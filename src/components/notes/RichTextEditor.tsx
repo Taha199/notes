@@ -7,12 +7,12 @@ import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
   BULLET_PREFIX_RE,
+  clipboardToNativeListHtml,
   convertListItemToParagraph,
   convertPseudoBulletBlocksToNativeLists,
   deleteSelectionRangeContents,
   insertParagraphAboveList,
   mergeAdjacentLists,
-  plainTextToListHtml,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
   shouldRemoveOrphanEmptyLists,
@@ -4147,23 +4147,28 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             return;
           }
           const plainTrimmed = plain.trim();
-          // Plain-text only: promote bullet lines to a native list (keeps HTML paste for bold/etc.).
-          if (!pastedHtml && plainTrimmed) {
-            const listHtml = plainTextToListHtml(plainTrimmed);
-            if (listHtml) {
-              e.preventDefault();
-              ensureFocus(true);
-              document.execCommand('insertHTML', false, listHtml);
-              saveSel();
-              const live = editorRef.current;
-              if (live) {
-                normalizePastedBlocks(live);
-                live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
-              }
-              readCommandState();
-              emitHtml();
-              return;
+          // ChatGPT/Word lists: never let the browser paste pseudo-bullets — insert a real ul/ol.
+          const nativeListHtml = clipboardToNativeListHtml(pastedHtml, plainTrimmed);
+          if (nativeListHtml) {
+            e.preventDefault();
+            ensureFocus(true);
+            document.execCommand('insertHTML', false, nativeListHtml);
+            saveSel();
+            const live = editorRef.current;
+            if (live) {
+              normalizePastedBlocks(live);
+              convertPseudoBulletBlocksToNativeLists(live);
+              live.querySelectorAll('ul, ol, li').forEach((el) => {
+                el.setAttribute('dir', 'auto');
+                if (el instanceof HTMLElement) {
+                  el.style.removeProperty('text-align');
+                  el.removeAttribute('align');
+                }
+              });
             }
+            readCommandState();
+            emitHtml();
+            return;
           }
           if (!pastedHtml) {
             const videoId = extractYouTubeVideoId(plainTrimmed);
