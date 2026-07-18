@@ -230,13 +230,45 @@ export function normalizeListItemStructure(root: HTMLElement): boolean {
   return changed;
 }
 
+const INLINE_WRAP_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'A', 'SPAN', 'FONT', 'SUB', 'SUP', 'MARK', 'BR']);
+
+/**
+ * Wrap loose top-level text / inline nodes (e.g. a bare "• …" text node pasted
+ * straight under the editor) into block divs so the list logic can see them.
+ */
+export function wrapLooseInlineChildren(root: HTMLElement): boolean {
+  let changed = false;
+  let run: HTMLElement | null = null;
+  const flush = () => { run = null; };
+  for (const node of [...root.childNodes]) {
+    const isInline =
+      node.nodeType === Node.TEXT_NODE
+      || (node instanceof HTMLElement && INLINE_WRAP_TAGS.has(node.tagName));
+    if (!isInline) { flush(); continue; }
+    if (node.nodeType === Node.TEXT_NODE && !(node.textContent ?? '').replace(/[\u200B\uFEFF]/g, '').trim()) {
+      // Keep stray whitespace attached to the current run if one exists.
+      if (run) run.appendChild(node);
+      continue;
+    }
+    if (!run) {
+      run = document.createElement('div');
+      run.setAttribute('dir', 'auto');
+      root.insertBefore(run, node);
+      changed = true;
+    }
+    run.appendChild(node);
+  }
+  return changed;
+}
+
 /**
  * Turn pasted ChatGPT/plain pseudo-lists (`• text` in div/p) into real ul/ol/li
  * so Enter/Backspace/list toolbar match manually created lists.
  */
 export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boolean {
+  const wrapChanged = wrapLooseInlineChildren(root);
   const splitChanged = splitBrSeparatedPseudoListBlocks(root);
-  let changed = splitChanged;
+  let changed = wrapChanged || splitChanged;
   let guard = 0;
   while (guard++ < 80) {
     let start: HTMLElement | null = null;

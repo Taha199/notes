@@ -7,6 +7,7 @@ import {
   clipboardToNativeListHtml,
   convertPseudoBulletBlocksToNativeLists,
   isCaretInBulletPrefixZone,
+  wrapLooseInlineChildren,
   createEmptyParagraph,
   deleteSelectionRangeContents,
   insertParagraphAboveList,
@@ -325,6 +326,29 @@ describe('listEditorBehavior', () => {
     expect(ed.querySelectorAll('li').length).toBe(1);
     expect(ed.textContent).not.toMatch(/•/);
     expect(ed.querySelector('li b')?.textContent).toContain('Mukosa');
+    ed.remove();
+  });
+
+  it('wrapLooseInlineChildren wraps a bare bullet text node at root', () => {
+    const ed = editorHtml('\u2022 Mukosa');
+    expect(wrapLooseInlineChildren(ed)).toBe(true);
+    expect(ed.querySelector('div')?.textContent).toContain('Mukosa');
+    ed.remove();
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists converts a bare • node at editor root', () => {
+    const ed = editorHtml('\u2022 <b>Mukosa</b> \u2013 barri\u00e4r');
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
+    expect(ed.querySelectorAll('li').length).toBe(1);
+    expect(ed.textContent).not.toMatch(/\u2022/);
+    expect(ed.querySelector('li b')?.textContent).toBe('Mukosa');
+    ed.remove();
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists clears a lone empty • at root', () => {
+    const ed = editorHtml('\u2022');
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
+    expect(ed.textContent?.replace(/[\u200B\s]/g, '')).toBe('');
     ed.remove();
   });
 
