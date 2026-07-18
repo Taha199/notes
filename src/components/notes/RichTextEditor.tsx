@@ -1418,6 +1418,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
+    if (isLastListItem(li)) {
+      pendingListMarginExitRef.current = null;
+      exitListAfterLastItem(li);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return true;
+    }
     insertNewListItemAfter(li);
     saveSel();
     readCommandState();
@@ -1449,6 +1457,28 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     pendingListMarginExitRef.current = null;
     handleEmptyListItemBackspace(li, ed);
+  };
+
+  /** Step 2 of staged list exit: Backspace after removing trailing empty bullet → margin paragraph. */
+  const tryCompletePendingListMarginExit = (range: Range, ed: HTMLElement): boolean => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return false;
+    const li = resolveListItemAtSelection(range, ed);
+    if (!li) return false;
+    const pending = pendingListMarginExitRef.current;
+    if (
+      pending?.isConnected
+      && pending.contains(li)
+      && isLastListItem(li)
+    ) {
+      focusParagraphAfterList(pending, ed);
+      pendingListMarginExitRef.current = null;
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return true;
+    }
+    return false;
   };
 
   const promoteEmptyListItemToMarginParagraph = (li: HTMLLIElement, ed: HTMLElement) => {
@@ -1783,6 +1813,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       if (isLiEffectivelyEmpty(li)) {
+        if (tryCompletePendingListMarginExit(range, ed)) return true;
         backspaceEmptyListItem(li, ed);
         return true;
       }
@@ -2923,6 +2954,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return true as const;
     };
 
+    if (tryCompletePendingListMarginExit(range, ed)) {
+      e.preventDefault();
+      return handled();
+    }
+
     if (tryRemoveStuckBullet(range, ed)) {
       e.preventDefault();
       return handled();
@@ -2978,11 +3014,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         && isLastListItem(li)
       ) {
         e.preventDefault();
-        focusParagraphAfterList(pending, ed);
-        pendingListMarginExitRef.current = null;
-        saveSel();
-        readCommandState();
-        emitHtml();
+        tryCompletePendingListMarginExit(range, ed);
         return handled();
       }
 
