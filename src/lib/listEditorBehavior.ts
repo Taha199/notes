@@ -100,7 +100,7 @@ export function splitNodesByBr(block: HTMLElement): ChildNode[][] {
 function lineNodesLookLikePseudoItem(nodes: ChildNode[]): boolean {
   const probe = document.createElement('div');
   nodes.forEach((n) => probe.appendChild(n.cloneNode(true)));
-  return !!getPseudoListPrefix(probe);
+  return !!getPseudoListPrefix(probe) || !!getGenericBulletPrefix(probe);
 }
 
 /**
@@ -233,6 +233,118 @@ export function normalizeListItemStructure(root: HTMLElement): boolean {
 const INLINE_WRAP_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'A', 'SPAN', 'FONT', 'SUB', 'SUP', 'MARK', 'BR']);
 
 /**
+ * Character-agnostic bullet detection: a single leading symbol char (any non
+ * letter/number/space) followed by whitespace. Used only for runs of 2+
+ * consecutive lines so normal prose is never affected.
+ */
+const GENERIC_BULLET_PREFIX_RE =
+  /^[\s\u00a0\u200B\uFEFF\u202F]*([^\p{L}\p{N}\s\u00a0\u200B\uFEFF\u202F])[\s\u00a0\u202F]+/u;
+
+// Symbols that are NOT bullets even when they lead a line (emoji, quotes,
+// brackets, sentence punctuation) — never strip these as list markers.
+const NON_BULLET_LEAD_RE = /[\p{Extended_Pictographic}"'`«»‹›“”‘’()\[\]{}<>@#&$%^_=+|~,.?!;:]/u;
+
+function isBulletLikeSymbol(symbol: string): boolean {
+  if (!symbol) return false;
+  return !NON_BULLET_LEAD_RE.test(symbol);
+}
+
+function getGenericBulletPrefix(block: HTMLElement): RegExpMatchArray | null {
+  if (block.closest('li, ul, ol')) return null;
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  const pick = (raw: string): RegExpMatchArray | null => {
+    const m = raw.match(GENERIC_BULLET_PREFIX_RE);
+    return m && isBulletLikeSymbol(m[1]) ? m : null;
+  };
+  while (node) {
+    const raw = node.textContent ?? '';
+    if (!raw.replace(/[\u200B\uFEFF\s\u00a0]/g, '')) {
+      node = walker.nextNode();
+      continue;
+    }
+    return pick(raw);
+  }
+  return pick(block.textContent ?? '');
+}
+
+function stripGenericBulletPrefixFromElement(el: HTMLElement): void {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const raw = node.textContent ?? '';
+    if (!raw.replace(/[\u200B\uFEFF\s\u00a0]/g, '')) {
+      node = walker.nextNode();
+      continue;
+    }
+    const stripped = raw.replace(GENERIC_BULLET_PREFIX_RE, '');
+    if (stripped !== raw) node.textContent = stripped;
+    return;
+  }
+}
+
+/**
+ * Convert runs of 2+ consecutive sibling blocks that each start with the same
+ * leading symbol (any bullet-like char) into a native <ul>. Char-agnostic, so
+ * it catches whatever glyph ChatGPT/Word/etc. used.
+ */
+export function convertSymbolPrefixedRunsToLists(root: HTMLElement): boolean {
+  let changed = false;
+  const parents = new Set<HTMLElement>([root]);
+  root.querySelectorAll<HTMLElement>('*').forEach((el) => {
+    if (el.children.length > 0) parents.add(el);
+  });
+
+  for (const parent of parents) {
+    let i = 0;
+    const kids = () => [...parent.children].filter((c): c is HTMLElement => c instanceof HTMLElement);
+    let children = kids();
+    while (i < children.length) {
+      const block = children[i];
+      if (
+        !PSEUDO_LIST_BLOCK_TAGS.has(block.tagName)
+        || block.closest('li, ul, ol') !== null && block.parentElement !== parent
+      ) { i++; continue; }
+      const std = getPseudoListPrefix(block);
+      const gen = std ? null : getGenericBulletPrefix(block);
+      if (!gen) { i++; continue; }
+      const symbol = gen[1];
+      // Collect the consecutive run sharing this same leading symbol.
+      const run: HTMLElement[] = [block];
+      let j = i + 1;
+      while (j < children.length) {
+        const next = children[j];
+        if (!PSEUDO_LIST_BLOCK_TAGS.has(next.tagName)) break;
+        const m = getGenericBulletPrefix(next);
+        if (!m || m[1] !== symbol) break;
+        run.push(next);
+        j++;
+      }
+      if (run.length < 2) { i++; continue; }
+
+      const list = document.createElement('ul');
+      list.setAttribute('dir', 'auto');
+      parent.insertBefore(list, block);
+      run.forEach((b) => {
+        const li = document.createElement('li');
+        li.setAttribute('dir', 'auto');
+        while (b.firstChild) li.appendChild(b.firstChild);
+        stripGenericBulletPrefixFromElement(li);
+        if (!li.textContent?.replace(/\u200B/g, '').trim() && !li.querySelector('img')) {
+          li.innerHTML = '<br>';
+        }
+        list.appendChild(li);
+      });
+      run.forEach((b) => b.remove());
+      changed = true;
+      children = kids();
+      i = 0;
+    }
+  }
+  return changed;
+}
+
+/**
  * Wrap loose top-level text / inline nodes (e.g. a bare "• …" text node pasted
  * straight under the editor) into block divs so the list logic can see them.
  */
@@ -312,6 +424,9 @@ export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boole
     el.removeAttribute('data-skip-pseudo-list');
   });
 
+  // Char-agnostic fallback for exotic bullet glyphs (runs of 2+ lines).
+  if (convertSymbolPrefixedRunsToLists(root)) changed = true;
+
   if (explodePseudoBulletLinesInListItems(root)) changed = true;
   if (normalizeListItemStructure(root)) changed = true;
   if (changed) mergeAdjacentLists(root);
@@ -325,10 +440,11 @@ export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boole
  */
 export function normalizePseudoListsInHtmlString(html: string): string {
   if (!html) return html;
-  // Cheap gate: only do work when a bullet/number marker could exist outside a list.
-  if (!/[\uF0B7\uF0A7\u2022\u2023\u2043\u2219\u2024\u25E6\u25AA\u25CF\u25CB•●◦▪▫‣⁃·∙・○■□➢➤]|\d+[.)]/.test(html)) {
-    return html;
-  }
+  // Cheap gate: known bullet/number markers, OR any symbol char right after a
+  // block open tag followed by whitespace (catches exotic bullet glyphs).
+  const hasKnownMarker = /[\uF0B7\uF0A7\u2022\u2023\u2043\u2219\u2024\u25E6\u25AA\u25CF\u25CB•●◦▪▫‣⁃·∙・○■□➢➤]|\d+[.)]/.test(html);
+  const hasGenericMarker = />[\s\u00a0]*[^\w\s<>&][\s\u00a0\u202F]/u.test(html);
+  if (!hasKnownMarker && !hasGenericMarker) return html;
   const root = document.createElement('div');
   root.innerHTML = html;
   const changed = convertPseudoBulletBlocksToNativeLists(root);

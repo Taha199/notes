@@ -6,6 +6,7 @@ import {
   convertListItemToParagraph,
   clipboardToNativeListHtml,
   convertPseudoBulletBlocksToNativeLists,
+  convertSymbolPrefixedRunsToLists,
   isCaretInBulletPrefixZone,
   wrapLooseInlineChildren,
   createEmptyParagraph,
@@ -350,6 +351,45 @@ describe('listEditorBehavior', () => {
     const ed = editorHtml('\u2022');
     expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
     expect(ed.textContent?.replace(/[\u200B\s]/g, '')).toBe('');
+    ed.remove();
+  });
+
+  it('convertSymbolPrefixedRunsToLists converts an exotic bullet glyph run', () => {
+    // U+2B24 (⬤) is NOT in the known bullet list — must still convert.
+    const ed = editorHtml('<div>\u2B24 Mukosa</div><div>\u2B24 Submukosa</div><div>\u2B24 Serosa</div>');
+    expect(convertSymbolPrefixedRunsToLists(ed)).toBe(true);
+    expect(ed.querySelectorAll('li').length).toBe(3);
+    expect(ed.textContent).not.toMatch(/\u2B24/);
+    ed.remove();
+  });
+
+  it('convertSymbolPrefixedRunsToLists leaves single symbol line and prose alone', () => {
+    const ed = editorHtml('<div>\u2B24 Only one</div><div>Vanlig text</div>');
+    expect(convertSymbolPrefixedRunsToLists(ed)).toBe(false);
+    expect(ed.querySelectorAll('li').length).toBe(0);
+    ed.remove();
+  });
+
+  it('convertSymbolPrefixedRunsToLists does not touch emoji-led lines', () => {
+    const ed = editorHtml('<div>\uD83D\uDE00 Glad</div><div>\uD83D\uDE00 Ledsen</div>');
+    expect(convertSymbolPrefixedRunsToLists(ed)).toBe(false);
+    expect(ed.querySelectorAll('li').length).toBe(0);
+    expect(ed.textContent).toContain('\uD83D\uDE00');
+    ed.remove();
+  });
+
+  it('convertSymbolPrefixedRunsToLists ignores quote-led prose lines', () => {
+    const ed = editorHtml('<div>" Ett citat</div><div>" Ett till</div>');
+    expect(convertSymbolPrefixedRunsToLists(ed)).toBe(false);
+    ed.remove();
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists handles exotic glyph via fallback', () => {
+    const ed = editorHtml('<div>\u25B8 <b>A</b> \u2013 x</div><div>\u25B8 <b>B</b> \u2013 y</div>');
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(true);
+    expect(ed.querySelectorAll('ul').length).toBe(1);
+    expect(ed.querySelectorAll('li').length).toBe(2);
+    expect(ed.textContent).not.toMatch(/\u25B8/);
     ed.remove();
   });
 
