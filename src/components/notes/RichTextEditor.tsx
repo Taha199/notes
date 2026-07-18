@@ -480,7 +480,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputCleanupRafRef = useRef<number | null>(null);
   const selectionRafRef = useRef<number | null>(null);
-  /** Reserved for staged list margin exit; cleared on most list edits. */
+  /** After removing a trailing empty bullet, the next Backspace exits the list to the left margin. */
   const pendingListMarginExitRef = useRef<HTMLUListElement | HTMLOListElement | null>(null);
   /** After empty bullet → paragraph (step 1), step 2 strips indent on this block. */
   const pendingIndentExitRef = useRef<HTMLElement | null>(null);
@@ -1416,6 +1416,24 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
+    if (shouldExitListAfterEmptyItem(li)) {
+      const list = li.parentElement;
+      const prevLi = li.previousElementSibling;
+      li.remove();
+      if (list && LIST_TAGS.has(list.tagName)) {
+        cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement, ed);
+        pendingListMarginExitRef.current = list as HTMLUListElement | HTMLOListElement;
+      }
+      if (prevLi instanceof HTMLLIElement) {
+        placeCaretInBlock(prevLi, false);
+      } else {
+        pendingListMarginExitRef.current = null;
+      }
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
     pendingListMarginExitRef.current = null;
     handleEmptyListItemBackspace(li, ed);
   };
@@ -2963,6 +2981,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
 
       const atStart = isCaretAtStartOfLi(li, range);
+      if (atStart && isLastListItem(li) && !isLiEffectivelyEmpty(li)) {
+        e.preventDefault();
+        const list = li.parentElement;
+        if (list && LIST_TAGS.has(list.tagName)) {
+          focusParagraphAfterList(list as HTMLUListElement | HTMLOListElement, ed);
+        }
+        pendingListMarginExitRef.current = null;
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return handled();
+      }
+
       if (atStart) {
         e.preventDefault();
         if (isNestedListItem(li)) returnToParentListItem(li);
