@@ -5,8 +5,10 @@ import {
   convertEmptyListItemToParagraph,
   convertListItemToParagraph,
   clipboardToNativeListHtml,
+  clipboardToNormalizedHtml,
   convertPseudoBulletBlocksToNativeLists,
   convertSymbolPrefixedRunsToLists,
+  plainTextToMixedHtml,
   isCaretInBulletPrefixZone,
   wrapLooseInlineChildren,
   createEmptyParagraph,
@@ -320,6 +322,36 @@ describe('listEditorBehavior', () => {
   it('clipboardToNativeListHtml falls back to plain when HTML is empty', () => {
     const out = clipboardToNativeListHtml('', '• One\n• Two');
     expect(out).toBe('<ul dir="auto"><li dir="auto">One</li><li dir="auto">Two</li></ul>');
+  });
+
+  it('clipboardToNormalizedHtml keeps heading + paragraphs AND converts the list', () => {
+    const html = '<!--StartFragment-->'
+      + '<h3>Vad händer vid IBD?</h3>'
+      + '<p>Inflammationen börjar när immunceller.</p>'
+      + '<div>\u2022 Blodkärlen aktiveras.</div>'
+      + '<div>\u2022 Fler leukocyter vandrar.</div>'
+      + '<div>\u2022 Immunceller frisätter.</div>'
+      + '<!--EndFragment-->';
+    const out = clipboardToNormalizedHtml(html, '');
+    expect(out).toBeTruthy();
+    expect(out!).toContain('Vad händer vid IBD?');
+    expect(out!).toContain('Inflammationen');
+    expect(out!).toContain('<ul');
+    expect((out!.match(/<li\b/g) || []).length).toBe(3);
+    expect(out!).not.toMatch(/\u2022/);
+  });
+
+  it('clipboardToNormalizedHtml returns null when there is no list', () => {
+    expect(clipboardToNormalizedHtml('<p>Bara text</p><p>Rad två</p>', '')).toBeNull();
+  });
+
+  it('plainTextToMixedHtml keeps prose lines and groups bullet runs', () => {
+    const out = plainTextToMixedHtml('Rubrik\n\n• A\n• B\nSlut');
+    expect(out).toBeTruthy();
+    expect(out!).toContain('<div dir="auto">Rubrik</div>');
+    expect(out!).toContain('<ul');
+    expect((out!.match(/<li\b/g) || []).length).toBe(2);
+    expect(out!).toContain('<div dir="auto">Slut</div>');
   });
 
   it('convertPseudoBulletBlocksToNativeLists converts a single • line', () => {

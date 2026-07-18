@@ -660,6 +660,62 @@ export function clipboardToNativeListHtml(html: string, plain: string): string |
   return candidates[0];
 }
 
+/** Build mixed HTML from plain text: bullet runs → lists, other lines → paragraphs. */
+export function plainTextToMixedHtml(plain: string): string | null {
+  const lines = plain.replace(/\r\n/g, '\n').split('\n');
+  let sawBullet = false;
+  const parts: string[] = [];
+  let listBuffer: { ordered: boolean; content: string }[] = [];
+  const flushList = () => {
+    if (listBuffer.length === 0) return;
+    const ordered = listBuffer.every((it) => it.ordered);
+    const tag = ordered ? 'ol' : 'ul';
+    const body = listBuffer
+      .map((it) => `<li dir="auto">${escapeHtmlPlain(it.content.trim()) || '<br>'}</li>`)
+      .join('');
+    parts.push(`<${tag} dir="auto">${body}</${tag}>`);
+    listBuffer = [];
+  };
+  for (const line of lines) {
+    const match = line.match(BULLET_PREFIX_RE);
+    if (match && line.slice(match[0].length).trim()) {
+      sawBullet = true;
+      listBuffer.push({ ordered: /\d+[.)]/.test(match[0]), content: line.slice(match[0].length) });
+      continue;
+    }
+    flushList();
+    if (line.trim()) parts.push(`<div dir="auto">${escapeHtmlPlain(line.trim())}</div>`);
+  }
+  flushList();
+  if (!sawBullet || parts.length === 0) return null;
+  return parts.join('');
+}
+
+/**
+ * Normalize a whole clipboard payload for insertion: keeps headings/paragraphs
+ * AND converts pseudo bullet blocks to real lists. Returns null when there is no
+ * list at all (so normal rich/text paste handling can proceed unchanged).
+ */
+export function clipboardToNormalizedHtml(html: string, plain: string): string | null {
+  const h = html.trim();
+  if (h) {
+    const root = document.createElement('div');
+    root.innerHTML = extractClipboardFragment(h);
+    root.querySelectorAll('script, style, meta, link, title').forEach((el) => el.remove());
+    convertPseudoBulletBlocksToNativeLists(root);
+    // Only intercept when there is an actual list — otherwise let default paste run.
+    if (!root.querySelector('ul, ol')) return null;
+    // Normalize list items (unwrap <p>, strip leftover markers) but keep all blocks.
+    normalizeListItemStructure(root);
+    mergeAdjacentLists(root);
+    const out = root.innerHTML.trim();
+    return out || null;
+  }
+  const p = plain.trim();
+  if (!p) return null;
+  return plainTextToMixedHtml(p);
+}
+
 export const LIST_EXIT_INDENT_PROPS = [
   'margin-left',
   'padding-left',

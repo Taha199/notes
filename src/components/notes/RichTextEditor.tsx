@@ -7,7 +7,7 @@ import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
   BULLET_PREFIX_RE,
-  clipboardToNativeListHtml,
+  clipboardToNormalizedHtml,
   convertListItemToParagraph,
   convertPseudoBulletBlocksToNativeLists,
   deleteSelectionRangeContents,
@@ -4201,17 +4201,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             return;
           }
           const plainTrimmed = plain.trim();
-          // ChatGPT/Word lists: never let the browser paste pseudo-bullets — insert a real ul/ol.
-          const nativeListHtml = clipboardToNativeListHtml(pastedHtml, plainTrimmed);
-          if (nativeListHtml) {
+          // Lists (incl. mixed heading/paragraph + list): insert normalized HTML that
+          // keeps all surrounding text and turns pseudo-bullets into real ul/ol.
+          const normalizedHtml = clipboardToNormalizedHtml(pastedHtml, plainTrimmed);
+          if (normalizedHtml) {
             e.preventDefault();
             ensureFocus(true);
-            document.execCommand('insertHTML', false, nativeListHtml);
+            document.execCommand('insertHTML', false, normalizedHtml);
             saveSel();
             const live = editorRef.current;
             if (live) {
               normalizePastedBlocks(live);
               promotePseudoListsToNative(live);
+              normalizeAutoLinks(live);
             }
             readCommandState();
             emitHtml();
