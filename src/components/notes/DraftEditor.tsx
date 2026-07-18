@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { Draft } from '../../contexts/NotesContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { RichTextEditor } from './RichTextEditor';
+import { AppRichTextEditor } from './AppRichTextEditor';
 import { CloudSavedAtLabel } from '../common/CloudSavedAtLabel';
 
 export function DraftEditor({ draft, index, total }: { draft: Draft; index: number; total: number }) {
@@ -54,7 +54,7 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
         maxLength={80}
         className="border-b border-app-border bg-transparent px-4 py-2.5 text-sm font-semibold text-app-text outline-none placeholder:font-normal placeholder:text-gray-400 dark:border-white/10 dark:text-gray-100"
       />
-      <RichTextEditor
+      <AppRichTextEditor
         html={draft.html}
         syncUpdatedAt={draft.updatedAt}
         onChange={onHtmlChange}

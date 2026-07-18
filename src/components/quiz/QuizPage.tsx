@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, memo } from 'react';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
-import { RichTextEditor } from '../notes/RichTextEditor';
+import { AppRichTextEditor } from '../notes/AppRichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 import { useAuth } from '../../contexts/AuthContext';
 import { StudyMode } from './StudyMode';
@@ -193,7 +193,11 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
             {item.explanation && (
               <div className="mt-3 w-full max-w-full overflow-x-hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
                 <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">{t.quizExplanationLabel}</p>
-                <p dir="auto" className="break-words text-[13px] leading-relaxed text-amber-900 [overflow-wrap:anywhere] dark:text-amber-200">{item.explanation}</p>
+                <div
+                  dir="auto"
+                  className="note-content break-words text-[13px] leading-relaxed text-amber-900 [overflow-wrap:anywhere] dark:text-amber-200"
+                  dangerouslySetInnerHTML={{ __html: mdToHtml(item.explanation) }}
+                />
               </div>
             )}
           </div>
@@ -412,7 +416,13 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
       .join('');
     const composedQ = `${question}<div style="margin-top:6px">${optionsHtml}</div>`;
     const composedA = safeCorrects.map((ci) => `${OPT_LETTERS[ci]}) ${escapeHtml(finalOptions[ci])} ✓`).join('<br>');
-    onSave({ question: composedQ, answer: composedA, options: finalOptions, correctIndexes: safeCorrects, explanation: explanation.trim() || undefined });
+    onSave({
+      question: composedQ,
+      answer: composedA,
+      options: finalOptions,
+      correctIndexes: safeCorrects,
+      explanation: hasContent(explanation) ? explanation : undefined,
+    });
   };
 
   return (
@@ -441,23 +451,19 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         </button>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 p-4 md:grid-cols-2 md:items-stretch">
-        <div className="flex min-h-0 min-w-0 flex-col">
-          <div className="flex min-h-[200px] flex-1 flex-col overflow-x-hidden rounded-xl border border-app-border dark:border-white/10">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <RichTextEditor
-              html={question}
-              onChange={onChangeQ}
-              onLiveChange={onChangeQ}
-              placeholder={`${t.quizQuestionLabel}...`}
-              minHeight="140px"
-            />
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+          <AppRichTextEditor
+            html={question}
+            onChange={onChangeQ}
+            onLiveChange={onChangeQ}
+            placeholder={`${t.quizQuestionLabel}...`}
+            minHeight="140px"
+          />
+          {hasAi && !mcq && (
+            <div className="shrink-0 border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
+              <div className="h-7" aria-hidden="true" />
             </div>
-            {hasAi && !mcq && (
-              <div className="shrink-0 border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
-                <div className="h-7" aria-hidden="true" />
-              </div>
-            )}
-          </div>
+          )}
         </div>
         {mcq ? (
           <div>
@@ -490,43 +496,38 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
                 </button>
               )}
             </div>
-            <div className="mt-3">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{t.quizExplanationOptional}</p>
-              <textarea
-                value={explanation}
-                onChange={(e) => setExplanation(e.target.value)}
-                dir="auto"
-                rows={3}
+            <div className="mt-3 overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+              <p className="border-b border-app-border px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:border-white/10">{t.quizExplanationOptional}</p>
+              <AppRichTextEditor
+                html={explanation}
+                onChange={setExplanation}
+                onLiveChange={setExplanation}
                 placeholder={t.quizExplanationPh}
-                className="w-full resize-none rounded-xl border border-app-border bg-white px-3 py-2 text-[13px] text-app-text outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-200/60 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100"
+                minHeight="100px"
               />
             </div>
           </div>
         ) : (
-        <div className="flex min-h-0 min-w-0 flex-col">
-          <div className="flex min-h-[200px] flex-1 flex-col overflow-x-hidden rounded-xl border border-app-border dark:border-white/10">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <RichTextEditor
-              html={answer}
-              onChange={onChangeA}
-              onLiveChange={onChangeA}
-              placeholder={`${t.quizAnswerLabel}...`}
-              minHeight="140px"
-            />
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+          <AppRichTextEditor
+            html={answer}
+            onChange={onChangeA}
+            onLiveChange={onChangeA}
+            placeholder={`${t.quizAnswerLabel}...`}
+            minHeight="140px"
+          />
+          {hasAi && (
+            <div className="flex shrink-0 justify-end border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
+              <button
+                type="button"
+                onClick={handleAiAnswer}
+                disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
+                className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+              >
+                {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
+              </button>
             </div>
-            {hasAi && (
-              <div className="flex shrink-0 justify-end border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
-                <button
-                  type="button"
-                  onClick={handleAiAnswer}
-                  disabled={aiLoading || !question.replace(/<[^>]*>/g, '').trim()}
-                  className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-violet-200 bg-violet-50 px-2.5 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
-                >
-                  {aiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
-                </button>
-              </div>
-            )}
-          </div>
+          )}
           {aiSuggestion !== null && (
             <div className="mt-2 overflow-hidden rounded-xl border border-violet-300 bg-violet-50 dark:border-violet-500/30 dark:bg-violet-500/10">
               <div className="flex items-center justify-between border-b border-violet-200 px-3 py-1.5 dark:border-violet-500/20">

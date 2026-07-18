@@ -3,7 +3,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { RichTextEditor } from './RichTextEditor';
+import { AppRichTextEditor } from './AppRichTextEditor';
 import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini';
 import type { Page } from '../../types';
 
@@ -424,7 +424,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
         placeholder={t.mTiPh}
         className="border-b border-app-border px-3 py-3 text-base font-bold text-app-text outline-none dark:border-white/10 dark:bg-transparent dark:text-gray-100 sm:px-4 sm:py-3.5 sm:text-lg"
       />
-      <RichTextEditor
+      <AppRichTextEditor
         html={html}
         onChange={(v) => { htmlLiveRef.current = v; setHtml(v); }}
         onLiveChange={(v) => { htmlLiveRef.current = v; }}
@@ -532,7 +532,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   </div>
                   <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
                     <div className="flex min-h-0 flex-1 flex-col">
-                    <RichTextEditor key={`mq-${manualResetKey}`} html={manualQ} onChange={setManualQ} placeholder={t.noteWriteQuestionPh} minHeight="110px" />
+                    <AppRichTextEditor key={`mq-${manualResetKey}`} html={manualQ} onChange={setManualQ} placeholder={t.noteWriteQuestionPh} minHeight="110px" />
                     </div>
                   </div>
                 </div>
@@ -585,7 +585,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   ) : (
                     <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
                       <div className="flex min-h-0 flex-1 flex-col">
-                      <RichTextEditor key={`ma-${manualResetKey}`} html={manualA} onChange={setManualA} placeholder={t.noteWriteAnswerPh} minHeight="110px" />
+                      <AppRichTextEditor key={`ma-${manualResetKey}`} html={manualA} onChange={setManualA} placeholder={t.noteWriteAnswerPh} minHeight="110px" />
                       </div>
                     </div>
                   )}
@@ -654,7 +654,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   </div>
                   <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
                     <div className="flex min-h-0 flex-1 flex-col">
-                    <RichTextEditor html={aiQ} onChange={setAiQ} placeholder={t.noteGenerateQuestionPh} minHeight="110px" />
+                    <AppRichTextEditor html={aiQ} onChange={setAiQ} placeholder={t.noteGenerateQuestionPh} minHeight="110px" />
                     </div>
                   </div>
                 </div>
@@ -678,7 +678,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                   </div>
                   <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
                     <div className="flex min-h-0 flex-1 flex-col">
-                    <RichTextEditor html={aiA} onChange={setAiA} placeholder={t.noteGenerateAnswerPh} minHeight="110px" />
+                    <AppRichTextEditor html={aiA} onChange={setAiA} placeholder={t.noteGenerateAnswerPh} minHeight="110px" />
                     </div>
                   </div>
                 </div>
@@ -751,7 +751,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                           <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{t.quizQuestionLabel}</label>
                           <div className="flex max-h-[min(50dvh,28rem)] min-h-[80px] flex-col rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
                             <div className="flex min-h-0 flex-1 flex-col">
-                            <RichTextEditor html={editQ} onChange={setEditQ} placeholder={t.noteWriteQuestionEditPh} editable={true} minHeight="80px" />
+                            <AppRichTextEditor html={editQ} onChange={setEditQ} placeholder={t.noteWriteQuestionEditPh} editable={true} minHeight="80px" />
                             </div>
                           </div>
                         </div>
@@ -776,7 +776,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                           </div>
                           <div className="flex max-h-[min(50dvh,28rem)] min-h-[100px] flex-col rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
                             <div className="flex min-h-0 flex-1 flex-col">
-                            <RichTextEditor html={editA} onChange={setEditA} placeholder={t.noteWriteAnswerPh} editable={true} minHeight="100px" />
+                            <AppRichTextEditor html={editA} onChange={setEditA} placeholder={t.noteWriteAnswerPh} editable={true} minHeight="100px" />
                             </div>
                           </div>
                         </div>

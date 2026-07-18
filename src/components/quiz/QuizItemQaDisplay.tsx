@@ -56,7 +56,11 @@ export function QuizItemQaDisplay({
           {item.explanation && (
             <div className="mt-3 w-full max-w-full overflow-x-hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
               <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">{t.quizExplanationLabel}</p>
-              <p dir="auto" className="break-words text-[13px] leading-relaxed text-amber-900 [overflow-wrap:anywhere] dark:text-amber-200">{item.explanation}</p>
+              <div
+                dir="auto"
+                className="note-content break-words text-[13px] leading-relaxed text-amber-900 [overflow-wrap:anywhere] dark:text-amber-200"
+                dangerouslySetInnerHTML={{ __html: mdToHtml(item.explanation) }}
+              />
             </div>
           )}
         </div>
