@@ -1266,7 +1266,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const draftSaveInFlightRef = useRef<Set<string>>(new Set());
   const draftSavePendingAgainRef = useRef<Set<string>>(new Set());
   const pendingLocalDraftIdsRef = useRef<Set<string>>(new Set());
-  const pullTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pullTimer = useRef<number | null>(null);
   const pendingRemotePullRef = useRef(false);
   const lastPushedDataAtRef = useRef(0);
   const lastPushedPayloadRef = useRef<Partial<Record<'notes' | 'quizzes' | 'quizSets' | 'quizFolders', string>>>({});

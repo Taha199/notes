@@ -5,6 +5,13 @@ import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteIma
 import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
+import {
+  convertEmptyListItemToParagraph,
+  insertParagraphAboveList,
+  mergeAdjacentLists,
+  removeListItemsInRangeDom,
+  selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
+} from '../../lib/listEditorBehavior';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
 const HIGHLIGHT_COLORS = ['#FFEB3B', '#FFD54F', '#A5D6A7', '#80DEEA', '#CE93D8', '#F48FB1', '#FFCC80', '#EF9A9A', '#B0BEC5', '#FFFFFF', '#000000'];
@@ -473,6 +480,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const selectionRafRef = useRef<number | null>(null);
   /** Reserved for staged list margin exit; cleared on most list edits. */
   const pendingListMarginExitRef = useRef<HTMLUListElement | HTMLOListElement | null>(null);
+  /** After empty bullet → paragraph (step 1), step 2 strips indent on this block. */
+  const pendingIndentExitRef = useRef<HTMLElement | null>(null);
   const undoStackRef = useRef<EditorSnapshot[]>([]);
   const redoStackRef = useRef<EditorSnapshot[]>([]);
   const isRestoringUndoRef = useRef(false);
@@ -971,17 +980,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const removeListItemsInRange = (startLi: HTMLLIElement, endLi: HTMLLIElement) => {
     pendingListMarginExitRef.current = null;
-    const list = startLi.parentElement;
-    const prevLi = startLi.previousElementSibling;
-    const items = collectListItemsBetween(startLi, endLi);
-    for (let i = items.length - 1; i >= 0; i--) items[i].remove();
-    if (list && LIST_TAGS.has(list.tagName) && list.children.length === 0) list.remove();
-    if (prevLi instanceof HTMLLIElement) {
-      placeCaretInBlock(prevLi, false);
-    } else {
-      const first = list?.querySelector(':scope > li:first-child');
-      if (first instanceof HTMLLIElement) placeCaretInBlock(first, true);
-    }
+    pendingIndentExitRef.current = null;
+    const ed = editorRef.current;
+    const caretTarget = removeListItemsInRangeDom(startLi, endLi, (list) => {
+      if (ed) cleanupEmptyListShell(list, ed);
+    });
+    if (ed) mergeAdjacentLists(ed);
+    if (caretTarget) placeCaretInBlock(caretTarget, false);
+    else selectEditorEnd();
     saveSel();
     readCommandState();
     emitHtml();
@@ -989,6 +995,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const deletePartialListSelection = (range: Range, ed: HTMLElement) => {
     pendingListMarginExitRef.current = null;
+    pendingIndentExitRef.current = null;
     const touched = new Set<HTMLLIElement>();
     const noteLi = (node: Node | null) => {
       const li = getListItem(node, ed);
@@ -1445,13 +1452,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const handleEmptyListItemBackspace = (li: HTMLLIElement, ed: HTMLElement) => {
-    const list = li.parentElement;
+    pendingListMarginExitRef.current = null;
     if (isNestedListItem(li)) {
       returnToParentListItem(li);
-    } else if (list && LIST_TAGS.has(list.tagName) && list.children.length === 1) {
-      unwrapList(list as HTMLUListElement | HTMLOListElement, true);
     } else {
-      promoteEmptyListItemToMarginParagraph(li, ed);
+      const div = convertEmptyListItemToParagraph(li, (list) => cleanupEmptyListShell(list, ed));
+      if (div) {
+        pendingIndentExitRef.current = div;
+        placeCaretInBlock(div, true);
+      }
     }
     saveSel();
     readCommandState();
@@ -2794,10 +2803,45 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const range = sel.getRangeAt(0);
     const li = resolveListItemAtSelection(range, ed);
     if (!li || !isCaretAtStartOfLi(li, range)) return;
+    const list = li.parentElement;
+    if (!list || !LIST_TAGS.has(list.tagName) || li !== list.firstElementChild) return;
     e.preventDefault();
     pushUndoCheckpoint();
-    insertNormalLineAboveListItem(li, ed);
+    const para = insertParagraphAboveList(list as HTMLUListElement | HTMLOListElement);
+    placeCaretInBlock(para, true);
     finishNewLineEditing(ed);
+  };
+
+  const runEditorListSelectionDelete = (
+    range: Range,
+    ed: HTMLElement,
+    sel: Selection,
+  ): boolean => {
+    const startLi = getListItem(range.startContainer, ed);
+    const endLi = getListItem(range.endContainer, ed);
+    if (
+      startLi
+      && endLi
+      && startLi !== endLi
+      && startLi.parentElement === endLi.parentElement
+    ) {
+      if (selectionSpansEntireListItemsLib(startLi, endLi, range)) {
+        removeListItemsInRange(startLi, endLi);
+      } else {
+        deletePartialListSelection(range, ed);
+      }
+      return true;
+    }
+    const li = resolveListItemAtSelection(range, ed);
+    if (li && (isEntireListItemSelected(li, range) || selectionCoversFullLiText(li, range))) {
+      removeListItemOnBackspace(li, ed);
+      return true;
+    }
+    if (li) {
+      pendingListMarginExitRef.current = null;
+      pendingIndentExitRef.current = null;
+    }
+    return false;
   };
 
   const runEditorBackspace = (e: { key: string; preventDefault: () => void; nativeEvent?: { isComposing?: boolean } }) => {
@@ -2827,6 +2871,20 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     const block = getLineBlock(range.startContainer, ed);
     if (block && block.tagName !== 'LI' && !block.closest('li') && isCaretAtStartOfBlock(block, range)) {
+      if (
+        isEmptyTextLine(block)
+        && pendingIndentExitRef.current === block
+      ) {
+        e.preventDefault();
+        stripListPasteIndent(block, true);
+        stripNewParagraphIndent(block);
+        pendingIndentExitRef.current = null;
+        placeCaretInBlock(block, true);
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return handled();
+      }
       if (focusLineAboveAfterListParagraph(block)) {
         e.preventDefault();
         saveSel();
@@ -2847,28 +2905,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const li = resolveListItemAtSelection(range, ed);
     if (li) {
       if (!sel.isCollapsed) {
-        const startLi = getListItem(range.startContainer, ed);
-        const endLi = getListItem(range.endContainer, ed);
-        if (
-          startLi
-          && endLi
-          && startLi !== endLi
-          && startLi.parentElement === endLi.parentElement
-        ) {
+        if (runEditorListSelectionDelete(range, ed, sel)) {
           e.preventDefault();
-          if (selectionSpansEntireListItems(startLi, endLi, range)) {
-            removeListItemsInRange(startLi, endLi);
-          } else {
-            deletePartialListSelection(range, ed);
-          }
           return handled();
         }
-        if (isEntireListItemSelected(li, range) || selectionCoversFullLiText(li, range)) {
-          e.preventDefault();
-          removeListItemOnBackspace(li, ed);
-          return handled();
-        }
-        pendingListMarginExitRef.current = null;
         return false;
       }
 
@@ -2923,11 +2963,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return false;
     const sel = window.getSelection();
-    if (!sel?.rangeCount || !sel.isCollapsed) return false;
+    if (!sel?.rangeCount) return false;
     const range = sel.getRangeAt(0);
+    pushUndoCheckpoint();
+    if (!sel.isCollapsed) {
+      if (runEditorListSelectionDelete(range, ed, sel)) {
+        e.preventDefault();
+        return true;
+      }
+      return false;
+    }
     const li = resolveListItemAtSelection(range, ed);
     if (!li || !isLiEffectivelyEmpty(li)) return false;
-    pushUndoCheckpoint();
     e.preventDefault();
     backspaceEmptyListItem(li, ed);
     return true;
@@ -2947,7 +2994,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const handleEditorDelete = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    runEditorForwardDelete(e);
+    if (runEditorForwardDelete(e)) e.preventDefault();
   };
 
   // ── Initial content ───────────────────────────────────────────────────
