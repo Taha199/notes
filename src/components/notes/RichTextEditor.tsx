@@ -1399,14 +1399,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
-    if (shouldExitListAfterEmptyItem(li)) {
-      pendingListMarginExitRef.current = null;
-      exitListAfterLastItem(li);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return;
-    }
     pendingListMarginExitRef.current = null;
     handleEmptyListItemBackspace(li, ed);
   };
@@ -1467,6 +1459,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         }
       } else {
         const caretTarget = removeEmptyListItemSimple(li, (listEl) => cleanupEmptyListShell(listEl, ed));
+        mergeAdjacentLists(ed);
         if (caretTarget) placeCaretInBlock(caretTarget, false);
         else selectEditorEnd();
       }

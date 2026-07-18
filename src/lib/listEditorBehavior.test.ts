@@ -131,6 +131,32 @@ describe('listEditorBehavior', () => {
     ed.remove();
   });
 
+  it('removeEmptyListItemSimple on middle empty keeps unified list and targets previous li', () => {
+    const ed = editorHtml('<ul><li>Content</li><li><br></li><li><br></li></ul>');
+    const items = [...ed.querySelectorAll('li')] as HTMLLIElement[];
+    const caretTarget = removeEmptyListItemSimple(items[1], () => {});
+    mergeAdjacentLists(ed);
+    expect(ed.querySelectorAll('ul').length).toBe(1);
+    expect(ed.querySelectorAll('div').length).toBe(0);
+    expect(ed.querySelectorAll('li').length).toBe(2);
+    expect(caretTarget).toBe(items[0]);
+    expect(caretTarget?.textContent).toContain('Content');
+    ed.remove();
+  });
+
+  it('removeEmptyListItemSimple on trailing empty after content targets content li', () => {
+    const ed = editorHtml('<ul><li>Content</li><li><br></li></ul>');
+    const items = [...ed.querySelectorAll('li')] as HTMLLIElement[];
+    const caretTarget = removeEmptyListItemSimple(items[1], () => {});
+    mergeAdjacentLists(ed);
+    expect(ed.querySelectorAll('ul').length).toBe(1);
+    expect(ed.querySelectorAll('div').length).toBe(0);
+    expect(ed.querySelectorAll('li').length).toBe(1);
+    expect(caretTarget).toBe(items[0]);
+    expect(caretTarget?.textContent).toContain('Content');
+    ed.remove();
+  });
+
   it('BULLET_PREFIX_RE matches pseudo bullets', () => {
     expect('• test'.match(BULLET_PREFIX_RE)?.[0]).toBe('• ');
     expect('1. test'.match(BULLET_PREFIX_RE)?.[0]).toBe('1. ');
