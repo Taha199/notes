@@ -9,8 +9,12 @@ import { storage } from '../../lib/firebase';
 import { getRtdbAuthToken, rtdbFetch } from '../../lib/rtdb';
 import { getStorageLimitBytes } from '../../lib/storageQuota';
 
-/** Fail fast on denied/missing objects — default SDK retries can hang for ~2 minutes. */
-storage.maxOperationRetryTime = 12_000;
+/**
+ * Cap SDK retries so missing objects fail in ~90s (not the default ~2 min),
+ * but still allow large PDF getBytes on slow links. Prior 12s budget made
+ * getBytes abort while window.open(downloadUrl) still worked — preview died, download lived.
+ */
+storage.maxOperationRetryTime = 90_000;
 
 interface StoredFile {
   id: string;
@@ -44,18 +48,27 @@ type PreviewMode = 'image' | 'pdf' | 'docx' | 'text' | 'unsupported';
 
 const FILE_INPUT_ID = 'files-upload-input';
 const FILES_FOLDER_KEY = 'malacadhati_files_folder';
-/** Floor for preview; actual budget scales with file.size (large PDFs need more). */
-const PREVIEW_TIMEOUT_MIN_MS = 20_000;
-const PREVIEW_TIMEOUT_MAX_MS = 90_000;
-/** Downloads may be large; keep separate from preview budget. */
+/** Floor for preview; large PDFs need a long getBytes window (never fail at 6–20s). */
+const PREVIEW_TIMEOUT_MIN_MS = 60_000;
+const PREVIEW_TIMEOUT_MAX_MS = 120_000;
+/** Blob download fallback only — primary download streams via token URL. */
 const DOWNLOAD_TIMEOUT_MS = 90_000;
 const RESOLVE_TIMEOUT_MS = 12_000;
 const UNSUPPORTED_AR = 'الملف غير مدعوم';
 
 function previewBudgetMs(file: { size?: number }) {
   const size = typeof file.size === 'number' ? file.size : 0;
-  // ~400 KB/s floor + 12s overhead, clamped.
-  return Math.min(PREVIEW_TIMEOUT_MAX_MS, Math.max(PREVIEW_TIMEOUT_MIN_MS, size / 400 + 12_000));
+  // ~250 KB/s floor + 20s overhead, clamped (Firebase SDK getBytes is slower than CDN navigation).
+  return Math.min(PREVIEW_TIMEOUT_MAX_MS, Math.max(PREVIEW_TIMEOUT_MIN_MS, size / 250 + 20_000));
+}
+
+/** Google Docs viewer can render Firebase token URLs that blank <embed> due to Content-Disposition: attachment. */
+function googleDocsViewerUrl(fileUrl: string): string {
+  return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(fileUrl)}`;
+}
+
+function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
 }
 
 function formatSize(size: number) {
@@ -385,12 +398,17 @@ function triggerBlobDownload(blob: Blob, filename: string) {
 /**
  * Open a tokenized Firebase (or other http) URL during the click gesture.
  * Must run BEFORE any await — popup blockers silently kill post-await window.open/_blank.
+ * Avoid `noopener` in the windowFeatures string: browsers then return null even on success,
+ * which previously made callers think open failed and chain into slow getBytes.
  */
 function openDownloadUrlNow(href: string): boolean {
   if (!href || href.startsWith('data:') || href.startsWith('blob:')) return false;
   try {
-    const win = window.open(href, '_blank', 'noopener,noreferrer');
-    if (win) return true;
+    const win = window.open(href, '_blank');
+    if (win) {
+      try { win.opener = null; } catch { /* ignore */ }
+      return true;
+    }
   } catch { /* continue */ }
   try {
     const a = document.createElement('a');
@@ -400,6 +418,7 @@ function openDownloadUrlNow(href: string): boolean {
     document.body.appendChild(a);
     a.click();
     a.remove();
+    // <a target=_blank> during a user gesture usually works; callers must not also getBytes.
     return true;
   } catch {
     return false;
@@ -448,14 +467,13 @@ async function downloadViaApiAttachment(
 }
 
 /**
- * Download MUST work even when preview fails.
- * 1) Sync: open downloadUrl during the click gesture (no await).
- * 2) Blob via getBytes / fetch / API proxy (works after await; no popup).
- * 3) Same-tab navigate to a reminted URL. Never silent-succeed after a blocked popup.
+ * Download MUST work even when preview fails — and must feel fast.
+ * 1) Sync: open downloadUrl during the click gesture (no await) → return immediately.
+ * 2) Resolve a token URL (getDownloadURL / API remint) and open/navigate — stream from CDN.
+ * 3) Blob / proxy ONLY when open/navigation truly cannot start. Never getBytes after a successful open.
  */
 async function downloadStoredFile(file: StoredFile, uid: string | undefined): Promise<void> {
-  // 1) IMMEDIATE — preserve user gesture. Tokenized Firebase URLs often force download
-  // via Content-Disposition: attachment; navigation does not need CORS (unlike preview fetch).
+  // 1) IMMEDIATE — preserve user gesture. Do NOT chain getBytes after this.
   if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl)) {
     return;
   }
@@ -467,7 +485,6 @@ async function downloadStoredFile(file: StoredFile, uid: string | undefined): Pr
     } catch { /* fall through */ }
   }
 
-  // 2) Authenticated bytes → <a download> (same-origin blob; no popup needed)
   let resolved: ResolvedFile | null = null;
   try {
     resolved = await withTimeout(
@@ -475,46 +492,73 @@ async function downloadStoredFile(file: StoredFile, uid: string | undefined): Pr
       RESOLVE_TIMEOUT_MS,
       'resolve-timeout',
     );
-    // If list metadata lacked downloadUrl but resolve found one, open it — gesture may
-    // already be gone, so prefer blob below; still try open in case the browser allows it.
-    if (!file.downloadUrl && resolved.href && !resolved.href.startsWith('data:')) {
-      openDownloadUrlNow(resolved.href);
-    }
-    const blob = await loadFileBlob(
-      resolved,
-      file.type || undefined,
-      DOWNLOAD_TIMEOUT_MS,
-      file.id,
-    );
-    triggerBlobDownload(blob, file.name);
-    return;
-  } catch { /* fall through */ }
+  } catch { /* continue */ }
 
-  // 3) Service-account attachment proxy / reminted URL
-  try {
-    if (await downloadViaApiAttachment(file.id, file.name, DOWNLOAD_TIMEOUT_MS)) {
-      return;
-    }
-  } catch { /* fall through */ }
-
-  try {
-    const fresh = await refreshViaFileApi(file.id);
-    const href = fresh?.href || resolved?.href || '';
-    if (fresh?.dataUrl?.startsWith('data:')) {
-      triggerBlobDownload(await dataUrlToBlob(fresh.dataUrl), file.name);
-      return;
-    }
-    if (href && !href.startsWith('blob:')) {
+  // 2) Prefer streaming via token URL (CDN) over downloading the whole file into memory.
+  const tryOpenOrNavigate = (href: string): boolean => {
+    if (!href || href.startsWith('data:') || href.startsWith('blob:')) return false;
+    if (openDownloadUrlNow(href)) return true;
+    try {
       navigateToDownloadUrl(href);
-      return;
+      return true;
+    } catch {
+      return false;
     }
-    if (resolved?.storagePath) {
+  };
+
+  if (resolved?.href && tryOpenOrNavigate(resolved.href)) {
+    return;
+  }
+
+  if (resolved?.storagePath) {
+    try {
       const url = await withTimeout(
         getDownloadURL(ref(storage, resolved.storagePath)),
         RESOLVE_TIMEOUT_MS,
         'getDownloadURL-timeout',
       );
-      navigateToDownloadUrl(url);
+      if (tryOpenOrNavigate(url)) return;
+    } catch { /* fall through */ }
+  }
+
+  try {
+    const fresh = await refreshViaFileApi(file.id);
+    if (fresh?.dataUrl?.startsWith('data:')) {
+      triggerBlobDownload(await dataUrlToBlob(fresh.dataUrl), file.name);
+      return;
+    }
+    if (fresh?.href && tryOpenOrNavigate(fresh.href)) return;
+    if (fresh?.storagePath) {
+      const url = await withTimeout(
+        getDownloadURL(ref(storage, fresh.storagePath)),
+        RESOLVE_TIMEOUT_MS,
+        'getDownloadURL-timeout',
+      );
+      if (tryOpenOrNavigate(url)) return;
+    }
+  } catch { /* fall through */ }
+
+  // 3) Last resort: full-file blob (slow) — only when URL open/navigation failed.
+  try {
+    const forBlob = resolved || {
+      href: file.downloadUrl || file.dataUrl || '',
+      storagePath: file.storagePath || guessStoragePath(file, uid),
+      dataUrl: file.dataUrl,
+    };
+    if (forBlob.href || forBlob.storagePath || forBlob.dataUrl) {
+      const blob = await loadFileBlob(
+        forBlob,
+        file.type || undefined,
+        DOWNLOAD_TIMEOUT_MS,
+        file.id,
+      );
+      triggerBlobDownload(blob, file.name);
+      return;
+    }
+  } catch { /* fall through */ }
+
+  try {
+    if (await downloadViaApiAttachment(file.id, file.name, DOWNLOAD_TIMEOUT_MS)) {
       return;
     }
   } catch { /* fall through */ }
@@ -559,6 +603,8 @@ function FilePreviewModal({
 }) {
   const mode = previewModeFor(file);
   const [previewSrc, setPreviewSrc] = useState('');
+  /** PDF: 'blob' (local bytes), 'gview' (Google Docs), or '' while loading. */
+  const [pdfKind, setPdfKind] = useState<'blob' | 'gview' | ''>('');
   const [resolving, setResolving] = useState(mode !== 'unsupported');
   const [failed, setFailed] = useState(mode === 'unsupported');
   const [textContent, setTextContent] = useState('');
@@ -568,6 +614,7 @@ function FilePreviewModal({
   const objectUrlRef = useRef<string | null>(null);
   const imageFallbackRef = useRef(false);
   const previewGenRef = useRef(0);
+  const pdfHasFrameRef = useRef(false);
 
   const revokeObjectUrl = () => {
     if (objectUrlRef.current) {
@@ -596,7 +643,9 @@ function FilePreviewModal({
     const deadline = Date.now() + budget;
     revokeObjectUrl();
     imageFallbackRef.current = false;
+    pdfHasFrameRef.current = false;
     setPreviewSrc('');
+    setPdfKind('');
     setTextContent('');
     setDocxHtml('');
     setDownloadError('');
@@ -618,9 +667,11 @@ function FilePreviewModal({
       revokeObjectUrl();
       objectUrlRef.current = src;
       setPreviewSrc(src);
+      if (mode === 'pdf') setPdfKind('blob');
       setFailed(false);
       setResolving(false);
       painted = true;
+      pdfHasFrameRef.current = true;
     };
 
     const paintDirect = (url: string) => {
@@ -631,10 +682,22 @@ function FilePreviewModal({
       painted = true;
     };
 
+    const paintPdfGview = (href: string) => {
+      if (!isLive() || !isHttpUrl(href)) return;
+      // Speculative frame — Content-Disposition: attachment blanks native <embed>,
+      // but Google Docs viewer fetches the token URL server-side.
+      setPreviewSrc(googleDocsViewerUrl(href));
+      setPdfKind('gview');
+      setFailed(false);
+      setResolving(false);
+      pdfHasFrameRef.current = true;
+    };
+
     const failPreview = () => {
-      if (!isLive() || painted) return;
+      if (!isLive() || painted || pdfHasFrameRef.current) return;
       revokeObjectUrl();
       setPreviewSrc('');
+      setPdfKind('');
       setDocxHtml('');
       setTextContent('');
       setFailed(true);
@@ -643,6 +706,97 @@ function FilePreviewModal({
 
     (async () => {
       try {
+        // Images: paint token URL immediately (fast). Blob only on <img> error.
+        if (mode === 'image') {
+          const quickHref = file.downloadUrl || file.dataUrl || '';
+          if (quickHref && !quickHref.startsWith('blob:')) {
+            paintDirect(quickHref);
+            return;
+          }
+          const resolved = await withTimeout(
+            resolveFile(file, uid),
+            Math.min(RESOLVE_TIMEOUT_MS, remainingMs(deadline)),
+            'resolve-timeout',
+          );
+          if (!isLive()) return;
+          if (resolved.href || resolved.dataUrl) {
+            paintDirect(resolved.href || resolved.dataUrl || '');
+            return;
+          }
+          const blob = await loadFileBlob(
+            resolved,
+            file.type || undefined,
+            remainingMs(deadline),
+            file.id,
+          );
+          if (!isLive()) return;
+          showObjectUrl(blob);
+          return;
+        }
+
+        if (mode === 'pdf') {
+          // Start from list metadata immediately — do not wait for resolve before getBytes / gview.
+          const quickPath =
+            file.storagePath
+            || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)
+            || guessStoragePath(file, uid);
+          const quickHref = file.downloadUrl || '';
+
+          if (quickHref) paintPdfGview(quickHref);
+
+          // Parallel: authenticated getBytes → blob iframe (preferred when it arrives).
+          const bytesPromise = (async (): Promise<Blob | null> => {
+            if (quickPath) {
+              try {
+                return await storagePathToBlob(quickPath, 'application/pdf', remainingMs(deadline));
+              } catch { /* try full loader below */ }
+            }
+            try {
+              const resolved = await withTimeout(
+                resolveFile(file, uid),
+                Math.min(RESOLVE_TIMEOUT_MS, remainingMs(deadline)),
+                'resolve-timeout',
+              );
+              if (!isLive()) return null;
+              if (resolved.href && !quickHref) paintPdfGview(resolved.href);
+              return await loadFileBlob(
+                resolved,
+                'application/pdf',
+                remainingMs(deadline),
+                file.id,
+              );
+            } catch {
+              return null;
+            }
+          })();
+
+          const blob = await bytesPromise;
+          if (!isLive()) return;
+          if (blob) {
+            showObjectUrl(coerceMime(blob, 'application/pdf'));
+            return;
+          }
+          // Blob failed — keep gview if painted; else remint + gview once more.
+          if (pdfHasFrameRef.current) {
+            painted = true;
+            setResolving(false);
+            setFailed(false);
+            return;
+          }
+          try {
+            const fresh = await refreshViaFileApi(file.id);
+            if (!isLive()) return;
+            if (fresh?.href) {
+              paintPdfGview(fresh.href);
+              painted = true;
+              setResolving(false);
+              return;
+            }
+          } catch { /* ignore */ }
+          failPreview();
+          return;
+        }
+
         const resolved = await withTimeout(
           resolveFile(file, uid),
           Math.min(RESOLVE_TIMEOUT_MS, remainingMs(deadline)),
@@ -651,47 +805,12 @@ function FilePreviewModal({
         if (!isLive()) return;
 
         if (!resolved.href && !resolved.storagePath && !resolved.dataUrl) {
-          // One more chance via service-account remint before declaring failure.
           const fresh = await refreshViaFileApi(file.id);
           if (!fresh?.href && !fresh?.storagePath && !fresh?.dataUrl) {
             failPreview();
             return;
           }
           Object.assign(resolved, fresh);
-        }
-
-        if (mode === 'image') {
-          // Try SDK bytes first so Content-Disposition cannot blank the image; URL as fast paint.
-          try {
-            const blob = await loadFileBlob(
-              resolved,
-              file.type || undefined,
-              remainingMs(deadline),
-              file.id,
-            );
-            if (!isLive()) return;
-            showObjectUrl(blob);
-            return;
-          } catch {
-            if (resolved.href && !resolved.href.startsWith('blob:')) {
-              paintDirect(resolved.href);
-              return;
-            }
-            throw new Error('image-failed');
-          }
-        }
-
-        if (mode === 'pdf') {
-          // Always materialize a blob: URL so Content-Disposition: attachment cannot blank <embed>.
-          const blob = await loadFileBlob(
-            resolved,
-            'application/pdf',
-            remainingMs(deadline),
-            file.id,
-          );
-          if (!isLive()) return;
-          showObjectUrl(blob);
-          return;
         }
 
         if (mode === 'docx') {
@@ -741,14 +860,32 @@ function FilePreviewModal({
 
         failPreview();
       } catch {
+        // PDF may already have a speculative gview frame — do not wipe it on late errors.
+        if (mode === 'pdf' && pdfHasFrameRef.current) {
+          painted = true;
+          if (isLive()) {
+            setResolving(false);
+            setFailed(false);
+          }
+          return;
+        }
         failPreview();
       } finally {
-        if (isLive()) setResolving(false);
+        if (isLive() && (painted || pdfHasFrameRef.current)) setResolving(false);
+        else if (isLive() && !painted) setResolving(false);
       }
     })();
 
     const failsafe = window.setTimeout(() => {
-      if (isLive() && !painted) failPreview();
+      if (!isLive()) return;
+      // Accept speculative gview rather than labeling a slow PDF as failed.
+      if (pdfHasFrameRef.current) {
+        painted = true;
+        setResolving(false);
+        setFailed(false);
+        return;
+      }
+      if (!painted) failPreview();
     }, budget + 500);
 
     return () => {
@@ -810,6 +947,9 @@ function FilePreviewModal({
     })();
   };
 
+  const showPdf = mode === 'pdf' && !!previewSrc && !failed;
+  const showImage = mode === 'image' && !!previewSrc && !failed;
+
   return createPortal(
     <div
       role="dialog"
@@ -839,21 +979,21 @@ function FilePreviewModal({
           </button>
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
         {downloadError && (
           <p className="mb-3 rounded-xl bg-red-500/20 px-4 py-2 text-center text-sm text-white" dir="auto">
             {downloadError}
           </p>
         )}
         {resolving && (
-          <p className="text-sm text-white/80">…</p>
+          <p className="absolute top-6 z-10 rounded-full bg-black/50 px-3 py-1 text-sm text-white/90">…</p>
         )}
         {!resolving && failed && (
           <p className="rounded-xl bg-white/10 px-4 py-3 text-center text-sm text-white" dir="auto">
             {errorMessage}
           </p>
         )}
-        {!resolving && !failed && mode === 'image' && !!previewSrc && (
+        {showImage && (
           <img
             src={previewSrc}
             alt={file.name}
@@ -861,12 +1001,19 @@ function FilePreviewModal({
             onError={onImageError}
           />
         )}
-        {!resolving && !failed && mode === 'pdf' && !!previewSrc && (
-          <embed
+        {showPdf && pdfKind === 'blob' && (
+          <iframe
             title={file.name}
             src={previewSrc}
-            type="application/pdf"
             className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
+          />
+        )}
+        {showPdf && pdfKind === 'gview' && (
+          <iframe
+            title={file.name}
+            src={previewSrc}
+            className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
+            allow="fullscreen"
           />
         )}
         {!resolving && !failed && mode === 'docx' && (
