@@ -22,6 +22,7 @@ import { ConfirmDialog } from './common/ConfirmDialog';
 import { filterNotesBySearch, normalizeSearch, noteMatchesSearch, nextSearchHitIndex } from '../lib/noteSearch';
 import { buildGlobalSearchResults, buildGlobalSearchHitStarts } from '../lib/globalSearch';
 import { GlobalSearchResults } from './search/GlobalSearchResults';
+import { AiBackNotice } from './common/AiBackNotice';
 
 const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
 
@@ -335,6 +336,7 @@ export function Dashboard() {
           onNewNote={handleNewNote}
           onOpenMenu={() => setMobileMenuOpen(true)}
         />
+        <AiBackNotice />
 
         <div className="flex-1 overflow-y-auto">
           {showGlobalSearch && (
