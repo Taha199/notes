@@ -22,8 +22,11 @@ async function readNodeStrict(accessToken, path) {
   return res.json();
 }
 
-// Cap server-side migrations per request so the function never times out.
-const MAX_MIGRATIONS_PER_CALL = 40;
+/**
+ * Background migrate only — keep each call small so Hobby functions stay under
+ * the time limit. List requests must NEVER wait on these uploads.
+ */
+const MAX_MIGRATIONS_PER_CALL = 5;
 
 function normalizeList(data) {
   if (!data) return [];
@@ -61,6 +64,40 @@ function toClientFile(file, uid) {
   return storagePath ? { ...stripped, storagePath } : stripped;
 }
 
+function toListEntry(file, uid) {
+  // Never ship base64 blobs to the browser.
+  if (file.dataUrl && !file.downloadUrl) {
+    return { ...toClientFile(file, uid), inlinePending: true };
+  }
+  return toClientFile(file, uid);
+}
+
+async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
+  let migrated = 0;
+  const updatedById = new Map();
+  for (const file of files) {
+    if (!(file.dataUrl && !file.downloadUrl) || migrated >= MAX_MIGRATIONS_PER_CALL) continue;
+    try {
+      const { buffer, contentType } = dataUrlToBuffer(file.dataUrl);
+      const objectPath = resolveStoragePath(file, uid) || `users/${uid}/files/${file.id}/${file.name}`;
+      const downloadUrl = await uploadToStorage(storageToken, objectPath, buffer, contentType || file.type);
+      const clean = { ...stripBlob(file), downloadUrl, storagePath: objectPath };
+      const ok = await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, clean);
+      if (ok) {
+        migrated += 1;
+        updatedById.set(file.id, clean);
+      }
+    } catch {
+      /* keep legacy inline for a later pass */
+    }
+  }
+  const remaining = files.some((file) => {
+    if (updatedById.has(file.id)) return false;
+    return !!(file.dataUrl && !file.downloadUrl);
+  });
+  return { migrated, updatedById, remaining };
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
@@ -73,51 +110,43 @@ export default async function handler(request, response) {
   const account = idToken ? await verifyUser(idToken) : null;
   if (!account) return response.status(403).json({ error: 'forbidden' });
 
+  const doMigrate = String(request.query?.migrate || '') === '1';
+
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
+    const uid = account.uid;
+
+    // Fast list: metadata only — never block the UI on Storage uploads.
+    if (!doMigrate) {
+      const dbToken = await getGoogleAccessToken(serviceAccount, RTDB_SCOPES);
+      const [filesRaw, foldersRaw] = await Promise.all([
+        readNodeStrict(dbToken, `/users/${uid}/files`),
+        readNodeStrict(dbToken, `/users/${uid}/fileFolders`),
+      ]);
+      const files = normalizeList(filesRaw);
+      const folders = normalizeList(foldersRaw);
+      const out = files.map((file) => toListEntry(file, uid));
+      const migratedRemaining = files.some((f) => f.dataUrl && !f.downloadUrl);
+      return response.status(200).json({ files: out, folders, migratedRemaining });
+    }
+
+    // Background migrate: small batches after the list has already painted.
     const [dbToken, storageToken] = await Promise.all([
       getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
       getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
     ]);
-
-    const uid = account.uid;
-    // Throw on real read failures so the client falls back to a direct DB read.
     const [filesRaw, foldersRaw] = await Promise.all([
       readNodeStrict(dbToken, `/users/${uid}/files`),
       readNodeStrict(dbToken, `/users/${uid}/fileFolders`),
     ]);
     const files = normalizeList(filesRaw);
     const folders = normalizeList(foldersRaw);
-
-    // Migrate legacy inline (base64) files to Storage so future loads stay light.
-    let migrated = 0;
-    const out = [];
-    for (const file of files) {
-      if (file.dataUrl && !file.downloadUrl && migrated < MAX_MIGRATIONS_PER_CALL) {
-        try {
-          const { buffer, contentType } = dataUrlToBuffer(file.dataUrl);
-          const objectPath = resolveStoragePath(file, uid) || `users/${uid}/files/${file.id}/${file.name}`;
-          const downloadUrl = await uploadToStorage(storageToken, objectPath, buffer, contentType || file.type);
-          const clean = { ...stripBlob(file), downloadUrl, storagePath: objectPath };
-          const ok = await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, clean);
-          if (ok) {
-            migrated += 1;
-            out.push(toClientFile(clean, uid));
-            continue;
-          }
-        } catch {
-          /* fall through: keep the file usable via inline dataUrl this round */
-        }
-      }
-      // Never ship base64 blobs to the browser; keep a marker so the client knows it's inline.
-      if (file.dataUrl && !file.downloadUrl) {
-        out.push({ ...toClientFile(file, uid), inlinePending: true });
-      } else {
-        out.push(toClientFile(file, uid));
-      }
-    }
-
-    return response.status(200).json({ files: out, folders, migratedRemaining: migrated >= MAX_MIGRATIONS_PER_CALL });
+    const { updatedById, remaining } = await migrateLegacyBatch(files, uid, dbToken, storageToken);
+    const out = files.map((file) => {
+      const clean = updatedById.get(file.id);
+      return toListEntry(clean || file, uid);
+    });
+    return response.status(200).json({ files: out, folders, migratedRemaining: remaining });
   } catch (error) {
     console.error('my-files failed', error);
     return response.status(500).json({ error: 'request-failed' });

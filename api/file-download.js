@@ -34,6 +34,17 @@ function safeFilename(name) {
   return String(name || 'download').replace(/[^\w.\- ()\u00C0-\u024F]+/g, '_').slice(0, 180) || 'download';
 }
 
+function guessContentType(name, fallback) {
+  const lower = String(name || '').toLowerCase();
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (/\.(png)$/.test(lower)) return 'image/png';
+  if (/\.(jpe?g)$/.test(lower)) return 'image/jpeg';
+  if (/\.(gif)$/.test(lower)) return 'image/gif';
+  if (/\.(webp)$/.test(lower)) return 'image/webp';
+  if (/\.(txt|md|csv|log)$/.test(lower)) return 'text/plain';
+  return fallback || 'application/octet-stream';
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
@@ -58,12 +69,17 @@ export default async function handler(request, response) {
 
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
-    const [dbToken, storageToken] = await Promise.all([
-      getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
-      getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
-    ]);
-
     const uid = account.uid;
+
+    // Proxy: mint both Google tokens in parallel (preview hot path).
+    // JSON: RTDB first; Storage token only when a download URL must be created.
+    const dbTokenPromise = getGoogleAccessToken(serviceAccount, RTDB_SCOPES);
+    const storageTokenPromise = mode === 'proxy'
+      ? getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE])
+      : null;
+
+    const dbToken = await dbTokenPromise;
+
     let file = null;
     if (fileId) {
       file = await readRtdb(dbToken, `/users/${uid}/files/${fileId}`);
@@ -88,13 +104,77 @@ export default async function handler(request, response) {
       ? file.dataUrl
       : '';
     const fileName = file?.name || (storagePath ? storagePath.split('/').pop() : 'download');
-    const fileType = file?.type || 'application/octet-stream';
+    const fileType = file?.type || guessContentType(fileName, 'application/octet-stream');
     const fileSize = file?.size;
 
-    // Reuse the existing Firebase token whenever possible. Reminting on every
-    // request was invalidating downloadUrl values still held in the browser.
-    if (storagePath) {
+    if (mode === 'proxy') {
+      const storageToken = storageTokenPromise ? await storageTokenPromise : null;
+      let buffer;
+      let contentType = fileType || 'application/octet-stream';
+      if (storagePath) {
+        const downloaded = await downloadFromStorage(storageToken, storagePath);
+        buffer = downloaded.buffer;
+        contentType = downloaded.contentType || contentType;
+      } else if (dataUrl) {
+        const parsed = dataUrlToBuffer(dataUrl);
+        buffer = parsed.buffer;
+        contentType = parsed.contentType || contentType;
+      } else {
+        return response.status(404).json({ error: 'no-bytes' });
+      }
+
+      // Prefer a real MIME for PDF preview (GCS often returns octet-stream).
+      if (!contentType || contentType === 'application/octet-stream') {
+        contentType = guessContentType(fileName, contentType);
+      }
+
+      if (buffer.length > MAX_PROXY_BYTES) {
+        // Too large for Hobby — hand back a URL without reminting tokens.
+        if (!downloadUrl && storagePath) {
+          try {
+            const resolved = await resolveDownloadUrl(
+              storageToken,
+              storagePath,
+              contentType || undefined,
+              false,
+            );
+            downloadUrl = resolved.downloadUrl;
+            // Persist only when the RTDB row was missing a URL (never wipe a live one).
+            if (fileId && file && !file.downloadUrl) {
+              const clean = { ...file, downloadUrl, storagePath };
+              delete clean.dataUrl;
+              delete clean.inlinePending;
+              await writeRtdb(dbToken, `/users/${uid}/files/${fileId}`, clean);
+            }
+          } catch {
+            /* keep empty */
+          }
+        }
+        if (!downloadUrl) return response.status(413).json({ error: 'too-large' });
+        return response.status(200).json({
+          downloadUrl,
+          storagePath: storagePath || storagePathFromDownloadUrl(downloadUrl),
+          name: fileName,
+          type: contentType,
+          size: fileSize,
+          proxy: false,
+        });
+      }
+      const filename = safeFilename(fileName);
+      response.setHeader('Content-Type', contentType);
+      response.setHeader(
+        'Content-Disposition',
+        `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      );
+      response.setHeader('Cache-Control', 'private, no-store');
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      return response.status(200).send(buffer);
+    }
+
+    // JSON / redirect: reuse existing tokenized URL. Remint only if missing or forced.
+    if (storagePath && (!downloadUrl || forceRemint)) {
       try {
+        const storageToken = await getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]);
         const resolved = await resolveDownloadUrl(
           storageToken,
           storagePath,
@@ -115,43 +195,6 @@ export default async function handler(request, response) {
       } catch {
         /* keep existing downloadUrl / fall through */
       }
-    }
-
-    if (mode === 'proxy') {
-      let buffer;
-      let contentType = fileType || 'application/octet-stream';
-      if (storagePath) {
-        const downloaded = await downloadFromStorage(storageToken, storagePath);
-        buffer = downloaded.buffer;
-        contentType = downloaded.contentType || contentType;
-      } else if (dataUrl) {
-        const parsed = dataUrlToBuffer(dataUrl);
-        buffer = parsed.buffer;
-        contentType = parsed.contentType || contentType;
-      } else {
-        return response.status(404).json({ error: 'no-bytes' });
-      }
-      if (buffer.length > MAX_PROXY_BYTES) {
-        // Too large for Hobby — hand the client a fresh URL instead.
-        if (!downloadUrl) return response.status(413).json({ error: 'too-large' });
-        return response.status(200).json({
-          downloadUrl,
-          storagePath: storagePath || storagePathFromDownloadUrl(downloadUrl),
-          name: fileName,
-          type: contentType,
-          size: fileSize,
-          proxy: false,
-        });
-      }
-      const filename = safeFilename(fileName);
-      response.setHeader('Content-Type', contentType);
-      response.setHeader(
-        'Content-Disposition',
-        `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      );
-      response.setHeader('Cache-Control', 'private, no-store');
-      response.setHeader('X-Content-Type-Options', 'nosniff');
-      return response.status(200).send(buffer);
     }
 
     if (mode === 'redirect') {
