@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { deleteObject, getBlob, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -21,6 +21,13 @@ interface StoredFile {
   dataUrl?: string;
   /** Legacy inline file not yet migrated to Storage (blob withheld from the list). */
   inlinePending?: boolean;
+}
+
+/** Full file record after resolving Storage/RTDB fields needed for preview. */
+interface ResolvedFile {
+  href: string;
+  storagePath?: string;
+  dataUrl?: string;
 }
 
 interface FileFolder {
@@ -70,29 +77,64 @@ function canPreview(file: StoredFile) {
   return previewModeFor(file) !== 'unsupported';
 }
 
-/** Resolve a usable URL for preview/download (Storage token, path, or legacy inline blob). */
-async function resolveFileUrl(file: StoredFile, uid: string | undefined): Promise<string> {
-  if (file.downloadUrl) return file.downloadUrl;
-  if (file.dataUrl) return file.dataUrl;
-  if (file.storagePath) {
+/** Resolve download URL + storage path (Storage token, path, or legacy inline blob). */
+async function resolveFile(file: StoredFile, uid: string | undefined): Promise<ResolvedFile> {
+  let result: ResolvedFile = {
+    href: file.downloadUrl || file.dataUrl || '',
+    storagePath: file.storagePath,
+    dataUrl: file.dataUrl,
+  };
+
+  const ensureHrefFromStorage = async () => {
+    if (result.href || !result.storagePath) return;
     try {
-      return await getDownloadURL(ref(storage, file.storagePath));
-    } catch { /* fall through */ }
+      result = { ...result, href: await getDownloadURL(ref(storage, result.storagePath)) };
+    } catch { /* ignore */ }
+  };
+
+  await ensureHrefFromStorage();
+
+  // Backfill when the list API withheld the blob or left us without a usable URL.
+  if ((!result.href || file.inlinePending) && uid) {
+    try {
+      const res = await rtdbFetch(`/users/${uid}/files/${file.id}`);
+      if (res.ok) {
+        const full = (await res.json()) as StoredFile | null;
+        if (full) {
+          result = {
+            href: result.href || full.downloadUrl || full.dataUrl || '',
+            storagePath: result.storagePath || full.storagePath,
+            dataUrl: result.dataUrl || full.dataUrl,
+          };
+          await ensureHrefFromStorage();
+        }
+      }
+    } catch { /* ignore */ }
   }
-  if (!uid) return '';
-  try {
-    const res = await rtdbFetch(`/users/${uid}/files/${file.id}`);
-    if (!res.ok) return '';
-    const full = (await res.json()) as StoredFile | null;
-    if (full?.downloadUrl) return full.downloadUrl;
-    if (full?.dataUrl) return full.dataUrl;
-    if (full?.storagePath) {
-      try {
-        return await getDownloadURL(ref(storage, full.storagePath));
-      } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
-  return '';
+
+  return result;
+}
+
+async function resolveFileUrl(file: StoredFile, uid: string | undefined): Promise<string> {
+  return (await resolveFile(file, uid)).href;
+}
+
+/**
+ * PDFs cannot reliably render from Firebase Storage download URLs in an iframe
+ * (Content-Disposition: attachment leaves a blank viewer). Prefer SDK getBlob → object URL.
+ */
+async function loadPdfPreviewSrc(resolved: ResolvedFile): Promise<string> {
+  if (resolved.dataUrl?.startsWith('data:')) return resolved.dataUrl;
+  if (resolved.storagePath) {
+    const blob = await getBlob(ref(storage, resolved.storagePath));
+    return URL.createObjectURL(blob);
+  }
+  if (!resolved.href) throw new Error('no-url');
+  if (resolved.href.startsWith('data:') || resolved.href.startsWith('blob:')) return resolved.href;
+  const res = await fetch(resolved.href);
+  if (!res.ok) throw new Error('fetch-failed');
+  const blob = await res.blob();
+  return URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: 'application/pdf' }));
 }
 
 async function loadTextPreview(href: string): Promise<string> {
@@ -117,14 +159,17 @@ function FilePreviewModal({
   file: StoredFile;
   uid?: string;
   onClose: () => void;
-  t: { filesDownload: string; filesPreviewUnavailable: string };
+  t: { filesDownload: string; filesPreviewUnavailable: string; filesPreviewFailed: string };
 }) {
   const mode = previewModeFor(file);
   const [href, setHref] = useState(() => fileHref(file));
-  const [resolving, setResolving] = useState(!fileHref(file));
+  const [previewSrc, setPreviewSrc] = useState(() => (mode === 'image' ? fileHref(file) : ''));
+  const [resolving, setResolving] = useState(() => mode === 'pdf' || mode === 'text' || !fileHref(file));
   const [failed, setFailed] = useState(false);
   const [textContent, setTextContent] = useState('');
-  const [loadingText, setLoadingText] = useState(mode === 'text');
+  const errorMessage = failed
+    ? (href || previewSrc ? t.filesPreviewFailed : t.filesPreviewUnavailable)
+    : '';
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -134,41 +179,73 @@ function FilePreviewModal({
 
   useEffect(() => {
     let cancelled = false;
-    const initial = fileHref(file);
-    if (initial) {
-      setHref(initial);
-      setResolving(false);
-      setFailed(false);
-      return;
-    }
-    setResolving(true);
+    let objectUrl = '';
     setFailed(false);
-    (async () => {
-      const url = await resolveFileUrl(file, uid);
-      if (cancelled) return;
-      setHref(url);
-      setResolving(false);
-      setFailed(!url);
-    })();
-    return () => { cancelled = true; };
-  }, [file, uid]);
+    setResolving(true);
 
-  useEffect(() => {
-    if (mode !== 'text' || !href) return;
-    let cancelled = false;
-    setLoadingText(true);
     (async () => {
       try {
-        const body = await loadTextPreview(href);
-        if (!cancelled) setTextContent(body);
+        const resolved = await resolveFile(file, uid);
+        if (cancelled) return;
+        setHref(resolved.href);
+
+        if (mode === 'pdf') {
+          if (!resolved.href && !resolved.storagePath && !resolved.dataUrl) {
+            setPreviewSrc('');
+            setFailed(true);
+            return;
+          }
+          const src = await loadPdfPreviewSrc(resolved);
+          if (cancelled) {
+            if (src.startsWith('blob:')) URL.revokeObjectURL(src);
+            return;
+          }
+          if (src.startsWith('blob:')) objectUrl = src;
+          setPreviewSrc(src);
+          setFailed(false);
+          return;
+        }
+
+        if (mode === 'image') {
+          setPreviewSrc(resolved.href);
+          setFailed(!resolved.href);
+          return;
+        }
+
+        if (mode === 'text') {
+          if (!resolved.href) {
+            setFailed(true);
+            setTextContent('');
+            return;
+          }
+          try {
+            const body = await loadTextPreview(resolved.href);
+            if (!cancelled) setTextContent(body);
+          } catch {
+            if (!cancelled) {
+              setTextContent('');
+              setFailed(true);
+            }
+          }
+          return;
+        }
+
+        setFailed(true);
       } catch {
-        if (!cancelled) setTextContent(t.filesPreviewUnavailable);
+        if (!cancelled) {
+          setPreviewSrc('');
+          setFailed(true);
+        }
       } finally {
-        if (!cancelled) setLoadingText(false);
+        if (!cancelled) setResolving(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [href, mode, t.filesPreviewUnavailable]);
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [file, uid, mode]);
 
   return createPortal(
     <div
@@ -208,29 +285,33 @@ function FilePreviewModal({
         </div>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {(resolving || (mode === 'text' && loadingText && !!href)) && (
+        {resolving && (
           <p className="text-sm text-white/80">…</p>
         )}
-        {!resolving && (failed || !href) && (
-          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewUnavailable}</p>
+        {!resolving && failed && (
+          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{errorMessage}</p>
         )}
-        {!resolving && !!href && !failed && mode === 'image' && (
+        {!resolving && !failed && mode === 'image' && !!previewSrc && (
           <img
-            src={href}
+            src={previewSrc}
             alt={file.name}
             className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
             onError={() => setFailed(true)}
           />
         )}
-        {!resolving && !!href && !failed && mode === 'pdf' && (
-          <iframe title={file.name} src={href} className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl" />
+        {!resolving && !failed && mode === 'pdf' && !!previewSrc && (
+          <iframe
+            title={file.name}
+            src={previewSrc}
+            className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
+          />
         )}
-        {!resolving && !!href && !failed && mode === 'text' && !loadingText && (
+        {!resolving && !failed && mode === 'text' && (
           <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
             {textContent}
           </pre>
         )}
-        {!resolving && !!href && !failed && mode === 'unsupported' && (
+        {!resolving && !failed && mode === 'unsupported' && (
           <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewUnavailable}</p>
         )}
       </div>
