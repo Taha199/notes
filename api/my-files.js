@@ -50,11 +50,14 @@ function dataUrlToBuffer(dataUrl) {
   return { buffer, contentType };
 }
 
-/** Always expose a usable storagePath so the client SDK can getBytes. */
+/** Always expose a usable storagePath so the client SDK can getBytes / proxy. */
 function toClientFile(file, uid) {
   const stripped = stripBlob(file);
   const storagePath = resolveStoragePath(stripped, uid)
-    || (stripped.downloadUrl ? storagePathFromDownloadUrl(stripped.downloadUrl) : undefined);
+    || (stripped.downloadUrl ? storagePathFromDownloadUrl(stripped.downloadUrl) : undefined)
+    || (uid && stripped.id && stripped.name
+      ? `users/${uid}/files/${stripped.id}/${stripped.name}`
+      : undefined);
   return storagePath ? { ...stripped, storagePath } : stripped;
 }
 

@@ -4,7 +4,11 @@ export const ADMIN_EMAIL = 'abdomar200@gmail.com';
 export const FIREBASE_API_KEY = 'AIzaSyDvmhfrgIWtgdSCnvwPgt5u0P4-unx0HL4';
 export const FB_DB_URL = 'https://noteclaude-a5b3b-default-rtdb.europe-west1.firebasedatabase.app';
 export const STORAGE_BUCKET = 'noteclaude-a5b3b.firebasestorage.app';
-export const ALLOWED_ORIGINS = new Set(['https://tahanote.com', 'https://notes-woad-pi.vercel.app']);
+export const ALLOWED_ORIGINS = new Set([
+  'https://tahanote.com',
+  'https://www.tahanote.com',
+  'https://notes-woad-pi.vercel.app',
+]);
 
 // Firebase Realtime Database REST with an OAuth access token requires BOTH scopes.
 export const RTDB_SCOPES = [

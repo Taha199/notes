@@ -38,6 +38,25 @@ export async function uploadToStorage(storageToken, objectPath, buffer, contentT
   return mintDownloadToken(storageToken, objectPath, contentType);
 }
 
+/**
+ * Read the existing Firebase download token from object metadata.
+ * CRITICAL: never replace a live token unless reminting — that invalidates
+ * downloadUrl values already held in the client list state (403 forever).
+ */
+export async function existingDownloadUrl(storageToken, objectPath) {
+  const metaUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(STORAGE_BUCKET)}/o/${encodeURIComponent(objectPath)}?fields=metadata`;
+  const res = await fetch(metaUrl, {
+    headers: { Authorization: `Bearer ${storageToken}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const raw = data?.metadata?.firebaseStorageDownloadTokens;
+  if (!raw || typeof raw !== 'string') return null;
+  const token = raw.split(',')[0]?.trim();
+  if (!token) return null;
+  return firebaseMediaUrl(objectPath, token);
+}
+
 /** Attach / refresh a Firebase download token on an existing object. */
 export async function mintDownloadToken(storageToken, objectPath, contentType) {
   const token = randomUUID();
@@ -56,6 +75,23 @@ export async function mintDownloadToken(storageToken, objectPath, contentType) {
   });
   if (!patchRes.ok) throw new Error(`storage-token-failed:${patchRes.status}`);
   return firebaseMediaUrl(objectPath, token);
+}
+
+/**
+ * Prefer the existing Storage download token. Only mint a new one when missing
+ * or when forceRemint is set — reminting invalidates every prior URL.
+ */
+export async function resolveDownloadUrl(storageToken, objectPath, contentType, forceRemint = false) {
+  if (!forceRemint) {
+    try {
+      const existing = await existingDownloadUrl(storageToken, objectPath);
+      if (existing) return { downloadUrl: existing, minted: false };
+    } catch {
+      /* fall through to mint */
+    }
+  }
+  const downloadUrl = await mintDownloadToken(storageToken, objectPath, contentType);
+  return { downloadUrl, minted: true };
 }
 
 /** Download object bytes via GCS JSON API (service account). */

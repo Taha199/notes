@@ -3,7 +3,11 @@ import { createSign } from 'node:crypto';
 const ADMIN_EMAIL = 'abdomar200@gmail.com';
 const FIREBASE_API_KEY = 'AIzaSyDvmhfrgIWtgdSCnvwPgt5u0P4-unx0HL4';
 const FB_DB_URL = 'https://noteclaude-a5b3b-default-rtdb.europe-west1.firebasedatabase.app';
-const ALLOWED_ORIGINS = new Set(['https://tahanote.com', 'https://notes-woad-pi.vercel.app']);
+const ALLOWED_ORIGINS = new Set([
+  'https://tahanote.com',
+  'https://www.tahanote.com',
+  'https://notes-woad-pi.vercel.app',
+]);
 
 function base64Url(value) {
   return Buffer.from(value)

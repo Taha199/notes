@@ -10,7 +10,7 @@ import {
 import {
   STORAGE_SCOPE,
   downloadFromStorage,
-  mintDownloadToken,
+  resolveDownloadUrl,
   resolveStoragePath,
   storagePathFromDownloadUrl,
 } from './_lib/storageFiles.js';
@@ -30,6 +30,10 @@ function dataUrlToBuffer(dataUrl) {
   return { buffer, contentType };
 }
 
+function safeFilename(name) {
+  return String(name || 'download').replace(/[^\w.\- ()\u00C0-\u024F]+/g, '_').slice(0, 180) || 'download';
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
@@ -44,9 +48,13 @@ export default async function handler(request, response) {
   if (!account) return response.status(403).json({ error: 'forbidden' });
 
   const fileId = String(request.query?.fileId || '');
+  const pathParam = String(request.query?.path || '');
   const mode = String(request.query?.mode || 'json');
   const disposition = String(request.query?.disposition || '') === 'inline' ? 'inline' : 'attachment';
-  if (!fileId) return response.status(400).json({ error: 'missing-file-id' });
+  const forceRemint = String(request.query?.remint || '') === '1';
+  if (!fileId && !pathParam) {
+    return response.status(400).json({ error: 'missing-file-id' });
+  }
 
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
@@ -56,33 +64,54 @@ export default async function handler(request, response) {
     ]);
 
     const uid = account.uid;
-    const file = await readRtdb(dbToken, `/users/${uid}/files/${fileId}`);
-    if (!file || typeof file !== 'object') {
-      return response.status(404).json({ error: 'not-found' });
+    let file = null;
+    if (fileId) {
+      file = await readRtdb(dbToken, `/users/${uid}/files/${fileId}`);
+      if (!file || typeof file !== 'object') {
+        return response.status(404).json({ error: 'not-found' });
+      }
     }
 
-    const storagePath = resolveStoragePath(file, uid);
-    let downloadUrl = typeof file.downloadUrl === 'string' ? file.downloadUrl : '';
-    const dataUrl = typeof file.dataUrl === 'string' && file.dataUrl.startsWith('data:')
+    // path= may be used alone (storage object under this user's tree) or to override.
+    let storagePath = pathParam
+      || (file ? resolveStoragePath(file, uid) : undefined);
+    if (pathParam) {
+      const expectedPrefix = `users/${uid}/files/`;
+      if (!pathParam.startsWith(expectedPrefix)) {
+        return response.status(403).json({ error: 'forbidden-path' });
+      }
+      storagePath = pathParam;
+    }
+
+    let downloadUrl = typeof file?.downloadUrl === 'string' ? file.downloadUrl : '';
+    const dataUrl = typeof file?.dataUrl === 'string' && file.dataUrl.startsWith('data:')
       ? file.dataUrl
       : '';
+    const fileName = file?.name || (storagePath ? storagePath.split('/').pop() : 'download');
+    const fileType = file?.type || 'application/octet-stream';
+    const fileSize = file?.size;
 
-    // Prefer refreshing a tokenized Firebase URL so the browser can fetch with CORS.
+    // Reuse the existing Firebase token whenever possible. Reminting on every
+    // request was invalidating downloadUrl values still held in the browser.
     if (storagePath) {
       try {
-        downloadUrl = await mintDownloadToken(
+        const resolved = await resolveDownloadUrl(
           storageToken,
           storagePath,
-          file.type || undefined,
+          fileType || undefined,
+          forceRemint,
         );
-        const clean = {
-          ...file,
-          downloadUrl,
-          storagePath,
-        };
-        delete clean.dataUrl;
-        delete clean.inlinePending;
-        await writeRtdb(dbToken, `/users/${uid}/files/${fileId}`, clean);
+        downloadUrl = resolved.downloadUrl;
+        if (fileId && file && (resolved.minted || !file.downloadUrl || !file.storagePath)) {
+          const clean = {
+            ...file,
+            downloadUrl,
+            storagePath,
+          };
+          delete clean.dataUrl;
+          delete clean.inlinePending;
+          await writeRtdb(dbToken, `/users/${uid}/files/${fileId}`, clean);
+        }
       } catch {
         /* keep existing downloadUrl / fall through */
       }
@@ -90,7 +119,7 @@ export default async function handler(request, response) {
 
     if (mode === 'proxy') {
       let buffer;
-      let contentType = file.type || 'application/octet-stream';
+      let contentType = fileType || 'application/octet-stream';
       if (storagePath) {
         const downloaded = await downloadFromStorage(storageToken, storagePath);
         buffer = downloaded.buffer;
@@ -108,24 +137,26 @@ export default async function handler(request, response) {
         return response.status(200).json({
           downloadUrl,
           storagePath: storagePath || storagePathFromDownloadUrl(downloadUrl),
-          name: file.name,
+          name: fileName,
           type: contentType,
-          size: file.size,
+          size: fileSize,
           proxy: false,
         });
       }
+      const filename = safeFilename(fileName);
       response.setHeader('Content-Type', contentType);
       response.setHeader(
         'Content-Disposition',
-        `${disposition}; filename="${String(file.name || 'download').replace(/"/g, '')}"`,
+        `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
       );
       response.setHeader('Cache-Control', 'private, no-store');
+      response.setHeader('X-Content-Type-Options', 'nosniff');
       return response.status(200).send(buffer);
     }
 
     if (mode === 'redirect') {
       if (!downloadUrl && dataUrl) {
-        return response.status(200).json({ dataUrl, name: file.name, type: file.type, size: file.size });
+        return response.status(200).json({ dataUrl, name: fileName, type: fileType, size: fileSize });
       }
       if (!downloadUrl) return response.status(404).json({ error: 'no-url' });
       response.setHeader('Location', downloadUrl);
@@ -140,9 +171,9 @@ export default async function handler(request, response) {
       downloadUrl: downloadUrl || undefined,
       storagePath: storagePath || undefined,
       dataUrl: dataUrl || undefined,
-      name: file.name,
-      type: file.type,
-      size: file.size,
+      name: fileName,
+      type: fileType,
+      size: fileSize,
     });
   } catch (error) {
     console.error('file-download failed', error);
