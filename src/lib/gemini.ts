@@ -1,4 +1,4 @@
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string;
+const API_KEY = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ?? '';
 
 let tokenSink: ((n: number) => void) | null = null;
 export function setTokenSink(fn: (n: number) => void) { tokenSink = fn; }
@@ -6,7 +6,59 @@ function reportTokens(data: { usageMetadata?: { totalTokenCount?: number } }) {
   const n = data?.usageMetadata?.totalTokenCount;
   if (n && n > 0) tokenSink?.(n);
 }
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
+
+const MODEL = 'gemini-2.5-flash';
+const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+const STREAM_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent?alt=sse&key=${API_KEY}`;
+
+/** Disable thinking so answer tokens aren't eaten by thought tokens (common empty-response bug). */
+const GENERATION_CONFIG = {
+  thinkingConfig: { thinkingBudget: 0 },
+  maxOutputTokens: 8192,
+};
+
+type GeminiPart = { text?: string; thought?: boolean };
+type GeminiResponse = {
+  candidates?: Array<{
+    content?: { parts?: GeminiPart[] };
+    finishReason?: string;
+  }>;
+  usageMetadata?: { totalTokenCount?: number };
+  error?: { message?: string };
+};
+
+function assertApiKey() {
+  if (!API_KEY) {
+    throw new Error('AI API-nyckel saknas. Sätt VITE_GEMINI_API_KEY i Vercel och gör Redeploy.');
+  }
+}
+
+/** Prefer non-thought text parts; fall back to any text if needed. */
+function extractText(data: GeminiResponse): string {
+  const parts = data?.candidates?.[0]?.content?.parts ?? [];
+  const visible = parts
+    .filter((p) => p.text && !p.thought)
+    .map((p) => p.text!.trim())
+    .filter(Boolean);
+  if (visible.length) return visible.join('\n').trim();
+  const any = parts.map((p) => p.text?.trim()).filter(Boolean) as string[];
+  return any.join('\n').trim();
+}
+
+async function generateContent(body: Record<string, unknown>): Promise<GeminiResponse> {
+  assertApiKey();
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, generationConfig: GENERATION_CONFIG }),
+  });
+  const data = (await res.json().catch(() => ({}))) as GeminiResponse;
+  if (!res.ok) {
+    throw new Error(data?.error?.message || `Gemini API error: ${res.status}`);
+  }
+  reportTokens(data);
+  return data;
+}
 
 export interface QuizResult {
   question: string;
@@ -14,15 +66,12 @@ export interface QuizResult {
 }
 
 export async function generateQuiz(noteText: string): Promise<QuizResult[]> {
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: `Du är en medicinsk/vetenskaplig assistent. Identifiera vilket språk anteckningsinnehållet är skrivet på och använd SAMMA språk i alla frågor och svar.
+  const data = await generateContent({
+    contents: [
+      {
+        parts: [
+          {
+            text: `Du är en medicinsk/vetenskaplig assistent. Identifiera vilket språk anteckningsinnehållet är skrivet på och använd SAMMA språk i alla frågor och svar.
 
 Analysera följande anteckningsinnehåll:
 
@@ -37,19 +86,12 @@ A: <svaret på svenska>
 
 Anteckningsinnehåll:
 ${noteText.slice(0, 6000)}`,
-            },
-          ],
-        },
-      ],
-    }),
+          },
+        ],
+      },
+    ],
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || 'Gemini API error: ' + res.status);
-  }
-  const data = await res.json();
-  reportTokens(data);
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  const text = extractText(data);
   if (!text) throw new Error('No response returned');
   if (text.includes('INSUFFICIENT_CONTENT')) throw new Error('INSUFFICIENT_CONTENT');
 
@@ -74,8 +116,6 @@ export interface ChatTurn {
   text: string;
 }
 
-const STREAM_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${API_KEY}`;
-
 export interface FilePart {
   mimeType: string;
   base64: string;
@@ -87,6 +127,7 @@ export async function sendChatMessageStream(
   onChunk: (chunk: string) => void,
   attachment?: FilePart,
 ): Promise<void> {
+  assertApiKey();
   const userParts: object[] = [];
   if (attachment) userParts.push({ inlineData: { mimeType: attachment.mimeType, data: attachment.base64 } });
   if (userMessage) userParts.push({ text: userMessage });
@@ -98,10 +139,10 @@ export async function sendChatMessageStream(
   const res = await fetch(STREAM_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents }),
+    body: JSON.stringify({ contents, generationConfig: GENERATION_CONFIG }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
+    const err = await res.json().catch(() => ({})) as GeminiResponse;
     throw new Error(err?.error?.message || 'API error');
   }
   const reader = res.body!.getReader();
@@ -118,8 +159,8 @@ export async function sendChatMessageStream(
       const json = line.slice(6).trim();
       if (!json || json === '[DONE]') continue;
       try {
-        const parsed = JSON.parse(json);
-        const chunk = parsed?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        const parsed = JSON.parse(json) as GeminiResponse;
+        const chunk = extractText(parsed);
         if (chunk) onChunk(chunk);
       } catch { /* skip malformed */ }
     }
@@ -127,34 +168,22 @@ export async function sendChatMessageStream(
 }
 
 export async function answerQuestion(question: string): Promise<string> {
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [{
-          text: `Besvara följande fråga på samma språk som frågan är skriven på. Ge ett tydligt och korrekt svar. Returnera ENDAST svaret, utan förklaringar eller extra text.\n\nFråga: ${question.replace(/<[^>]*>/g, '').trim()}`,
-        }],
+  const data = await generateContent({
+    contents: [{
+      parts: [{
+        text: `Besvara följande fråga på samma språk som frågan är skriven på. Ge ett tydligt och korrekt svar. Returnera ENDAST svaret, utan förklaringar eller extra text.\n\nFråga: ${question.replace(/<[^>]*>/g, '').trim()}`,
       }],
-    }),
+    }],
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || 'API error');
-  }
-  const data = await res.json();
-  reportTokens(data);
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  const text = extractText(data);
   if (!text) throw new Error('No answer returned');
   return text;
 }
 
 async function verifyAnswers(noteText: string, items: QuizResult[]): Promise<QuizResult[]> {
-  const qa = items.map((item, i) => `${i + 1}. F: ${item.question}\n   S: ${item.answer}`).join('\n');
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  try {
+    const qa = items.map((item, i) => `${i + 1}. F: ${item.question}\n   S: ${item.answer}`).join('\n');
+    const data = await generateContent({
       contents: [{
         parts: [{
           text: `Du är en medicinsk/vetenskaplig granskare. Använd samma språk som anteckningsinnehållet och frågorna är skrivna på. Nedan finns anteckningsinnehåll och automatiskt genererade frågor (F) och svar (S).
@@ -173,22 +202,21 @@ Frågor och svar att granska:
 ${qa}`,
         }],
       }],
-    }),
-  });
-  if (!res.ok) return items; // fallback to original if verify fails
-  const data = await res.json();
-  reportTokens(data);
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!text) return items;
+    });
+    const text = extractText(data);
+    if (!text) return items;
 
-  const blocks = text.split('---').map((b: string) => b.trim()).filter(Boolean);
-  const verified: QuizResult[] = [];
-  for (const block of blocks) {
-    const qMatch = block.match(/F:\s*(.+?)(?=\n\s*S:|$)/s);
-    const aMatch = block.match(/S:\s*(.+)/s);
-    if (qMatch && aMatch) {
-      verified.push({ question: qMatch[1].trim(), answer: aMatch[1].trim() });
+    const blocks = text.split('---').map((b: string) => b.trim()).filter(Boolean);
+    const verified: QuizResult[] = [];
+    for (const block of blocks) {
+      const qMatch = block.match(/F:\s*(.+?)(?=\n\s*S:|$)/s);
+      const aMatch = block.match(/S:\s*(.+)/s);
+      if (qMatch && aMatch) {
+        verified.push({ question: qMatch[1].trim(), answer: aMatch[1].trim() });
+      }
     }
+    return verified.length === items.length ? verified : items;
+  } catch {
+    return items;
   }
-  return verified.length === items.length ? verified : items;
 }

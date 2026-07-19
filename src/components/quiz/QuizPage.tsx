@@ -360,6 +360,7 @@ interface EditPanelProps {
 function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
   const { t } = useLanguage();
   const { hasAi } = useAuth();
+  const { show } = useToast();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
@@ -378,6 +379,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
       const res = await answerQuestion(plain);
       if (hasContent(answer)) setAiSuggestion(res);
       else onChangeA(res);
+    } catch (e) {
+      show(e instanceof Error ? e.message : 'AI-svar misslyckades');
     } finally {
       setAiLoading(false);
     }

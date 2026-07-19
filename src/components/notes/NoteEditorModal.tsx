@@ -548,7 +548,17 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       >☑ {t.quizMcq}</button>
                       {!mcqMode && hasAi && (
                         <button
-                          onClick={async () => { if (!hasContent(manualQ)) return; setManualAiLoading(true); try { setManualA(mdToHtml(await answerQuestion(manualQ.replace(/<[^>]*>/g, '')))); } finally { setManualAiLoading(false); } }}
+                          onClick={async () => {
+                            if (!hasContent(manualQ)) return;
+                            setManualAiLoading(true);
+                            try {
+                              setManualA(mdToHtml(await answerQuestion(manualQ.replace(/<[^>]*>/g, ''))));
+                            } catch (e) {
+                              show(e instanceof Error ? e.message : 'AI-svar misslyckades');
+                            } finally {
+                              setManualAiLoading(false);
+                            }
+                          }}
                           disabled={manualAiLoading || !hasContent(manualQ)}
                           className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
                         >
@@ -667,8 +677,13 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                       onClick={async () => {
                         if (!hasContent(aiQ)) return;
                         setAiGenALoading(true);
-                        try { setAiA(mdToHtml(await answerQuestion(aiQ.replace(/<[^>]*>/g, '')))); }
-                        finally { setAiGenALoading(false); }
+                        try {
+                          setAiA(mdToHtml(await answerQuestion(aiQ.replace(/<[^>]*>/g, ''))));
+                        } catch (e) {
+                          show(e instanceof Error ? e.message : 'AI-svar misslyckades');
+                        } finally {
+                          setAiGenALoading(false);
+                        }
                       }}
                       disabled={aiGenALoading || !hasContent(aiQ)}
                       className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
@@ -764,8 +779,13 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                                 const qText = editQ.replace(/<[^>]*>/g, '').trim();
                                 if (!qText) return;
                                 setAiAnswerLoading(true);
-                                try { setEditA(mdToHtml(await answerQuestion(qText))); }
-                                finally { setAiAnswerLoading(false); }
+                                try {
+                                  setEditA(mdToHtml(await answerQuestion(qText)));
+                                } catch (e) {
+                                  show(e instanceof Error ? e.message : 'AI-svar misslyckades');
+                                } finally {
+                                  setAiAnswerLoading(false);
+                                }
                               }}
                               disabled={aiAnswerLoading || !editQ.replace(/<[^>]*>/g, '').trim()}
                               className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
