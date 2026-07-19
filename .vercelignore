@@ -1,0 +1,12 @@
+.bin
+.git
+node_modules
+dist
+dist-ssr
+release
+.claude
+*.local
+.env*
+.DS_Store
+# Desktop installer exceeds Vercel 100MB file limit and blocks web deploys
+public/downloads

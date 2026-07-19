@@ -1,6 +1,6 @@
 import { createSign } from 'node:crypto';
-import { sendEmail } from './lib/resend.js';
-import { emailHeaderHtml, logoAttachment } from './lib/emailBrand.js';
+import { sendEmail } from './_lib/resend.js';
+import { emailHeaderHtml, logoAttachment } from './_lib/emailBrand.js';
 
 const APP_URL = 'https://tahanote.com';
 const ALLOWED_ORIGINS = new Set([APP_URL, 'https://notes-woad-pi.vercel.app']);

@@ -8,7 +8,7 @@ import {
   RTDB_SCOPES,
   verifyUser,
   writeRtdb,
-} from './lib/firebaseAdmin.js';
+} from './_lib/firebaseAdmin.js';
 
 const STORAGE_SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
 

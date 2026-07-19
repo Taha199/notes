@@ -1,9 +1,9 @@
-import { isAllowedOrigin, verifyAdmin } from '../lib/firebaseAdmin.js';
+import { isAllowedOrigin, verifyAdmin } from './_lib/firebaseAdmin.js';
 import {
   downloadPlatformBackup,
   listPlatformBackups,
   runPlatformBackup,
-} from '../lib/platformBackup.js';
+} from './_lib/platformBackup.js';
 
 export const config = {
   maxDuration: 60,

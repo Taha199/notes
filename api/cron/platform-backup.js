@@ -1,4 +1,4 @@
-import { runPlatformBackup, verifyCronSecret } from '../lib/platformBackup.js';
+import { runPlatformBackup, verifyCronSecret } from '../_lib/platformBackup.js';
 
 export const config = {
   maxDuration: 60,

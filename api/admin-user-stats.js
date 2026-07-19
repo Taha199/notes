@@ -6,7 +6,7 @@ import {
   readServiceAccount,
   RTDB_SCOPES,
   verifyAdmin,
-} from './lib/firebaseAdmin.js';
+} from './_lib/firebaseAdmin.js';
 
 const AUTH_SCOPE = 'https://www.googleapis.com/auth/identitytoolkit';
 const FREE_STORAGE_LIMIT_MB = 100;

@@ -7,7 +7,7 @@ import {
   RTDB_SCOPES,
   verifyUser,
   writeRtdb,
-} from './lib/firebaseAdmin.js';
+} from './_lib/firebaseAdmin.js';
 
 const MODEL = 'gemini-2.5-flash';
 
