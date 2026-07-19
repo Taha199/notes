@@ -739,22 +739,48 @@ function FilePreviewModal({
           return;
         }
 
-        // PDF: NEVER use Google Docs viewer as success — it blanks on Firebase token URLs.
-        // Race getBytes(storagePath) with /api/file-download?mode=proxy&disposition=inline
-        // into a local blob: URL (application/pdf) for <object>/<iframe>.
+        // PDF: paint a streamable URL first so preview opens immediately.
+        // Downloading the whole PDF into a blob made preview feel broken on slow links.
         if (mode === 'pdf') {
           const quickPath =
             file.storagePath
             || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)
             || guessStoragePath(file, uid);
+          const quickHref = file.downloadUrl || file.dataUrl || '';
           setLoadPct(15);
 
+          if (quickHref && !quickHref.startsWith('blob:')) {
+            if (quickPath && quickPath !== file.storagePath) {
+              onMetaRef.current?.({ storagePath: quickPath });
+            }
+            paintDirect(quickHref);
+            return;
+          }
+
+          try {
+            const fresh = await withTimeout(
+              refreshViaFileApi(file.id, { path: quickPath }),
+              Math.min(RESOLVE_TIMEOUT_MS, remainingMs(deadline)),
+              'api-refresh-timeout',
+            );
+            if (!isLive()) return;
+            if (fresh?.href || fresh?.dataUrl) {
+              onMetaRef.current?.({
+                downloadUrl: fresh.href?.startsWith('http') ? fresh.href : undefined,
+                storagePath: fresh.storagePath || quickPath,
+              });
+              paintDirect(fresh.href || fresh.dataUrl || '');
+              return;
+            }
+          } catch {
+            /* fall back to authenticated bytes below */
+          }
+
           const resolved: ResolvedFile = {
-            href: file.downloadUrl || '',
+            href: '',
             storagePath: quickPath,
             dataUrl: file.dataUrl,
           };
-
           const blob = await loadFileBlob(
             resolved,
             'application/pdf',
@@ -1335,13 +1361,22 @@ export function FilesPage({ search }: { search: string }) {
         return;
       }
 
-      for (const file of selected) {
-        const stored = await uploadOneFile(file, currentFolderId);
-        await saveFileMeta(stored);
-        uploaded.push(stored);
+      const CONCURRENT_UPLOADS = 3;
+      for (let i = 0; i < selected.length; i += CONCURRENT_UPLOADS) {
+        const chunk = selected.slice(i, i + CONCURRENT_UPLOADS);
+        const storedChunk = await Promise.all(chunk.map((file) => uploadOneFile(file, currentFolderId)));
+        uploaded.push(...storedChunk);
+        setFiles((prev) => [...storedChunk, ...prev]);
       }
+
       if (uploaded.length) {
-        setFiles((prev) => [...uploaded, ...prev]);
+        const updates = Object.fromEntries(uploaded.map((file) => [file.id, file]));
+        const res = await rtdbFetch(`/users/${user.uid}/files`, {
+          method: 'PATCH',
+          body: JSON.stringify(updates),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!res.ok) throw new Error('save-failed');
         show(uploaded.length === 1 ? t.filesUploadSuccess : `${uploaded.length} ${t.filesUploadSuccess}`);
       }
     } catch (err) {
