@@ -2904,12 +2904,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
     const newId = Date.now();
-    setQuizzes((prev) => {
-      const now = new Date().toISOString();
-      const next = [...prev, { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now }];
-      persist({ quizzes: next });
-      return next;
-    });
+    const now = new Date().toISOString();
+    const next = [...quizzesRef.current, { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now }];
+    quizzesRef.current = next;
+    setQuizzes(next);
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
+    // Force immediate cloud write so other devices (mobile) see new questions.
+    persist({ quizzes: next }, true);
+    scheduleInstantDataCloudSave({ quizzes: next });
     return newId;
   };
 
@@ -3535,20 +3537,27 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const newId = Date.now();
     const newItem: QuizItem = { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now };
-    setQuizSets((prev) => {
-      const next = prev.map((s) => s.id === setId ? { ...s, items: [...s.items, newItem] } : s);
-      persistSets(next);
-      return next;
-    });
+    const next = quizSetsRef.current.map((s) => (
+      s.id === setId ? { ...s, items: [...s.items, newItem], updatedAt: now } : s
+    ));
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    // Force immediate cloud write so other devices (mobile) see new set questions.
+    persistSets(next, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
     return newId;
   };
 
   const removeItemFromSet = (setId: string, itemId: number) => {
-    setQuizSets((prev) => {
-      const next = prev.map((s) => s.id === setId ? { ...s, items: s.items.filter((i) => i.id !== itemId) } : s);
-      persistSets(next);
-      return next;
-    });
+    const next = quizSetsRef.current.map((s) => (
+      s.id === setId ? { ...s, items: s.items.filter((i) => i.id !== itemId) } : s
+    ));
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    persistSets(next, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
