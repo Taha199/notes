@@ -382,30 +382,104 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
 }
 
-/** Cross-origin Firebase URLs ignore the download attribute — open/navigate instead. */
-function triggerUrlDownload(href: string) {
-  const a = document.createElement('a');
-  a.href = href;
-  a.target = '_blank';
-  a.rel = 'noopener noreferrer';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+/**
+ * Open a tokenized Firebase (or other http) URL during the click gesture.
+ * Must run BEFORE any await — popup blockers silently kill post-await window.open/_blank.
+ */
+function openDownloadUrlNow(href: string): boolean {
+  if (!href || href.startsWith('data:') || href.startsWith('blob:')) return false;
+  try {
+    const win = window.open(href, '_blank', 'noopener,noreferrer');
+    if (win) return true;
+  } catch { /* continue */ }
+  try {
+    const a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** After awaits: same-tab navigate is not popup-blocked (last resort). */
+function navigateToDownloadUrl(href: string) {
+  window.location.assign(href);
+}
+
+/** Service-account proxy with Content-Disposition: attachment → blob download (no popup). */
+async function downloadViaApiAttachment(
+  fileId: string,
+  filename: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const token = await getRtdbAuthToken();
+  if (!token) return false;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(
+      `/api/file-download?fileId=${encodeURIComponent(fileId)}&mode=proxy&disposition=attachment`,
+      { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal },
+    );
+    if (!res.ok) return false;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = (await res.json()) as { downloadUrl?: string };
+      if (!data.downloadUrl) return false;
+      try {
+        const blob = await fetchHrefAsBlob(data.downloadUrl, Math.min(timeoutMs, 60_000));
+        triggerBlobDownload(blob, filename);
+        return true;
+      } catch {
+        navigateToDownloadUrl(data.downloadUrl);
+        return true;
+      }
+    }
+    triggerBlobDownload(await res.blob(), filename);
+    return true;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 /**
  * Download MUST work even when preview fails.
- * Primary: authenticated getBytes → blob download. Fallbacks: API refresh, URL navigation.
+ * 1) Sync: open downloadUrl during the click gesture (no await).
+ * 2) Blob via getBytes / fetch / API proxy (works after await; no popup).
+ * 3) Same-tab navigate to a reminted URL. Never silent-succeed after a blocked popup.
  */
 async function downloadStoredFile(file: StoredFile, uid: string | undefined): Promise<void> {
-  let resolved = await withTimeout(
-    resolveFile(file, uid),
-    RESOLVE_TIMEOUT_MS,
-    'resolve-timeout',
-  );
+  // 1) IMMEDIATE — preserve user gesture. Tokenized Firebase URLs often force download
+  // via Content-Disposition: attachment; navigation does not need CORS (unlike preview fetch).
+  if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl)) {
+    return;
+  }
 
-  // Primary: SDK / fetch / API → same-origin blob (filename works).
+  if (file.dataUrl?.startsWith('data:')) {
+    try {
+      triggerBlobDownload(await dataUrlToBlob(file.dataUrl), file.name);
+      return;
+    } catch { /* fall through */ }
+  }
+
+  // 2) Authenticated bytes → <a download> (same-origin blob; no popup needed)
+  let resolved: ResolvedFile | null = null;
   try {
+    resolved = await withTimeout(
+      resolveFile(file, uid),
+      RESOLVE_TIMEOUT_MS,
+      'resolve-timeout',
+    );
+    // If list metadata lacked downloadUrl but resolve found one, open it — gesture may
+    // already be gone, so prefer blob below; still try open in case the browser allows it.
+    if (!file.downloadUrl && resolved.href && !resolved.href.startsWith('data:')) {
+      openDownloadUrlNow(resolved.href);
+    }
     const blob = await loadFileBlob(
       resolved,
       file.type || undefined,
@@ -414,32 +488,38 @@ async function downloadStoredFile(file: StoredFile, uid: string | undefined): Pr
     );
     triggerBlobDownload(blob, file.name);
     return;
-  } catch {
-    /* fall through */
-  }
+  } catch { /* fall through */ }
 
-  // Refresh tokenized URL via service account, then open it (always worked for navigation).
+  // 3) Service-account attachment proxy / reminted URL
+  try {
+    if (await downloadViaApiAttachment(file.id, file.name, DOWNLOAD_TIMEOUT_MS)) {
+      return;
+    }
+  } catch { /* fall through */ }
+
   try {
     const fresh = await refreshViaFileApi(file.id);
-    if (fresh) resolved = { ...resolved, ...fresh };
-  } catch { /* ignore */ }
-
-  let href = resolved.href;
-  if (!href && resolved.storagePath) {
-    try {
-      href = await withTimeout(
+    const href = fresh?.href || resolved?.href || '';
+    if (fresh?.dataUrl?.startsWith('data:')) {
+      triggerBlobDownload(await dataUrlToBlob(fresh.dataUrl), file.name);
+      return;
+    }
+    if (href && !href.startsWith('blob:')) {
+      navigateToDownloadUrl(href);
+      return;
+    }
+    if (resolved?.storagePath) {
+      const url = await withTimeout(
         getDownloadURL(ref(storage, resolved.storagePath)),
         RESOLVE_TIMEOUT_MS,
         'getDownloadURL-timeout',
       );
-    } catch { /* ignore */ }
-  }
-  if (href) {
-    triggerUrlDownload(href);
-    return;
-  }
+      navigateToDownloadUrl(url);
+      return;
+    }
+  } catch { /* fall through */ }
 
-  throw new Error('no-url');
+  throw new Error('download-failed');
 }
 
 async function loadTextPreview(href: string, timeoutMs = PREVIEW_TIMEOUT_MIN_MS): Promise<string> {
@@ -713,12 +793,17 @@ function FilePreviewModal({
     e.stopPropagation();
     if (downloading) return;
     setDownloadError('');
+    // Sync open during the click gesture — before any await / setState yield.
+    if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl)) {
+      return;
+    }
     setDownloading(true);
     void (async () => {
       try {
         await downloadStoredFile(file, uid);
       } catch {
         setDownloadError(t.filesDownloadFailed);
+        window.alert(t.filesDownloadFailed);
       } finally {
         setDownloading(false);
       }
@@ -1471,11 +1556,16 @@ export function FilesPage({ search }: { search: string }) {
                 <button
                   type="button"
                   onClick={() => {
+                    // Sync open during the click gesture — before any await.
+                    if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl)) {
+                      return;
+                    }
                     void (async () => {
                       try {
                         await downloadStoredFile(file, user?.uid);
                       } catch {
                         show(t.filesDownloadFailed);
+                        window.alert(t.filesDownloadFailed);
                       }
                     })();
                   }}
