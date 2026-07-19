@@ -14,7 +14,8 @@ import {
   type User,
 } from 'firebase/auth';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import { auth, googleProvider, EmailAuthProvider, FB_DB_URL, storage } from '../lib/firebase';
+import { onDisconnect, ref as dbRef, set } from 'firebase/database';
+import { auth, database, googleProvider, EmailAuthProvider, FB_DB_URL, storage } from '../lib/firebase';
 import { rtdbFetch } from '../lib/rtdb';
 import { hasAiAccess, isPlusUser } from '../lib/userPlan';
 
@@ -100,21 +101,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setProfileLoading(true);
 
+    const presenceRef = dbRef(database, `presence/${user.uid}`);
+    let cachedIp = '';
+
     const writePresence = async (includeIp: boolean) => {
       if (!user?.uid || cancelled) return;
+      const lastSeen = Date.now();
+      if (includeIp || !cachedIp) {
+        try {
+          const ipRes = await fetch('https://api.ipify.org?format=json');
+          cachedIp = (await ipRes.json())?.ip ?? cachedIp;
+        } catch { /* ignore */ }
+      }
       const patch: Record<string, unknown> = {
         email: user.email ?? '',
         displayName: user.displayName ?? '',
-        lastSeen: Date.now(),
+        lastSeen,
         provider: user.providerData[0]?.providerId ?? '',
       };
-      if (includeIp) {
-        try {
-          const ipRes = await fetch('https://api.ipify.org?format=json');
-          const ip = (await ipRes.json())?.ip ?? '';
-          if (ip) patch.ip = ip;
-        } catch { /* ignore */ }
-      }
+      if (cachedIp) patch.ip = cachedIp;
+
+      // Live admin board reads /presence via realtime listener.
+      try {
+        await set(presenceRef, {
+          lastSeen,
+          ip: cachedIp || null,
+          email: user.email ?? '',
+          displayName: user.displayName ?? '',
+        });
+        void onDisconnect(presenceRef).update({ lastSeen: Date.now() });
+      } catch { /* ignore */ }
+
+      // Keep profile.lastSeen for /api/admin-user-stats fallback.
       try {
         await rtdbFetch(`/users/${user.uid}/profile`, {
           method: 'PATCH',
@@ -140,12 +158,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } finally {
         if (!cancelled) setProfileLoading(false);
       }
-      // First write: lastSeen + IP.
       await writePresence(true);
     })();
 
-    // Keep "Senast sedd" near-live while the tab is open (every 30s + on focus).
-    const HEARTBEAT_MS = 30 * 1000;
+    // Near-live presence while the tab is open.
+    const HEARTBEAT_MS = 15 * 1000;
     const heartbeat = () => {
       if (document.visibilityState === 'hidden') return;
       void writePresence(false);
@@ -162,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
+      void onDisconnect(presenceRef).cancel().catch(() => {});
     };
   }, [user?.uid, user?.email, user?.displayName]);
 

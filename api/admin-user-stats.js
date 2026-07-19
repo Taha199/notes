@@ -95,11 +95,13 @@ export default async function handler(request, response) {
     ]);
 
     // Server-to-server read of the whole tree, but only compact numbers go to the client.
-    const [users, authUsers] = await Promise.all([
+    const [users, authUsers, presence] = await Promise.all([
       readRtdb(dbToken, '/users').catch(() => ({})),
       listAuthUsers(serviceAccount, authToken).catch(() => []),
+      readRtdb(dbToken, '/presence').catch(() => ({})),
     ]);
     const data = users && typeof users === 'object' ? users : {};
+    const presenceByUid = presence && typeof presence === 'object' ? presence : {};
 
     const authByUid = new Map(
       authUsers.map((u) => [u.localId, u]),
@@ -110,14 +112,21 @@ export default async function handler(request, response) {
       const blob = (data[uid] ?? {});
       const profile = (blob.profile ?? {});
       const authUser = authByUid.get(uid);
-      const email = ((profile.email) || authUser?.email || '').trim();
-      const displayName = ((profile.displayName) || authUser?.displayName || '').trim();
+      const live = presenceByUid[uid] ?? {};
+      const email = ((profile.email) || authUser?.email || live.email || '').trim();
+      const displayName = ((profile.displayName) || authUser?.displayName || live.displayName || '').trim();
+      const profileSeen = Number(profile.lastSeen) || 0;
+      const authSeen = Number(authUser?.lastLoginAt) || 0;
+      const presenceSeen = Number(live.lastSeen) || 0;
+      // Prefer live /presence heartbeat when newer than profile or auth lastLoginAt.
+      const lastSeen = Math.max(presenceSeen, profileSeen, authSeen);
+      const ip = (typeof live.ip === 'string' && live.ip) || profile.ip || '';
       return {
         uid,
         email,
         displayName,
-        lastSeen: Number(profile.lastSeen) || Number(authUser?.lastLoginAt) || 0,
-        ip: profile.ip ?? '',
+        lastSeen,
+        ip,
         provider: profile.provider || authUser?.providerUserInfo?.[0]?.providerId || '',
         blocked: profile.blocked === true,
         isPlus: isPlus(profile, email),

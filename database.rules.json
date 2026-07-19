@@ -6,6 +6,13 @@
         ".read": "auth != null && auth.uid == $uid",
         ".write": "auth != null && auth.uid == $uid"
       }
+    },
+    "presence": {
+      ".read": "auth != null && auth.token.email == 'abdomar200@gmail.com'",
+      "$uid": {
+        ".write": "auth != null && auth.uid == $uid",
+        ".validate": "newData.hasChildren(['lastSeen']) && newData.child('lastSeen').isNumber()"
+      }
     }
   }
 }

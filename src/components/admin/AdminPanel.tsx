@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { onValue, ref as dbRef } from 'firebase/database';
 import { useAuth } from '../../contexts/AuthContext';
-import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
+import { FB_DB_URL, ADMIN_EMAIL, database } from '../../lib/firebase';
 import { getRtdbAuthToken, waitForAuthUser } from '../../lib/rtdb';
 import { MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
 
@@ -17,6 +18,11 @@ interface UserRow {
   storageLimitMB: number;
 }
 
+interface PresenceEntry {
+  lastSeen?: number;
+  ip?: string | null;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -27,7 +33,7 @@ function timeAgo(ts: number, now = Date.now()): string {
   if (!ts) return '—';
   const diff = Math.max(0, now - ts);
   const sec = Math.floor(diff / 1000);
-  // Client heartbeat writes lastSeen about every 30s while online.
+  // Client heartbeat writes lastSeen about every 15s while online.
   if (sec < 90) return 'online';
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min} min sedan`;
@@ -35,6 +41,22 @@ function timeAgo(ts: number, now = Date.now()): string {
   if (h < 24) return `${h} h sedan`;
   const d = Math.floor(h / 24);
   return `${d} d sedan`;
+}
+
+function mergePresenceIntoRows(
+  list: UserRow[],
+  presence: Record<string, PresenceEntry> | null,
+): UserRow[] {
+  if (!presence) return list;
+  return list.map((row) => {
+    const live = presence[row.uid];
+    if (!live) return row;
+    const liveSeen = Number(live.lastSeen) || 0;
+    const lastSeen = liveSeen > (row.lastSeen || 0) ? liveSeen : row.lastSeen;
+    const ip = (typeof live.ip === 'string' && live.ip) || row.ip;
+    if (lastSeen === row.lastSeen && ip === row.ip) return row;
+    return { ...row, lastSeen, ip };
+  });
 }
 
 function fallbackName(uid: string): string {
@@ -51,6 +73,7 @@ export function AdminPanel() {
   const [editingLimitUid, setEditingLimitUid] = useState<string | null>(null);
   const [limitInput, setLimitInput] = useState('');
   const [now, setNow] = useState(() => Date.now());
+  const presenceRef = useRef<Record<string, PresenceEntry> | null>(null);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -80,7 +103,8 @@ export function AdminPanel() {
         bytes: u.bytes ?? 0,
         storageLimitMB: u.storageLimitMB ?? 0,
       }));
-      setRows(list);
+      // Prefer fresher live presence over API/auth lastLoginAt when merging storage stats.
+      setRows(mergePresenceIntoRows(list, presenceRef.current));
       setNow(Date.now());
     } finally {
       if (!silent) setLoading(false);
@@ -92,14 +116,26 @@ export function AdminPanel() {
     void load();
   }, [authLoading, isAdmin, user, load]);
 
-  // Live "Senast sedd": refresh stats often + re-render relative labels.
+  // Live presence from RTDB — updates Senast sedd without waiting for stats poll.
+  useEffect(() => {
+    if (authLoading || !isAdmin || !user) return;
+    const unsub = onValue(dbRef(database, 'presence'), (snap) => {
+      const val = (snap.val() ?? null) as Record<string, PresenceEntry> | null;
+      presenceRef.current = val;
+      setRows((prev) => mergePresenceIntoRows(prev, val));
+      setNow(Date.now());
+    });
+    return () => unsub();
+  }, [authLoading, isAdmin, user]);
+
+  // Poll LAGRING (~10s) + tick relative "online" labels (~5s) while visible.
   useEffect(() => {
     if (authLoading || !isAdmin || !user) return;
     const poll = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       void load({ silent: true });
-    }, 15_000);
-    const tick = window.setInterval(() => setNow(Date.now()), 15_000);
+    }, 10_000);
+    const tick = window.setInterval(() => setNow(Date.now()), 5_000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') void load({ silent: true });
     };
