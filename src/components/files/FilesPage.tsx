@@ -1034,21 +1034,33 @@ function FilePreviewModal({
   );
 }
 
-function FilesLoadingIndicator({ text }: { text: string }) {
+function FilesLoadingIndicator({ text, progress }: { text: string; progress: number }) {
   const label = text.replace(/[.…]+\s*$/, '');
+  const pct = Math.min(100, Math.max(0, Math.round(progress)));
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex w-full max-w-xs flex-col items-center gap-4">
       <span className="animate-files-loading-float text-4xl opacity-50" aria-hidden>☁️</span>
-      <p className="flex items-center gap-0.5 text-sm font-medium">
+      <p className="text-sm font-medium">
         <span className="animate-files-loading-shimmer bg-gradient-to-r from-app-text-secondary via-primary to-app-text-secondary bg-[length:220%_100%] bg-clip-text text-transparent dark:from-gray-500 dark:via-primary/90 dark:to-gray-500">
           {label}
         </span>
-        <span className="inline-flex min-w-[1.4rem] translate-y-px gap-px text-primary/80 dark:text-primary/90" aria-hidden>
-          <span className="animate-files-loading-dot [animation-delay:0ms]">·</span>
-          <span className="animate-files-loading-dot [animation-delay:180ms]">·</span>
-          <span className="animate-files-loading-dot [animation-delay:360ms]">·</span>
-        </span>
       </p>
+      <div
+        className="w-full"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label={label}
+      >
+        <div className="h-2 overflow-hidden rounded-full bg-primary/10 shadow-inner dark:bg-primary/20">
+          <div
+            className="h-full rounded-full bg-primary shadow-sm shadow-primary/30 transition-[width] duration-200 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <p className="mt-2 text-center text-sm font-semibold tabular-nums text-primary">{pct}%</p>
+      </div>
     </div>
   );
 }
@@ -1071,6 +1083,8 @@ export function FilesPage({ search }: { search: string }) {
     }
   });
   const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState(0);
+  const loadProgressTargetRef = useRef(0);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
@@ -1096,27 +1110,66 @@ export function FilesPage({ search }: { search: string }) {
   }, [renamingFolderId]);
 
   useEffect(() => {
+    if (!loading) return;
+    const id = window.setInterval(() => {
+      setLoadProgress((prev) => {
+        const target = loadProgressTargetRef.current;
+        if (prev >= 100) return 100;
+        if (prev >= target) {
+          const creepCap = Math.min(97, target + 14);
+          if (prev < creepCap) return Math.min(creepCap, prev + 0.35);
+          return prev;
+        }
+        const delta = Math.max(0.8, (target - prev) * 0.14);
+        return Math.min(target, prev + delta);
+      });
+    }, 40);
+    return () => window.clearInterval(id);
+  }, [loading]);
+
+  useEffect(() => {
     let cancelled = false;
+    const bumpTarget = (value: number) => {
+      if (!cancelled) loadProgressTargetRef.current = value;
+    };
+    const finishLoading = async () => {
+      bumpTarget(100);
+      setLoadProgress(100);
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      if (!cancelled) setLoading(false);
+    };
+
     if (!user) {
       setFiles([]);
       setFolders([]);
+      setLoadProgress(0);
+      loadProgressTargetRef.current = 0;
       setLoading(false);
       return;
     }
     setLoading(true);
+    setLoadProgress(0);
+    loadProgressTargetRef.current = 8;
     (async () => {
       // Load compact metadata from the server (no base64 blobs sent to the browser);
       // the server also migrates legacy inline files to Storage, in batches.
-      const fetchOnce = async (): Promise<boolean> => {
+      const fetchOnce = async (isFirst: boolean): Promise<boolean> => {
+        bumpTarget(isFirst ? 12 : loadProgressTargetRef.current);
         const token = await getRtdbAuthToken();
         if (!token) throw new Error('no-token');
+        bumpTarget(isFirst ? 28 : loadProgressTargetRef.current);
+
+        bumpTarget(isFirst ? 32 : Math.min(88, loadProgressTargetRef.current + 4));
         const res = await fetch('/api/my-files', { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) throw new Error('load-failed');
+        bumpTarget(isFirst ? 68 : Math.min(92, loadProgressTargetRef.current + 6));
+
         const data = (await res.json()) as {
           files?: StoredFile[];
           folders?: FileFolder[];
           migratedRemaining?: boolean;
         };
+        bumpTarget(isFirst ? 88 : Math.min(96, loadProgressTargetRef.current + 4));
         if (cancelled) return false;
         setFiles(
           (data.files ?? []).sort(
@@ -1128,26 +1181,34 @@ export function FilesPage({ search }: { search: string }) {
             (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
           ),
         );
+        bumpTarget(isFirst ? 94 : 96);
         return data.migratedRemaining === true;
       };
       try {
-        let more = await fetchOnce();
-        if (!cancelled) setLoading(false);
+        let more = await fetchOnce(true);
+        if (!cancelled) await finishLoading();
         // Continue migrating remaining legacy files in the background.
         let guard = 0;
         while (more && !cancelled && guard++ < 50) {
-          more = await fetchOnce();
+          more = await fetchOnce(false);
         }
       } catch {
         if (!cancelled) {
           // Fallback: read directly from the database (older path).
           try {
+            bumpTarget(18);
+            const token = await getRtdbAuthToken();
+            if (!token) throw new Error('no-token');
+            bumpTarget(30);
+            bumpTarget(40);
             const [filesRes, foldersRes] = await Promise.all([
               rtdbFetch(`/users/${user.uid}/files`),
               rtdbFetch(`/users/${user.uid}/fileFolders`),
             ]);
+            bumpTarget(72);
             const cloudFiles = await filesRes.json();
             const cloudFolders = await foldersRes.json();
+            bumpTarget(88);
             if (!cancelled) {
               setFiles(
                 normalizeList<StoredFile>(cloudFiles).sort(
@@ -1160,15 +1221,16 @@ export function FilesPage({ search }: { search: string }) {
                 ),
               );
             }
+            bumpTarget(94);
+            await finishLoading();
           } catch {
             if (!cancelled) {
               setFiles([]);
               setFolders([]);
+              await finishLoading();
             }
           }
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -1590,7 +1652,7 @@ export function FilesPage({ search }: { search: string }) {
           onDrop={onDrop}
         >
           {loading ? (
-            <FilesLoadingIndicator text={t.filesLoading} />
+            <FilesLoadingIndicator text={t.filesLoading} progress={loadProgress} />
           ) : (
             <>
               <span className="mb-3 text-5xl opacity-30">{currentFolderId ? '📁' : '📎'}</span>
