@@ -1,16 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import {
+  FB_DB_URL,
   STORAGE_BUCKET,
   getGoogleAccessToken,
   isAllowedOrigin,
-  readRtdb,
   readServiceAccount,
+  RTDB_SCOPES,
   verifyUser,
   writeRtdb,
 } from './lib/firebaseAdmin.js';
 
-const DB_SCOPE = 'https://www.googleapis.com/auth/firebase.database';
 const STORAGE_SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
+
+/** Read a node, distinguishing "empty" (null, ok) from a real failure (throws). */
+async function readNodeStrict(accessToken, path) {
+  const url = `${FB_DB_URL}${path}.json?access_token=${encodeURIComponent(accessToken)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`rtdb-read-failed:${res.status}`);
+  return res.json();
+}
 // Cap server-side migrations per request so the function never times out.
 const MAX_MIGRATIONS_PER_CALL = 40;
 
@@ -73,14 +81,15 @@ export default async function handler(request, response) {
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
     const [dbToken, storageToken] = await Promise.all([
-      getGoogleAccessToken(serviceAccount, [DB_SCOPE]),
+      getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
       getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
     ]);
 
     const uid = account.uid;
+    // Throw on real read failures so the client falls back to a direct DB read.
     const [filesRaw, foldersRaw] = await Promise.all([
-      readRtdb(dbToken, `/users/${uid}/files`).catch(() => null),
-      readRtdb(dbToken, `/users/${uid}/fileFolders`).catch(() => null),
+      readNodeStrict(dbToken, `/users/${uid}/files`),
+      readNodeStrict(dbToken, `/users/${uid}/fileFolders`),
     ]);
     const files = normalizeList(filesRaw);
     const folders = normalizeList(foldersRaw);

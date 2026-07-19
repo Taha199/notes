@@ -5,12 +5,12 @@ import {
   getGoogleAccessToken,
   readRtdb,
   readServiceAccount,
+  RTDB_SCOPES,
 } from './firebaseAdmin.js';
 
 export const PLATFORM_BACKUP_PREFIX = 'platform-backups/';
 export const MAX_PLATFORM_BACKUPS = 168;
 
-const DB_SCOPE = 'https://www.googleapis.com/auth/firebase.database';
 const STORAGE_SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
 
 function formatBackupName(timestamp) {
@@ -22,7 +22,7 @@ function formatBackupName(timestamp) {
 async function getBackupTokens() {
   const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
   const [dbToken, storageToken] = await Promise.all([
-    getGoogleAccessToken(serviceAccount, [DB_SCOPE]),
+    getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
     getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
   ]);
   return { dbToken, storageToken };

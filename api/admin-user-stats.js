@@ -4,10 +4,10 @@ import {
   isAllowedOrigin,
   readRtdb,
   readServiceAccount,
+  RTDB_SCOPES,
   verifyAdmin,
 } from './lib/firebaseAdmin.js';
 
-const DB_SCOPE = 'https://www.googleapis.com/auth/firebase.database';
 const AUTH_SCOPE = 'https://www.googleapis.com/auth/identitytoolkit';
 const FREE_STORAGE_LIMIT_MB = 100;
 const PLUS_STORAGE_LIMIT_MB = 1000;
@@ -90,7 +90,7 @@ export default async function handler(request, response) {
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
     const [dbToken, authToken] = await Promise.all([
-      getGoogleAccessToken(serviceAccount, [DB_SCOPE]),
+      getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
       getGoogleAccessToken(serviceAccount, [AUTH_SCOPE]),
     ]);
 

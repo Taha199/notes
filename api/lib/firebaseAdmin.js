@@ -6,6 +6,12 @@ export const FB_DB_URL = 'https://noteclaude-a5b3b-default-rtdb.europe-west1.fir
 export const STORAGE_BUCKET = 'noteclaude-a5b3b.firebasestorage.app';
 export const ALLOWED_ORIGINS = new Set(['https://tahanote.com', 'https://notes-woad-pi.vercel.app']);
 
+// Firebase Realtime Database REST with an OAuth access token requires BOTH scopes.
+export const RTDB_SCOPES = [
+  'https://www.googleapis.com/auth/firebase.database',
+  'https://www.googleapis.com/auth/userinfo.email',
+];
+
 export function base64Url(value) {
   return Buffer.from(value)
     .toString('base64')
