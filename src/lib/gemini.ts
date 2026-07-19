@@ -1,8 +1,8 @@
 /**
- * AI client (OpenAI Chat Completions).
- * File kept as gemini.ts so existing imports stay stable.
+ * AI client — calls authenticated /api/ai proxy (OpenAI key stays on the server).
+ * Filename kept for stable imports.
  */
-const API_KEY = (import.meta.env.VITE_OPENAI_API_KEY as string | undefined)?.trim() ?? '';
+import { getRtdbAuthToken } from './rtdb';
 
 let tokenSink: ((n: number) => void) | null = null;
 export function setTokenSink(fn: (n: number) => void) { tokenSink = fn; }
@@ -10,46 +10,46 @@ function reportTokens(n?: number) {
   if (n && n > 0) tokenSink?.(n);
 }
 
-const MODEL = 'gpt-4o-mini';
-const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+const NOTE_SLICE = 2500;
+const MAX_ANSWER_TOKENS = 500;
+const MAX_QUIZ_TOKENS = 900;
+const MAX_CHAT_TOKENS = 700;
+const MAX_HISTORY_TURNS = 8;
+const MAX_IMAGE_BASE64_CHARS = 350_000;
 
-type OpenAIMessage =
+type ChatMessage =
   | { role: 'system' | 'user' | 'assistant'; content: string }
   | { role: 'user'; content: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> };
 
-type OpenAIResponse = {
-  choices?: Array<{ message?: { content?: string | null }; delta?: { content?: string | null } }>;
-  usage?: { total_tokens?: number };
-  error?: { message?: string };
-};
+async function callAi(body: {
+  messages: ChatMessage[];
+  max_tokens?: number;
+  temperature?: number;
+}): Promise<string> {
+  const token = await getRtdbAuthToken();
+  if (!token) throw new Error('Du måste vara inloggad för AI.');
 
-function assertApiKey() {
-  if (!API_KEY) {
-    throw new Error('AI API-nyckel saknas. Sätt VITE_OPENAI_API_KEY i Vercel och gör Redeploy.');
-  }
-}
-
-async function chatCompletion(messages: OpenAIMessage[]): Promise<string> {
-  assertApiKey();
-  const res = await fetch(ENDPOINT, {
+  const res = await fetch('/api/ai', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({
-      model: MODEL,
-      messages,
-      max_tokens: 4096,
-      temperature: 0.4,
-    }),
+    body: JSON.stringify(body),
   });
-  const data = (await res.json().catch(() => ({}))) as OpenAIResponse;
+
+  const data = await res.json().catch(() => ({})) as {
+    text?: string;
+    usage?: { total_tokens?: number };
+    message?: string;
+    error?: string;
+  };
+
   if (!res.ok) {
-    throw new Error(data?.error?.message || `OpenAI API error: ${res.status}`);
+    throw new Error(data.message || data.error || `AI error: ${res.status}`);
   }
   reportTokens(data.usage?.total_tokens);
-  const text = data.choices?.[0]?.message?.content?.trim() ?? '';
+  const text = data.text?.trim() ?? '';
   if (!text) throw new Error('No response returned');
   return text;
 }
@@ -59,32 +59,54 @@ export interface QuizResult {
   answer: string;
 }
 
-export async function generateQuiz(noteText: string): Promise<QuizResult[]> {
-  const text = await chatCompletion([
-    {
+/** One Q+A pair in a single cheap request (preferred for AI mode). */
+export async function generateOneQa(noteText: string): Promise<QuizResult> {
+  const text = await callAi({
+    max_tokens: MAX_ANSWER_TOKENS,
+    temperature: 0.3,
+    messages: [{
       role: 'user',
-      content: `Du är en medicinsk/vetenskaplig assistent. Identifiera vilket språk anteckningsinnehållet är skrivet på och använd SAMMA språk i alla frågor och svar.
-
-Analysera följande anteckningsinnehåll:
-
-- Om innehållet redan innehåller en fråga (utan svar): besvara frågan på samma språk och returnera den som ett Q&A-par.
-- Om innehållet är en längre text: generera frågor och svar på samma språk som täcker ALLA delar.
-- Om innehållet är helt obegripligt eller tomt: svara exakt med: INSUFFICIENT_CONTENT
-
-Svara i exakt detta format (repetera för varje fråga):
+      content: `Skapa EXAKT EN studiefråga med svar från anteckningen. Samma språk som anteckningen.
+Svara i exakt format:
 Q: <frågan>
 A: <svaret>
+
+Anteckning:
+${noteText.slice(0, NOTE_SLICE)}`,
+    }],
+  });
+
+  const qMatch = text.match(/Q:\s*(.+?)(?=\nA:|$)/s);
+  const aMatch = text.match(/A:\s*(.+)/s);
+  if (!qMatch || !aMatch) throw new Error('Could not parse response');
+  return { question: qMatch[1].trim(), answer: aMatch[1].trim() };
+}
+
+export async function generateQuiz(noteText: string): Promise<QuizResult[]> {
+  // Single pass only (no verify round-trip). Cap to a few Q&As.
+  const text = await callAi({
+    max_tokens: MAX_QUIZ_TOKENS,
+    temperature: 0.3,
+    messages: [{
+      role: 'user',
+      content: `Du är en studieassistent. Skapa högst 4 frågor med svar från anteckningen. Samma språk som anteckningen.
+Om innehållet är tomt/obegripligt: svara exakt INSUFFICIENT_CONTENT
+
+Format (repetera max 4 gånger):
+Q: <frågan>
+A: <kort svar>
 ---
 
-Anteckningsinnehåll:
-${noteText.slice(0, 6000)}`,
-    },
-  ]);
+Anteckning:
+${noteText.slice(0, NOTE_SLICE)}`,
+    }],
+  });
+
   if (text.includes('INSUFFICIENT_CONTENT')) throw new Error('INSUFFICIENT_CONTENT');
 
-  const blocks = text.split('---').map((b: string) => b.trim()).filter(Boolean);
+  const blocks = text.split('---').map((b) => b.trim()).filter(Boolean);
   const results: QuizResult[] = [];
-  for (const block of blocks) {
+  for (const block of blocks.slice(0, 4)) {
     const qMatch = block.match(/Q:\s*(.+?)(?=\nA:|$)/s);
     const aMatch = block.match(/A:\s*(.+)/s);
     if (qMatch && aMatch) {
@@ -92,9 +114,7 @@ ${noteText.slice(0, 6000)}`,
     }
   }
   if (!results.length) throw new Error('Could not parse response');
-
-  const verified = await verifyAnswers(noteText, results);
-  return verified;
+  return results;
 }
 
 export interface ChatTurn {
@@ -113,45 +133,49 @@ export async function sendChatMessageStream(
   onChunk: (chunk: string) => void,
   attachment?: FilePart,
 ): Promise<void> {
-  assertApiKey();
+  const token = await getRtdbAuthToken();
+  if (!token) throw new Error('Du måste vara inloggad för AI.');
 
-  const messages: OpenAIMessage[] = history.map((h) => ({
-    role: h.role === 'model' ? 'assistant' as const : 'user' as const,
-    content: h.text,
-  }));
+  const messages: ChatMessage[] = history
+    .slice(-MAX_HISTORY_TURNS)
+    .map((h) => ({
+      role: h.role === 'model' ? 'assistant' as const : 'user' as const,
+      content: h.text.slice(0, 2000),
+    }));
 
   if (attachment?.mimeType.startsWith('image/') && attachment.base64) {
+    if (attachment.base64.length > MAX_IMAGE_BASE64_CHARS) {
+      throw new Error('Bilden är för stor för AI (max ~250 KB).');
+    }
     const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
       { type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.base64}` } },
     ];
-    if (userMessage) parts.push({ type: 'text', text: userMessage });
-    else parts.push({ type: 'text', text: 'Describe or help with this image.' });
+    parts.push({ type: 'text', text: (userMessage || 'Beskriv bilden kort.').slice(0, 1000) });
     messages.push({ role: 'user', content: parts });
   } else {
-    const text = userMessage
-      || (attachment ? `[Attached file: ${attachment.mimeType}]` : '');
-    messages.push({ role: 'user', content: text });
+    messages.push({
+      role: 'user',
+      content: (userMessage || (attachment ? `[Fil: ${attachment.mimeType}]` : '')).slice(0, 2000),
+    });
   }
 
-  const res = await fetch(ENDPOINT, {
+  const res = await fetch('/api/ai', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      model: MODEL,
       messages,
-      max_tokens: 4096,
-      temperature: 0.5,
+      max_tokens: MAX_CHAT_TOKENS,
+      temperature: 0.4,
       stream: true,
-      stream_options: { include_usage: true },
     }),
   });
 
   if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as OpenAIResponse;
-    throw new Error(err?.error?.message || `OpenAI API error: ${res.status}`);
+    const err = await res.json().catch(() => ({})) as { message?: string; error?: string };
+    throw new Error(err.message || err.error || `AI error: ${res.status}`);
   }
 
   const reader = res.body!.getReader();
@@ -166,62 +190,28 @@ export async function sendChatMessageStream(
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
       const json = line.slice(6).trim();
-      if (!json || json === '[DONE]') continue;
+      if (!json) continue;
       try {
-        const parsed = JSON.parse(json) as OpenAIResponse & {
+        const parsed = JSON.parse(json) as {
+          delta?: string;
+          done?: boolean;
           usage?: { total_tokens?: number };
         };
-        if (parsed.usage?.total_tokens) reportTokens(parsed.usage.total_tokens);
-        const chunk = parsed.choices?.[0]?.delta?.content ?? '';
-        if (chunk) onChunk(chunk);
-      } catch { /* skip malformed */ }
+        if (parsed.delta) onChunk(parsed.delta);
+        if (parsed.done) reportTokens(parsed.usage?.total_tokens);
+      } catch { /* skip */ }
     }
   }
 }
 
 export async function answerQuestion(question: string): Promise<string> {
-  return chatCompletion([
-    {
+  const q = question.replace(/<[^>]*>/g, '').trim().slice(0, 1500);
+  return callAi({
+    max_tokens: MAX_ANSWER_TOKENS,
+    temperature: 0.2,
+    messages: [{
       role: 'user',
-      content: `Besvara följande fråga på samma språk som frågan är skriven på. Ge ett tydligt och korrekt svar. Returnera ENDAST svaret, utan förklaringar eller extra text.\n\nFråga: ${question.replace(/<[^>]*>/g, '').trim()}`,
-    },
-  ]);
-}
-
-async function verifyAnswers(noteText: string, items: QuizResult[]): Promise<QuizResult[]> {
-  try {
-    const qa = items.map((item, i) => `${i + 1}. F: ${item.question}\n   S: ${item.answer}`).join('\n');
-    const text = await chatCompletion([
-      {
-        role: 'user',
-        content: `Du är en medicinsk/vetenskaplig granskare. Använd samma språk som anteckningsinnehållet och frågorna är skrivna på. Nedan finns anteckningsinnehåll och automatiskt genererade frågor (F) och svar (S).
-
-Granska varje svar och kontrollera att det stämmer med anteckningsinnehållet. Rätta eventuella fel. Svara i exakt samma format:
-
-1. F: <frågan oförändrad>
-   S: <det korrekta svaret>
----
-(repetera för varje fråga)
-
-Anteckningsinnehåll:
-${noteText.slice(0, 4000)}
-
-Frågor och svar att granska:
-${qa}`,
-      },
-    ]);
-
-    const blocks = text.split('---').map((b: string) => b.trim()).filter(Boolean);
-    const verified: QuizResult[] = [];
-    for (const block of blocks) {
-      const qMatch = block.match(/F:\s*(.+?)(?=\n\s*S:|$)/s);
-      const aMatch = block.match(/S:\s*(.+)/s);
-      if (qMatch && aMatch) {
-        verified.push({ question: qMatch[1].trim(), answer: aMatch[1].trim() });
-      }
-    }
-    return verified.length === items.length ? verified : items;
-  } catch {
-    return items;
-  }
+      content: `Besvara kort på samma språk som frågan. Endast svaret.\n\nFråga: ${q}`,
+    }],
+  });
 }

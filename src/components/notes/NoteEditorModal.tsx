@@ -4,7 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { AppRichTextEditor } from './AppRichTextEditor';
-import { generateQuiz, answerQuestion, type QuizResult } from '../../lib/gemini';
+import { generateQuiz, generateOneQa, answerQuestion, type QuizResult } from '../../lib/gemini';
 import type { Page } from '../../types';
 
 const hasContent = (h: string) => !!h.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
@@ -651,8 +651,12 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         onClick={async () => {
                           setAiGenQLoading(true);
                           try {
-                            const results = await generateQuiz(note.text || plainText);
-                            if (results.length > 0) setAiQ(mdToHtml(results[0].question));
+                            // One cheap request fills both question and answer.
+                            const qa = await generateOneQa(note.text || plainText);
+                            setAiQ(mdToHtml(qa.question));
+                            setAiA(mdToHtml(qa.answer));
+                          } catch (e) {
+                            show(e instanceof Error ? e.message : 'AI misslyckades');
                           } finally { setAiGenQLoading(false); }
                         }}
                         disabled={aiGenQLoading}

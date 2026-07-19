@@ -1774,11 +1774,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const next = prev + n;
       const u = userRef.current;
       if (u) {
-        fetch(`${FB_DB_URL}/users/${u.uid}/tokenUsage.json`, {
+        void rtdbFetch(`/users/${u.uid}/tokenUsage`, {
           method: 'PUT',
-          body: JSON.stringify(next),
           headers: { 'Content-Type': 'application/json' },
-        });
+          body: JSON.stringify(next),
+        }).catch(() => {});
       }
       return next;
     });
