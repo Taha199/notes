@@ -1,19 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { deleteObject, getBytes, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import mammoth from 'mammoth';
+import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { storage } from '../../lib/firebase';
-import { getRtdbAuthToken, rtdbFetch } from '../../lib/rtdb';
-import { getStorageLimitBytes } from '../../lib/storageQuota';
-
-/**
- * getBytes is a secondary preview fallback (proxy is primary). Cap retries so a
- * missing object fails fast instead of hanging the modal for minutes.
- */
-storage.maxOperationRetryTime = 45_000;
+import { rtdbFetch } from '../../lib/rtdb';
+import { calculateFilesStorageBytes, getStorageLimitBytes } from '../../lib/storageQuota';
 
 interface StoredFile {
   id: string;
@@ -26,15 +19,6 @@ interface StoredFile {
   folderId?: string | null;
   /** Legacy uploads stored inline in Realtime Database */
   dataUrl?: string;
-  /** Legacy inline file not yet migrated to Storage (blob withheld from the list). */
-  inlinePending?: boolean;
-}
-
-/** Full file record after resolving Storage/RTDB fields needed for preview. */
-interface ResolvedFile {
-  href: string;
-  storagePath?: string;
-  dataUrl?: string;
 }
 
 interface FileFolder {
@@ -43,27 +27,10 @@ interface FileFolder {
   createdAt: string;
 }
 
-type PreviewMode = 'image' | 'pdf' | 'docx' | 'text' | 'unsupported';
+type PreviewMode = 'image' | 'pdf' | 'text' | 'unsupported';
 
 const FILE_INPUT_ID = 'files-upload-input';
 const FILES_FOLDER_KEY = 'malacadhati_files_folder';
-/** Floor for preview; large PDFs need a long getBytes window (never fail at 6–20s). */
-const PREVIEW_TIMEOUT_MIN_MS = 60_000;
-const PREVIEW_TIMEOUT_MAX_MS = 120_000;
-/** Blob download fallback only — primary download streams via token URL. */
-const DOWNLOAD_TIMEOUT_MS = 90_000;
-const RESOLVE_TIMEOUT_MS = 12_000;
-const UNSUPPORTED_AR = 'الملف غير مدعوم';
-
-function previewBudgetMs(file: { size?: number }) {
-  const size = typeof file.size === 'number' ? file.size : 0;
-  // ~250 KB/s floor + 20s overhead, clamped (Firebase SDK getBytes is slower than CDN navigation).
-  return Math.min(PREVIEW_TIMEOUT_MAX_MS, Math.max(PREVIEW_TIMEOUT_MIN_MS, size / 250 + 20_000));
-}
-
-function isHttpUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
-}
 
 function formatSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -84,550 +51,55 @@ function normalizeList<T extends { id: string }>(data: unknown): T[] {
   return [];
 }
 
+function fileHref(file: StoredFile) {
+  return file.downloadUrl || file.dataUrl || '#';
+}
+
 function previewModeFor(file: StoredFile): PreviewMode {
-  const type = (file.type || '').toLowerCase();
+  const type = file.type.toLowerCase();
   const name = file.name.toLowerCase();
-  if (type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(name)) return 'image';
+  if (type.startsWith('image/')) return 'image';
   if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
-  // .docx can be rendered client-side; legacy .doc cannot reliably.
-  if (
-    type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    || name.endsWith('.docx')
-  ) return 'docx';
   if (type.startsWith('text/') || /\.(txt|md|json|csv|log|xml|html?)$/i.test(name)) return 'text';
   return 'unsupported';
 }
 
-/** Extract Storage object path from a Firebase download URL when metadata omitted storagePath. */
-function storagePathFromDownloadUrl(url: string): string | undefined {
-  try {
-    const u = new URL(url);
-    // https://firebasestorage.googleapis.com/v0/b/<bucket>/o/<encodedPath>?alt=media&token=...
-    const marker = '/o/';
-    const idx = u.pathname.indexOf(marker);
-    if (idx === -1) return undefined;
-    const encoded = u.pathname.slice(idx + marker.length);
-    if (!encoded) return undefined;
-    return decodeURIComponent(encoded);
-  } catch {
-    return undefined;
-  }
+function canPreview(file: StoredFile) {
+  return previewModeFor(file) !== 'unsupported';
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(label)), ms);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (err) => { clearTimeout(timer); reject(err); },
-    );
-  });
+/** Convert a legacy inline base64/text data URL back into a Blob for Storage upload. */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const commaIdx = dataUrl.indexOf(',');
+  const meta = commaIdx === -1 ? '' : dataUrl.slice(5, commaIdx); // strip leading "data:"
+  const payload = commaIdx === -1 ? '' : dataUrl.slice(commaIdx + 1);
+  const contentType = meta.split(';')[0] || 'application/octet-stream';
+  if (/;base64/i.test(meta)) {
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: contentType });
+  }
+  return new Blob([decodeURIComponent(payload)], { type: contentType });
 }
 
-function remainingMs(deadline: number) {
-  return Math.max(400, deadline - Date.now());
-}
-
-function coerceMime(blob: Blob, mimeHint?: string): Blob {
-  if (mimeHint && (!blob.type || blob.type === 'application/octet-stream')) {
-    return new Blob([blob], { type: mimeHint });
-  }
-  return blob;
-}
-
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const res = await fetch(dataUrl);
-  if (!res.ok) throw new Error('dataurl-failed');
-  return res.blob();
-}
-
-/** Fetch bytes with a real AbortController so hung network cannot outlive the budget. */
-async function fetchHrefAsBlob(href: string, timeoutMs: number, mimeHint?: string): Promise<Blob> {
-  if (href.startsWith('data:')) return coerceMime(await dataUrlToBlob(href), mimeHint);
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(href, { signal: controller.signal, mode: 'cors', credentials: 'omit' });
-    if (!res.ok) throw new Error(`fetch-failed:${res.status}`);
-    const blob = await res.blob();
-    return coerceMime(blob, mimeHint);
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
-/** Authenticated Storage SDK read — secondary preview fallback after proxy. */
-async function storagePathToBlob(path: string, mimeHint?: string, timeoutMs = 30_000): Promise<Blob> {
-  const bytes = await withTimeout(getBytes(ref(storage, path)), timeoutMs, 'getBytes-timeout');
-  return new Blob([bytes], { type: mimeHint || 'application/octet-stream' });
-}
-
-type FileApiResult = ResolvedFile & { name?: string; type?: string };
-
-/**
- * Ask the server for a usable downloadUrl / storagePath / dataUrl.
- * Server reuses existing Storage tokens (does not invalidate list URLs).
- */
-async function refreshViaFileApi(
-  fileId: string,
-  opts?: { path?: string; remint?: boolean },
-): Promise<FileApiResult | null> {
-  const token = await getRtdbAuthToken();
-  if (!token) return null;
-  const params = new URLSearchParams({ mode: 'json' });
-  if (fileId) params.set('fileId', fileId);
-  if (opts?.path) params.set('path', opts.path);
-  if (opts?.remint) params.set('remint', '1');
-  const res = await fetch(`/api/file-download?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as {
-    downloadUrl?: string;
-    storagePath?: string;
-    dataUrl?: string;
-    name?: string;
-    type?: string;
-  };
-  const href = data.downloadUrl || data.dataUrl || '';
-  if (!href && !data.storagePath) return null;
-  return {
-    href,
-    storagePath: data.storagePath || (href ? storagePathFromDownloadUrl(href) : undefined),
-    dataUrl: data.dataUrl,
-    name: data.name,
-    type: data.type,
-  };
-}
-
-/**
- * Proxy files through the service-account API (bypasses CORS +
- * Content-Disposition: attachment that blanks Firebase URLs in <iframe>).
- * When the file is too large for Hobby, throws proxy-too-large so callers
- * fall back to getBytes (browser fetch of Firebase URLs often CORS-fails).
- */
-async function proxyViaFileApi(
-  fileId: string,
-  timeoutMs: number,
-  mimeHint?: string,
-  disposition: 'inline' | 'attachment' = 'inline',
-  storagePath?: string,
-): Promise<Blob> {
-  const token = await getRtdbAuthToken();
-  if (!token) throw new Error('no-token');
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const params = new URLSearchParams({
-      mode: 'proxy',
-      disposition,
-    });
-    if (fileId) params.set('fileId', fileId);
-    if (storagePath) params.set('path', storagePath);
-    const res = await fetch(`/api/file-download?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`proxy-failed:${res.status}`);
-    const contentType = res.headers.get('content-type') || '';
-    // Server returns JSON {downloadUrl} when the file is too large to proxy.
-    if (contentType.includes('application/json')) {
-      throw new Error('proxy-too-large');
-    }
-    return coerceMime(await res.blob(), mimeHint);
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
-/**
- * Load file bytes for preview.
- * PRIMARY: /api/file-download?mode=proxy&disposition=inline → typed blob URL.
- * SECONDARY: getBytes(storagePath). Then token URL fetch / JSON refresh.
- */
-async function loadFileBlob(
-  resolved: ResolvedFile,
-  mimeHint?: string,
-  timeoutMs = PREVIEW_TIMEOUT_MIN_MS,
-  fileId?: string,
-  opts?: { skipProxy?: boolean },
-): Promise<Blob> {
-  const deadline = Date.now() + timeoutMs;
-  if (resolved.dataUrl?.startsWith('data:')) {
-    return coerceMime(await dataUrlToBlob(resolved.dataUrl), mimeHint);
-  }
-
-  const errors: unknown[] = [];
-  let href = resolved.href;
-  let path = resolved.storagePath || (href ? storagePathFromDownloadUrl(href) : undefined);
-
-  // PRIMARY — same-origin proxy (works for PDF preview; no Google Docs).
-  if (fileId && !opts?.skipProxy) {
-    try {
-      return await proxyViaFileApi(fileId, remainingMs(deadline), mimeHint, 'inline', path);
-    } catch (err) {
-      errors.push(err);
-    }
-  }
-
-  // SECONDARY — authenticated SDK read (best path when proxy exceeds Hobby size).
-  if (path && remainingMs(deadline) > 1500) {
-    try {
-      return await storagePathToBlob(path, mimeHint, remainingMs(deadline));
-    } catch (err) {
-      errors.push(err);
-    }
-  }
-
-  // Tokenized Firebase URL (CORS permitting — often fails; last resort before refresh).
-  if (href && !href.startsWith('blob:') && remainingMs(deadline) > 1000) {
-    try {
-      return await fetchHrefAsBlob(href, remainingMs(deadline), mimeHint);
-    } catch (err) {
-      errors.push(err);
-    }
-  }
-
-  // Refresh metadata via API (reuses token; does not remint), then retry.
-  if (fileId && remainingMs(deadline) > 1500) {
-    try {
-      const fresh = await withTimeout(
-        refreshViaFileApi(fileId, { path }),
-        remainingMs(deadline),
-        'api-refresh-timeout',
-      );
-      if (fresh) {
-        href = fresh.href || href;
-        path = fresh.storagePath || path;
-        if (fresh.dataUrl?.startsWith('data:')) {
-          return coerceMime(await dataUrlToBlob(fresh.dataUrl), mimeHint);
-        }
-        try {
-          return await proxyViaFileApi(fileId, remainingMs(deadline), mimeHint, 'inline', path);
-        } catch (err) {
-          errors.push(err);
-        }
-        if (path && remainingMs(deadline) > 1500) {
-          return await storagePathToBlob(path, mimeHint, remainingMs(deadline));
-        }
-        if (href && !href.startsWith('blob:')) {
-          return await fetchHrefAsBlob(href, remainingMs(deadline), mimeHint);
-        }
-      }
-    } catch (err) {
-      errors.push(err);
-    }
-  }
-
-  throw errors[0] instanceof Error ? errors[0] : new Error('no-url');
-}
-
-/** Canonical Storage path used by uploadOneFile / my-files migration. */
-function guessStoragePath(file: StoredFile, uid: string | undefined): string | undefined {
-  if (!uid || !file.id || !file.name) return undefined;
-  return `users/${uid}/files/${file.id}/${file.name}`;
-}
-
-/** Resolve download URL + storage path from list metadata, Storage, or RTDB. */
-async function resolveFile(file: StoredFile, uid: string | undefined): Promise<ResolvedFile> {
-  let result: ResolvedFile = {
-    href: file.downloadUrl || file.dataUrl || '',
-    storagePath:
-      file.storagePath
-      || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)
-      || guessStoragePath(file, uid),
-    dataUrl: file.dataUrl,
-  };
-
-  if (!result.storagePath && result.href) {
-    result = { ...result, storagePath: storagePathFromDownloadUrl(result.href) };
-  }
-
-  const ensureHrefFromStorage = async (budgetMs: number) => {
-    if (result.href || !result.storagePath) return;
-    try {
-      result = {
-        ...result,
-        href: await withTimeout(
-          getDownloadURL(ref(storage, result.storagePath)),
-          budgetMs,
-          'getDownloadURL-timeout',
-        ),
-      };
-    } catch { /* ignore */ }
-  };
-
-  // Already have a tokenized URL (or data URL) — still recover storagePath above; skip RTDB.
-  if (result.href && !file.inlinePending) {
-    return result;
-  }
-
-  await ensureHrefFromStorage(RESOLVE_TIMEOUT_MS);
-
-  // Backfill when list stripped the blob or left us without href/path.
-  if ((!result.href || file.inlinePending || !result.storagePath) && uid) {
-    try {
-      const res = await withTimeout(
-        rtdbFetch(`/users/${uid}/files/${file.id}`),
-        RESOLVE_TIMEOUT_MS,
-        'rtdb-timeout',
-      );
-      if (res.ok) {
-        const full = (await res.json()) as StoredFile | null;
-        if (full) {
-          const href = result.href || full.downloadUrl || full.dataUrl || '';
-          result = {
-            href,
-            storagePath:
-              result.storagePath
-              || full.storagePath
-              || (full.downloadUrl ? storagePathFromDownloadUrl(full.downloadUrl) : undefined)
-              || (href ? storagePathFromDownloadUrl(href) : undefined)
-              || guessStoragePath(full, uid)
-              || guessStoragePath(file, uid),
-            dataUrl: result.dataUrl || full.dataUrl,
-          };
-          await ensureHrefFromStorage(RESOLVE_TIMEOUT_MS);
-        }
-      }
-    } catch { /* ignore */ }
-  }
-
-  if (!result.storagePath) {
-    result = {
-      ...result,
-      storagePath:
-        (result.href ? storagePathFromDownloadUrl(result.href) : undefined)
-        || guessStoragePath(file, uid),
-    };
-    if (!result.href) await ensureHrefFromStorage(RESOLVE_TIMEOUT_MS);
-  }
-
-  return result;
-}
-
-/** Same-origin blob: URLs honor the download attribute; cross-origin Firebase URLs do not. */
-function triggerBlobDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename || 'download';
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
-}
-
-/**
- * Trigger a download/navigation during the click gesture (before any await).
- * Uses <a target=_blank> synchronously; also tries same-tab assign as backup
- * when the caller still has the user gesture (no await yet).
- */
-function openDownloadUrlNow(href: string, filename?: string): boolean {
-  if (!href || href.startsWith('data:') || href.startsWith('blob:')) return false;
-  if (!isHttpUrl(href) && !href.startsWith('/')) return false;
-  try {
-    const a = document.createElement('a');
-    a.href = href;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    if (filename) a.setAttribute('download', filename);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** After awaits: same-tab navigate is not popup-blocked (last resort). */
-function navigateToDownloadUrl(href: string) {
-  window.location.assign(href);
-}
-
-/** Service-account proxy with Content-Disposition: attachment → blob download (no popup). */
-async function downloadViaApiAttachment(
-  fileId: string,
-  filename: string,
-  timeoutMs: number,
-  storagePath?: string,
-): Promise<boolean> {
-  try {
-    const blob = await proxyViaFileApi(
-      fileId,
-      timeoutMs,
-      undefined,
-      'attachment',
-      storagePath,
-    );
-    triggerBlobDownload(blob, filename);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-type FileMetaPatch = Partial<Pick<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl'>>;
-
-/**
- * Download MUST work even when preview fails — and must feel fast.
- * 1) Sync: <a href=downloadUrl> during the click gesture (no await).
- * 2) storagePath → getDownloadURL → open/navigate (CDN stream, not full getBytes).
- * 3) /api/file-download JSON URL, then attachment proxy / dataUrl blob.
- */
-async function downloadStoredFile(
-  file: StoredFile,
-  uid: string | undefined,
-  onMeta?: (patch: FileMetaPatch) => void,
-): Promise<void> {
-  const path =
-    file.storagePath
-    || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)
-    || guessStoragePath(file, uid);
-
-  // 1) IMMEDIATE — preserve user gesture with the list downloadUrl. Stay fast;
-  // do not remint or second-guess a working tokenized URL.
-  if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl, file.name)) {
-    if (path && path !== file.storagePath) onMeta?.({ storagePath: path });
-    return;
-  }
-
+async function loadTextPreview(file: StoredFile, href: string): Promise<string> {
   if (file.dataUrl?.startsWith('data:')) {
-    try {
-      triggerBlobDownload(await dataUrlToBlob(file.dataUrl), file.name);
-      return;
-    } catch { /* fall through */ }
-  }
-
-  const tryOpenOrNavigate = (href: string): boolean => {
-    if (!href || href.startsWith('data:') || href.startsWith('blob:')) return false;
-    if (openDownloadUrlNow(href, file.name)) return true;
-    try {
-      navigateToDownloadUrl(href);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  // 2) storagePath → getDownloadURL (fast metadata) then open CDN URL.
-  if (path) {
-    try {
-      const url = await withTimeout(
-        getDownloadURL(ref(storage, path)),
-        RESOLVE_TIMEOUT_MS,
-        'getDownloadURL-timeout',
-      );
-      onMeta?.({ downloadUrl: url, storagePath: path });
-      if (tryOpenOrNavigate(url)) return;
-    } catch { /* fall through */ }
-  }
-
-  // 3) Server JSON (reuses existing token — does not poison list URLs).
-  try {
-    const fresh = await refreshViaFileApi(file.id, { path });
-    if (fresh?.dataUrl?.startsWith('data:')) {
-      triggerBlobDownload(await dataUrlToBlob(fresh.dataUrl), file.name);
-      return;
-    }
-    if (fresh?.href) {
-      onMeta?.({
-        downloadUrl: fresh.href.startsWith('http') ? fresh.href : undefined,
-        storagePath: fresh.storagePath || path,
-      });
-      if (tryOpenOrNavigate(fresh.href)) return;
-    }
-    if (fresh?.storagePath && fresh.storagePath !== path) {
-      const url = await withTimeout(
-        getDownloadURL(ref(storage, fresh.storagePath)),
-        RESOLVE_TIMEOUT_MS,
-        'getDownloadURL-timeout',
-      );
-      onMeta?.({ downloadUrl: url, storagePath: fresh.storagePath });
-      if (tryOpenOrNavigate(url)) return;
-    }
-  } catch { /* fall through */ }
-
-  // 4) Attachment proxy / blob (works when navigation is blocked).
-  try {
-    if (await downloadViaApiAttachment(file.id, file.name, DOWNLOAD_TIMEOUT_MS, path)) {
-      return;
-    }
-  } catch { /* fall through */ }
-
-  if (file.dataUrl?.startsWith('data:')) {
-    triggerBlobDownload(await dataUrlToBlob(file.dataUrl), file.name);
-    return;
-  }
-
-  throw new Error('download-failed');
-}
-
-async function loadTextPreview(href: string, timeoutMs = PREVIEW_TIMEOUT_MIN_MS): Promise<string> {
-  if (href.startsWith('data:')) {
-    const match = href.match(/^data:([^,]*),(.*)$/s);
+    const match = file.dataUrl.match(/^data:([^,]*),(.*)$/s);
     if (!match) return '';
     const [, meta, payload] = match;
     if (meta.includes('base64')) return atob(payload);
     return decodeURIComponent(payload);
   }
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(href, { signal: controller.signal, mode: 'cors', credentials: 'omit' });
-    if (!res.ok) throw new Error('fetch-failed');
-    return res.text();
-  } finally {
-    window.clearTimeout(timer);
-  }
+  const res = await fetch(href);
+  return res.text();
 }
 
-function FilePreviewModal({
-  file,
-  uid,
-  onClose,
-  onMeta,
-  t,
-}: {
-  file: StoredFile;
-  uid?: string;
-  onClose: () => void;
-  onMeta?: (patch: FileMetaPatch) => void;
-  t: {
-    filesDownload: string;
-    filesPreviewUnavailable: string;
-    filesPreviewFailed: string;
-    filesDownloadFailed: string;
-  };
-}) {
+function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () => void; t: { filesDownload: string; filesPreviewUnavailable: string } }) {
+  const href = fileHref(file);
   const mode = previewModeFor(file);
-  const [previewSrc, setPreviewSrc] = useState('');
-  const [resolving, setResolving] = useState(mode !== 'unsupported');
-  const [failed, setFailed] = useState(mode === 'unsupported');
   const [textContent, setTextContent] = useState('');
-  const [docxHtml, setDocxHtml] = useState('');
-  const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState('');
-  const [loadPct, setLoadPct] = useState(0);
-  const objectUrlRef = useRef<string | null>(null);
-  const imageFallbackRef = useRef(false);
-  const previewGenRef = useRef(0);
-  const onMetaRef = useRef(onMeta);
-  onMetaRef.current = onMeta;
-
-  const revokeObjectUrl = () => {
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
-  };
-
-  // Network/load failures must NOT use the "unsupported type" copy — download still works.
-  const errorMessage = failed
-    ? (mode === 'unsupported' ? t.filesPreviewUnavailable : t.filesPreviewFailed)
-    : '';
+  const [loadingText, setLoadingText] = useState(mode === 'text');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -635,299 +107,22 @@ function FilePreviewModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Preview only — download is handled separately and never blocked by this effect.
   useEffect(() => {
-    const gen = ++previewGenRef.current;
+    if (mode !== 'text') return;
     let cancelled = false;
-    let painted = false;
-    const budget = previewBudgetMs(file);
-    const deadline = Date.now() + budget;
-    revokeObjectUrl();
-    imageFallbackRef.current = false;
-    setPreviewSrc('');
-    setTextContent('');
-    setDocxHtml('');
-    setDownloadError('');
-    setLoadPct(8);
-    setFailed(mode === 'unsupported');
-    setResolving(mode !== 'unsupported');
-
-    if (mode === 'unsupported') {
-      return () => { cancelled = true; };
-    }
-
-    const isLive = () => !cancelled && previewGenRef.current === gen;
-
-    const showObjectUrl = (blob: Blob) => {
-      const typed = mode === 'pdf' ? coerceMime(blob, 'application/pdf') : blob;
-      const src = URL.createObjectURL(typed);
-      if (!isLive()) {
-        URL.revokeObjectURL(src);
-        return;
-      }
-      revokeObjectUrl();
-      objectUrlRef.current = src;
-      setPreviewSrc(src);
-      setFailed(false);
-      setResolving(false);
-      setLoadPct(100);
-      painted = true;
-    };
-
-    const paintDirect = (url: string) => {
-      if (!isLive()) return;
-      setPreviewSrc(url);
-      setFailed(false);
-      setResolving(false);
-      setLoadPct(100);
-      painted = true;
-    };
-
-    const failPreview = () => {
-      if (!isLive() || painted) return;
-      revokeObjectUrl();
-      setPreviewSrc('');
-      setDocxHtml('');
-      setTextContent('');
-      setFailed(true);
-      setResolving(false);
-      setLoadPct(0);
-    };
-
-    const progressTimer = window.setInterval(() => {
-      if (!isLive() || painted) return;
-      setLoadPct((p) => Math.min(92, p + 2));
-    }, 400);
-
+    setLoadingText(true);
     (async () => {
       try {
-        // Images: paint token URL immediately (fast). Blob only on <img> error.
-        if (mode === 'image') {
-          const quickHref = file.downloadUrl || file.dataUrl || '';
-          if (quickHref && !quickHref.startsWith('blob:')) {
-            paintDirect(quickHref);
-            return;
-          }
-          setLoadPct(20);
-          const resolved = await withTimeout(
-            resolveFile(file, uid),
-            Math.min(RESOLVE_TIMEOUT_MS, remainingMs(deadline)),
-            'resolve-timeout',
-          );
-          if (!isLive()) return;
-          if (resolved.href || resolved.dataUrl) {
-            paintDirect(resolved.href || resolved.dataUrl || '');
-            return;
-          }
-          setLoadPct(40);
-          const blob = await loadFileBlob(
-            resolved,
-            file.type || undefined,
-            remainingMs(deadline),
-            file.id,
-          );
-          if (!isLive()) return;
-          showObjectUrl(blob);
-          return;
-        }
-
-        // PDF: NEVER use Google Docs / raw Firebase URL in an iframe (blank or forced download).
-        // PRIMARY: same-origin proxy → blob: URL typed application/pdf for <iframe>/<embed>.
-        // SECONDARY: getBytes via loadFileBlob fallbacks.
-        if (mode === 'pdf') {
-          const quickPath =
-            file.storagePath
-            || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)
-            || guessStoragePath(file, uid);
-          setLoadPct(15);
-
-          if (file.dataUrl?.startsWith('data:')) {
-            showObjectUrl(coerceMime(await dataUrlToBlob(file.dataUrl), 'application/pdf'));
-            return;
-          }
-
-          let blob: Blob | null = null;
-          try {
-            blob = await proxyViaFileApi(
-              file.id,
-              remainingMs(deadline),
-              'application/pdf',
-              'inline',
-              quickPath,
-            );
-          } catch {
-            // Already tried proxy — fall through to getBytes / URL fetch.
-            const resolved: ResolvedFile = {
-              href: file.downloadUrl || '',
-              storagePath: quickPath,
-              dataUrl: file.dataUrl,
-            };
-            blob = await loadFileBlob(
-              resolved,
-              'application/pdf',
-              remainingMs(deadline),
-              file.id,
-              { skipProxy: true },
-            );
-          }
-          if (!isLive()) return;
-          if (quickPath && quickPath !== file.storagePath) {
-            onMetaRef.current?.({ storagePath: quickPath });
-          }
-          showObjectUrl(coerceMime(blob, 'application/pdf'));
-          return;
-        }
-
-        setLoadPct(20);
-        const resolved = await withTimeout(
-          resolveFile(file, uid),
-          Math.min(RESOLVE_TIMEOUT_MS, remainingMs(deadline)),
-          'resolve-timeout',
-        );
-        if (!isLive()) return;
-
-        if (!resolved.href && !resolved.storagePath && !resolved.dataUrl) {
-          const fresh = await refreshViaFileApi(file.id);
-          if (!fresh?.href && !fresh?.storagePath && !fresh?.dataUrl) {
-            failPreview();
-            return;
-          }
-          Object.assign(resolved, fresh);
-          if (fresh.href?.startsWith('http') || fresh.storagePath) {
-            onMetaRef.current?.({
-              downloadUrl: fresh.href?.startsWith('http') ? fresh.href : undefined,
-              storagePath: fresh.storagePath,
-            });
-          }
-        }
-
-        setLoadPct(45);
-
-        if (mode === 'docx') {
-          const blob = await loadFileBlob(
-            resolved,
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            remainingMs(deadline),
-            file.id,
-          );
-          if (!isLive()) return;
-          const arrayBuffer = await blob.arrayBuffer();
-          const result = await withTimeout(
-            mammoth.convertToHtml({ arrayBuffer }),
-            remainingMs(deadline),
-            'mammoth-timeout',
-          );
-          if (!isLive()) return;
-          setDocxHtml(result.value || `<p>${UNSUPPORTED_AR}</p>`);
-          setFailed(false);
-          setResolving(false);
-          setLoadPct(100);
-          painted = true;
-          return;
-        }
-
-        if (mode === 'text') {
-          let body = '';
-          if (resolved.dataUrl?.startsWith('data:')) {
-            body = await loadTextPreview(resolved.dataUrl, remainingMs(deadline));
-          } else if (resolved.href?.startsWith('data:')) {
-            body = await loadTextPreview(resolved.href, remainingMs(deadline));
-          } else {
-            const blob = await loadFileBlob(
-              resolved,
-              'text/plain',
-              remainingMs(deadline),
-              file.id,
-            );
-            body = await blob.text();
-          }
-          if (!isLive()) return;
-          setTextContent(body);
-          setFailed(false);
-          setResolving(false);
-          setLoadPct(100);
-          painted = true;
-          return;
-        }
-
-        failPreview();
+        const body = await loadTextPreview(file, href);
+        if (!cancelled) setTextContent(body);
       } catch {
-        failPreview();
+        if (!cancelled) setTextContent(t.filesPreviewUnavailable);
       } finally {
-        if (isLive() && !painted) setResolving(false);
-        else if (isLive() && painted) setResolving(false);
+        if (!cancelled) setLoadingText(false);
       }
     })();
-
-    const failsafe = window.setTimeout(() => {
-      if (!isLive()) return;
-      if (!painted) failPreview();
-    }, budget + 500);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(failsafe);
-      window.clearInterval(progressTimer);
-      revokeObjectUrl();
-    };
-  }, [file.id, file.downloadUrl, file.storagePath, file.dataUrl, file.type, file.name, file.size, uid, mode]);
-
-  const onImageError = () => {
-    if (imageFallbackRef.current || mode !== 'image') {
-      setFailed(true);
-      setResolving(false);
-      return;
-    }
-    imageFallbackRef.current = true;
-    setResolving(true);
-    setLoadPct(30);
-    const deadline = Date.now() + previewBudgetMs(file);
-    void (async () => {
-      try {
-        const resolved = await resolveFile(file, uid);
-        const blob = await loadFileBlob(
-          resolved,
-          file.type || undefined,
-          remainingMs(deadline),
-          file.id,
-        );
-        const src = URL.createObjectURL(blob);
-        revokeObjectUrl();
-        objectUrlRef.current = src;
-        setPreviewSrc(src);
-        setFailed(false);
-        setLoadPct(100);
-      } catch {
-        setFailed(true);
-      } finally {
-        setResolving(false);
-      }
-    })();
-  };
-
-  const onDownloadClick = (e: MouseEvent) => {
-    e.stopPropagation();
-    if (downloading) return;
-    setDownloadError('');
-    // Sync open during the click gesture — before any await / setState yield.
-    if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl, file.name)) {
-      return;
-    }
-    setDownloading(true);
-    void (async () => {
-      try {
-        await downloadStoredFile(file, uid, (patch) => onMetaRef.current?.(patch));
-      } catch {
-        setDownloadError(t.filesDownloadFailed);
-        window.alert(t.filesDownloadFailed);
-      } finally {
-        setDownloading(false);
-      }
-    })();
-  };
-
-  const showPdf = mode === 'pdf' && !!previewSrc && !failed;
-  const showImage = mode === 'image' && !!previewSrc && !failed;
+    return () => { cancelled = true; };
+  }, [file, href, mode, t.filesPreviewUnavailable]);
 
   return createPortal(
     <div
@@ -940,14 +135,14 @@ function FilePreviewModal({
       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
         <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={onDownloadClick}
-            disabled={downloading}
-            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
+          <a
+            href={href}
+            download={file.name}
+            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
+            onClick={(e) => e.stopPropagation()}
           >
-            {downloading ? '…' : t.filesDownload}
-          </button>
+            {t.filesDownload}
+          </a>
           <button
             type="button"
             onClick={onClose}
@@ -958,54 +153,20 @@ function FilePreviewModal({
           </button>
         </div>
       </div>
-      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {downloadError && (
-          <p className="mb-3 rounded-xl bg-red-500/20 px-4 py-2 text-center text-sm text-white" dir="auto">
-            {downloadError}
-          </p>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
+        {mode === 'image' && (
+          <img src={href} alt={file.name} className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl" />
         )}
-        {resolving && (
-          <div className="absolute top-6 z-10 flex w-48 flex-col items-center gap-2 rounded-xl bg-black/55 px-3 py-2">
-            <p className="text-sm text-white/90">…</p>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/20">
-              <div
-                className="h-full rounded-full bg-white transition-[width] duration-300"
-                style={{ width: `${loadPct}%` }}
-              />
-            </div>
-          </div>
+        {mode === 'pdf' && (
+          <iframe title={file.name} src={href} className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl" />
         )}
-        {!resolving && failed && (
-          <p className="rounded-xl bg-white/10 px-4 py-3 text-center text-sm text-white" dir="auto">
-            {errorMessage}
-          </p>
-        )}
-        {showImage && (
-          <img
-            src={previewSrc}
-            alt={file.name}
-            className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
-            onError={onImageError}
-          />
-        )}
-        {showPdf && (
-          <iframe
-            title={file.name}
-            src={previewSrc}
-            className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
-          />
-        )}
-        {!resolving && !failed && mode === 'docx' && (
-          <div
-            className="prose prose-sm max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-6 text-left text-gray-900 shadow-2xl dark:prose-invert dark:bg-gray-900 dark:text-gray-100"
-            // Mammoth output is generated locally from the user's own file bytes.
-            dangerouslySetInnerHTML={{ __html: docxHtml }}
-          />
-        )}
-        {!resolving && !failed && mode === 'text' && (
+        {mode === 'text' && (
           <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
-            {textContent}
+            {loadingText ? '…' : textContent}
           </pre>
+        )}
+        {mode === 'unsupported' && (
+          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewUnavailable}</p>
         )}
       </div>
     </div>,
@@ -1013,33 +174,21 @@ function FilePreviewModal({
   );
 }
 
-function FilesLoadingIndicator({ text, progress }: { text: string; progress: number }) {
+function FilesLoadingIndicator({ text }: { text: string }) {
   const label = text.replace(/[.…]+\s*$/, '');
-  const pct = Math.min(100, Math.max(0, Math.round(progress)));
   return (
-    <div className="flex w-full max-w-xs flex-col items-center gap-4">
+    <div className="flex flex-col items-center gap-3">
       <span className="animate-files-loading-float text-4xl opacity-50" aria-hidden>☁️</span>
-      <p className="text-sm font-medium">
+      <p className="flex items-center gap-0.5 text-sm font-medium">
         <span className="animate-files-loading-shimmer bg-gradient-to-r from-app-text-secondary via-primary to-app-text-secondary bg-[length:220%_100%] bg-clip-text text-transparent dark:from-gray-500 dark:via-primary/90 dark:to-gray-500">
           {label}
         </span>
+        <span className="inline-flex min-w-[1.4rem] translate-y-px gap-px text-primary/80 dark:text-primary/90" aria-hidden>
+          <span className="animate-files-loading-dot [animation-delay:0ms]">·</span>
+          <span className="animate-files-loading-dot [animation-delay:180ms]">·</span>
+          <span className="animate-files-loading-dot [animation-delay:360ms]">·</span>
+        </span>
       </p>
-      <div
-        className="w-full"
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={pct}
-        aria-label={label}
-      >
-        <div className="h-2 overflow-hidden rounded-full bg-primary/10 shadow-inner dark:bg-primary/20">
-          <div
-            className="h-full rounded-full bg-primary shadow-sm shadow-primary/30 transition-[width] duration-200 ease-out"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <p className="mt-2 text-center text-sm font-semibold tabular-nums text-primary">{pct}%</p>
-      </div>
     </div>
   );
 }
@@ -1062,8 +211,6 @@ export function FilesPage({ search }: { search: string }) {
     }
   });
   const [loading, setLoading] = useState(true);
-  const [loadProgress, setLoadProgress] = useState(0);
-  const loadProgressTargetRef = useRef(0);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
@@ -1075,6 +222,7 @@ export function FilesPage({ search }: { search: string }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
+  const migrationStartedRef = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
@@ -1089,128 +237,41 @@ export function FilesPage({ search }: { search: string }) {
   }, [renamingFolderId]);
 
   useEffect(() => {
-    if (!loading) return;
-    const id = window.setInterval(() => {
-      setLoadProgress((prev) => {
-        const target = loadProgressTargetRef.current;
-        if (prev >= 100) return 100;
-        if (prev >= target) {
-          const creepCap = Math.min(97, target + 14);
-          if (prev < creepCap) return Math.min(creepCap, prev + 0.35);
-          return prev;
-        }
-        const delta = Math.max(0.8, (target - prev) * 0.14);
-        return Math.min(target, prev + delta);
-      });
-    }, 40);
-    return () => window.clearInterval(id);
-  }, [loading]);
-
-  useEffect(() => {
     let cancelled = false;
-    const bumpTarget = (value: number) => {
-      if (!cancelled) loadProgressTargetRef.current = value;
-    };
-    const paintList = (data: { files?: StoredFile[]; folders?: FileFolder[] }) => {
-      if (cancelled) return;
-      setFiles(
-        (data.files ?? []).sort(
-          (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
-        ),
-      );
-      setFolders(
-        (data.folders ?? []).sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        ),
-      );
-    };
-    const finishLoading = () => {
-      bumpTarget(100);
-      setLoadProgress(100);
-      if (!cancelled) setLoading(false);
-    };
-
     if (!user) {
       setFiles([]);
       setFolders([]);
-      setLoadProgress(0);
-      loadProgressTargetRef.current = 0;
       setLoading(false);
       return;
     }
     setLoading(true);
-    setLoadProgress(0);
-    loadProgressTargetRef.current = 10;
     (async () => {
-      // Fast path: metadata-only list. Migration runs AFTER first paint (?migrate=1).
       try {
-        bumpTarget(25);
-        const token = await getRtdbAuthToken();
-        if (!token) throw new Error('no-token');
-        bumpTarget(50);
-
-        const res = await fetch('/api/my-files', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error('load-failed');
-        bumpTarget(85);
-
-        const data = (await res.json()) as {
-          files?: StoredFile[];
-          folders?: FileFolder[];
-          migratedRemaining?: boolean;
-        };
-        paintList(data);
-        finishLoading();
-
-        // Background migration — never blocks the list UI.
-        let more = data.migratedRemaining === true;
-        let guard = 0;
-        while (more && !cancelled && guard++ < 50) {
-          const migRes = await fetch('/api/my-files?migrate=1', {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (!migRes.ok) break;
-          const mig = (await migRes.json()) as {
-            files?: StoredFile[];
-            folders?: FileFolder[];
-            migratedRemaining?: boolean;
-          };
-          paintList(mig);
-          more = mig.migratedRemaining === true;
+        const [filesRes, foldersRes] = await Promise.all([
+          rtdbFetch(`/users/${user.uid}/files`),
+          rtdbFetch(`/users/${user.uid}/fileFolders`),
+        ]);
+        const cloudFiles = await filesRes.json();
+        const cloudFolders = await foldersRes.json();
+        if (!cancelled) {
+          setFiles(
+            normalizeList<StoredFile>(cloudFiles).sort(
+              (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
+            ),
+          );
+          setFolders(
+            normalizeList<FileFolder>(cloudFolders).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+            ),
+          );
         }
       } catch {
-        if (cancelled) return;
-        // Fallback: read directly from the database (older path).
-        try {
-          bumpTarget(30);
-          const [filesRes, foldersRes] = await Promise.all([
-            rtdbFetch(`/users/${user.uid}/files`),
-            rtdbFetch(`/users/${user.uid}/fileFolders`),
-          ]);
-          bumpTarget(75);
-          const cloudFiles = await filesRes.json();
-          const cloudFolders = await foldersRes.json();
-          if (!cancelled) {
-            setFiles(
-              normalizeList<StoredFile>(cloudFiles).sort(
-                (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
-              ),
-            );
-            setFolders(
-              normalizeList<FileFolder>(cloudFolders).sort(
-                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-              ),
-            );
-          }
-          finishLoading();
-        } catch {
-          if (!cancelled) {
-            setFiles([]);
-            setFolders([]);
-            finishLoading();
-          }
+        if (!cancelled) {
+          setFiles([]);
+          setFolders([]);
         }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -1223,6 +284,28 @@ export function FilesPage({ search }: { search: string }) {
       setCurrentFolderId(null);
     }
   }, [currentFolderId, folders]);
+
+  // Background: migrate any legacy inline (base64) files to Storage so future
+  // loads (and the admin panel) stay fast. Runs once, never blocks the UI.
+  useEffect(() => {
+    if (!user || migrationStartedRef.current) return;
+    const legacy = files.filter((f) => f.dataUrl && !f.storagePath);
+    if (legacy.length === 0) return;
+    migrationStartedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      for (const file of legacy) {
+        if (cancelled) break;
+        try {
+          await migrateInlineFileToStorage(file);
+        } catch {
+          /* keep the inline copy on failure — file stays accessible */
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, user]);
 
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
 
@@ -1304,6 +387,22 @@ export function FilesPage({ search }: { search: string }) {
     return { ...withFolder, downloadUrl, storagePath };
   };
 
+  /** Move a legacy inline (base64) file into Storage and drop the heavy dataUrl. */
+  const migrateInlineFileToStorage = async (file: StoredFile) => {
+    if (!user || !file.dataUrl) return;
+    const blob = dataUrlToBlob(file.dataUrl);
+    const storagePath = file.storagePath || `users/${user.uid}/files/${file.id}/${file.name}`;
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, blob, { contentType: file.type || 'application/octet-stream' });
+    const downloadUrl = await getDownloadURL(storageRef);
+    const migrated: StoredFile = { ...file, downloadUrl, storagePath };
+    delete migrated.dataUrl;
+    // Persist the light metadata (removes the inline blob from the DB) only after
+    // the Storage upload succeeded, so the file is never lost.
+    await saveFileMeta(migrated);
+    setFiles((prev) => prev.map((f) => (f.id === file.id ? migrated : f)));
+  };
+
   const handleFiles = async (list: FileList | null) => {
     if (!list?.length) return;
     if (!user) {
@@ -1322,15 +421,11 @@ export function FilesPage({ search }: { search: string }) {
     setUploading(true);
     const uploaded: StoredFile[] = [];
     try {
-      // Quota: use in-memory file sizes + a small profile read (no full-tree download).
-      let profile: Record<string, unknown> = {};
-      try {
-        const profRes = await rtdbFetch(`/users/${user.uid}/profile`);
-        if (profRes.ok) profile = (await profRes.json()) ?? {};
-      } catch {
-        /* fall back to defaults */
-      }
-      const usedBytes = files.reduce((sum, f) => sum + (typeof f.size === 'number' ? f.size : 0), 0);
+      const userRes = await rtdbFetch(`/users/${user.uid}`);
+      if (!userRes.ok) throw new Error('profile-load-failed');
+      const userData = (await userRes.json()) ?? {};
+      const profile = (userData.profile ?? {}) as Record<string, unknown>;
+      const usedBytes = calculateFilesStorageBytes(userData);
       const limitBytes = getStorageLimitBytes(profile, user.email);
       const incomingBytes = selected.reduce((sum, file) => sum + file.size, 0);
       if (usedBytes + incomingBytes > limitBytes) {
@@ -1632,7 +727,7 @@ export function FilesPage({ search }: { search: string }) {
           onDrop={onDrop}
         >
           {loading ? (
-            <FilesLoadingIndicator text={t.filesLoading} progress={loadProgress} />
+            <FilesLoadingIndicator text={t.filesLoading} />
           ) : (
             <>
               <span className="mb-3 text-5xl opacity-30">{currentFolderId ? '📁' : '📎'}</span>
@@ -1735,41 +830,22 @@ export function FilesPage({ search }: { search: string }) {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPreviewFile(file)}
-                  className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:hover:bg-white/10"
-                >
-                  {t.filesPreview}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const patchMeta = (patch: FileMetaPatch) => {
-                      setFiles((prev) =>
-                        prev.map((item) => (item.id === file.id ? { ...item, ...patch } : item)),
-                      );
-                      setPreviewFile((prev) =>
-                        prev?.id === file.id ? { ...prev, ...patch } : prev,
-                      );
-                    };
-                    // Sync open during the click gesture — before any await.
-                    if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl, file.name)) {
-                      return;
-                    }
-                    void (async () => {
-                      try {
-                        await downloadStoredFile(file, user?.uid, patchMeta);
-                      } catch {
-                        show(t.filesDownloadFailed);
-                        window.alert(t.filesDownloadFailed);
-                      }
-                    })();
-                  }}
+                {canPreview(file) && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewFile(file)}
+                    className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:hover:bg-white/10"
+                  >
+                    {t.filesPreview}
+                  </button>
+                )}
+                <a
+                  href={fileHref(file)}
+                  download={file.name}
                   className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
                 >
                   {t.filesDownload}
-                </button>
+                </a>
                 <button
                   type="button"
                   onClick={() => startRename(file)}
@@ -1821,18 +897,7 @@ export function FilesPage({ search }: { search: string }) {
       )}
 
       {previewFile && (
-        <FilePreviewModal
-          file={previewFile}
-          uid={user?.uid}
-          onClose={() => setPreviewFile(null)}
-          onMeta={(patch) => {
-            setFiles((prev) =>
-              prev.map((item) => (item.id === previewFile.id ? { ...item, ...patch } : item)),
-            );
-            setPreviewFile((prev) => (prev ? { ...prev, ...patch } : prev));
-          }}
-          t={t}
-        />
+        <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} t={t} />
       )}
     </div>
   );
