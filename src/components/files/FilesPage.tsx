@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { deleteObject, getBlob, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import mammoth from 'mammoth';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -36,10 +37,13 @@ interface FileFolder {
   createdAt: string;
 }
 
-type PreviewMode = 'image' | 'pdf' | 'text' | 'unsupported';
+type PreviewMode = 'image' | 'pdf' | 'docx' | 'text' | 'unsupported';
 
 const FILE_INPUT_ID = 'files-upload-input';
 const FILES_FOLDER_KEY = 'malacadhati_files_folder';
+/** Never leave the preview modal spinning — Storage getBlob/fetch can stall indefinitely. */
+const PREVIEW_TIMEOUT_MS = 25_000;
+const UNSUPPORTED_AR = 'الملف غير مدعوم';
 
 function formatSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -69,41 +73,135 @@ function previewModeFor(file: StoredFile): PreviewMode {
   const name = file.name.toLowerCase();
   if (type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(name)) return 'image';
   if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+  // .docx can be rendered client-side; legacy .doc cannot reliably.
+  if (
+    type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    || name.endsWith('.docx')
+  ) return 'docx';
   if (type.startsWith('text/') || /\.(txt|md|json|csv|log|xml|html?)$/i.test(name)) return 'text';
   return 'unsupported';
 }
 
-function canPreview(file: StoredFile) {
-  return previewModeFor(file) !== 'unsupported';
+/** Extract Storage object path from a Firebase download URL when metadata omitted storagePath. */
+function storagePathFromDownloadUrl(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    // https://firebasestorage.googleapis.com/v0/b/<bucket>/o/<encodedPath>?alt=media&token=...
+    const marker = '/o/';
+    const idx = u.pathname.indexOf(marker);
+    if (idx === -1) return undefined;
+    const encoded = u.pathname.slice(idx + marker.length);
+    if (!encoded) return undefined;
+    return decodeURIComponent(encoded);
+  } catch {
+    return undefined;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  if (!res.ok) throw new Error('dataurl-failed');
+  return res.blob();
+}
+
+/**
+ * Load file bytes for preview. Firebase download URLs often send
+ * Content-Disposition: attachment (breaks PDF iframes / some image loads),
+ * so prefer authenticated getBlob → object URL, with fetch fallback + timeout.
+ */
+async function loadPreviewBlob(resolved: ResolvedFile, mimeHint?: string): Promise<Blob> {
+  if (resolved.dataUrl?.startsWith('data:')) {
+    return dataUrlToBlob(resolved.dataUrl);
+  }
+
+  const path = resolved.storagePath || (resolved.href ? storagePathFromDownloadUrl(resolved.href) : undefined);
+  const errors: unknown[] = [];
+
+  if (path) {
+    try {
+      const blob = await withTimeout(getBlob(ref(storage, path)), PREVIEW_TIMEOUT_MS, 'getBlob-timeout');
+      if (mimeHint && (!blob.type || blob.type === 'application/octet-stream')) {
+        return new Blob([blob], { type: mimeHint });
+      }
+      return blob;
+    } catch (err) {
+      errors.push(err);
+    }
+  }
+
+  const href = resolved.href;
+  if (!href) {
+    throw errors[0] instanceof Error ? errors[0] : new Error('no-url');
+  }
+  if (href.startsWith('data:')) return dataUrlToBlob(href);
+  if (href.startsWith('blob:')) {
+    const res = await withTimeout(fetch(href), PREVIEW_TIMEOUT_MS, 'blob-fetch-timeout');
+    if (!res.ok) throw new Error('fetch-failed');
+    const blob = await res.blob();
+    if (mimeHint && (!blob.type || blob.type === 'application/octet-stream')) {
+      return new Blob([blob], { type: mimeHint });
+    }
+    return blob;
+  }
+
+  const res = await withTimeout(fetch(href), PREVIEW_TIMEOUT_MS, 'fetch-timeout');
+  if (!res.ok) throw new Error(`fetch-failed:${res.status}`);
+  const blob = await res.blob();
+  if (mimeHint && (!blob.type || blob.type === 'application/octet-stream')) {
+    return new Blob([blob], { type: mimeHint });
+  }
+  return blob;
 }
 
 /** Resolve download URL + storage path (Storage token, path, or legacy inline blob). */
 async function resolveFile(file: StoredFile, uid: string | undefined): Promise<ResolvedFile> {
   let result: ResolvedFile = {
     href: file.downloadUrl || file.dataUrl || '',
-    storagePath: file.storagePath,
+    storagePath: file.storagePath || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined),
     dataUrl: file.dataUrl,
   };
 
   const ensureHrefFromStorage = async () => {
     if (result.href || !result.storagePath) return;
     try {
-      result = { ...result, href: await getDownloadURL(ref(storage, result.storagePath)) };
+      result = {
+        ...result,
+        href: await withTimeout(
+          getDownloadURL(ref(storage, result.storagePath)),
+          PREVIEW_TIMEOUT_MS,
+          'getDownloadURL-timeout',
+        ),
+      };
     } catch { /* ignore */ }
   };
 
   await ensureHrefFromStorage();
 
   // Backfill when the list API withheld the blob or left us without a usable URL.
-  if ((!result.href || file.inlinePending) && uid) {
+  if ((!result.href || file.inlinePending || !result.storagePath) && uid) {
     try {
       const res = await rtdbFetch(`/users/${uid}/files/${file.id}`);
       if (res.ok) {
         const full = (await res.json()) as StoredFile | null;
         if (full) {
+          const href = result.href || full.downloadUrl || full.dataUrl || '';
           result = {
-            href: result.href || full.downloadUrl || full.dataUrl || '',
-            storagePath: result.storagePath || full.storagePath,
+            href,
+            storagePath:
+              result.storagePath
+              || full.storagePath
+              || (full.downloadUrl ? storagePathFromDownloadUrl(full.downloadUrl) : undefined)
+              || (href ? storagePathFromDownloadUrl(href) : undefined),
             dataUrl: result.dataUrl || full.dataUrl,
           };
           await ensureHrefFromStorage();
@@ -112,29 +210,15 @@ async function resolveFile(file: StoredFile, uid: string | undefined): Promise<R
     } catch { /* ignore */ }
   }
 
+  if (!result.storagePath && result.href) {
+    result = { ...result, storagePath: storagePathFromDownloadUrl(result.href) };
+  }
+
   return result;
 }
 
 async function resolveFileUrl(file: StoredFile, uid: string | undefined): Promise<string> {
   return (await resolveFile(file, uid)).href;
-}
-
-/**
- * PDFs cannot reliably render from Firebase Storage download URLs in an iframe
- * (Content-Disposition: attachment leaves a blank viewer). Prefer SDK getBlob → object URL.
- */
-async function loadPdfPreviewSrc(resolved: ResolvedFile): Promise<string> {
-  if (resolved.dataUrl?.startsWith('data:')) return resolved.dataUrl;
-  if (resolved.storagePath) {
-    const blob = await getBlob(ref(storage, resolved.storagePath));
-    return URL.createObjectURL(blob);
-  }
-  if (!resolved.href) throw new Error('no-url');
-  if (resolved.href.startsWith('data:') || resolved.href.startsWith('blob:')) return resolved.href;
-  const res = await fetch(resolved.href);
-  if (!res.ok) throw new Error('fetch-failed');
-  const blob = await res.blob();
-  return URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: 'application/pdf' }));
 }
 
 async function loadTextPreview(href: string): Promise<string> {
@@ -145,7 +229,7 @@ async function loadTextPreview(href: string): Promise<string> {
     if (meta.includes('base64')) return atob(payload);
     return decodeURIComponent(payload);
   }
-  const res = await fetch(href);
+  const res = await withTimeout(fetch(href), PREVIEW_TIMEOUT_MS, 'text-fetch-timeout');
   if (!res.ok) throw new Error('fetch-failed');
   return res.text();
 }
@@ -163,12 +247,26 @@ function FilePreviewModal({
 }) {
   const mode = previewModeFor(file);
   const [href, setHref] = useState(() => fileHref(file));
-  const [previewSrc, setPreviewSrc] = useState(() => (mode === 'image' ? fileHref(file) : ''));
-  const [resolving, setResolving] = useState(() => mode === 'pdf' || mode === 'text' || !fileHref(file));
-  const [failed, setFailed] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState('');
+  const [resolving, setResolving] = useState(mode !== 'unsupported');
+  const [failed, setFailed] = useState(mode === 'unsupported');
   const [textContent, setTextContent] = useState('');
+  const [docxHtml, setDocxHtml] = useState('');
+  const objectUrlRef = useRef<string | null>(null);
+
+  const revokeObjectUrl = () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  };
+
   const errorMessage = failed
-    ? (href || previewSrc ? t.filesPreviewFailed : t.filesPreviewUnavailable)
+    ? (mode === 'unsupported'
+      ? t.filesPreviewUnavailable
+      : (href || previewSrc || textContent || docxHtml
+        ? t.filesPreviewFailed
+        : t.filesPreviewUnavailable))
     : '';
 
   useEffect(() => {
@@ -179,61 +277,84 @@ function FilePreviewModal({
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl = '';
-    setFailed(false);
-    setResolving(true);
+    revokeObjectUrl();
+    setPreviewSrc('');
+    setTextContent('');
+    setDocxHtml('');
+    setFailed(mode === 'unsupported');
+    setResolving(mode !== 'unsupported');
+
+    if (mode === 'unsupported') {
+      return () => { cancelled = true; };
+    }
 
     (async () => {
       try {
-        const resolved = await resolveFile(file, uid);
+        const resolved = await withTimeout(resolveFile(file, uid), PREVIEW_TIMEOUT_MS, 'resolve-timeout');
         if (cancelled) return;
         setHref(resolved.href);
 
-        if (mode === 'pdf') {
-          if (!resolved.href && !resolved.storagePath && !resolved.dataUrl) {
-            setPreviewSrc('');
-            setFailed(true);
-            return;
-          }
-          const src = await loadPdfPreviewSrc(resolved);
+        if (!resolved.href && !resolved.storagePath && !resolved.dataUrl) {
+          setFailed(true);
+          return;
+        }
+
+        if (mode === 'pdf' || mode === 'image') {
+          const mime = mode === 'pdf' ? 'application/pdf' : (file.type || undefined);
+          const blob = await loadPreviewBlob(resolved, mime);
+          if (cancelled) return;
+          const src = URL.createObjectURL(blob);
           if (cancelled) {
-            if (src.startsWith('blob:')) URL.revokeObjectURL(src);
+            URL.revokeObjectURL(src);
             return;
           }
-          if (src.startsWith('blob:')) objectUrl = src;
+          objectUrlRef.current = src;
           setPreviewSrc(src);
           setFailed(false);
           return;
         }
 
-        if (mode === 'image') {
-          setPreviewSrc(resolved.href);
-          setFailed(!resolved.href);
+        if (mode === 'docx') {
+          const blob = await loadPreviewBlob(
+            resolved,
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          );
+          if (cancelled) return;
+          const arrayBuffer = await blob.arrayBuffer();
+          const result = await withTimeout(
+            mammoth.convertToHtml({ arrayBuffer }),
+            PREVIEW_TIMEOUT_MS,
+            'mammoth-timeout',
+          );
+          if (cancelled) return;
+          setDocxHtml(result.value || `<p>${UNSUPPORTED_AR}</p>`);
+          setFailed(false);
           return;
         }
 
         if (mode === 'text') {
-          if (!resolved.href) {
-            setFailed(true);
-            setTextContent('');
-            return;
+          let body = '';
+          if (resolved.dataUrl?.startsWith('data:')) {
+            body = await loadTextPreview(resolved.dataUrl);
+          } else if (resolved.href?.startsWith('data:')) {
+            body = await loadTextPreview(resolved.href);
+          } else {
+            const blob = await loadPreviewBlob(resolved, 'text/plain');
+            body = await blob.text();
           }
-          try {
-            const body = await loadTextPreview(resolved.href);
-            if (!cancelled) setTextContent(body);
-          } catch {
-            if (!cancelled) {
-              setTextContent('');
-              setFailed(true);
-            }
-          }
+          if (cancelled) return;
+          setTextContent(body);
+          setFailed(false);
           return;
         }
 
         setFailed(true);
       } catch {
         if (!cancelled) {
+          revokeObjectUrl();
           setPreviewSrc('');
+          setDocxHtml('');
+          setTextContent('');
           setFailed(true);
         }
       } finally {
@@ -243,7 +364,7 @@ function FilePreviewModal({
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      revokeObjectUrl();
     };
   }, [file, uid, mode]);
 
@@ -289,7 +410,9 @@ function FilePreviewModal({
           <p className="text-sm text-white/80">…</p>
         )}
         {!resolving && failed && (
-          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{errorMessage}</p>
+          <p className="rounded-xl bg-white/10 px-4 py-3 text-center text-sm text-white" dir="auto">
+            {errorMessage}
+          </p>
         )}
         {!resolving && !failed && mode === 'image' && !!previewSrc && (
           <img
@@ -300,19 +423,24 @@ function FilePreviewModal({
           />
         )}
         {!resolving && !failed && mode === 'pdf' && !!previewSrc && (
-          <iframe
+          <embed
             title={file.name}
             src={previewSrc}
+            type="application/pdf"
             className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
+          />
+        )}
+        {!resolving && !failed && mode === 'docx' && (
+          <div
+            className="prose prose-sm max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-6 text-left text-gray-900 shadow-2xl dark:prose-invert dark:bg-gray-900 dark:text-gray-100"
+            // Mammoth output is generated locally from the user's own file bytes.
+            dangerouslySetInnerHTML={{ __html: docxHtml }}
           />
         )}
         {!resolving && !failed && mode === 'text' && (
           <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
             {textContent}
           </pre>
-        )}
-        {!resolving && !failed && mode === 'unsupported' && (
-          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewUnavailable}</p>
         )}
       </div>
     </div>,
@@ -979,15 +1107,13 @@ export function FilesPage({ search }: { search: string }) {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {canPreview(file) && (
-                  <button
-                    type="button"
-                    onClick={() => setPreviewFile(file)}
-                    className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:hover:bg-white/10"
-                  >
-                    {t.filesPreview}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setPreviewFile(file)}
+                  className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:hover:bg-white/10"
+                >
+                  {t.filesPreview}
+                </button>
                 <button
                   type="button"
                   onClick={() => {
