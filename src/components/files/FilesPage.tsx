@@ -54,13 +54,13 @@ function normalizeList<T extends { id: string }>(data: unknown): T[] {
 }
 
 function fileHref(file: StoredFile) {
-  return file.downloadUrl || file.dataUrl || '#';
+  return file.downloadUrl || file.dataUrl || '';
 }
 
 function previewModeFor(file: StoredFile): PreviewMode {
-  const type = file.type.toLowerCase();
+  const type = (file.type || '').toLowerCase();
   const name = file.name.toLowerCase();
-  if (type.startsWith('image/')) return 'image';
+  if (type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg|heic|avif)$/i.test(name)) return 'image';
   if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
   if (type.startsWith('text/') || /\.(txt|md|json|csv|log|xml|html?)$/i.test(name)) return 'text';
   return 'unsupported';
@@ -70,21 +70,59 @@ function canPreview(file: StoredFile) {
   return previewModeFor(file) !== 'unsupported';
 }
 
-async function loadTextPreview(file: StoredFile, href: string): Promise<string> {
-  if (file.dataUrl?.startsWith('data:')) {
-    const match = file.dataUrl.match(/^data:([^,]*),(.*)$/s);
+/** Resolve a usable URL for preview/download (Storage token, path, or legacy inline blob). */
+async function resolveFileUrl(file: StoredFile, uid: string | undefined): Promise<string> {
+  if (file.downloadUrl) return file.downloadUrl;
+  if (file.dataUrl) return file.dataUrl;
+  if (file.storagePath) {
+    try {
+      return await getDownloadURL(ref(storage, file.storagePath));
+    } catch { /* fall through */ }
+  }
+  if (!uid) return '';
+  try {
+    const res = await rtdbFetch(`/users/${uid}/files/${file.id}`);
+    if (!res.ok) return '';
+    const full = (await res.json()) as StoredFile | null;
+    if (full?.downloadUrl) return full.downloadUrl;
+    if (full?.dataUrl) return full.dataUrl;
+    if (full?.storagePath) {
+      try {
+        return await getDownloadURL(ref(storage, full.storagePath));
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+  return '';
+}
+
+async function loadTextPreview(href: string): Promise<string> {
+  if (href.startsWith('data:')) {
+    const match = href.match(/^data:([^,]*),(.*)$/s);
     if (!match) return '';
     const [, meta, payload] = match;
     if (meta.includes('base64')) return atob(payload);
     return decodeURIComponent(payload);
   }
   const res = await fetch(href);
+  if (!res.ok) throw new Error('fetch-failed');
   return res.text();
 }
 
-function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () => void; t: { filesDownload: string; filesPreviewUnavailable: string } }) {
-  const href = fileHref(file);
+function FilePreviewModal({
+  file,
+  uid,
+  onClose,
+  t,
+}: {
+  file: StoredFile;
+  uid?: string;
+  onClose: () => void;
+  t: { filesDownload: string; filesPreviewUnavailable: string };
+}) {
   const mode = previewModeFor(file);
+  const [href, setHref] = useState(() => fileHref(file));
+  const [resolving, setResolving] = useState(!fileHref(file));
+  const [failed, setFailed] = useState(false);
   const [textContent, setTextContent] = useState('');
   const [loadingText, setLoadingText] = useState(mode === 'text');
 
@@ -95,12 +133,33 @@ function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () 
   }, [onClose]);
 
   useEffect(() => {
-    if (mode !== 'text') return;
+    let cancelled = false;
+    const initial = fileHref(file);
+    if (initial) {
+      setHref(initial);
+      setResolving(false);
+      setFailed(false);
+      return;
+    }
+    setResolving(true);
+    setFailed(false);
+    (async () => {
+      const url = await resolveFileUrl(file, uid);
+      if (cancelled) return;
+      setHref(url);
+      setResolving(false);
+      setFailed(!url);
+    })();
+    return () => { cancelled = true; };
+  }, [file, uid]);
+
+  useEffect(() => {
+    if (mode !== 'text' || !href) return;
     let cancelled = false;
     setLoadingText(true);
     (async () => {
       try {
-        const body = await loadTextPreview(file, href);
+        const body = await loadTextPreview(href);
         if (!cancelled) setTextContent(body);
       } catch {
         if (!cancelled) setTextContent(t.filesPreviewUnavailable);
@@ -109,7 +168,7 @@ function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () 
       }
     })();
     return () => { cancelled = true; };
-  }, [file, href, mode, t.filesPreviewUnavailable]);
+  }, [href, mode, t.filesPreviewUnavailable]);
 
   return createPortal(
     <div
@@ -122,14 +181,22 @@ function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () 
       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
         <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
         <div className="flex shrink-0 items-center gap-2">
-          <a
-            href={href}
-            download={file.name}
-            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {t.filesDownload}
-          </a>
+          {href ? (
+            <a
+              href={href}
+              download={file.name}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {t.filesDownload}
+            </a>
+          ) : (
+            <span className="rounded-lg bg-white/20 px-3 py-1.5 text-xs font-semibold text-white/50">
+              {t.filesDownload}
+            </span>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -141,18 +208,29 @@ function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () 
         </div>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {mode === 'image' && (
-          <img src={href} alt={file.name} className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl" />
+        {(resolving || (mode === 'text' && loadingText && !!href)) && (
+          <p className="text-sm text-white/80">…</p>
         )}
-        {mode === 'pdf' && (
+        {!resolving && (failed || !href) && (
+          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewUnavailable}</p>
+        )}
+        {!resolving && !!href && !failed && mode === 'image' && (
+          <img
+            src={href}
+            alt={file.name}
+            className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
+            onError={() => setFailed(true)}
+          />
+        )}
+        {!resolving && !!href && !failed && mode === 'pdf' && (
           <iframe title={file.name} src={href} className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl" />
         )}
-        {mode === 'text' && (
+        {!resolving && !!href && !failed && mode === 'text' && !loadingText && (
           <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
-            {loadingText ? '…' : textContent}
+            {textContent}
           </pre>
         )}
-        {mode === 'unsupported' && (
+        {!resolving && !!href && !failed && mode === 'unsupported' && (
           <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewUnavailable}</p>
         )}
       </div>
@@ -829,13 +907,29 @@ export function FilesPage({ search }: { search: string }) {
                     {t.filesPreview}
                   </button>
                 )}
-                <a
-                  href={fileHref(file)}
-                  download={file.name}
+                <button
+                  type="button"
+                  onClick={() => {
+                    void (async () => {
+                      const url = fileHref(file) || await resolveFileUrl(file, user?.uid);
+                      if (!url) {
+                        show(t.filesPreviewUnavailable);
+                        return;
+                      }
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = file.name;
+                      a.target = '_blank';
+                      a.rel = 'noopener noreferrer';
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                    })();
+                  }}
                   className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
                 >
                   {t.filesDownload}
-                </a>
+                </button>
                 <button
                   type="button"
                   onClick={() => startRename(file)}
@@ -887,7 +981,12 @@ export function FilesPage({ search }: { search: string }) {
       )}
 
       {previewFile && (
-        <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} t={t} />
+        <FilePreviewModal
+          file={previewFile}
+          uid={user?.uid}
+          onClose={() => setPreviewFile(null)}
+          t={t}
+        />
       )}
     </div>
   );
