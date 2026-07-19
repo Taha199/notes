@@ -97,8 +97,8 @@ export async function writeRtdb(accessToken, path, value, method = 'PUT') {
   const url = `${FB_DB_URL}${path}.json?access_token=${encodeURIComponent(accessToken)}`;
   const response = await fetch(url, {
     method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(value),
+    headers: method === 'DELETE' ? undefined : { 'Content-Type': 'application/json' },
+    body: method === 'DELETE' ? undefined : JSON.stringify(value),
   });
   return response.ok;
 }

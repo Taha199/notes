@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onValue, ref as dbRef } from 'firebase/database';
 import { useAuth } from '../../contexts/AuthContext';
-import { FB_DB_URL, ADMIN_EMAIL, database } from '../../lib/firebase';
+import { ADMIN_EMAIL, database } from '../../lib/firebase';
 import { getRtdbAuthToken, waitForAuthUser } from '../../lib/rtdb';
 import { MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
 
@@ -149,6 +149,24 @@ export function AdminPanel() {
 
   const totalBytes = useMemo(() => rows.reduce((s, r) => s + r.bytes, 0), [rows]);
 
+  const adminAction = useCallback(async (payload: Record<string, unknown>) => {
+    const token = await getRtdbAuthToken();
+    if (!token) throw new Error('no-auth');
+    const res = await fetch('/api/admin-user-action', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(err?.error || 'action-failed');
+    }
+    return (await res.json()) as Record<string, unknown>;
+  }, []);
+
   if (!isAdmin) {
     return (
       <div className="flex h-full items-center justify-center text-app-text-secondary">
@@ -160,12 +178,11 @@ export function AdminPanel() {
   const toggleBlock = async (row: UserRow) => {
     setBusy(row.uid);
     try {
-      await fetch(`${FB_DB_URL}/users/${row.uid}/profile/blocked.json`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(!row.blocked),
-      });
-      setRows((prev) => prev.map((r) => (r.uid === row.uid ? { ...r, blocked: !r.blocked } : r)));
+      const next = !row.blocked;
+      await adminAction({ action: 'setBlocked', uid: row.uid, blocked: next });
+      setRows((prev) => prev.map((r) => (r.uid === row.uid ? { ...r, blocked: next } : r)));
+    } catch (e) {
+      console.error('toggleBlock failed', e);
     } finally {
       setBusy(null);
     }
@@ -174,9 +191,11 @@ export function AdminPanel() {
   const deleteUser = async (row: UserRow) => {
     setBusy(row.uid);
     try {
-      await fetch(`${FB_DB_URL}/users/${row.uid}.json`, { method: 'DELETE' });
+      await adminAction({ action: 'deleteUser', uid: row.uid, email: row.email });
       setRows((prev) => prev.filter((r) => r.uid !== row.uid));
       setConfirmDelete(null);
+    } catch (e) {
+      console.error('deleteUser failed', e);
     } finally {
       setBusy(null);
     }
@@ -197,13 +216,11 @@ export function AdminPanel() {
     if (!Number.isFinite(mb) || mb < MIN_STORAGE_LIMIT_MB || mb > MAX_STORAGE_LIMIT_MB) return;
     setBusy(row.uid);
     try {
-      await fetch(`${FB_DB_URL}/users/${row.uid}/profile/storageLimitMB.json`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mb),
-      });
+      await adminAction({ action: 'setStorageLimit', uid: row.uid, storageLimitMB: mb });
       setRows((prev) => prev.map((r) => (r.uid === row.uid ? { ...r, storageLimitMB: mb } : r)));
       cancelEditLimit();
+    } catch (e) {
+      console.error('saveStorageLimit failed', e);
     } finally {
       setBusy(null);
     }
@@ -214,17 +231,16 @@ export function AdminPanel() {
     const next = !row.isPlus;
     setBusy(row.uid);
     try {
-      const storageLimitMB = plusStorageLimitForToggle(next);
-      await fetch(`${FB_DB_URL}/users/${row.uid}/profile.json`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isPlus: next, storageLimitMB }),
-      });
+      const data = await adminAction({ action: 'setPlus', uid: row.uid, isPlus: next });
+      const storageLimitMB =
+        typeof data.storageLimitMB === 'number' ? data.storageLimitMB : plusStorageLimitForToggle(next);
       setRows((prev) =>
         prev.map((r) =>
           r.uid === row.uid ? { ...r, isPlus: next, storageLimitMB } : r,
         ),
       );
+    } catch (e) {
+      console.error('togglePlus failed', e);
     } finally {
       setBusy(null);
     }
@@ -356,13 +372,14 @@ export function AdminPanel() {
                       {row.email !== ADMIN_EMAIL && (
                         <>
                           <button
-                            onClick={() => togglePlus(row)}
+                            type="button"
+                            onClick={() => void togglePlus(row)}
                             disabled={busy === row.uid}
                             className={'rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition disabled:opacity-50 ' + (row.isPlus
-                              ? 'border-violet-300 text-violet-600 hover:bg-violet-50 dark:border-violet-500/30 dark:hover:bg-violet-500/10'
-                              : 'border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-white/15 dark:text-gray-300 dark:hover:bg-white/5')}
+                              ? 'border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/15 dark:text-violet-300 dark:hover:bg-violet-500/25'
+                              : 'border-violet-300 text-violet-600 hover:bg-violet-50 dark:border-violet-500/30 dark:text-violet-300 dark:hover:bg-violet-500/10')}
                           >
-                            {row.isPlus ? 'Ta bort Plus' : 'Aktivera Plus'}
+                            {busy === row.uid ? 'Sparar…' : row.isPlus ? 'Ta bort Plus' : 'Aktivera Plus'}
                           </button>
                           <button
                             onClick={() => toggleBlock(row)}
