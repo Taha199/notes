@@ -43,7 +43,7 @@ jobs:
 
           Path('.github/workflows/fix-files-preview-upload.yml').unlink(missing_ok=True)
       - name: Verify build
-        run: npm ci && npm run build
+        run: npm install && npm run build
       - name: Commit fix
         shell: bash
         run: |
@@ -57,4 +57,4 @@ jobs:
           fi
           git commit -m "Fix file preview and speed up uploads"
           git push
-# trigger: 2026-07-19-1
+# trigger: 2026-07-19-2
