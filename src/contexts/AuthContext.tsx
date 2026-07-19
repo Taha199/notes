@@ -99,6 +99,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     setProfileLoading(true);
+
+    const writePresence = async (includeIp: boolean) => {
+      if (!user?.uid || cancelled) return;
+      const patch: Record<string, unknown> = {
+        email: user.email ?? '',
+        displayName: user.displayName ?? '',
+        lastSeen: Date.now(),
+        provider: user.providerData[0]?.providerId ?? '',
+      };
+      if (includeIp) {
+        try {
+          const ipRes = await fetch('https://api.ipify.org?format=json');
+          const ip = (await ipRes.json())?.ip ?? '';
+          if (ip) patch.ip = ip;
+        } catch { /* ignore */ }
+      }
+      try {
+        await rtdbFetch(`/users/${user.uid}/profile`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        });
+      } catch { /* ignore */ }
+    };
+
     (async () => {
       try {
         const r = await rtdbFetch(`/users/${user.uid}/profile`);
@@ -115,28 +140,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } finally {
         if (!cancelled) setProfileLoading(false);
       }
-      // Best-effort client IP.
-      let ip = '';
-      try {
-        const ipRes = await fetch('https://api.ipify.org?format=json');
-        ip = (await ipRes.json())?.ip ?? '';
-      } catch { /* ignore */ }
-      const patch: Record<string, unknown> = {
-        email: user.email ?? '',
-        displayName: user.displayName ?? '',
-        lastSeen: Date.now(),
-        provider: user.providerData[0]?.providerId ?? '',
-      };
-      if (ip) patch.ip = ip;
-      try {
-        await rtdbFetch(`/users/${user.uid}/profile`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patch),
-        });
-      } catch { /* ignore */ }
+      // First write: lastSeen + IP.
+      await writePresence(true);
     })();
-    return () => { cancelled = true; };
+
+    // Keep "Senast sedd" fresh while the tab is open (every 2 min + on focus).
+    const HEARTBEAT_MS = 2 * 60 * 1000;
+    const heartbeat = () => {
+      if (document.visibilityState === 'hidden') return;
+      void writePresence(false);
+    };
+    const timer = window.setInterval(heartbeat, HEARTBEAT_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void writePresence(false);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
   }, [user?.uid, user?.email, user?.displayName]);
 
   const profilePhotoURL =

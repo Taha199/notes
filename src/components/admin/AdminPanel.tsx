@@ -27,7 +27,8 @@ function timeAgo(ts: number): string {
   if (!ts) return '—';
   const diff = Date.now() - ts;
   const min = Math.floor(diff / 60000);
-  if (min < 1) return 'just nu';
+  // Heartbeat writes lastSeen every ~2 min while the tab is open.
+  if (min < 5) return 'online';
   if (min < 60) return `${min} min sedan`;
   const h = Math.floor(min / 60);
   if (h < 24) return `${h} h sedan`;
