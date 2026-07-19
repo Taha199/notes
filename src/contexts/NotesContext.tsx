@@ -665,13 +665,12 @@ function countUserQuizSets(sets: QuizSet[]) {
 
 async function fetchLatestFolderHistory(uid: string): Promise<QuizFolder[] | null> {
   try {
-    const res = await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory.json?shallow=true`);
+    const res = await rtdbFetch(`/users/${uid}/quizFoldersHistory?shallow=true`);
     if (!res.ok) return null;
     const keys = Object.keys((await res.json()) || {}).sort().reverse();
     if (!keys.length) return null;
-    const folders = firebaseToArray<QuizFolder>(
-      await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory/${keys[0]}.json`).then((r) => r.json()),
-    );
+    const snap = await rtdbFetch(`/users/${uid}/quizFoldersHistory/${keys[0]}`);
+    const folders = firebaseToArray<QuizFolder>(await snap.json());
     if (!folders.some((folder) => !folder.system)) return null;
     return folders;
   } catch {
@@ -744,11 +743,11 @@ function recoverNotesFromDraftContents(dc: Record<string, { title?: string; html
 
 async function trimHistoryKeys(uid: string, path: string, max: number) {
   try {
-    const res = await fetch(`${FB_DB_URL}/users/${uid}/${path}.json?shallow=true`);
+    const res = await rtdbFetch(`/users/${uid}/${path}?shallow=true`);
     const keys = Object.keys((await res.json()) || {}).sort();
     const overflow = keys.length - max;
     for (let i = 0; i < overflow; i += 1) {
-      await fetch(`${FB_DB_URL}/users/${uid}/${path}/${keys[i]}.json`, { method: 'DELETE' });
+      await rtdbFetch(`/users/${uid}/${path}/${keys[i]}`, { method: 'DELETE' });
     }
   } catch { /* ignore */ }
 }
@@ -760,17 +759,21 @@ async function appendDataHistory(uid: string, snapshot: DataHistorySnapshot) {
   if (now - last < DATA_HISTORY_MIN_INTERVAL_MS) return;
   setLastDataHistoryAt(uid, now);
   const key = String(now);
-  await fetch(`${FB_DB_URL}/users/${uid}/dataHistory/${key}.json`, {
-    method: 'PUT',
-    body: JSON.stringify({ ...snapshot, savedAt: new Date(now).toISOString() }),
-    headers: { 'Content-Type': 'application/json' },
-  });
-  await trimHistoryKeys(uid, 'dataHistory', MAX_DATA_HISTORY);
+  try {
+    await rtdbFetch(`/users/${uid}/dataHistory/${key}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...snapshot, savedAt: new Date(now).toISOString() }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    await trimHistoryKeys(uid, 'dataHistory', MAX_DATA_HISTORY);
+  } catch { /* ignore */ }
 }
 
 async function fetchDataHistorySnapshot(uid: string, key: string): Promise<DataHistorySnapshot | null> {
   try {
-    const snap = await fetch(`${FB_DB_URL}/users/${uid}/dataHistory/${key}.json`).then((r) => r.json());
+    const res = await rtdbFetch(`/users/${uid}/dataHistory/${key}`);
+    if (!res.ok) return null;
+    const snap = await res.json();
     if (!snap) return null;
     return {
       notes: firebaseToArray<Note>(snap.notes),
@@ -844,13 +847,13 @@ function countChatUserMessages(chats: ChatConversation[]) {
 
 async function fetchBestDataHistory(uid: string): Promise<{ key: string | null; snapshot: DataHistorySnapshot | null }> {
   try {
-    const res = await fetch(`${FB_DB_URL}/users/${uid}/dataHistory.json?shallow=true`);
+    const res = await rtdbFetch(`/users/${uid}/dataHistory?shallow=true`);
     if (!res.ok) return { key: null, snapshot: null };
     const keys = Object.keys((await res.json()) || {}).sort().reverse();
     let bestKey: string | null = null;
     let bestSnapshot: DataHistorySnapshot | null = null;
     let bestScore = 0;
-    for (const key of keys) {
+    for (const key of keys.slice(0, 48)) {
       const snapshot = await fetchDataHistorySnapshot(uid, key);
       if (!snapshot) continue;
       const score = dataHistoryScore(snapshot);
@@ -874,7 +877,7 @@ async function fetchLatestDataHistory(uid: string): Promise<DataHistorySnapshot 
 /** Single latest dataHistory entry — used on normal load when notes are empty. */
 async function fetchLatestDataHistorySnapshot(uid: string): Promise<DataHistorySnapshot | null> {
   try {
-    const res = await fetch(`${FB_DB_URL}/users/${uid}/dataHistory.json?shallow=true`);
+    const res = await rtdbFetch(`/users/${uid}/dataHistory?shallow=true`);
     if (!res.ok) return null;
     const keys = Object.keys((await res.json()) || {}).sort().reverse();
     if (!keys.length) return null;
@@ -886,12 +889,13 @@ async function fetchLatestDataHistorySnapshot(uid: string): Promise<DataHistoryS
 
 async function fetchAllFolderHistory(uid: string): Promise<QuizFolder[]> {
   try {
-    const res = await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory.json?shallow=true`);
+    const res = await rtdbFetch(`/users/${uid}/quizFoldersHistory?shallow=true`);
     if (!res.ok) return [];
     const keys = Object.keys((await res.json()) || {}).sort().reverse();
-    const lists = await Promise.all(keys.map(async (key) => firebaseToArray<QuizFolder>(
-      await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory/${key}.json`).then((r) => r.json()),
-    )));
+    const lists = await Promise.all(keys.map(async (key) => {
+      const r = await rtdbFetch(`/users/${uid}/quizFoldersHistory/${key}`);
+      return firebaseToArray<QuizFolder>(await r.json());
+    }));
     return mergeById(...lists);
   } catch {
     return [];
@@ -902,20 +906,22 @@ async function readDedicatedQuizData(uid: string) {
   let folders: QuizFolder[] = [];
   let sets: QuizSet[] = [];
   try {
-    folders = firebaseToArray<QuizFolder>(await fetch(`${FB_DB_URL}/users/${uid}/quizFolders.json`).then((r) => r.json()));
+    const r = await rtdbFetch(`/users/${uid}/quizFolders`);
+    folders = firebaseToArray<QuizFolder>(await r.json());
   } catch { /* ignore */ }
   try {
-    sets = firebaseToArray<QuizSet>(await fetch(`${FB_DB_URL}/users/${uid}/quizSets.json`).then((r) => r.json())).map((set) => ({ ...set, items: set.items ?? [] }));
+    const r = await rtdbFetch(`/users/${uid}/quizSets`);
+    sets = firebaseToArray<QuizSet>(await r.json()).map((set) => ({ ...set, items: set.items ?? [] }));
   } catch { /* ignore */ }
   return { folders, sets };
 }
 
 async function fetchAllDataHistorySnapshots(uid: string): Promise<DataHistorySnapshot[]> {
   try {
-    const res = await fetch(`${FB_DB_URL}/users/${uid}/dataHistory.json?shallow=true`);
+    const res = await rtdbFetch(`/users/${uid}/dataHistory?shallow=true`);
     if (!res.ok) return [];
     const keys = Object.keys((await res.json()) || {}).sort().reverse();
-    const snapshots = await Promise.all(keys.map((key) => fetchDataHistorySnapshot(uid, key)));
+    const snapshots = await Promise.all(keys.slice(0, 48).map((key) => fetchDataHistorySnapshot(uid, key)));
     return snapshots.filter((snap): snap is DataHistorySnapshot => !!snap);
   } catch {
     return [];
@@ -1256,6 +1262,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const saveFailedRef = useRef(false);
   const pendingDeletedDraftIdsRef = useRef<Set<string>>(readDeletedDraftIds());
   const permDeletedRef = useRef<PermanentlyDeletedIds>(readPermDeleted());
+  /** Once true, refuse to PATCH/PUT empty arrays over cloud (prevents accidental wipe). */
+  const everHadNotesRef = useRef(false);
+  const everHadQuizzesRef = useRef(false);
+  const everHadSetsRef = useRef(false);
+  const markEverHadContent = (n: Note[], q: QuizItem[], sets: QuizSet[]) => {
+    if (n.length > 0) everHadNotesRef.current = true;
+    if (q.length > 0) everHadQuizzesRef.current = true;
+    if (countUserQuizSets(sets) > 0) everHadSetsRef.current = true;
+  };
   const lastDraftEditAt = useRef(0);
   const lastCloudDraftIdsRef = useRef<Set<string>>(new Set());
   const pendingDraftCloudSaveRef = useRef(false);
@@ -1581,17 +1596,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizStructureFromLocal: repairQuizStructure,
           fromCloudHistory: historyRepair,
         });
+        markEverHadContent(notes, quizzes, normalizedSets);
         if (needsRepair) {
           recoveryLog('repairing cloud from local/history');
+          const repairBody: Record<string, unknown> = { chats, quizFolders: normalizedFolders };
+          if (notes.length > 0) repairBody.notes = notes;
+          if (quizzes.length > 0) repairBody.quizzes = quizzes;
+          if (countUserQuizSets(normalizedSets) > 0) repairBody.quizSets = normalizedSets;
           void rtdbFetch(`/users/${user.uid}`, {
             method: 'PATCH',
-            body: JSON.stringify({
-              notes,
-              quizzes,
-              chats,
-              quizSets: normalizedSets,
-              quizFolders: normalizedFolders,
-            }),
+            body: JSON.stringify(repairBody),
             headers: { 'Content-Type': 'application/json' },
           });
           if (repairQuizStructure || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)) {
@@ -1707,8 +1721,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const persistSets = (nextSets: QuizSet[], forceCloud = false) => {
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    persist({ quizSets: nextSets }, forceCloud);
+    quizSetsRef.current = nextSets;
+    // Never force a full-user PATCH here — that raced with empty notes and wiped the cloud.
+    persist({ quizSets: nextSets }, false);
     if (user && loadedRef.current && forceCloud) {
+      if (countUserQuizSets(nextSets) === 0 && everHadSetsRef.current) {
+        recoveryLog('skipped quizSets PUT wipe');
+        return;
+      }
+      if (countUserQuizSets(nextSets) > 0) everHadSetsRef.current = true;
       void rtdbFetch(`/users/${user.uid}/quizSets`, {
         method: 'PUT',
         body: JSON.stringify(nextSets),
@@ -2234,18 +2255,35 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }) => {
     const u = userRef.current;
     if (!u || !loadedRef.current) return;
+    const safe: typeof patch = { ...patch };
+    if (safe.notes && safe.notes.length === 0 && everHadNotesRef.current) {
+      recoveryLog('skipped instant notes wipe');
+      delete safe.notes;
+    }
+    if (safe.quizzes && safe.quizzes.length === 0 && everHadQuizzesRef.current) {
+      recoveryLog('skipped instant quizzes wipe');
+      delete safe.quizzes;
+    }
+    if (safe.quizSets && countUserQuizSets(safe.quizSets) === 0 && everHadSetsRef.current) {
+      recoveryLog('skipped instant quizSets wipe');
+      delete safe.quizSets;
+    }
+    if (!safe.notes && !safe.quizzes && !safe.quizSets && !safe.quizFolders) return;
+    if (safe.notes?.length) everHadNotesRef.current = true;
+    if (safe.quizzes?.length) everHadQuizzesRef.current = true;
+    if (safe.quizSets && countUserQuizSets(safe.quizSets) > 0) everHadSetsRef.current = true;
     const syncedAt = Date.now();
     try {
       await getRtdbAuthToken(true);
       await update(dbRef(database, `users/${u.uid}`), {
-        ...patch,
+        ...safe,
         cloudSyncAt: syncedAt,
       });
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
       localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
-      markPushedData(patch, syncedAt);
+      markPushedData(safe, syncedAt);
     } catch {
       /* best-effort */
     }
@@ -2383,6 +2421,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       recoveryLog('skipped cloud sync — empty user payload');
       return;
     }
+    markEverHadContent(nextNotes, qList, qsList);
     void appendDataHistory(u.uid, {
       notes: nextNotes,
       quizzes: qList,
@@ -2394,19 +2433,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setCloudStatus('saving');
     savingStartedAt.current = Date.now();
     const draftPayload = buildDraftCloudPayload(dList);
+    // Never PATCH empty collections over previously known non-empty cloud data.
+    // (A race after a failed/partial load used to wipe notes/quizzes with [].)
+    const body: Record<string, unknown> = {
+      ...draftPayload,
+      permanentlyDeletedIds: permDeletedRef.current,
+      tokenUsage: tokenUsageRef.current,
+      cloudSyncAt: Date.now(),
+    };
+    if (nextNotes.length > 0 || !everHadNotesRef.current) body.notes = nextNotes;
+    else recoveryLog('skipped wiping notes with empty local array');
+    if (qList.length > 0 || !everHadQuizzesRef.current) body.quizzes = qList;
+    else recoveryLog('skipped wiping quizzes with empty local array');
+    if (chatList.length > 0) body.chats = chatList;
+    if (countUserQuizSets(qsList) > 0 || !everHadSetsRef.current) body.quizSets = qsList;
+    else recoveryLog('skipped wiping quizSets with empty local array');
+    if (qfList.length > 0) body.quizFolders = qfList;
     void rtdbFetch(`/users/${u.uid}`, {
       method: 'PATCH',
-      body: JSON.stringify({
-        notes: nextNotes,
-        ...draftPayload,
-        quizzes: qList,
-        chats: chatList,
-        quizSets: qsList,
-        quizFolders: qfList,
-        permanentlyDeletedIds: permDeletedRef.current,
-        tokenUsage: tokenUsageRef.current,
-        cloudSyncAt: Date.now(),
-      }),
+      body: JSON.stringify(body),
       headers: { 'Content-Type': 'application/json' },
       keepalive,
     })
@@ -2909,8 +2954,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizzesRef.current = next;
     setQuizzes(next);
     localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
-    // Force immediate cloud write so other devices (mobile) see new questions.
-    persist({ quizzes: next }, true);
+    everHadQuizzesRef.current = true;
+    // Field-level cloud write only (never force a full-user PATCH that could wipe notes).
+    persist({ quizzes: next }, false);
     scheduleInstantDataCloudSave({ quizzes: next });
     return newId;
   };
@@ -3281,9 +3327,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const listDataBackups = async (): Promise<{ key: string; label: string; notes: number; quizzes: number; sets: number; folders: number; chats: number }[]> => {
     if (!user) return [];
     try {
-      const res = await fetch(`${FB_DB_URL}/users/${user.uid}/dataHistory.json?shallow=true`);
+      const res = await rtdbFetch(`/users/${user.uid}/dataHistory?shallow=true`);
       const keys = Object.keys((await res.json()) || {}).sort().reverse();
-      const snapshots = await Promise.all(keys.map(async (key) => {
+      const snapshots = await Promise.all(keys.slice(0, 24).map(async (key) => {
         const snapshot = await fetchDataHistorySnapshot(user.uid, key);
         if (!snapshot) return null;
         const counts = summarizeDataSnapshot(snapshot);
@@ -3324,13 +3370,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    markEverHadContent(nextNotes, nextQuizzes, nextSets);
     persist({ notes: nextNotes, quizzes: nextQuizzes, chats: nextChats, quizSets: nextSets, quizFolders: nextFolders }, true);
-    await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
+    await rtdbFetch(`/users/${user.uid}/quizSets`, {
       method: 'PUT',
       body: JSON.stringify(nextSets),
       headers: { 'Content-Type': 'application/json' },
     });
-    await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`, {
+    await rtdbFetch(`/users/${user.uid}/quizFolders`, {
       method: 'PUT',
       body: JSON.stringify(nextFolders),
       headers: { 'Content-Type': 'application/json' },
@@ -3341,7 +3388,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const hasDataBackups = async (): Promise<boolean> => {
     if (!user) return false;
     try {
-      const res = await fetch(`${FB_DB_URL}/users/${user.uid}/dataHistory.json?shallow=true`);
+      const res = await rtdbFetch(`/users/${user.uid}/dataHistory?shallow=true`);
       const keys = Object.keys((await res.json()) || {});
       return keys.length > 0;
     } catch {
@@ -3367,13 +3414,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('malacadhati_chats', JSON.stringify(snapshot.chats));
     localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    markEverHadContent(snapshot.notes, snapshot.quizzes, nextSets);
     persist({ notes: snapshot.notes, quizzes: snapshot.quizzes, chats: snapshot.chats, quizSets: nextSets, quizFolders: nextFolders }, true);
-    await fetch(`${FB_DB_URL}/users/${user!.uid}/quizSets.json`, {
+    await rtdbFetch(`/users/${user!.uid}/quizSets`, {
       method: 'PUT',
       body: JSON.stringify(nextSets),
       headers: { 'Content-Type': 'application/json' },
     });
-    await fetch(`${FB_DB_URL}/users/${user!.uid}/quizFolders.json`, {
+    await rtdbFetch(`/users/${user!.uid}/quizFolders`, {
       method: 'PUT',
       body: JSON.stringify(nextFolders),
       headers: { 'Content-Type': 'application/json' },
@@ -3398,14 +3446,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         folderNames: [],
       };
     }
-    const cloud = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json()).catch(() => null) as Record<string, unknown> | null;
-    const fullUserTree = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json()).catch(() => null);
+    const cloudRes = await rtdbFetch(`/users/${user.uid}`).catch(() => null);
+    const cloud = cloudRes && cloudRes.ok
+      ? ((await cloudRes.json().catch(() => null)) as Record<string, unknown> | null)
+      : null;
+    const fullUserTree = cloud;
     const orphaned = deepScanOrphanedContent(fullUserTree);
-    const [{ key: bestKey, snapshot: bestHistory }, dedicated, folderHistoryKeys] = await Promise.all([
+    const [{ key: bestKey, snapshot: bestHistory }, dedicated, folderHistRes] = await Promise.all([
       fetchBestDataHistory(user.uid),
       readDedicatedQuizData(user.uid),
-      fetch(`${FB_DB_URL}/users/${user.uid}/quizFoldersHistory.json?shallow=true`).then((r) => r.json()).then((data) => Object.keys(data || {}).length).catch(() => 0),
+      rtdbFetch(`/users/${user.uid}/quizFoldersHistory?shallow=true`).catch(() => null),
     ]);
+    const folderHistoryKeys = folderHistRes && folderHistRes.ok
+      ? Object.keys((await folderHistRes.json().catch(() => ({}))) || {}).length
+      : 0;
     const cloudChats = cloud
       ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>).map((chat) => ({ ...chat, messages: chat.messages ?? [] }))
       : [];
@@ -3456,7 +3510,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const emergencyRecoverFromCloud = async (): Promise<{ notes: number; quizzes: number; sets: number; folders: number; chats: number }> => {
     if (!user) return { notes: 0, quizzes: 0, sets: 0, folders: 0, chats: 0 };
-    const cloud = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json()).catch(() => null) as Record<string, unknown> | null;
+    const cloudRes = await rtdbFetch(`/users/${user.uid}`).catch(() => null);
+    const cloud = cloudRes && cloudRes.ok
+      ? ((await cloudRes.json().catch(() => null)) as Record<string, unknown> | null)
+      : null;
     const recovery = await buildRecoverySnapshot(user.uid, cloud);
     const merged: DataHistorySnapshot = {
       notes: mergeNotesById(notes, recovery.notes),
@@ -3543,7 +3600,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
-    // Force immediate cloud write so other devices (mobile) see new set questions.
+    everHadSetsRef.current = true;
     persistSets(next, true);
     scheduleInstantDataCloudSave({ quizSets: next });
     return newId;
