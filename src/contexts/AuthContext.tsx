@@ -144,8 +144,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await writePresence(true);
     })();
 
-    // Keep "Senast sedd" fresh while the tab is open (every 2 min + on focus).
-    const HEARTBEAT_MS = 2 * 60 * 1000;
+    // Keep "Senast sedd" near-live while the tab is open (every 30s + on focus).
+    const HEARTBEAT_MS = 30 * 1000;
     const heartbeat = () => {
       if (document.visibilityState === 'hidden') return;
       void writePresence(false);

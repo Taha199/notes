@@ -23,12 +23,13 @@ function formatBytes(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
-function timeAgo(ts: number): string {
+function timeAgo(ts: number, now = Date.now()): string {
   if (!ts) return '—';
-  const diff = Date.now() - ts;
-  const min = Math.floor(diff / 60000);
-  // Heartbeat writes lastSeen every ~2 min while the tab is open.
-  if (min < 5) return 'online';
+  const diff = Math.max(0, now - ts);
+  const sec = Math.floor(diff / 1000);
+  // Client heartbeat writes lastSeen about every 30s while online.
+  if (sec < 90) return 'online';
+  const min = Math.floor(sec / 60);
   if (min < 60) return `${min} min sedan`;
   const h = Math.floor(min / 60);
   if (h < 24) return `${h} h sedan`;
@@ -49,9 +50,11 @@ export function AdminPanel() {
   const [confirmDelete, setConfirmDelete] = useState<UserRow | null>(null);
   const [editingLimitUid, setEditingLimitUid] = useState<string | null>(null);
   const [limitInput, setLimitInput] = useState('');
+  const [now, setNow] = useState(() => Date.now());
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) setLoading(true);
     try {
       const authUser = user ?? (await waitForAuthUser());
       if (!authUser) return;
@@ -78,14 +81,34 @@ export function AdminPanel() {
         storageLimitMB: u.storageLimitMB ?? 0,
       }));
       setRows(list);
+      setNow(Date.now());
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [user]);
 
   useEffect(() => {
     if (authLoading || !isAdmin || !user) return;
     void load();
+  }, [authLoading, isAdmin, user, load]);
+
+  // Live "Senast sedd": refresh stats often + re-render relative labels.
+  useEffect(() => {
+    if (authLoading || !isAdmin || !user) return;
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void load({ silent: true });
+    }, 15_000);
+    const tick = window.setInterval(() => setNow(Date.now()), 15_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load({ silent: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(poll);
+      window.clearInterval(tick);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [authLoading, isAdmin, user, load]);
 
   const totalBytes = useMemo(() => rows.reduce((s, r) => s + r.bytes, 0), [rows]);
@@ -183,7 +206,7 @@ export function AdminPanel() {
           </p>
         </div>
         <button
-          onClick={load}
+          onClick={() => void load()}
           className="rounded-xl border border-app-border px-4 py-2 text-sm font-medium text-app-text-secondary transition hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
         >
           🔄 Uppdatera
@@ -224,7 +247,9 @@ export function AdminPanel() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-app-text-secondary dark:text-gray-400">{timeAgo(row.lastSeen)}</td>
+                  <td className={'px-4 py-3 ' + (now - row.lastSeen < 90_000 && row.lastSeen ? 'font-semibold text-emerald-600 dark:text-emerald-400' : 'text-app-text-secondary dark:text-gray-400')}>
+                    {timeAgo(row.lastSeen, now)}
+                  </td>
                   <td className="px-4 py-3 font-mono text-[12px] text-app-text-secondary dark:text-gray-400">{row.ip || '—'}</td>
                   <td className="px-4 py-3">
                     <div className="min-w-[110px]">
