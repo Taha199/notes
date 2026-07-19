@@ -1,6 +1,5 @@
 /**
- * AI client — calls authenticated /api/ai proxy (OpenAI key stays on the server).
- * Filename kept for stable imports.
+ * AI client — calls authenticated /api/ai proxy (Gemini key stays on the server as GEMINI_API_KEY).
  */
 import { getRtdbAuthToken } from './rtdb';
 
