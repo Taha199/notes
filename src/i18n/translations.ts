@@ -119,6 +119,7 @@ export interface Translation {
   filesRenameSuccess: string;
   filesPreviewUnavailable: string;
   filesPreviewFailed: string;
+  filesDownloadFailed: string;
   filesDelete: string;
   filesStored: string;
   filesTooLarge: string;
@@ -579,7 +580,7 @@ export const LANGS: Record<Lang, Translation> = {
     notesViewExpandedTitle: 'Full note view',
     notesViewLabel: 'View',
     filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesSizeLimit: 'Maximum file size: 20 MB per file.', filesUpload: 'Choose files', filesLoading: 'Loading your files…',
-    filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewUnavailable: 'الملف غير مدعوم — Preview is not available for this file type.', filesPreviewFailed: 'الملف غير مدعوم — Could not load the preview.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
+    filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewUnavailable: 'الملف غير مدعوم — Preview is not available for this file type.', filesPreviewFailed: 'Could not load the preview. You can still download the file.', filesDownloadFailed: 'Could not download the file. Please try again.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
@@ -940,7 +941,7 @@ export const LANGS: Record<Lang, Translation> = {
     notesViewExpandedTitle: 'Visa hela anteckningen',
     notesViewLabel: 'Visning',
     filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesSizeLimit: 'Maximal filstorlek: 20 MB per fil.', filesUpload: 'Välj filer', filesLoading: 'Hämtar dina filer…',
-    filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewUnavailable: 'الملف غير مدعوم — Förhandsgranskning finns inte för den här filtypen.', filesPreviewFailed: 'الملف غير مدعوم — Kunde inte ladda förhandsgranskningen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
+    filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewUnavailable: 'الملف غير مدعوم — Förhandsgranskning finns inte för den här filtypen.', filesPreviewFailed: 'Kunde inte ladda förhandsgranskningen. Du kan fortfarande ladda ner filen.', filesDownloadFailed: 'Kunde inte ladda ner filen. Försök igen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',

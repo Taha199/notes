@@ -1,7 +1,11 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /users/{userId}/files/{fileId}/{fileName} {
+    // Any object under the user's files tree (handles odd filenames / nested paths).
+    match /users/{userId}/files/{allPaths=**} {
+      allow read, write, delete: if request.auth != null && request.auth.uid == userId;
+    }
+    match /users/{userId}/profile/{fileName} {
       allow read, write, delete: if request.auth != null && request.auth.uid == userId;
     }
   }

@@ -1,7 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import {
   FB_DB_URL,
-  STORAGE_BUCKET,
   getGoogleAccessToken,
   isAllowedOrigin,
   readServiceAccount,
@@ -9,8 +7,12 @@ import {
   verifyUser,
   writeRtdb,
 } from './_lib/firebaseAdmin.js';
-
-const STORAGE_SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
+import {
+  STORAGE_SCOPE,
+  resolveStoragePath,
+  storagePathFromDownloadUrl,
+  uploadToStorage,
+} from './_lib/storageFiles.js';
 
 /** Read a node, distinguishing "empty" (null, ok) from a real failure (throws). */
 async function readNodeStrict(accessToken, path) {
@@ -19,6 +21,7 @@ async function readNodeStrict(accessToken, path) {
   if (!res.ok) throw new Error(`rtdb-read-failed:${res.status}`);
   return res.json();
 }
+
 // Cap server-side migrations per request so the function never times out.
 const MAX_MIGRATIONS_PER_CALL = 40;
 
@@ -47,23 +50,12 @@ function dataUrlToBuffer(dataUrl) {
   return { buffer, contentType };
 }
 
-async function uploadToStorage(storageToken, objectPath, buffer, contentType) {
-  const token = randomUUID();
-  const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(STORAGE_BUCKET)}/o?uploadType=media&name=${encodeURIComponent(objectPath)}`;
-  const uploadRes = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${storageToken}`, 'Content-Type': contentType || 'application/octet-stream' },
-    body: buffer,
-  });
-  if (!uploadRes.ok) throw new Error('storage-upload-failed');
-  // Attach a Firebase download token so the client can fetch it like a normal upload.
-  const patchUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(STORAGE_BUCKET)}/o/${encodeURIComponent(objectPath)}`;
-  await fetch(patchUrl, {
-    method: 'PATCH',
-    headers: { Authorization: `Bearer ${storageToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contentType, metadata: { firebaseStorageDownloadTokens: token } }),
-  });
-  return `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`;
+/** Always expose a usable storagePath so the client SDK can getBytes. */
+function toClientFile(file, uid) {
+  const stripped = stripBlob(file);
+  const storagePath = resolveStoragePath(stripped, uid)
+    || (stripped.downloadUrl ? storagePathFromDownloadUrl(stripped.downloadUrl) : undefined);
+  return storagePath ? { ...stripped, storagePath } : stripped;
 }
 
 export default async function handler(request, response) {
@@ -101,13 +93,13 @@ export default async function handler(request, response) {
       if (file.dataUrl && !file.downloadUrl && migrated < MAX_MIGRATIONS_PER_CALL) {
         try {
           const { buffer, contentType } = dataUrlToBuffer(file.dataUrl);
-          const objectPath = file.storagePath || `users/${uid}/files/${file.id}/${file.name}`;
+          const objectPath = resolveStoragePath(file, uid) || `users/${uid}/files/${file.id}/${file.name}`;
           const downloadUrl = await uploadToStorage(storageToken, objectPath, buffer, contentType || file.type);
           const clean = { ...stripBlob(file), downloadUrl, storagePath: objectPath };
           const ok = await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, clean);
           if (ok) {
             migrated += 1;
-            out.push(clean);
+            out.push(toClientFile(clean, uid));
             continue;
           }
         } catch {
@@ -116,9 +108,9 @@ export default async function handler(request, response) {
       }
       // Never ship base64 blobs to the browser; keep a marker so the client knows it's inline.
       if (file.dataUrl && !file.downloadUrl) {
-        out.push({ ...stripBlob(file), inlinePending: true });
+        out.push({ ...toClientFile(file, uid), inlinePending: true });
       } else {
-        out.push(stripBlob(file));
+        out.push(toClientFile(file, uid));
       }
     }
 
