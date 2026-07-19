@@ -29,7 +29,7 @@ jobs:
           text = files_path.read_text()
 
           old_pdf = """        // PDF: NEVER use Google Docs viewer as success — it blanks on Firebase token URLs.\n        // Race getBytes(storagePath) with /api/file-download?mode=proxy&disposition=inline\n        // into a local blob: URL (application/pdf) for <object>/<iframe>.\n        if (mode === 'pdf') {\n          const quickPath =\n            file.storagePath\n            || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)\n            || guessStoragePath(file, uid);\n          setLoadPct(15);\n\n          const resolved: ResolvedFile = {\n            href: file.downloadUrl || '',\n            storagePath: quickPath,\n            dataUrl: file.dataUrl,\n          };\n\n          const blob = await loadFileBlob(\n            resolved,\n            'application/pdf',\n            remainingMs(deadline),\n            file.id,\n          );\n          if (!isLive()) return;\n          if (quickPath && quickPath !== file.storagePath) {\n            onMetaRef.current?.({ storagePath: quickPath });\n          }\n          showObjectUrl(coerceMime(blob, 'application/pdf'));\n          return;\n        }\n"""
-          new_pdf = """        // PDF: paint a streamable URL first so preview opens immediately.\n        // Downloading the whole PDF into a blob made preview feel broken on slow links.\n        if (mode === 'pdf') {\n          const quickPath =\n            file.storagePath\n            || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)\n            || guessStoragePath(file, uid);\n          const quickHref = file.downloadUrl || file.dataUrl || '';\n          setLoadPct(15);\n\n          if (quickHref && !quickHref.startsWith('blob:')) {\n            if (quickPath && quickPath !== file.storagePath) {\n              onMetaRef.current?.({ storagePath: quickPath });\n            }\n            paintDirect(quickHref);\n            return;\n          }\n\n          try {\n            const fresh = await withTimeout(\n              refreshViaFileApi(file.id, { path: quickPath }),\n              Math.min(RESOLVE_TIMEOUT_MS, remainingMs(deadline)),\n              'api-refresh-timeout',\n            );\n            if (!isLive()) return;\n            if (fresh?.href || fresh?.dataUrl) {\n              onMetaRef.current?.({\n                downloadUrl: fresh.href?.startsWith('http') ? fresh.href : undefined,\n                storagePath: fresh.storagePath || quickPath,\n              });\n              paintDirect(fresh.href || fresh.dataUrl || '');\n              return;\n            }\n          } catch {\n            /* fall back to authenticated bytes below */\n          }\n\n          const resolved: ResolvedFile = {\n            href: '',\n            storagePath: quickPath,\n            dataUrl: file.dataUrl,\n          };\n          const blob = await loadFileBlob(\n            resolved,\n            'application/pdf',\n            remainingMs(deadline),\n            file.id,\n          );\n          if (!isLive()) return;\n          if (quickPath && quickPath !== file.storagePath) {\n            onMetaRef.current?.({ storagePath: quickPath });\n          }\n          showObjectUrl(coerceMime(blob, 'application/pdf'));\n          return;\n        }\n"""
+          new_pdf = """        // PDF: paint a streamable URL first so preview opens immediately.\n        // Downloading the whole PDF into a blob made preview feel broken on slow links.\n        if (mode === 'pdf') {\n          const quickPath =\n            file.storagePath\n            || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)\n            || guessStoragePath(file, uid);\n          const quickHref = file.downloadUrl || file.dataUrl || '';\n          setLoadPct(15);\n\n          if (quickHref && !quickHref.startsWith('blob:')) {\n            if (quickPath && quickPath !== file.storagePath) {\n              onMetaRef.current?.({ storagePath: quickPath });\n            }\n            paintDirect(quickHref);\n            return;\n          }\n\n          try {\n            const fresh = await withTimeout(\n              refreshViaFileApi(file.id, { path: quickPath }),\n              Math.min(RESOLVE_TIMEOUT_MS, remainingMs(deadline)),\n              'api-refresh-timeout',\n            );\n            if (!isLive()) return;\n            if (fresh?.href || fresh?.dataUrl) {\n              onMetaRef.current?.({\n                downloadUrl: fresh.href?.startsWith('http') ? fresh.href : undefined,\n                storagePath: fresh.storagePath || quickPath,\n              });\n              paintDirect(fresh.href || fresh.dataUrl || '');\n              return;\n            }\n          } catch {\n            pass\n          }\n\n          const resolved: ResolvedFile = {\n            href: '',\n            storagePath: quickPath,\n            dataUrl: file.dataUrl,\n          };\n          const blob = await loadFileBlob(\n            resolved,\n            'application/pdf',\n            remainingMs(deadline),\n            file.id,\n          );\n          if (!isLive()) return;\n          if (quickPath && quickPath !== file.storagePath) {\n            onMetaRef.current?.({ storagePath: quickPath });\n          }\n          showObjectUrl(coerceMime(blob, 'application/pdf'));\n          return;\n        }\n""".replace('            pass', "            /* fall back to authenticated bytes below */")
           if old_pdf not in text:
             raise SystemExit('PDF preview block not found')
           text = text.replace(old_pdf, new_pdf)
@@ -39,16 +39,7 @@ jobs:
           if old_upload not in text:
             raise SystemExit('Upload loop block not found')
           text = text.replace(old_upload, new_upload)
-
           files_path.write_text(text)
-
-          api_path = Path('api/file-download.js')
-          api_text = api_path.read_text()
-          old_auth = """  const idToken = request.headers.authorization?.replace(/^Bearer\\s+/i, '');\n  const account = idToken ? await verifyUser(idToken) : null;\n"""
-          new_auth = """  const idToken =\n    request.headers.authorization?.replace(/^Bearer\\s+/i, '')\n    || (typeof request.query?.token === 'string' ? request.query.token : '');\n  const account = idToken ? await verifyUser(idToken) : null;\n"""
-          if old_auth in api_text:
-            api_text = api_text.replace(old_auth, new_auth)
-            api_path.write_text(api_text)
 
           Path('.github/workflows/fix-files-preview-upload.yml').unlink(missing_ok=True)
       - name: Verify build
@@ -59,10 +50,11 @@ jobs:
           set -euo pipefail
           git config user.name "Codex"
           git config user.email "codex@users.noreply.github.com"
-          git add src/components/files/FilesPage.tsx api/file-download.js .github/workflows/fix-files-preview-upload.yml
+          git add src/components/files/FilesPage.tsx .github/workflows/fix-files-preview-upload.yml
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
           fi
           git commit -m "Fix file preview and speed up uploads"
           git push
+# trigger: 2026-07-19-1
