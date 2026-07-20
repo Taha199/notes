@@ -1,5 +1,5 @@
 import { getDownloadURL, ref, type FirebaseStorage } from 'firebase/storage';
-import { storage, storageBuckets } from '../../lib/firebase';
+import { storageBuckets } from '../../lib/firebase';
 import { requireIdToken } from './apiHelpers';
 import { fileDownloadUrl, safeStorageFileName, type StoredFile } from './fileTypes';
 
@@ -137,8 +137,7 @@ export async function loadPreviewBlobUrl(file: StoredFile, uid: string): Promise
     /* fall through to media URL */
   }
 
-  const url = await resolveMediaUrl(file, uid);
-  return url;
+  return resolveMediaUrl(file, uid);
 }
 
 function triggerUrlDownload(url: string, fileName: string) {
@@ -159,7 +158,6 @@ export async function downloadStoredFile(file: StoredFile, uid: string): Promise
   triggerUrlDownload(url, file.name || 'download');
 }
 
-// Kept for FilesPage hydrate helper imports
 export function clientStoragePath(file: StoredFile, uid: string): string | undefined {
   return candidatePaths(file, uid)[0];
 }

@@ -509,9 +509,7 @@ export function FilesPage({ search }: { search: string }) {
         return;
       }
 
-      for (let i = 0; i < selected.length; i++) {
-        const file = selected[i];
-        const key = progressKeys[i];
+      const uploadAndSave = async (file: File, key: string) => {
         try {
           const stored = await uploadOneFile(file, currentFolderId, (pct) => {
             updateUploadItem(key, { progress: pct, status: 'uploading' });
@@ -525,6 +523,12 @@ export function FilesPage({ search }: { search: string }) {
           failureMessages.push(`${file.name}: ${uploadErrorMessage(err)}`);
           updateUploadItem(key, { status: 'error' });
         }
+      };
+
+      const CONCURRENT_UPLOADS = 3;
+      for (let i = 0; i < selected.length; i += CONCURRENT_UPLOADS) {
+        const chunk = selected.slice(i, i + CONCURRENT_UPLOADS);
+        await Promise.all(chunk.map((file, offset) => uploadAndSave(file, progressKeys[i + offset])));
       }
 
       if (uploaded.length) {

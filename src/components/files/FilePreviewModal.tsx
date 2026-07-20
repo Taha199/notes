@@ -34,7 +34,9 @@ export function FilePreviewModal({
   const mode = previewModeFor(file);
   const instantUrl = mode === 'image' ? fileDownloadUrl(file) : '';
   const [src, setSrc] = useState(instantUrl);
-  const [loading, setLoading] = useState(mode === 'image' || mode === 'pdf' || mode === 'text' ? !instantUrl : false);
+  const [loading, setLoading] = useState(
+    mode === 'image' || mode === 'pdf' || mode === 'text' ? !instantUrl : false,
+  );
   const [failed, setFailed] = useState(false);
   const [errorDetail, setErrorDetail] = useState('');
   const [text, setText] = useState('');
@@ -61,12 +63,10 @@ export function FilePreviewModal({
 
   useEffect(() => () => revoke(), []);
 
-  // Image: show downloadUrl immediately if present; otherwise resolve within 8s.
   useEffect(() => {
     if (mode !== 'image' && mode !== 'pdf') return;
     let cancelled = false;
 
-    // Image already has URL — nothing async needed.
     if (mode === 'image' && instantUrl) {
       setSrc(instantUrl);
       setLoading(false);
@@ -88,7 +88,6 @@ export function FilePreviewModal({
           return;
         }
 
-        // PDF
         const blobUrl = await loadPreviewBlobUrl(file, uid);
         if (cancelled) {
           if (blobUrl.startsWith('blob:')) URL.revokeObjectURL(blobUrl);

@@ -8,6 +8,7 @@ import {
   writeRtdb,
 } from './_lib/firebaseAdmin.js';
 import {
+  candidateStoragePaths,
   listStoragePrefix,
   resolveDownloadUrl,
   resolveFileBytes,
@@ -41,6 +42,41 @@ function stripBlob(file) {
   const { dataUrl, ...rest } = file;
   void dataUrl;
   return rest;
+}
+
+async function resolveDownloadUrlFast(storageToken, file, uid, contentType) {
+  if (file.downloadUrl) {
+    return {
+      downloadUrl: file.downloadUrl,
+      storagePath: resolveStoragePath(file, uid),
+      source: 'metadata-url',
+    };
+  }
+
+  const candidates = candidateStoragePaths(file, uid);
+  for (const path of candidates) {
+    try {
+      const resolved = await resolveDownloadUrl(storageToken, path, contentType, false);
+      return { downloadUrl: resolved.downloadUrl, storagePath: path, source: 'candidate' };
+    } catch {
+      /* try next */
+    }
+  }
+
+  if (uid && file.id) {
+    const listed = await listStoragePrefix(storageToken, `users/${uid}/files/${file.id}/`, 30);
+    for (const path of listed) {
+      if (candidates.includes(path)) continue;
+      try {
+        const resolved = await resolveDownloadUrl(storageToken, path, contentType, false);
+        return { downloadUrl: resolved.downloadUrl, storagePath: path, source: 'listed' };
+      } catch {
+        /* try next */
+      }
+    }
+  }
+
+  throw new Error('no-download-url');
 }
 
 export default async function handler(request, response) {
@@ -103,7 +139,34 @@ export default async function handler(request, response) {
     const fileName = file.name || 'file';
     const declaredSize = typeof file.size === 'number' ? file.size : 0;
 
-    // Resolve real bytes / path (handles stale storagePath that 404s).
+    if (format === 'json') {
+      try {
+        const fast = await resolveDownloadUrlFast(storageToken, file, account.uid, contentType);
+        if (fast.downloadUrl && (fast.downloadUrl !== file.downloadUrl || fast.storagePath !== file.storagePath)) {
+          void writeRtdb(dbToken, `/users/${account.uid}/files/${fileId}`, {
+            ...stripBlob(file),
+            downloadUrl: fast.downloadUrl,
+            ...(fast.storagePath ? { storagePath: fast.storagePath } : {}),
+          });
+        }
+        return json(response, 200, {
+          downloadUrl: fast.downloadUrl,
+          storagePath: fast.storagePath,
+          name: fileName,
+          type: contentType,
+          size: declaredSize,
+          source: fast.source,
+        }, origin);
+      } catch (err) {
+        return json(response, 404, {
+          error: 'no-download-url',
+          details: err instanceof Error ? err.message : String(err),
+          storagePath: resolveStoragePath(file, account.uid),
+          metaDownloadUrl: file.downloadUrl || null,
+        }, origin);
+      }
+    }
+
     let resolved;
     try {
       resolved = await resolveFileBytes(storageToken, file, account.uid);
@@ -129,40 +192,11 @@ export default async function handler(request, response) {
 
     const { buffer, contentType: detected, storagePath } = resolved;
 
-    // Heal metadata when we discovered a different real path.
     if (storagePath && storagePath !== file.storagePath) {
       void writeRtdb(dbToken, `/users/${account.uid}/files/${fileId}`, {
         ...stripBlob(file),
         storagePath,
-        ...(file.downloadUrl ? {} : {}),
       });
-    }
-
-    if (format === 'json') {
-      let downloadUrl = file.downloadUrl;
-      try {
-        const resolvedUrl = await resolveDownloadUrl(storageToken, storagePath, contentType, false);
-        downloadUrl = resolvedUrl.downloadUrl;
-        if (downloadUrl && downloadUrl !== file.downloadUrl) {
-          void writeRtdb(dbToken, `/users/${account.uid}/files/${fileId}`, {
-            ...stripBlob(file),
-            storagePath,
-            downloadUrl,
-          });
-        }
-      } catch {
-        /* keep existing downloadUrl if mint fails */
-      }
-      if (!downloadUrl) {
-        return json(response, 404, { error: 'no-download-url', storagePath }, origin);
-      }
-      return json(response, 200, {
-        downloadUrl,
-        storagePath,
-        name: fileName,
-        type: contentType,
-        size: declaredSize || buffer.length,
-      }, origin);
     }
 
     if (declaredSize > MAX_PROXY_BYTES || buffer.length > MAX_PROXY_BYTES) {
