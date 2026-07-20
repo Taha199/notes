@@ -1135,25 +1135,30 @@ export function FilesPage({ search }: { search: string }) {
   const downloadFile = async (file: StoredFile) => {
     if (!user || downloadingId) return;
 
-    let url = file.downloadUrl || file.dataUrl || '';
-    if (url) {
-      window.open(url, '_blank', 'noopener,noreferrer');
-      return;
-    }
-
     setDownloadingId(file.id);
     setError('');
     try {
-      const refreshed = await withTimeout(refreshFileAccess(file), 12_000, 'url-refresh');
-      url = refreshed?.downloadUrl || '';
-      if (url) {
-        window.open(url, '_blank', 'noopener,noreferrer');
-        return;
-      }
-      triggerBlobDownload(
-        await withTimeout(loadPreviewBlob(file, user.uid), 25_000, 'blob'),
-        file.name,
-      );
+      await withTimeout((async () => {
+        let url = file.downloadUrl || file.dataUrl || '';
+        if (!url) {
+          const refreshed = await refreshFileAccess(file);
+          url = refreshed?.downloadUrl || '';
+          if (url) {
+            setFiles((prev) =>
+              prev.map((f) =>
+                f.id === file.id
+                  ? { ...f, downloadUrl: url, storagePath: refreshed?.storagePath ?? f.storagePath }
+                  : f,
+              ),
+            );
+          }
+        }
+        if (url) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+          return;
+        }
+        triggerBlobDownload(await loadPreviewBlob(file, user.uid), file.name);
+      })(), 15_000, 'download');
     } catch (err) {
       console.error('File download failed', err);
       setError(t.filesDownloadFailed);
@@ -1162,6 +1167,8 @@ export function FilesPage({ search }: { search: string }) {
       setDownloadingId(null);
     }
   };
+
+  const fileDownloadUrl = (file: StoredFile) => file.downloadUrl || file.dataUrl || '';
 
   const onDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1474,14 +1481,26 @@ export function FilesPage({ search }: { search: string }) {
                     {t.filesPreview}
                   </button>
                 )}
-                <button
-                  type="button"
-                  disabled={downloadingId === file.id}
-                  onClick={() => void downloadFile(file)}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
-                >
-                  {downloadingId === file.id ? '…' : t.filesDownload}
-                </button>
+                {fileDownloadUrl(file) ? (
+                  <a
+                    href={fileDownloadUrl(file)}
+                    download={file.name}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+                  >
+                    {t.filesDownload}
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={downloadingId === file.id}
+                    onClick={() => void downloadFile(file)}
+                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
+                  >
+                    {downloadingId === file.id ? '…' : t.filesDownload}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => startRename(file)}
