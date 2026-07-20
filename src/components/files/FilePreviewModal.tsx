@@ -6,7 +6,7 @@ import {
   resolveImagePreviewSrc,
 } from './fileAccess';
 import { FileDownloadButton } from './FileDownloadButton';
-import { previewModeFor, type StoredFile } from './fileTypes';
+import { fileDownloadUrl, previewModeFor, type StoredFile } from './fileTypes';
 import { FilesLoadingIndicator } from './FilesLoadingIndicator';
 
 export function FilePreviewModal({
@@ -32,8 +32,9 @@ export function FilePreviewModal({
   };
 }) {
   const mode = previewModeFor(file);
-  const [src, setSrc] = useState('');
-  const [loading, setLoading] = useState(mode === 'image' || mode === 'pdf' || mode === 'text');
+  const instantUrl = mode === 'image' ? fileDownloadUrl(file) : '';
+  const [src, setSrc] = useState(instantUrl);
+  const [loading, setLoading] = useState(mode === 'image' || mode === 'pdf' || mode === 'text' ? !instantUrl : false);
   const [failed, setFailed] = useState(false);
   const [errorDetail, setErrorDetail] = useState('');
   const [text, setText] = useState('');
@@ -47,8 +48,8 @@ export function FilePreviewModal({
   };
 
   useEffect(() => {
-    console.info(`[files] ${FILES_ACCESS_VERSION} preview`, file.id, mode);
-  }, [file.id, mode]);
+    console.info(`[files] ${FILES_ACCESS_VERSION} preview`, file.id, mode, { hasUrl: !!instantUrl });
+  }, [file.id, mode, instantUrl]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -60,10 +61,18 @@ export function FilePreviewModal({
 
   useEffect(() => () => revoke(), []);
 
-  // Image: direct media URL (no CORS). PDF/text: blob via SDK.
+  // Image: show downloadUrl immediately if present; otherwise resolve within 8s.
   useEffect(() => {
     if (mode !== 'image' && mode !== 'pdf') return;
     let cancelled = false;
+
+    // Image already has URL — nothing async needed.
+    if (mode === 'image' && instantUrl) {
+      setSrc(instantUrl);
+      setLoading(false);
+      setFailed(false);
+      return;
+    }
 
     (async () => {
       setLoading(true);
@@ -75,11 +84,11 @@ export function FilePreviewModal({
         if (mode === 'image') {
           const url = await resolveImagePreviewSrc(file, uid);
           if (cancelled) return;
-          if (url.startsWith('blob:')) blobRef.current = url;
           setSrc(url);
           return;
         }
 
+        // PDF
         const blobUrl = await loadPreviewBlobUrl(file, uid);
         if (cancelled) {
           if (blobUrl.startsWith('blob:')) URL.revokeObjectURL(blobUrl);
@@ -93,9 +102,9 @@ export function FilePreviewModal({
           setFailed(true);
           const msg = err instanceof Error ? err.message : String(err);
           setErrorDetail(
-            msg.startsWith('MISSING_IN_STORAGE') || /storage-object-not-found/i.test(msg)
+            msg.includes('MISSING_IN_STORAGE') || /storage-object-not-found/i.test(msg)
               ? t.filesMissingInStorage
-              : msg,
+              : (msg.slice(0, 200) || t.filesPreviewFailed),
           );
         }
       } finally {
@@ -107,14 +116,13 @@ export function FilePreviewModal({
       cancelled = true;
       revoke();
     };
-  }, [file, mode, uid]);
+  }, [file, mode, uid, instantUrl, t.filesMissingInStorage, t.filesPreviewFailed]);
 
   useEffect(() => {
     if (mode !== 'text') return;
     let cancelled = false;
     (async () => {
       setLoading(true);
-      setFailed(false);
       try {
         const blobUrl = await loadPreviewBlobUrl(file, uid);
         if (cancelled) {
@@ -130,12 +138,11 @@ export function FilePreviewModal({
           const res = await fetch(blobUrl);
           if (!cancelled) setText(await res.text());
         }
-      } catch (err) {
-        console.error('[files] text preview failed', err);
+      } catch {
         if (!cancelled) {
-          setText(t.filesPreviewFailed);
           setFailed(true);
-          setErrorDetail(err instanceof Error ? err.message : String(err));
+          setErrorDetail(t.filesMissingInStorage);
+          setText(t.filesPreviewFailed);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -144,7 +151,7 @@ export function FilePreviewModal({
     return () => {
       cancelled = true;
     };
-  }, [file, mode, uid, t.filesPreviewFailed]);
+  }, [file, mode, uid, t.filesMissingInStorage, t.filesPreviewFailed]);
 
   const downloadBtn = (
     <FileDownloadButton
@@ -194,7 +201,7 @@ export function FilePreviewModal({
             className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
             onError={() => {
               setFailed(true);
-              setErrorDetail('Image failed to render from Storage URL');
+              setErrorDetail(t.filesMissingInStorage);
             }}
           />
         )}
@@ -219,7 +226,7 @@ export function FilePreviewModal({
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
               {downloadBtn}
-              {onDelete && errorDetail === t.filesMissingInStorage ? (
+              {onDelete ? (
                 <button
                   type="button"
                   className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600"
