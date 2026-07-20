@@ -417,13 +417,15 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const downloadFile = async (file: StoredFile) => {
-    if (downloadingId) return;
-    // Open CDN URL synchronously during the click gesture — never buffer the whole file first.
-    if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl, file.name)) {
-      return;
+    // Instant path: open CDN URL during the click gesture — never buffer bytes first.
+    const direct = (file.downloadUrl || '').trim();
+    if (direct && !direct.startsWith('data:') && !direct.startsWith('blob:')) {
+      if (openDownloadUrlNow(direct, file.name)) return;
     }
+    if (downloadingId === file.id) return;
     setDownloadingId(file.id);
     setError('');
+    const clearGuard = window.setTimeout(() => setDownloadingId(null), 20_000);
     try {
       await downloadStoredFile(file, user?.uid);
     } catch (err) {
@@ -431,8 +433,10 @@ export function FilesPage({ search }: { search: string }) {
       const msg = isMissingStorageError(err) ? t.filesMissingInStorage : t.filesDownloadFailed;
       setError(msg);
       show(msg);
+      window.alert(msg);
     } finally {
-      setDownloadingId(null);
+      window.clearTimeout(clearGuard);
+      setDownloadingId((id) => (id === file.id ? null : id));
     }
   };
 

@@ -211,12 +211,11 @@ export function FilePreviewModal({
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            disabled={downloading || missingInStorage}
-            title={missingInStorage ? t.filesMissingInStorage : undefined}
+            disabled={downloading}
             className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
             onClick={(e) => {
               e.stopPropagation();
-              if (!missingInStorage) onDownload(file);
+              onDownload(file);
             }}
           >
             {downloading ? '…' : t.filesDownload}
@@ -295,19 +294,17 @@ export function FilePreviewModal({
             </p>
             {mode !== 'unsupported' && (
               <div className="flex flex-wrap items-center justify-center gap-2">
-                {!missingInStorage && (
-                  <button
-                    type="button"
-                    disabled={downloading}
-                    className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDownload(file);
-                    }}
-                  >
-                    {downloading ? '…' : t.filesDownload}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  disabled={downloading}
+                  className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDownload(file);
+                  }}
+                >
+                  {downloading ? '…' : t.filesDownload}
+                </button>
                 {onDelete && (
                   <button
                     type="button"

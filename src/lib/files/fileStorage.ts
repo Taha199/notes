@@ -31,7 +31,11 @@ export function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([decodeURIComponent(payload)], { type: contentType });
 }
 
-/** Resumable upload; rejects with storage/upload-stuck if still at 0% after UPLOAD_STUCK_MS. */
+/**
+ * Resumable upload with stagnation detection.
+ * Aborts after UPLOAD_STUCK_MS with no increase in bytesTransferred
+ * (including the classic CORS hang stuck at ~5%).
+ */
 function uploadResumableOrStuck(
   storageRef: ReturnType<typeof ref>,
   file: File,
@@ -40,27 +44,42 @@ function uploadResumableOrStuck(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const task = uploadBytesResumable(storageRef, file, { contentType });
-    let gotBytes = false;
-    const stuckTimer = window.setTimeout(() => {
-      if (!gotBytes) {
-        try { task.cancel(); } catch { /* ignore */ }
-        reject(new Error('storage/upload-stuck'));
-      }
-    }, UPLOAD_STUCK_MS);
+    let lastBytes = 0;
+    let lastProgressAt = Date.now();
+    let settled = false;
+
+    const failStuck = () => {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(watchdog);
+      try { task.cancel(); } catch { /* ignore */ }
+      reject(new Error('storage/upload-stuck'));
+    };
+
+    const watchdog = window.setInterval(() => {
+      if (Date.now() - lastProgressAt >= UPLOAD_STUCK_MS) failStuck();
+    }, 500);
 
     task.on(
       'state_changed',
       (snapshot) => {
-        if (snapshot.bytesTransferred > 0) gotBytes = true;
+        if (snapshot.bytesTransferred > lastBytes) {
+          lastBytes = snapshot.bytesTransferred;
+          lastProgressAt = Date.now();
+        }
         const total = snapshot.totalBytes || file.size || 1;
         onProgress(Math.min(99, Math.round((snapshot.bytesTransferred / total) * 100)));
       },
       (err) => {
-        window.clearTimeout(stuckTimer);
+        if (settled) return;
+        settled = true;
+        window.clearInterval(watchdog);
         reject(err);
       },
       () => {
-        window.clearTimeout(stuckTimer);
+        if (settled) return;
+        settled = true;
+        window.clearInterval(watchdog);
         resolve();
       },
     );
@@ -77,7 +96,8 @@ export async function uploadFileToStorage(
   folderId: string | null,
   onProgress: (pct: number) => void,
 ): Promise<StoredFile> {
-  const token = await getRtdbAuthToken();
+  // Ensure auth is ready (fresh token) before touching Storage.
+  const token = await getRtdbAuthToken(true);
   if (!token) throw new Error('no-token');
 
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -105,7 +125,7 @@ export async function uploadFileToStorage(
         || code.includes('network')
         || code === 'storage/retry-limit-exceeded'
       ) {
-        onProgress(5);
+        onProgress(10);
         await withTimeout(
           uploadBytes(storageRef, file, { contentType: base.type }),
           UPLOAD_TOTAL_MS,
@@ -169,7 +189,12 @@ export function uploadErrorMessage(
   ) {
     return `${t.filesUploadAuthError}${code ? ` (${code})` : ''}`;
   }
-  if (code === 'storage/upload-stuck' || code === 'upload-stuck') {
+  if (
+    code === 'storage/upload-stuck'
+    || code === 'upload-stuck'
+    || code === 'upload-bytes-timeout'
+    || code === 'upload-timeout'
+  ) {
     return t.filesUploadStuck;
   }
   if (
