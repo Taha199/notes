@@ -34,6 +34,8 @@ const LIST_TIMEOUT_MS = 15_000;
 const UPLOAD_STUCK_MS = 10_000;
 const UPLOAD_TOTAL_MS = 90_000;
 const PROFILE_TIMEOUT_MS = 5_000;
+/** Preview blob fetch must not hang forever (Chrome XHR can stall without onload/onerror). */
+const PREVIEW_BLOB_TIMEOUT_MS = 25_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -255,19 +257,29 @@ function FilePreviewModal({
     filesDownload: string;
     filesPreviewUnavailable: string;
     filesPreviewFailed: string;
-    filesLoading: string;
+    filesPreviewLoading: string;
   };
   onDownload: (file: StoredFile) => void;
   downloading: boolean;
 }) {
   const href = fileHref(file);
+  const hasDirectSrc = Boolean(file.downloadUrl || file.dataUrl);
   const mode = previewModeFor(file);
   const [textContent, setTextContent] = useState('');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(mode === 'pdf' || mode === 'text');
+  /** Preview-only resolving state — never reuse the files-list "Hämtar dina filer" copy. */
+  const [previewResolving, setPreviewResolving] = useState(mode === 'pdf' || mode === 'text');
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
+  const blobUrlRef = useRef<string | null>(null);
+
+  const revokeBlobUrl = () => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -275,76 +287,100 @@ function FilePreviewModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  useEffect(() => () => revokeBlobUrl(), []);
+
   // PDF: always use a same-origin blob: URL (Chrome cannot embed Firebase attachment URLs).
   useEffect(() => {
     if (mode !== 'pdf') return;
     let cancelled = false;
-    let objectUrl: string | null = null;
-    setLoading(true);
+    setPreviewResolving(true);
     setLoadError(false);
     setLoadProgress(0);
     setBlobUrl(null);
+    revokeBlobUrl();
     (async () => {
       try {
-        const blob = await loadFileBlob(file, (loaded, total) => {
-          if (!cancelled && total > 0) {
-            setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
-          }
-        });
+        const blob = await withTimeout(
+          loadFileBlob(file, (loaded, total) => {
+            if (!cancelled && total > 0) {
+              setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
+            }
+          }),
+          PREVIEW_BLOB_TIMEOUT_MS,
+          'preview-timeout',
+        );
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
+        const objectUrl = URL.createObjectURL(blob);
+        blobUrlRef.current = objectUrl;
         setBlobUrl(objectUrl);
         setLoadProgress(100);
       } catch {
         if (!cancelled) setLoadError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setPreviewResolving(false);
       }
     })();
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      revokeBlobUrl();
     };
   }, [file, mode]);
 
-  // Image fallback: if remote <img> fails (rare CORP), load via blob.
+  // No direct URL (legacy stripped dataUrl) — go straight to blob / error.
   useEffect(() => {
-    if (mode !== 'image' || !imgFailed || blobUrl) return;
+    if (mode !== 'image' || hasDirectSrc || imgFailed || loadError) return;
+    if (file.storagePath) setImgFailed(true);
+    else setLoadError(true);
+  }, [mode, hasDirectSrc, imgFailed, loadError, file.storagePath]);
+
+  // Image fallback: remote <img> failed (or no direct URL) → blob via getBlob/XHR.
+  // Do NOT depend on blobUrl (that revoked the object URL on success in Chrome).
+  useEffect(() => {
+    if (mode !== 'image' || !imgFailed) return;
     let cancelled = false;
-    let objectUrl: string | null = null;
-    setLoading(true);
+    setPreviewResolving(true);
     setLoadError(false);
+    setLoadProgress(0);
     (async () => {
       try {
-        const blob = await loadFileBlob(file, (loaded, total) => {
-          if (!cancelled && total > 0) {
-            setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
-          }
-        });
+        const blob = await withTimeout(
+          loadFileBlob(file, (loaded, total) => {
+            if (!cancelled && total > 0) {
+              setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
+            }
+          }),
+          PREVIEW_BLOB_TIMEOUT_MS,
+          'preview-timeout',
+        );
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
+        revokeBlobUrl();
+        const objectUrl = URL.createObjectURL(blob);
+        blobUrlRef.current = objectUrl;
         setBlobUrl(objectUrl);
         setLoadProgress(100);
       } catch {
         if (!cancelled) setLoadError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setPreviewResolving(false);
       }
     })();
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, mode, imgFailed, blobUrl]);
+  }, [file, mode, imgFailed]);
 
   useEffect(() => {
     if (mode !== 'text') return;
     let cancelled = false;
-    setLoading(true);
+    setPreviewResolving(true);
     setLoadError(false);
     (async () => {
       try {
-        const body = await loadTextPreview(file);
+        const body = await withTimeout(
+          loadTextPreview(file),
+          PREVIEW_BLOB_TIMEOUT_MS,
+          'preview-timeout',
+        );
         if (!cancelled) setTextContent(body);
       } catch {
         if (!cancelled) {
@@ -352,13 +388,14 @@ function FilePreviewModal({
           setLoadError(true);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setPreviewResolving(false);
       }
     })();
     return () => { cancelled = true; };
   }, [file, mode, t.filesPreviewFailed]);
 
-  const imageSrc = blobUrl || href;
+  const imageSrc = blobUrl || (hasDirectSrc && !imgFailed ? href : null);
+  const showImageSpinner = mode === 'image' && !loadError && imgFailed && previewResolving && !blobUrl;
 
   return createPortal(
     <div
@@ -393,30 +430,31 @@ function FilePreviewModal({
         </div>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {mode === 'image' && !loadError && (
-          loading && imgFailed ? (
-            <div className="text-center text-white">
-              <FilesLoadingIndicator text={t.filesLoading} />
-              {loadProgress > 0 && (
-                <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
-              )}
-            </div>
-          ) : (
-            <img
-              src={imageSrc}
-              alt={file.name}
-              className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
-              onError={() => {
-                if (!imgFailed && !file.dataUrl) setImgFailed(true);
-                else setLoadError(true);
-              }}
-            />
-          )
+        {showImageSpinner && (
+          <div className="text-center text-white">
+            <FilesLoadingIndicator text={t.filesPreviewLoading} />
+            {loadProgress > 0 && (
+              <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
+            )}
+          </div>
+        )}
+        {mode === 'image' && !loadError && imageSrc && (
+          <img
+            src={imageSrc}
+            alt={file.name}
+            referrerPolicy="no-referrer"
+            className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
+            onError={() => {
+              if (blobUrl || file.dataUrl) setLoadError(true);
+              else if (!imgFailed) setImgFailed(true);
+              else setLoadError(true);
+            }}
+          />
         )}
         {mode === 'pdf' && (
-          loading ? (
+          previewResolving ? (
             <div className="text-center text-white">
-              <FilesLoadingIndicator text={t.filesLoading} />
+              <FilesLoadingIndicator text={t.filesPreviewLoading} />
               {loadProgress > 0 && (
                 <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
               )}
@@ -433,7 +471,7 @@ function FilePreviewModal({
         )}
         {mode === 'text' && (
           <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
-            {loading ? '…' : textContent}
+            {previewResolving ? '…' : textContent}
           </pre>
         )}
         {(mode === 'unsupported' || (mode === 'image' && loadError)) && (
@@ -1516,6 +1554,7 @@ export function FilesPage({ search }: { search: string }) {
 
       {previewFile && (
         <FilePreviewModal
+          key={previewFile.id}
           file={previewFile}
           onClose={() => setPreviewFile(null)}
           t={t}
