@@ -232,22 +232,81 @@ async function loadTextPreview(file: StoredFile, href: string): Promise<string> 
   return res.text();
 }
 
-function triggerBlobDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Revoke after the browser has started the download.
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
 async function loadTextPreviewFromBlob(file: StoredFile, uid: string): Promise<string> {
   const blob = await loadPreviewBlob(file, uid);
   return blob.text();
+}
+
+async function resolveDownloadHref(file: StoredFile, uid: string): Promise<string> {
+  if (file.downloadUrl) return file.downloadUrl;
+  if (file.dataUrl) return file.dataUrl;
+  const path = resolveClientStoragePath(file, uid);
+  if (path) {
+    try {
+      return await getDownloadURL(ref(storage, path));
+    } catch {
+      /* fall through */
+    }
+  }
+  const refreshed = await refreshFileAccess(file);
+  return refreshed?.downloadUrl || '';
+}
+
+/** Instant download link — label never changes to an ellipsis. */
+function FileDownloadLink({
+  file,
+  uid,
+  label,
+  className,
+  onClickExtra,
+}: {
+  file: StoredFile;
+  uid: string;
+  label: string;
+  className: string;
+  onClickExtra?: (e: React.MouseEvent) => void;
+}) {
+  const { show } = useToast();
+  const { t } = useLanguage();
+  const [href, setHref] = useState(file.downloadUrl || file.dataUrl || '');
+
+  useEffect(() => {
+    let cancelled = false;
+    if (href) return;
+    void (async () => {
+      const url = await resolveDownloadHref(file, uid);
+      if (!cancelled && url) setHref(url);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [file, uid, href]);
+
+  return (
+    <a
+      href={href || '#'}
+      download={file.name}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={className}
+      onClick={(e) => {
+        onClickExtra?.(e);
+        if (href) return;
+        e.preventDefault();
+        void (async () => {
+          const url = await resolveDownloadHref(file, uid);
+          if (url) {
+            setHref(url);
+            window.open(url, '_blank', 'noopener,noreferrer');
+          } else {
+            show(t.filesDownloadFailed);
+          }
+        })();
+      }}
+    >
+      {label}
+    </a>
+  );
 }
 
 function FilePreviewModal({
@@ -255,8 +314,6 @@ function FilePreviewModal({
   uid,
   onClose,
   t,
-  onDownload,
-  downloading,
 }: {
   file: StoredFile;
   uid: string;
@@ -267,8 +324,6 @@ function FilePreviewModal({
     filesPreviewFailed: string;
     filesPreviewLoading: string;
   };
-  onDownload: (file: StoredFile) => void;
-  downloading: boolean;
 }) {
   const mode = previewModeFor(file);
   const [textContent, setTextContent] = useState('');
@@ -370,8 +425,6 @@ function FilePreviewModal({
     return () => { cancelled = true; };
   }, [file, mode, uid, t.filesPreviewFailed]);
 
-  const downloadHref = file.downloadUrl || file.dataUrl || '';
-
   return createPortal(
     <div
       role="dialog"
@@ -383,30 +436,13 @@ function FilePreviewModal({
       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
         <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
         <div className="flex shrink-0 items-center gap-2">
-          {downloadHref ? (
-            <a
-              href={downloadHref}
-              download={file.name}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {t.filesDownload}
-            </a>
-          ) : (
-            <button
-              type="button"
-              disabled={downloading}
-              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDownload(file);
-              }}
-            >
-              {downloading ? '…' : t.filesDownload}
-            </button>
-          )}
+          <FileDownloadLink
+            file={file}
+            uid={uid}
+            label={t.filesDownload}
+            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
+            onClickExtra={(e) => e.stopPropagation()}
+          />
           <button
             type="button"
             onClick={onClose}
@@ -502,7 +538,6 @@ export function FilesPage({ search }: { search: string }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const migrationStartedRef = useRef(false);
 
   useEffect(() => {
@@ -1132,44 +1167,6 @@ export function FilesPage({ search }: { search: string }) {
     if (!uploading) setDragging(true);
   };
 
-  const downloadFile = async (file: StoredFile) => {
-    if (!user || downloadingId) return;
-
-    setDownloadingId(file.id);
-    setError('');
-    try {
-      await withTimeout((async () => {
-        let url = file.downloadUrl || file.dataUrl || '';
-        if (!url) {
-          const refreshed = await refreshFileAccess(file);
-          url = refreshed?.downloadUrl || '';
-          if (url) {
-            setFiles((prev) =>
-              prev.map((f) =>
-                f.id === file.id
-                  ? { ...f, downloadUrl: url, storagePath: refreshed?.storagePath ?? f.storagePath }
-                  : f,
-              ),
-            );
-          }
-        }
-        if (url) {
-          window.open(url, '_blank', 'noopener,noreferrer');
-          return;
-        }
-        triggerBlobDownload(await loadPreviewBlob(file, user.uid), file.name);
-      })(), 15_000, 'download');
-    } catch (err) {
-      console.error('File download failed', err);
-      setError(t.filesDownloadFailed);
-      show(t.filesDownloadFailed);
-    } finally {
-      setDownloadingId(null);
-    }
-  };
-
-  const fileDownloadUrl = (file: StoredFile) => file.downloadUrl || file.dataUrl || '';
-
   const onDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
@@ -1481,25 +1478,13 @@ export function FilesPage({ search }: { search: string }) {
                     {t.filesPreview}
                   </button>
                 )}
-                {fileDownloadUrl(file) ? (
-                  <a
-                    href={fileDownloadUrl(file)}
-                    download={file.name}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                {user && (
+                  <FileDownloadLink
+                    file={file}
+                    uid={user.uid}
+                    label={t.filesDownload}
                     className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
-                  >
-                    {t.filesDownload}
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={downloadingId === file.id}
-                    onClick={() => void downloadFile(file)}
-                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
-                  >
-                    {downloadingId === file.id ? '…' : t.filesDownload}
-                  </button>
+                  />
                 )}
                 <button
                   type="button"
@@ -1558,8 +1543,6 @@ export function FilesPage({ search }: { search: string }) {
           uid={user.uid}
           onClose={() => setPreviewFile(null)}
           t={t}
-          onDownload={(f) => void downloadFile(f)}
-          downloading={downloadingId === previewFile.id}
         />
       )}
     </div>
