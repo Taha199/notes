@@ -2,14 +2,52 @@ import { getBytes, getDownloadURL, ref, type FirebaseStorage } from 'firebase/st
 import mammoth from 'mammoth';
 import { storageBuckets } from '../firebase';
 import { getRtdbAuthToken } from '../rtdb';
+import { fetchFullFileRecord } from './fileApi';
 import { candidateStoragePaths } from './filePaths';
 import { dataUrlToBlob, dataUrlToBlobWithProgress } from './fileStorage';
 import {
+  fileHref,
+  isInlinePendingFile,
   isMissingStorageError,
   previewModeFor,
+  withHydratedInline,
   withTimeout,
   type StoredFile,
 } from './fileTypes';
+
+const inlineHydrateInflight = new Map<string, Promise<StoredFile>>();
+
+/**
+ * Restore Friday inline dataUrl from RTDB for list entries that only have inlinePending.
+ * Never touches Storage/API — one authenticated RTDB GET.
+ */
+export async function hydrateInlineFile(file: StoredFile, uid?: string): Promise<StoredFile> {
+  if (file.dataUrl?.startsWith('data:')) {
+    const next = { ...file };
+    delete next.inlinePending;
+    return next;
+  }
+  if (!isInlinePendingFile(file) || !uid) return file;
+
+  const key = `${uid}:${file.id}`;
+  const existing = inlineHydrateInflight.get(key);
+  if (existing) return existing;
+
+  const work = (async () => {
+    try {
+      const full = await fetchFullFileRecord(uid, file.id);
+      if (!full) return file;
+      return withHydratedInline(file, full);
+    } catch {
+      return file;
+    } finally {
+      inlineHydrateInflight.delete(key);
+    }
+  })();
+
+  inlineHydrateInflight.set(key, work);
+  return work;
+}
 
 /** Stall timeout for CDN XHR — resets on progress so large PDFs aren't killed. */
 const CDN_STALL_MS = 8_000;
@@ -410,14 +448,25 @@ export async function loadFileBlob(
   onProgress?: (loaded: number, total: number) => void,
   uid?: string,
 ): Promise<Blob> {
-  if (file.dataUrl?.startsWith('data:')) {
-    const blob = dataUrlToBlob(file.dataUrl);
+  let current = file;
+  if (current.dataUrl?.startsWith('data:')) {
+    const blob = dataUrlToBlob(current.dataUrl);
     onProgress?.(blob.size, blob.size);
-    return ensurePdfMime(blob, file);
+    return ensurePdfMime(blob, current);
   }
 
-  const downloadUrl = (file.downloadUrl || '').trim();
-  const paths = candidateStoragePaths(file, uid);
+  // Friday inline: hydrate dataUrl from RTDB before any Storage/API race.
+  if (isInlinePendingFile(current) && uid) {
+    current = await hydrateInlineFile(current, uid);
+    if (current.dataUrl?.startsWith('data:')) {
+      const blob = dataUrlToBlob(current.dataUrl);
+      onProgress?.(blob.size, blob.size);
+      return ensurePdfMime(blob, current);
+    }
+  }
+
+  const downloadUrl = (current.downloadUrl || '').trim();
+  const paths = candidateStoragePaths(current, uid);
   const primaryPath = paths[0];
 
   const attempts: RaceAttempt[] = [];
@@ -425,9 +474,9 @@ export async function loadFileBlob(
   if (downloadUrl && !downloadUrl.startsWith('data:') && !downloadUrl.startsWith('blob:')) {
     attempts.push({
       start: () => {
-        const ab = fetchBlobWithProgress(downloadUrl, file, onProgress);
+        const ab = fetchBlobWithProgress(downloadUrl, current, onProgress);
         return {
-          promise: ab.promise.then((blob) => ensurePdfMime(blob, file)),
+          promise: ab.promise.then((blob) => ensurePdfMime(blob, current)),
           abort: ab.abort,
         };
       },
@@ -436,7 +485,7 @@ export async function loadFileBlob(
 
   // API probe — short timeout; useful when CDN URL missing/stale.
   attempts.push({
-    start: () => fetchBlobViaApi(file, onProgress, PROBE_MS).then((blob) => ensurePdfMime(blob, file)),
+    start: () => fetchBlobViaApi(current, onProgress, PROBE_MS).then((blob) => ensurePdfMime(blob, current)),
   });
 
   if (primaryPath) {
@@ -445,7 +494,7 @@ export async function loadFileBlob(
         const blob = await tryGetBytesOnce(primaryPath, PROBE_MS);
         if (!blob) throw new Error('getbytes-miss');
         onProgress?.(blob.size, blob.size);
-        return ensurePdfMime(blob, file);
+        return ensurePdfMime(blob, current);
       },
     });
   }
@@ -456,11 +505,11 @@ export async function loadFileBlob(
   } catch (err) {
     // Last resort: resolve a fresh URL then fetch once.
     try {
-      const resolved = await resolveFileDownloadUrl(file, uid);
+      const resolved = await resolveFileDownloadUrl(current, uid);
       if (resolved && resolved !== downloadUrl) {
         return ensurePdfMime(
-          await fetchBlobWithProgress(resolved, file, onProgress).promise,
-          file,
+          await fetchBlobWithProgress(resolved, current, onProgress).promise,
+          current,
         );
       }
     } catch {
@@ -484,10 +533,11 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
 }
 
 /**
- * Fast download: navigate/open CDN URL immediately when available.
- * Heal missing/stale URLs via API + getDownloadURL before buffering bytes.
- * Blob path ONLY as last resort (legacy inline / recovery).
- * onProgress: 0–100 while working (CDN open → 100; dataUrl decode; XHR bytes).
+ * Fast download (Friday order):
+ * 1) dataUrl → blob download with % progress (no Storage/API)
+ * 2) downloadUrl → instant open/navigate (no heal/probe)
+ * 3) inlinePending → RTDB hydrate → dataUrl path
+ * 4) heal CDN URL / blob only as last resort
  */
 export async function downloadStoredFile(
   file: StoredFile,
@@ -496,19 +546,30 @@ export async function downloadStoredFile(
 ): Promise<void> {
   const report = (pct: number) => onProgress?.(Math.max(0, Math.min(100, Math.round(pct))));
 
-  const existing = (file.downloadUrl || '').trim();
-  if (existing && !existing.startsWith('data:') && !existing.startsWith('blob:')) {
-    // openOrNavigate: window.open → <a target=_blank> → location.assign.
-    // Never treat window.open===null as failure without the assign fallback.
-    report(100);
-    if (openOrNavigateToDownloadUrl(existing, file.name)) return;
-  }
-
   if (file.dataUrl?.startsWith('data:')) {
     const blob = await dataUrlToBlobWithProgress(file.dataUrl, report);
     triggerBlobDownload(blob, file.name);
     report(100);
     return;
+  }
+
+  const existing = (file.downloadUrl || '').trim();
+  if (existing && !existing.startsWith('data:') && !existing.startsWith('blob:')) {
+    // openOrNavigate: window.open → <a target=_blank> → location.assign.
+    report(100);
+    if (openOrNavigateToDownloadUrl(existing, file.name)) return;
+  }
+
+  // Friday ≤7MB inline list entry: restore dataUrl from RTDB — never Storage first.
+  if (isInlinePendingFile(file) && uid) {
+    report(8);
+    const hydrated = await hydrateInlineFile(file, uid);
+    if (hydrated.dataUrl?.startsWith('data:')) {
+      const blob = await dataUrlToBlobWithProgress(hydrated.dataUrl, report);
+      triggerBlobDownload(blob, hydrated.name || file.name);
+      report(100);
+      return;
+    }
   }
 
   // Heal: mint/list a CDN URL without downloading the full file body.
@@ -582,7 +643,8 @@ const previewBlobCache = new Map<string, CachedPreview>();
 const previewInflight = new Map<string, Promise<string>>();
 
 function previewCacheKey(file: StoredFile): string {
-  return `${file.id}:${file.downloadUrl || ''}:${file.storagePath || ''}:${file.inlinePending ? '1' : '0'}`;
+  const hasData = file.dataUrl?.startsWith('data:') ? '1' : '0';
+  return `${file.id}:${file.downloadUrl || ''}:${file.storagePath || ''}:${file.inlinePending ? '1' : '0'}:d${hasData}`;
 }
 
 export function getCachedPreviewBlobUrl(file: StoredFile): string | null {
@@ -668,8 +730,17 @@ export function preloadImageUrl(href: string): void {
  */
 export function prefetchPreview(file: StoredFile, uid?: string): void {
   const mode = previewModeFor(file);
+  // Warm inline dataUrl from RTDB so click opens instantly (Friday feel).
+  if (isInlinePendingFile(file) && uid) {
+    void hydrateInlineFile(file, uid).then((hydrated) => {
+      if (mode === 'image') {
+        const href = fileHref(hydrated);
+        if (href) preloadImageUrl(href);
+      }
+    }).catch(() => { /* ignore */ });
+  }
   if (mode === 'image') {
-    const href = (file.downloadUrl || file.dataUrl || '').trim();
+    const href = fileHref(file);
     if (href) preloadImageUrl(href);
     return;
   }

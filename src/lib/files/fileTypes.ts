@@ -77,6 +77,35 @@ export function fileHref(file: StoredFile): string {
   return (file.downloadUrl || '').trim();
 }
 
+/** True when the list entry is a Friday ≤7MB inline file whose dataUrl was stripped. */
+export function isInlinePendingFile(file: StoredFile): boolean {
+  if (file.dataUrl?.startsWith('data:')) return false;
+  if (file.inlinePending === true) return true;
+  const url = (file.downloadUrl || '').trim();
+  if (url && !url.startsWith('data:') && !url.startsWith('blob:')) return false;
+  // No CDN URL and no Storage path → must be (or was) RTDB-inline.
+  return !file.storagePath;
+}
+
+/** Merge a hydrated RTDB record onto list metadata (restore dataUrl, clear pending). */
+export function withHydratedInline(base: StoredFile, full: StoredFile): StoredFile {
+  const dataUrl = full.dataUrl?.startsWith('data:') ? full.dataUrl : base.dataUrl;
+  const downloadUrl = (full.downloadUrl || base.downloadUrl || '').trim() || undefined;
+  const storagePath = (full.storagePath || base.storagePath || '').trim() || undefined;
+  const next: StoredFile = {
+    ...base,
+    ...full,
+    id: base.id,
+    downloadUrl,
+    storagePath,
+    dataUrl,
+  };
+  if (dataUrl?.startsWith('data:')) {
+    delete next.inlinePending;
+  }
+  return next;
+}
+
 /** Drop heavy base64 payloads so the UI never holds multi‑MB strings. */
 export function lightFileMeta(file: StoredFile): StoredFile {
   if (!file.dataUrl) return file;

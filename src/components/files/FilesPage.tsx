@@ -14,6 +14,8 @@ import {
   fetchUserProfile,
   formatFileSize,
   healMissingDownloadUrls,
+  hydrateInlineFile,
+  isInlinePendingFile,
   isMissingStorageError,
   loadFilesWithFallback,
   openDownloadUrlNow,
@@ -23,6 +25,8 @@ import {
   saveFolderMeta,
   uploadErrorMessage,
   uploadFileToStorage,
+  dataUrlToBlobWithProgress,
+  triggerBlobDownload,
   withTimeout,
   type FileFolder,
   type StoredFile,
@@ -117,18 +121,27 @@ export function FilesPage({ search }: { search: string }) {
     }
   }, [currentFolderId, folders]);
 
-  // Keep open preview in sync when list migration fills downloadUrl/storagePath.
+  // Keep open preview in sync when list heals URLs — never drop a hydrated dataUrl.
   useEffect(() => {
     if (!previewFile) return;
     const latest = files.find((f) => f.id === previewFile.id);
     if (!latest) return;
+    const merged: StoredFile = {
+      ...latest,
+      dataUrl: latest.dataUrl || previewFile.dataUrl,
+      downloadUrl: latest.downloadUrl || previewFile.downloadUrl,
+      storagePath: latest.storagePath || previewFile.storagePath,
+    };
+    if (merged.dataUrl?.startsWith('data:')) {
+      delete merged.inlinePending;
+    }
     if (
-      latest.downloadUrl !== previewFile.downloadUrl
-      || latest.storagePath !== previewFile.storagePath
-      || latest.inlinePending !== previewFile.inlinePending
-      || latest.dataUrl !== previewFile.dataUrl
+      merged.downloadUrl !== previewFile.downloadUrl
+      || merged.storagePath !== previewFile.storagePath
+      || merged.inlinePending !== previewFile.inlinePending
+      || merged.dataUrl !== previewFile.dataUrl
     ) {
-      setPreviewFile(latest);
+      setPreviewFile(merged);
     }
   }, [files, previewFile]);
 
@@ -400,12 +413,39 @@ export function FilesPage({ search }: { search: string }) {
     }
   };
 
+  const applyHydratedFile = (hydrated: StoredFile) => {
+    setFiles((prev) => prev.map((f) => (f.id === hydrated.id ? { ...f, ...hydrated } : f)));
+    setPreviewFile((prev) => (prev?.id === hydrated.id ? { ...prev, ...hydrated } : prev));
+  };
+
   const downloadFile = async (file: StoredFile) => {
-    // Instant path: ZERO awaits before window.open when CDN URL is present.
+    // Friday order: dataUrl blob first (no Storage/API), then instant CDN open.
+    if (file.dataUrl?.startsWith('data:')) {
+      if (downloadingId === file.id) return;
+      setDownloadingId(file.id);
+      setDownloadPct(0);
+      setError('');
+      try {
+        const blob = await dataUrlToBlobWithProgress(file.dataUrl, setDownloadPct);
+        triggerBlobDownload(blob, file.name);
+        setDownloadPct(100);
+      } catch (err) {
+        console.error('File download failed', err);
+        const base = t.filesDownloadFailed;
+        const msg = file.name ? `${base}\n\n${file.name}` : base;
+        setError(msg);
+        show(base);
+        window.alert(msg);
+      } finally {
+        setDownloadingId(null);
+        setDownloadPct(0);
+      }
+      return;
+    }
+
     const direct = (file.downloadUrl || '').trim();
     if (direct && !direct.startsWith('data:') && !direct.startsWith('blob:')) {
       if (openDownloadUrlNow(direct, file.name)) {
-        // Brief 100% so the button never sticks on "…" for CDN opens.
         setDownloadingId(file.id);
         setDownloadPct(100);
         window.setTimeout(() => {
@@ -418,6 +458,7 @@ export function FilesPage({ search }: { search: string }) {
         return;
       }
     }
+
     if (downloadingId === file.id) return;
     setDownloadingId(file.id);
     setDownloadPct(0);
@@ -427,8 +468,17 @@ export function FilesPage({ search }: { search: string }) {
       setDownloadPct(0);
     }, 20_000);
     try {
-      // Heal URL then navigate — never full-blob when CDN works.
-      await downloadStoredFile(file, user?.uid, setDownloadPct);
+      let target = file;
+      // Metadata-only inline entry: RTDB hydrate first, then dataUrl blob — never Storage.
+      if (isInlinePendingFile(file) && user?.uid) {
+        setDownloadPct(5);
+        const hydrated = await hydrateInlineFile(file, user.uid);
+        if (hydrated.dataUrl?.startsWith('data:')) {
+          applyHydratedFile(hydrated);
+          target = hydrated;
+        }
+      }
+      await downloadStoredFile(target, user?.uid, setDownloadPct);
     } catch (err) {
       console.error('File download failed', err);
       const base = isMissingStorageError(err) ? t.filesMissingInStorage : t.filesDownloadFailed;
@@ -438,7 +488,6 @@ export function FilesPage({ search }: { search: string }) {
       window.alert(msg);
     } finally {
       window.clearTimeout(clearGuard);
-      // Always clear so the Download button never sticks on "…"
       setDownloadingId(null);
       setDownloadPct(0);
     }
@@ -450,6 +499,13 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const warmFile = (file: StoredFile) => {
+    if (isInlinePendingFile(file) && user?.uid) {
+      void hydrateInlineFile(file, user.uid).then((hydrated) => {
+        if (hydrated.dataUrl?.startsWith('data:') || hydrated.downloadUrl) {
+          applyHydratedFile(hydrated);
+        }
+      }).catch(() => { /* ignore */ });
+    }
     prefetchPreview(file, user?.uid);
   };
 
@@ -840,6 +896,7 @@ export function FilesPage({ search }: { search: string }) {
           onDownload={(f) => void downloadFile(f)}
           downloading={downloadingId === previewFile.id}
           downloadPct={downloadingId === previewFile.id ? downloadPct : 0}
+          onHydrated={applyHydratedFile}
         />
       )}
     </div>

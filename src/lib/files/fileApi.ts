@@ -28,9 +28,9 @@ async function authFetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-function sortFiles(files: StoredFile[]): StoredFile[] {
+function sortFiles(files: StoredFile[], keepInlineDataUrl = false): StoredFile[] {
   return files
-    .map(lightFileMeta)
+    .map((f) => (keepInlineDataUrl ? f : lightFileMeta(f)))
     .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
 }
 
@@ -77,10 +77,20 @@ export async function fetchFilesListFromRtdb(uid: string, signal?: AbortSignal):
   if (!filesRes.ok || !foldersRes.ok) throw new Error('rtdb-fallback-failed');
   const cloudFiles = await filesRes.json();
   const cloudFolders = await foldersRes.json();
+  // Keep inline dataUrl (Friday path) — do not strip for preview/download speed.
   return {
-    files: sortFiles(normalizeList<StoredFile>(cloudFiles)),
+    files: sortFiles(normalizeList<StoredFile>(cloudFiles), true),
     folders: sortFolders(normalizeList<FileFolder>(cloudFolders)),
   };
+}
+
+/** Fetch one file record from RTDB, including inline dataUrl when present. */
+export async function fetchFullFileRecord(uid: string, fileId: string): Promise<StoredFile | null> {
+  const res = await rtdbFetch(`/users/${uid}/files/${fileId}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data || typeof data !== 'object' || !('id' in data)) return null;
+  return data as StoredFile;
 }
 
 export async function loadFilesWithFallback(uid: string): Promise<{
