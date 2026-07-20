@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { loadPreviewBlobUrl, PROXY_MAX_BYTES, resolvePublicDownloadUrl } from './fileAccess';
+import {
+  FILES_ACCESS_VERSION,
+  loadPreviewBlobUrl,
+  resolveImagePreviewSrc,
+} from './fileAccess';
 import { FileDownloadButton } from './FileDownloadButton';
 import { previewModeFor, type StoredFile } from './fileTypes';
 import { FilesLoadingIndicator } from './FilesLoadingIndicator';
@@ -39,6 +43,10 @@ export function FilePreviewModal({
   };
 
   useEffect(() => {
+    console.info(`[files] ${FILES_ACCESS_VERSION} preview`, file.id, mode);
+  }, [file.id, mode]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -48,7 +56,7 @@ export function FilePreviewModal({
 
   useEffect(() => () => revoke(), []);
 
-  // Image + PDF preview via authenticated proxy (same-origin bytes).
+  // Image: direct media URL (no CORS). PDF/text: blob via SDK.
   useEffect(() => {
     if (mode !== 'image' && mode !== 'pdf') return;
     let cancelled = false;
@@ -59,25 +67,21 @@ export function FilePreviewModal({
       setErrorDetail('');
       revoke();
 
-      const tooLarge = typeof file.size === 'number' && file.size > PROXY_MAX_BYTES;
-
       try {
-        if (tooLarge && mode === 'image') {
-          const url = await resolvePublicDownloadUrl(file, uid);
+        if (mode === 'image') {
+          const url = await resolveImagePreviewSrc(file, uid);
           if (cancelled) return;
+          if (url.startsWith('blob:')) blobRef.current = url;
           setSrc(url);
           return;
-        }
-        if (tooLarge && mode === 'pdf') {
-          throw new Error('PDF too large for in-app preview — use download');
         }
 
         const blobUrl = await loadPreviewBlobUrl(file, uid);
         if (cancelled) {
-          URL.revokeObjectURL(blobUrl);
+          if (blobUrl.startsWith('blob:')) URL.revokeObjectURL(blobUrl);
           return;
         }
-        blobRef.current = blobUrl;
+        if (blobUrl.startsWith('blob:')) blobRef.current = blobUrl;
         setSrc(blobUrl);
       } catch (err) {
         console.error('[files] preview failed', file.id, err);
@@ -96,7 +100,6 @@ export function FilePreviewModal({
     };
   }, [file, mode, uid]);
 
-  // Text preview
   useEffect(() => {
     if (mode !== 'text') return;
     let cancelled = false;
@@ -106,13 +109,18 @@ export function FilePreviewModal({
       try {
         const blobUrl = await loadPreviewBlobUrl(file, uid);
         if (cancelled) {
-          URL.revokeObjectURL(blobUrl);
+          if (blobUrl.startsWith('blob:')) URL.revokeObjectURL(blobUrl);
           return;
         }
-        const res = await fetch(blobUrl);
-        const body = await res.text();
-        URL.revokeObjectURL(blobUrl);
-        if (!cancelled) setText(body);
+        if (blobUrl.startsWith('blob:')) {
+          const res = await fetch(blobUrl);
+          const body = await res.text();
+          URL.revokeObjectURL(blobUrl);
+          if (!cancelled) setText(body);
+        } else {
+          const res = await fetch(blobUrl);
+          if (!cancelled) setText(await res.text());
+        }
       } catch (err) {
         console.error('[files] text preview failed', err);
         if (!cancelled) {
@@ -127,7 +135,7 @@ export function FilePreviewModal({
     return () => {
       cancelled = true;
     };
-  }, [file, mode, t.filesPreviewFailed]);
+  }, [file, mode, uid, t.filesPreviewFailed]);
 
   const downloadBtn = (
     <FileDownloadButton
@@ -177,7 +185,7 @@ export function FilePreviewModal({
             className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
             onError={() => {
               setFailed(true);
-              setErrorDetail('Image failed to render');
+              setErrorDetail('Image failed to render from Storage URL');
             }}
           />
         )}
@@ -194,7 +202,7 @@ export function FilePreviewModal({
           </pre>
         )}
         {(mode === 'unsupported' || failed) && !loading && (
-          <div className="flex max-w-md flex-col items-center gap-3 text-center">
+          <div className="flex max-w-lg flex-col items-center gap-3 text-center">
             <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">
               {mode === 'unsupported' ? t.filesPreviewUnavailable : t.filesPreviewFailed}
             </p>
