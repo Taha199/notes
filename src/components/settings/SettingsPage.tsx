@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
@@ -33,19 +32,8 @@ export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
   const { show } = useToast();
-  const {
-    scanRecoverableCloud,
-    emergencyRecoverFromCloud,
-    listDataBackups,
-    restoreDataBackup,
-    getLocalBackupSummary,
-    restoreFromLocalBackup,
-  } = useNotes();
   const [storageLimitMB, setStorageLimitMB] = useState(100);
   const [cloudUserData, setCloudUserData] = useState<Record<string, unknown> | null>(null);
-  const [recoveryBusy, setRecoveryBusy] = useState(false);
-  const [recoveryScan, setRecoveryScan] = useState<string>('');
-  const [dataBackups, setDataBackups] = useState<{ key: string; label: string; notes: number; quizzes: number; sets: number; folders: number; chats: number }[]>([]);
 
   // Profile
   const [nameInput, setNameInput] = useState(user?.displayName || '');
@@ -354,117 +342,6 @@ export function SettingsPage() {
             ))}
           </div>
         </div>
-      </SectionCard>
-
-      <SectionCard title={t.settingsEmergencyRecovery}>
-        <p className="mb-3 text-[13px] text-app-text-secondary dark:text-gray-400">
-          {t.settingsEmergencyRecoverySub}
-        </p>
-        {recoveryScan && (
-          <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-            {recoveryScan}
-          </p>
-        )}
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={recoveryBusy}
-            onClick={async () => {
-              setRecoveryBusy(true);
-              try {
-                const scan = await scanRecoverableCloud();
-                const tr = scan.totalRecoverable;
-                setRecoveryScan(
-                  `${tr.notes} anteckningar · ${tr.quizzes} frågor · ${tr.sets} sets · ${tr.folders} mappar · ${tr.chats} chattar`
-                  + (scan.sources.dataHistoryBest.key
-                    ? ` · backup: ${scan.sources.dataHistoryBest.notes}n/${scan.sources.dataHistoryBest.quizzes}q`
-                    : ''),
-                );
-                const backups = await listDataBackups();
-                setDataBackups(backups);
-                const local = getLocalBackupSummary();
-                if (local.hasData) {
-                  setRecoveryScan((prev) => `${prev} · lokal: ${local.notes}n/${local.quizzes}q`);
-                }
-                if (!tr.notes && !tr.quizzes && !tr.sets && !local.hasData && !backups.length) {
-                  show(t.settingsEmergencyRecoveryEmpty);
-                }
-              } finally {
-                setRecoveryBusy(false);
-              }
-            }}
-            className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
-          >
-            {recoveryBusy ? '…' : t.settingsEmergencyRecoveryScan}
-          </button>
-          <button
-            type="button"
-            disabled={recoveryBusy}
-            onClick={async () => {
-              setRecoveryBusy(true);
-              try {
-                const counts = await emergencyRecoverFromCloud();
-                const local = getLocalBackupSummary();
-                if (local.hasData && counts.notes === 0 && local.notes > 0) {
-                  await restoreFromLocalBackup();
-                }
-                show(t.settingsEmergencyRecoveryRestored);
-                setRecoveryScan(`${counts.notes} anteckningar · ${counts.quizzes} frågor · ${counts.sets} sets återställda`);
-              } finally {
-                setRecoveryBusy(false);
-              }
-            }}
-            className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-          >
-            {t.settingsEmergencyRecoveryRestore}
-          </button>
-          <button
-            type="button"
-            disabled={recoveryBusy || !getLocalBackupSummary().hasData}
-            onClick={async () => {
-              setRecoveryBusy(true);
-              try {
-                const counts = await restoreFromLocalBackup();
-                show(t.settingsEmergencyRecoveryRestored);
-                setRecoveryScan(`Lokal: ${counts.notes} anteckningar · ${counts.quizzes} frågor`);
-              } finally {
-                setRecoveryBusy(false);
-              }
-            }}
-            className="rounded-xl border border-app-border px-4 py-2 text-sm font-semibold text-app-text hover:bg-app-border/30 disabled:opacity-40 dark:border-white/10"
-          >
-            {lang === 'sv' ? 'Återställ från denna enhet' : 'Restore from this device'}
-          </button>
-        </div>
-        {dataBackups.length > 0 && (
-          <div className="mt-4 space-y-2 border-t border-app-border pt-3 dark:border-white/10">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70">Cloud backups</p>
-            {dataBackups.slice(0, 8).map((b) => (
-              <div key={b.key} className="flex items-center justify-between gap-2 text-[13px]">
-                <span className="text-app-text-secondary dark:text-gray-400">
-                  {b.label} · {b.notes}n · {b.quizzes}q · {b.sets}s
-                </span>
-                <button
-                  type="button"
-                  disabled={recoveryBusy}
-                  onClick={async () => {
-                    setRecoveryBusy(true);
-                    try {
-                      const counts = await restoreDataBackup(b.key);
-                      show(t.settingsEmergencyRecoveryRestored);
-                      setRecoveryScan(`${counts.notes} anteckningar · ${counts.quizzes} frågor från backup`);
-                    } finally {
-                      setRecoveryBusy(false);
-                    }
-                  }}
-                  className="rounded-lg border border-amber-300 px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-500/30 dark:text-amber-200"
-                >
-                  {lang === 'sv' ? 'Återställ' : 'Restore'}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
       </SectionCard>
 
       {isAdmin && <PlatformBackupCard />}
