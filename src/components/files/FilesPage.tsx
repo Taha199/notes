@@ -34,8 +34,6 @@ const LIST_TIMEOUT_MS = 15_000;
 const UPLOAD_STUCK_MS = 10_000;
 const UPLOAD_TOTAL_MS = 90_000;
 const PROFILE_TIMEOUT_MS = 5_000;
-/** Preview blob fetch must not hang forever (Chrome XHR can stall without onload/onerror). */
-const PREVIEW_BLOB_TIMEOUT_MS = 25_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -157,70 +155,40 @@ function ensurePdfMime(blob: Blob, file: StoredFile): Blob {
   return blob;
 }
 
-/**
- * Load file bytes as a same-origin-friendly Blob.
- * Chrome blanks Firebase download URLs in <iframe> (Content-Disposition: attachment)
- * and ignores cross-origin <a download>. Blob URLs fix both for all browsers.
- */
-async function loadFileBlob(
-  file: StoredFile,
-  onProgress?: (loaded: number, total: number) => void,
-): Promise<Blob> {
-  if (file.dataUrl) {
-    const blob = dataUrlToBlob(file.dataUrl);
-    onProgress?.(blob.size, blob.size);
-    return ensurePdfMime(blob, file);
-  }
+function isChromeBrowser(): boolean {
+  const ua = navigator.userAgent;
+  return /Chrome\//.test(ua) && !/Edg\//.test(ua) && !/OPR\//.test(ua);
+}
 
-  // Authenticated SDK read first — Chrome often hangs on XHR to Firebase token URLs.
+/** Load bytes from Storage / legacy data — no XHR (Chrome can hang on token URLs). */
+async function loadStorageBlob(file: StoredFile): Promise<Blob> {
+  if (file.dataUrl) return dataUrlToBlob(file.dataUrl);
   if (file.storagePath) {
     try {
-      const blob = await getBlob(ref(storage, file.storagePath));
-      onProgress?.(blob.size, blob.size);
-      return ensurePdfMime(blob, file);
+      return await getBlob(ref(storage, file.storagePath));
     } catch {
       /* fall through */
     }
   }
-
   if (file.downloadUrl) {
-    return await withTimeout(
-      fetchBlobWithProgress(file.downloadUrl, file, onProgress),
-      15_000,
-      'xhr-timeout',
-    );
+    const res = await fetch(file.downloadUrl);
+    if (!res.ok) throw new Error(`fetch:${res.status}`);
+    return res.blob();
   }
-
   throw new Error('no-file-source');
 }
 
-/** XHR fetch so we can report byte progress (fetch streams are awkward here). */
-function fetchBlobWithProgress(
-  url: string,
-  file: StoredFile,
-  onProgress?: (loaded: number, total: number) => void,
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', url, true);
-    xhr.responseType = 'blob';
-    xhr.onprogress = (e) => {
-      if (e.lengthComputable) onProgress?.(e.loaded, e.total);
-      else if (file.size > 0) onProgress?.(e.loaded, file.size);
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        const blob = ensurePdfMime(xhr.response as Blob, file);
-        onProgress?.(blob.size, blob.size);
-        resolve(blob);
-      } else {
-        reject(new Error(`fetch-failed:${xhr.status}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error('fetch-network'));
-    xhr.onabort = () => reject(new Error('fetch-abort'));
-    xhr.send();
-  });
+async function loadTextPreview(file: StoredFile, href: string): Promise<string> {
+  if (file.dataUrl?.startsWith('data:')) {
+    const match = file.dataUrl.match(/^data:([^,]*),(.*)$/s);
+    if (!match) return '';
+    const [, meta, payload] = match;
+    if (meta.includes('base64')) return atob(payload);
+    return decodeURIComponent(payload);
+  }
+  const res = await fetch(href);
+  if (!res.ok) throw new Error(`fetch:${res.status}`);
+  return res.text();
 }
 
 function triggerBlobDownload(blob: Blob, filename: string) {
@@ -236,15 +204,8 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-async function loadTextPreview(file: StoredFile): Promise<string> {
-  if (file.dataUrl?.startsWith('data:')) {
-    const match = file.dataUrl.match(/^data:([^,]*),(.*)$/s);
-    if (!match) return '';
-    const [, meta, payload] = match;
-    if (meta.includes('base64')) return atob(payload);
-    return decodeURIComponent(payload);
-  }
-  const blob = await loadFileBlob(file);
+async function loadTextPreviewFromBlob(file: StoredFile): Promise<string> {
+  const blob = await loadStorageBlob(file);
   return blob.text();
 }
 
@@ -267,25 +228,19 @@ function FilePreviewModal({
   downloading: boolean;
 }) {
   const href = fileHref(file);
-  const hasDirectSrc = Boolean(file.downloadUrl || file.dataUrl);
   const mode = previewModeFor(file);
-  /** Chrome blocks Firebase URLs in <img>; load via SDK when we know the Storage path. */
-  const imageNeedsSdkBlob = mode === 'image' && Boolean(file.storagePath || file.dataUrl);
+  const chrome = isChromeBrowser();
   const [textContent, setTextContent] = useState('');
+  const [loadingText, setLoadingText] = useState(mode === 'text');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  /** Preview-only resolving state — never reuse the files-list "Hämtar dina filer" copy. */
-  const [previewResolving, setPreviewResolving] = useState(
-    mode === 'pdf' || mode === 'text' || imageNeedsSdkBlob,
-  );
-  const [loadProgress, setLoadProgress] = useState(0);
+  const [blobLoading, setBlobLoading] = useState(mode === 'pdf' && chrome);
   const [loadError, setLoadError] = useState(false);
-  const [imgFailed, setImgFailed] = useState(false);
-  const blobUrlRef = useRef<string | null>(null);
+  const blobRef = useRef<string | null>(null);
 
-  const revokeBlobUrl = () => {
-    if (blobUrlRef.current) {
-      URL.revokeObjectURL(blobUrlRef.current);
-      blobUrlRef.current = null;
+  const revokeBlob = () => {
+    if (blobRef.current) {
+      URL.revokeObjectURL(blobRef.current);
+      blobRef.current = null;
     }
   };
 
@@ -295,135 +250,45 @@ function FilePreviewModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  useEffect(() => () => revokeBlobUrl(), []);
+  useEffect(() => () => revokeBlob(), []);
 
-  // PDF: always use a same-origin blob: URL (Chrome cannot embed Firebase attachment URLs).
+  // Chrome cannot embed Firebase PDF URLs (Content-Disposition: attachment).
   useEffect(() => {
-    if (mode !== 'pdf') return;
+    if (mode !== 'pdf' || !chrome) return;
     let cancelled = false;
-    setPreviewResolving(true);
+    setBlobLoading(true);
     setLoadError(false);
-    setLoadProgress(0);
     setBlobUrl(null);
-    revokeBlobUrl();
+    revokeBlob();
     (async () => {
       try {
-        const blob = await withTimeout(
-          loadFileBlob(file, (loaded, total) => {
-            if (!cancelled && total > 0) {
-              setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
-            }
-          }),
-          PREVIEW_BLOB_TIMEOUT_MS,
-          'preview-timeout',
-        );
+        const blob = ensurePdfMime(await loadStorageBlob(file), file);
         if (cancelled) return;
-        const objectUrl = URL.createObjectURL(blob);
-        blobUrlRef.current = objectUrl;
-        setBlobUrl(objectUrl);
-        setLoadProgress(100);
+        const url = URL.createObjectURL(blob);
+        blobRef.current = url;
+        setBlobUrl(url);
       } catch {
         if (!cancelled) setLoadError(true);
       } finally {
-        if (!cancelled) setPreviewResolving(false);
+        if (!cancelled) setBlobLoading(false);
       }
     })();
     return () => {
       cancelled = true;
-      revokeBlobUrl();
+      revokeBlob();
     };
-  }, [file, mode]);
-
-  // Storage-backed images: load bytes via SDK immediately (Chrome-safe).
-  useEffect(() => {
-    if (!imageNeedsSdkBlob) return;
-    let cancelled = false;
-    setPreviewResolving(true);
-    setLoadError(false);
-    setLoadProgress(0);
-    setBlobUrl(null);
-    revokeBlobUrl();
-    (async () => {
-      try {
-        const blob = await withTimeout(
-          loadFileBlob(file, (loaded, total) => {
-            if (!cancelled && total > 0) {
-              setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
-            }
-          }),
-          PREVIEW_BLOB_TIMEOUT_MS,
-          'preview-timeout',
-        );
-        if (cancelled) return;
-        const objectUrl = URL.createObjectURL(blob);
-        blobUrlRef.current = objectUrl;
-        setBlobUrl(objectUrl);
-        setLoadProgress(100);
-      } catch {
-        if (!cancelled) setLoadError(true);
-      } finally {
-        if (!cancelled) setPreviewResolving(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      revokeBlobUrl();
-    };
-  }, [file, imageNeedsSdkBlob]);
-
-  // No direct URL (legacy stripped dataUrl) — go straight to blob / error.
-  useEffect(() => {
-    if (mode !== 'image' || hasDirectSrc || imgFailed || loadError || imageNeedsSdkBlob) return;
-    setLoadError(true);
-  }, [mode, hasDirectSrc, imgFailed, loadError, imageNeedsSdkBlob]);
-
-  // Image fallback: remote <img> failed → blob via getBlob (SDK first).
-  useEffect(() => {
-    if (mode !== 'image' || !imgFailed || imageNeedsSdkBlob) return;
-    let cancelled = false;
-    setPreviewResolving(true);
-    setLoadError(false);
-    setLoadProgress(0);
-    (async () => {
-      try {
-        const blob = await withTimeout(
-          loadFileBlob(file, (loaded, total) => {
-            if (!cancelled && total > 0) {
-              setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
-            }
-          }),
-          PREVIEW_BLOB_TIMEOUT_MS,
-          'preview-timeout',
-        );
-        if (cancelled) return;
-        revokeBlobUrl();
-        const objectUrl = URL.createObjectURL(blob);
-        blobUrlRef.current = objectUrl;
-        setBlobUrl(objectUrl);
-        setLoadProgress(100);
-      } catch {
-        if (!cancelled) setLoadError(true);
-      } finally {
-        if (!cancelled) setPreviewResolving(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [file, mode, imgFailed]);
+  }, [file, mode, chrome]);
 
   useEffect(() => {
     if (mode !== 'text') return;
     let cancelled = false;
-    setPreviewResolving(true);
+    setLoadingText(true);
     setLoadError(false);
     (async () => {
       try {
-        const body = await withTimeout(
-          loadTextPreview(file),
-          PREVIEW_BLOB_TIMEOUT_MS,
-          'preview-timeout',
-        );
+        const body = href && href !== '#'
+          ? await loadTextPreview(file, href)
+          : await loadTextPreviewFromBlob(file);
         if (!cancelled) setTextContent(body);
       } catch {
         if (!cancelled) {
@@ -431,14 +296,33 @@ function FilePreviewModal({
           setLoadError(true);
         }
       } finally {
-        if (!cancelled) setPreviewResolving(false);
+        if (!cancelled) setLoadingText(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [file, mode, t.filesPreviewFailed]);
+  }, [file, href, mode, t.filesPreviewFailed]);
 
-  const imageSrc = blobUrl || (hasDirectSrc && !imgFailed && !imageNeedsSdkBlob ? href : null);
-  const showImageSpinner = mode === 'image' && !loadError && previewResolving && !imageSrc;
+  const loadImageBlob = () => {
+    if (blobUrl || blobLoading || loadError) return;
+    setBlobLoading(true);
+    void (async () => {
+      try {
+        const blob = await loadStorageBlob(file);
+        revokeBlob();
+        const url = URL.createObjectURL(blob);
+        blobRef.current = url;
+        setBlobUrl(url);
+      } catch {
+        setLoadError(true);
+      } finally {
+        setBlobLoading(false);
+      }
+    })();
+  };
+
+  const imageSrc = blobUrl || href;
+  const pdfSrc = chrome ? blobUrl : href;
+  const showPreviewSpinner = blobLoading && !blobUrl && !loadError;
 
   return createPortal(
     <div
@@ -451,17 +335,30 @@ function FilePreviewModal({
       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
         <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            disabled={downloading}
-            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDownload(file);
-            }}
-          >
-            {downloading ? '…' : t.filesDownload}
-          </button>
+          {href !== '#' ? (
+            <a
+              href={href}
+              download={file.name}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {t.filesDownload}
+            </a>
+          ) : (
+            <button
+              type="button"
+              disabled={downloading}
+              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownload(file);
+              }}
+            >
+              {downloading ? '…' : t.filesDownload}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -473,51 +370,30 @@ function FilePreviewModal({
         </div>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {showImageSpinner && (
-          <div className="text-center text-white">
-            <FilesLoadingIndicator text={t.filesPreviewLoading} />
-            {loadProgress > 0 && (
-              <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
-            )}
-          </div>
+        {showPreviewSpinner && (
+          <FilesLoadingIndicator text={t.filesPreviewLoading} />
         )}
-        {mode === 'image' && !loadError && imageSrc && (
+        {mode === 'image' && !loadError && href !== '#' && (
           <img
             src={imageSrc}
             alt={file.name}
-            referrerPolicy="no-referrer"
             className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
-            onError={() => {
-              if (blobUrl || file.dataUrl) setLoadError(true);
-              else if (!imgFailed) setImgFailed(true);
-              else setLoadError(true);
-            }}
+            onError={loadImageBlob}
           />
         )}
-        {mode === 'pdf' && (
-          previewResolving ? (
-            <div className="text-center text-white">
-              <FilesLoadingIndicator text={t.filesPreviewLoading} />
-              {loadProgress > 0 && (
-                <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
-              )}
-            </div>
-          ) : loadError || !blobUrl ? (
-            <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewFailed}</p>
-          ) : (
-            <iframe
-              title={file.name}
-              src={blobUrl}
-              className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
-            />
-          )
+        {mode === 'pdf' && !loadError && !showPreviewSpinner && pdfSrc && (
+          <iframe
+            title={file.name}
+            src={pdfSrc}
+            className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
+          />
         )}
         {mode === 'text' && (
           <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
-            {previewResolving ? '…' : textContent}
+            {loadingText ? '…' : textContent}
           </pre>
         )}
-        {(mode === 'unsupported' || (mode === 'image' && loadError)) && (
+        {(mode === 'unsupported' || loadError) && (
           <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">
             {mode === 'unsupported' ? t.filesPreviewUnavailable : t.filesPreviewFailed}
           </p>
@@ -1209,21 +1085,33 @@ export function FilesPage({ search }: { search: string }) {
     if (!uploading) setDragging(true);
   };
 
-  const downloadFile = async (file: StoredFile) => {
+  const downloadFile = (file: StoredFile) => {
+    const href = fileHref(file);
+    if (href && href !== '#') {
+      const a = document.createElement('a');
+      a.href = href;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
     if (downloadingId) return;
     setDownloadingId(file.id);
     setError('');
-    try {
-      // Same-origin blob + <a download> works in Chrome; cross-origin downloadUrl does not.
-      const blob = await loadFileBlob(file);
-      triggerBlobDownload(blob, file.name);
-    } catch (err) {
-      console.error('File download failed', err);
-      setError(t.filesDownloadFailed);
-      show(t.filesDownloadFailed);
-    } finally {
-      setDownloadingId(null);
-    }
+    void (async () => {
+      try {
+        triggerBlobDownload(await loadStorageBlob(file), file.name);
+      } catch (err) {
+        console.error('File download failed', err);
+        setError(t.filesDownloadFailed);
+        show(t.filesDownloadFailed);
+      } finally {
+        setDownloadingId(null);
+      }
+    })();
   };
 
   const onDragLeave = (e: React.DragEvent) => {
