@@ -5,10 +5,11 @@ import {
   readServiceAccount,
   RTDB_SCOPES,
   verifyUser,
+  writeRtdb,
 } from './_lib/firebaseAdmin.js';
 import {
-  downloadFromStorage,
   resolveDownloadUrl,
+  resolveFileBytes,
   resolveStoragePath,
   STORAGE_SCOPE,
 } from './_lib/storageFiles.js';
@@ -33,6 +34,12 @@ function contentDisposition(format, fileName) {
   const encoded = encodeURIComponent(raw);
   const type = format === 'attachment' ? 'attachment' : 'inline';
   return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+function stripBlob(file) {
+  const { dataUrl, ...rest } = file;
+  void dataUrl;
+  return rest;
 }
 
 export default async function handler(request, response) {
@@ -67,7 +74,6 @@ export default async function handler(request, response) {
     return json(response, 400, { error: 'missing-file-id' }, origin);
   }
 
-  // Default to attachment for safety; explicit json for URL-only clients.
   const rawFormat = String(request.query?.format || 'attachment').toLowerCase();
   const format = rawFormat === 'inline' || rawFormat === 'json' ? rawFormat : 'attachment';
 
@@ -87,78 +93,76 @@ export default async function handler(request, response) {
       getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
     ]);
 
-    // Ownership: path is scoped to verified UID — never trust client-supplied uid.
     const file = await readRtdb(dbToken, `/users/${account.uid}/files/${fileId}`);
     if (!file || typeof file !== 'object') {
       return json(response, 404, { error: 'file-not-found' }, origin);
     }
 
-    const storagePath = resolveStoragePath(file, account.uid);
-    if (!storagePath) {
+    const contentType = file.type || 'application/octet-stream';
+    const fileName = file.name || 'file';
+    const declaredSize = typeof file.size === 'number' ? file.size : 0;
+
+    // Resolve real bytes / path (handles stale storagePath that 404s).
+    let resolved;
+    try {
+      resolved = await resolveFileBytes(storageToken, file, account.uid);
+    } catch (err) {
       return json(response, 404, {
-        error: 'no-storage-path',
-        details: 'File metadata has no storagePath or recoverable path',
+        error: 'storage-object-not-found',
+        details: err instanceof Error ? err.message : String(err),
+        storagePath: resolveStoragePath(file, account.uid),
       }, origin);
     }
 
-    const contentType = file.type || 'application/octet-stream';
-    const fileName = file.name || 'file';
+    const { buffer, contentType: detected, storagePath } = resolved;
+
+    // Heal metadata when we discovered a different real path.
+    if (storagePath && storagePath !== file.storagePath) {
+      void writeRtdb(dbToken, `/users/${account.uid}/files/${fileId}`, {
+        ...stripBlob(file),
+        storagePath,
+        ...(file.downloadUrl ? {} : {}),
+      });
+    }
 
     if (format === 'json') {
-      const { downloadUrl } = await resolveDownloadUrl(
-        storageToken,
-        storagePath,
-        contentType,
-        false,
-      );
+      let downloadUrl = file.downloadUrl;
+      try {
+        const resolvedUrl = await resolveDownloadUrl(storageToken, storagePath, contentType, false);
+        downloadUrl = resolvedUrl.downloadUrl;
+        if (downloadUrl && downloadUrl !== file.downloadUrl) {
+          void writeRtdb(dbToken, `/users/${account.uid}/files/${fileId}`, {
+            ...stripBlob(file),
+            storagePath,
+            downloadUrl,
+          });
+        }
+      } catch {
+        /* keep existing downloadUrl if mint fails */
+      }
+      if (!downloadUrl) {
+        return json(response, 404, { error: 'no-download-url', storagePath }, origin);
+      }
       return json(response, 200, {
         downloadUrl,
         storagePath,
         name: fileName,
         type: contentType,
-        size: typeof file.size === 'number' ? file.size : undefined,
+        size: declaredSize || buffer.length,
       }, origin);
     }
 
-    // inline | attachment → stream bytes (authenticated, same-origin).
-    const declaredSize = typeof file.size === 'number' ? file.size : 0;
-    if (declaredSize > MAX_PROXY_BYTES) {
-      const { downloadUrl } = await resolveDownloadUrl(
-        storageToken,
-        storagePath,
-        contentType,
-        false,
-      );
+    if (declaredSize > MAX_PROXY_BYTES || buffer.length > MAX_PROXY_BYTES) {
+      let downloadUrl = file.downloadUrl;
+      try {
+        const resolvedUrl = await resolveDownloadUrl(storageToken, storagePath, contentType, false);
+        downloadUrl = resolvedUrl.downloadUrl;
+      } catch {
+        /* keep existing */
+      }
       return json(response, 413, {
         error: 'too-large-for-proxy',
-        size: declaredSize,
-        downloadUrl,
-        storagePath,
-      }, origin);
-    }
-
-    let buffer;
-    let detected;
-    try {
-      ({ buffer, contentType: detected } = await downloadFromStorage(storageToken, storagePath));
-    } catch (err) {
-      return json(response, 502, {
-        error: 'storage-download-failed',
-        details: err instanceof Error ? err.message : String(err),
-        storagePath,
-      }, origin);
-    }
-
-    if (buffer.length > MAX_PROXY_BYTES) {
-      const { downloadUrl } = await resolveDownloadUrl(
-        storageToken,
-        storagePath,
-        contentType,
-        false,
-      );
-      return json(response, 413, {
-        error: 'too-large-for-proxy',
-        size: buffer.length,
+        size: buffer.length || declaredSize,
         downloadUrl,
         storagePath,
       }, origin);

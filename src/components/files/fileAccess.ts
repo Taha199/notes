@@ -77,7 +77,7 @@ export async function resolvePublicDownloadUrl(file: StoredFile, uid: string): P
  * Load file bytes via authenticated same-origin API (preview).
  * Returns a blob object URL — caller must revoke it.
  */
-export async function loadPreviewBlobUrl(file: StoredFile): Promise<string> {
+export async function loadPreviewBlobUrl(file: StoredFile, uid: string): Promise<string> {
   const { token } = await requireIdToken();
 
   const res = await withTimeout(
@@ -89,17 +89,34 @@ export async function loadPreviewBlobUrl(file: StoredFile): Promise<string> {
     'preview-proxy-timeout',
   );
 
-  if (res.status === 413) throw new Error('too-large-for-proxy');
-
-  if (!res.ok) {
-    const message = await res.text();
-    throw new Error(`Preview failed: ${res.status} ${message.slice(0, 300)}`);
+  if (res.ok) {
+    const blob = await res.blob();
+    const type = file.type || blob.type;
+    const typed = type && blob.type !== type ? new Blob([blob], { type }) : blob;
+    return URL.createObjectURL(typed);
   }
 
-  const blob = await res.blob();
-  const type = file.type || blob.type;
-  const typed = type && blob.type !== type ? new Blob([blob], { type }) : blob;
-  return URL.createObjectURL(typed);
+  if (res.status === 413) throw new Error('too-large-for-proxy');
+
+  // Stale storagePath / 404 — try media URL (and let server heal path on next call).
+  const message = await res.text();
+  console.warn('[files] preview proxy failed', res.status, message.slice(0, 200));
+
+  try {
+    const url = await resolvePublicDownloadUrl(file, uid);
+    const mediaRes = await withTimeout(fetch(url), 25_000, 'media-fetch-timeout');
+    if (!mediaRes.ok) throw new Error(`media:${mediaRes.status}`);
+    const blob = await mediaRes.blob();
+    const type = file.type || blob.type;
+    const typed = type && blob.type !== type ? new Blob([blob], { type }) : blob;
+    return URL.createObjectURL(typed);
+  } catch (fallbackErr) {
+    throw new Error(
+      `Preview failed: ${res.status} ${message.slice(0, 200)} | fallback: ${
+        fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+      }`,
+    );
+  }
 }
 
 function triggerBlobDownload(blob: Blob, fileName: string) {
@@ -161,6 +178,41 @@ export async function downloadStoredFile(file: StoredFile, uid: string): Promise
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
+    return;
+  }
+
+  // 404/502 with stale path — fall back to media URL / healed json endpoint.
+  if (res.status === 404 || res.status === 502) {
+    const errBody = await res.text();
+    console.warn('[files] download proxy failed', res.status, errBody.slice(0, 200));
+    try {
+      const jsonRes = await withTimeout(
+        fetch(`/api/file-download?fileId=${encodeURIComponent(file.id)}&format=json`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        RESOLVE_MS,
+        'download-json-timeout',
+      );
+      const data = await readApiResponse<{ downloadUrl?: string }>(jsonRes);
+      if (jsonRes.ok && data.downloadUrl) {
+        const anchor = document.createElement('a');
+        anchor.href = data.downloadUrl;
+        anchor.download = fileName;
+        anchor.rel = 'noopener';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        return;
+      }
+    } catch {
+      /* continue */
+    }
+    const url = await resolvePublicDownloadUrl(file, uid);
+    const mediaRes = await withTimeout(fetch(url), 60_000, 'media-download-timeout');
+    if (!mediaRes.ok) {
+      throw new Error(`Download failed: ${res.status} ${errBody.slice(0, 200)}`);
+    }
+    triggerBlobDownload(await mediaRes.blob(), fileName);
     return;
   }
 

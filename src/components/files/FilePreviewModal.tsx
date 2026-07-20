@@ -72,7 +72,7 @@ export function FilePreviewModal({
           throw new Error('PDF too large for in-app preview — use download');
         }
 
-        const blobUrl = await loadPreviewBlobUrl(file);
+        const blobUrl = await loadPreviewBlobUrl(file, uid);
         if (cancelled) {
           URL.revokeObjectURL(blobUrl);
           return;
@@ -104,7 +104,7 @@ export function FilePreviewModal({
       setLoading(true);
       setFailed(false);
       try {
-        const blobUrl = await loadPreviewBlobUrl(file);
+        const blobUrl = await loadPreviewBlobUrl(file, uid);
         if (cancelled) {
           URL.revokeObjectURL(blobUrl);
           return;

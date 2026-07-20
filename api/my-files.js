@@ -12,6 +12,8 @@ import {
   resolveStoragePath,
   safeStorageFileName,
   storagePathFromDownloadUrl,
+  candidateStoragePaths,
+  listStoragePrefix,
   uploadToStorage,
   STORAGE_SCOPE,
 } from './_lib/storageFiles.js';
@@ -87,41 +89,57 @@ async function enrichFileUrls(files, uid, storageToken, dbToken) {
     files.map(async (file) => {
       try {
         const entry = toListEntry(file, uid);
-        if (entry.downloadUrl && entry.storagePath) return entry;
+        if (entry.downloadUrl && entry.storagePath) {
+          // Still verify path candidates aren't needed — keep as-is for speed.
+          return entry;
+        }
 
-        const path = resolveStoragePath(entry, uid) || entry.storagePath;
-        if (!path || !storageToken) {
+        const candidates = candidateStoragePaths(entry, uid);
+        if (uid && file.id) {
+          try {
+            const listed = await listStoragePrefix(storageToken, `users/${uid}/files/${file.id}/`);
+            for (const p of listed) {
+              if (!candidates.includes(p)) candidates.push(p);
+            }
+          } catch {
+            /* ignore list failures */
+          }
+        }
+
+        if (!candidates.length || !storageToken) {
           return {
             ...entry,
             accessError: entry.inlinePending ? 'inline-pending' : 'missing-storage-path',
           };
         }
 
-        try {
-          const { downloadUrl } = await resolveDownloadUrl(
-            storageToken,
-            path,
-            file.type || 'application/octet-stream',
-            false,
-          );
-          const enriched = { ...entry, downloadUrl, storagePath: path };
-          delete enriched.accessError;
-          if (dbToken && downloadUrl && downloadUrl !== file.downloadUrl) {
-            // Persist in background — don't fail the list if write fails.
-            void writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, {
-              ...stripBlob(file),
-              downloadUrl,
-              storagePath: path,
-            });
+        for (const path of candidates) {
+          try {
+            const { downloadUrl } = await resolveDownloadUrl(
+              storageToken,
+              path,
+              file.type || 'application/octet-stream',
+              false,
+            );
+            const enriched = { ...entry, downloadUrl, storagePath: path };
+            delete enriched.accessError;
+            if (dbToken && (downloadUrl !== file.downloadUrl || path !== file.storagePath)) {
+              void writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, {
+                ...stripBlob(file),
+                downloadUrl,
+                storagePath: path,
+              });
+            }
+            return enriched;
+          } catch {
+            /* try next path */
           }
-          return enriched;
-        } catch (err) {
-          return {
-            ...entry,
-            storagePath: path,
-            accessError: err instanceof Error ? err.message : 'url-enrich-failed',
-          };
         }
+
+        return {
+          ...entry,
+          accessError: 'url-enrich-failed',
+        };
       } catch (err) {
         return {
           ...stripBlob(file),
