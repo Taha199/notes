@@ -3,10 +3,10 @@ import { STORAGE_BUCKET } from './firebaseAdmin.js';
 
 export const STORAGE_SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
 
-/** Some Firebase projects still resolve objects under the legacy appspot bucket name. */
+/** Prefer legacy appspot first — older uploads often live there, not on *.firebasestorage.app. */
 export const STORAGE_BUCKET_CANDIDATES = [
-  STORAGE_BUCKET,
   'noteclaude-a5b3b.appspot.com',
+  STORAGE_BUCKET,
 ].filter((b, i, arr) => b && arr.indexOf(b) === i);
 
 /** Extract Storage object path from a Firebase download URL. */

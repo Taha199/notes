@@ -3,15 +3,16 @@ import {
   getDownloadURL,
   listAll,
   ref,
+  type FirebaseStorage,
   type StorageReference,
 } from 'firebase/storage';
-import { storage } from '../../lib/firebase';
+import { storage, storageBuckets } from '../../lib/firebase';
 import { rtdbFetch } from '../../lib/rtdb';
 import { readApiResponse, requireIdToken } from './apiHelpers';
 import { fileDownloadUrl, safeStorageFileName, type StoredFile } from './fileTypes';
 
 /** Bump when diagnosing deploy cache — visible in DevTools console. */
-export const FILES_ACCESS_VERSION = 'safari-url-first-v6';
+export const FILES_ACCESS_VERSION = 'dual-bucket-v7';
 
 const RESOLVE_MS = 12_000;
 export const PROXY_MAX_BYTES = 3_500_000;
@@ -42,6 +43,19 @@ function pathFromDownloadUrl(url: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function bucketFromDownloadUrl(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    const parts = u.pathname.split('/');
+    // /v0/b/{bucket}/o/...
+    const bIdx = parts.indexOf('b');
+    if (bIdx !== -1 && parts[bIdx + 1]) return decodeURIComponent(parts[bIdx + 1]);
+  } catch {
+    /* ignore */
+  }
+  return undefined;
 }
 
 /** Every plausible Storage object path for this metadata row. */
@@ -87,9 +101,25 @@ async function healFileMeta(file: StoredFile, uid: string, storagePath: string, 
   }
 }
 
+async function tryPathOnBucket(
+  bucket: FirebaseStorage,
+  path: string,
+  file: StoredFile,
+  uid: string,
+): Promise<{ storageRef: StorageReference; downloadUrl: string; storagePath: string } | null> {
+  try {
+    const storageRef = ref(bucket, path);
+    const downloadUrl = await withTimeout(getDownloadURL(storageRef), RESOLVE_MS, 'getDownloadURL');
+    console.info('[files] found', { path, bucket: bucket.app.options.storageBucket });
+    void healFileMeta(file, uid, path, downloadUrl);
+    return { storageRef, downloadUrl, storagePath: path };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Find a live Storage ref for this file (SDK + listAll).
- * This is the source of truth — not the API proxy.
+ * Find a live Storage ref across BOTH buckets (legacy appspot + firebasestorage.app).
  */
 export async function findLiveStorageRef(
   file: StoredFile,
@@ -97,68 +127,77 @@ export async function findLiveStorageRef(
 ): Promise<{ storageRef: StorageReference; downloadUrl: string; storagePath: string } | null> {
   console.info(`[files] ${FILES_ACCESS_VERSION} findLiveStorageRef`, file.id, file.name);
 
-  for (const path of candidateStoragePaths(file, uid)) {
+  // If downloadUrl names a bucket, try that bucket first.
+  const urlBucket = file.downloadUrl ? bucketFromDownloadUrl(file.downloadUrl) : undefined;
+  const orderedBuckets = [...storageBuckets];
+  if (urlBucket) {
+    orderedBuckets.sort((a, b) => {
+      const aMatch = (a.app.options.storageBucket || '').includes(urlBucket.replace(/\.firebasestorage\.app|\.appspot\.com/, '')) ||
+        a.app.options.storageBucket === urlBucket ? -1 : 0;
+      const bMatch = b.app.options.storageBucket === urlBucket ? -1 : 0;
+      return aMatch - bMatch;
+    });
+  }
+
+  const paths = candidateStoragePaths(file, uid);
+  for (const bucket of orderedBuckets) {
+    for (const path of paths) {
+      const hit = await tryPathOnBucket(bucket, path, file, uid);
+      if (hit) return hit;
+    }
+  }
+
+  // listAll on each bucket under this file id
+  for (const bucket of orderedBuckets) {
     try {
-      const storageRef = ref(storage, path);
-      const downloadUrl = await withTimeout(getDownloadURL(storageRef), RESOLVE_MS, 'getDownloadURL');
-      console.info('[files] found via path', path);
-      void healFileMeta(file, uid, path, downloadUrl);
-      return { storageRef, downloadUrl, storagePath: path };
-    } catch {
-      /* try next */
-    }
-  }
-
-  // List whatever actually exists under this file id folder.
-  try {
-    const folderRef = ref(storage, `users/${uid}/files/${file.id}`);
-    const listed = await withTimeout(listAll(folderRef), RESOLVE_MS, 'listAll');
-    for (const item of listed.items) {
-      try {
-        const downloadUrl = await withTimeout(getDownloadURL(item), RESOLVE_MS, 'getDownloadURL-listed');
-        console.info('[files] found via listAll', item.fullPath);
-        void healFileMeta(file, uid, item.fullPath, downloadUrl);
-        return { storageRef: item, downloadUrl, storagePath: item.fullPath };
-      } catch {
-        /* try next item */
-      }
-    }
-  } catch (err) {
-    console.warn('[files] listAll failed', err);
-  }
-
-  // Broad search under users/{uid}/files/*/{filename}
-  try {
-    const rootRef = ref(storage, `users/${uid}/files`);
-    const rootListed = await withTimeout(listAll(rootRef), RESOLVE_MS, 'listAll-root');
-    const want = new Set(
-      [
-        file.name,
-        safeStorageFileName(file.name),
-        file.name.replace(/\s+/g, '_'),
-      ].filter(Boolean),
-    );
-    const wantLower = new Set([...want].map((s) => s.toLowerCase()));
-    for (const prefix of rootListed.prefixes) {
-      try {
-        const sub = await withTimeout(listAll(prefix), 8_000, 'listAll-sub');
-        for (const item of sub.items) {
-          if (!want.has(item.name) && !wantLower.has(item.name.toLowerCase())) continue;
-          try {
-            const downloadUrl = await withTimeout(getDownloadURL(item), RESOLVE_MS, 'getDownloadURL-broad');
-            console.info('[files] found via broad listAll', item.fullPath);
-            void healFileMeta(file, uid, item.fullPath, downloadUrl);
-            return { storageRef: item, downloadUrl, storagePath: item.fullPath };
-          } catch {
-            /* next */
-          }
+      const folderRef = ref(bucket, `users/${uid}/files/${file.id}`);
+      const listed = await withTimeout(listAll(folderRef), RESOLVE_MS, 'listAll');
+      for (const item of listed.items) {
+        try {
+          const downloadUrl = await withTimeout(getDownloadURL(item), RESOLVE_MS, 'getDownloadURL-listed');
+          console.info('[files] found via listAll', item.fullPath, bucket.app.options.storageBucket);
+          void healFileMeta(file, uid, item.fullPath, downloadUrl);
+          return { storageRef: item, downloadUrl, storagePath: item.fullPath };
+        } catch {
+          /* next */
         }
-      } catch {
-        /* next prefix */
       }
+    } catch (err) {
+      console.warn('[files] listAll failed', bucket.app.options.storageBucket, err);
     }
-  } catch (err) {
-    console.warn('[files] broad listAll failed', err);
+  }
+
+  // Broad name search on both buckets
+  const want = new Set(
+    [file.name, safeStorageFileName(file.name), file.name.replace(/\s+/g, '_')].filter(Boolean),
+  );
+  const wantLower = new Set([...want].map((s) => s.toLowerCase()));
+
+  for (const bucket of orderedBuckets) {
+    try {
+      const rootRef = ref(bucket, `users/${uid}/files`);
+      const rootListed = await withTimeout(listAll(rootRef), RESOLVE_MS, 'listAll-root');
+      for (const prefix of rootListed.prefixes) {
+        try {
+          const sub = await withTimeout(listAll(prefix), 8_000, 'listAll-sub');
+          for (const item of sub.items) {
+            if (!want.has(item.name) && !wantLower.has(item.name.toLowerCase())) continue;
+            try {
+              const downloadUrl = await withTimeout(getDownloadURL(item), RESOLVE_MS, 'getDownloadURL-broad');
+              console.info('[files] found via broad list', item.fullPath);
+              void healFileMeta(file, uid, item.fullPath, downloadUrl);
+              return { storageRef: item, downloadUrl, storagePath: item.fullPath };
+            } catch {
+              /* next */
+            }
+          }
+        } catch {
+          /* next prefix */
+        }
+      }
+    } catch (err) {
+      console.warn('[files] broad list failed', bucket.app.options.storageBucket, err);
+    }
   }
 
   return null;

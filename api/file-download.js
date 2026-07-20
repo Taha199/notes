@@ -8,6 +8,7 @@ import {
   writeRtdb,
 } from './_lib/firebaseAdmin.js';
 import {
+  listStoragePrefix,
   resolveDownloadUrl,
   resolveFileBytes,
   resolveStoragePath,
@@ -107,10 +108,22 @@ export default async function handler(request, response) {
     try {
       resolved = await resolveFileBytes(storageToken, file, account.uid);
     } catch (err) {
+      let listedSample = [];
+      try {
+        listedSample = (
+          await listStoragePrefix(storageToken, `users/${account.uid}/files/`, 30)
+        ).slice(0, 15);
+      } catch {
+        /* ignore */
+      }
       return json(response, 404, {
         error: 'storage-object-not-found',
         details: err instanceof Error ? err.message : String(err),
         storagePath: resolveStoragePath(file, account.uid),
+        metaDownloadUrl: file.downloadUrl || null,
+        metaStoragePath: file.storagePath || null,
+        listedUnderUserFiles: listedSample,
+        hint: 'If listedUnderUserFiles is empty, objects were never stored or were deleted. If it has paths, metadata storagePath is wrong.',
       }, origin);
     }
 

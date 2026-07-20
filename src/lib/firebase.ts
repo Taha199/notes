@@ -5,7 +5,7 @@ import {
   EmailAuthProvider,
 } from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
-import { getStorage } from 'firebase/storage';
+import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDvmhfrgIWtgdSCnvwPgt5u0P4-unx0HL4',
@@ -20,7 +20,19 @@ const firebaseConfig = {
 export const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
 export const database = getDatabase(firebaseApp);
+
+/** Default (current) bucket — new uploads go here. */
 export const storage = getStorage(firebaseApp);
+
+/**
+ * Legacy App Engine-style bucket. Older uploads may still live here even though
+ * the web config now points at *.firebasestorage.app — that mismatch caused mass 404s.
+ */
+export const storageLegacy = getStorage(firebaseApp, 'gs://noteclaude-a5b3b.appspot.com');
+
+/** Both buckets to search when resolving existing files. Legacy first (where old files live). */
+export const storageBuckets: FirebaseStorage[] = [storageLegacy, storage];
+
 export const googleProvider = new GoogleAuthProvider();
 export { EmailAuthProvider };
 
