@@ -1037,6 +1037,7 @@ export function FilesPage({ search }: { search: string }) {
           file={previewFile}
           uid={user.uid}
           onClose={() => setPreviewFile(null)}
+          onDelete={(f) => { void removeFile(f); }}
           t={t}
         />
       )}

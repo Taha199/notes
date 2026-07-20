@@ -135,21 +135,49 @@ export async function downloadViaMediaUrl(downloadUrl) {
 }
 
 /** List object names under a prefix (e.g. users/{uid}/files/{fileId}/). */
-export async function listStoragePrefix(storageToken, prefix) {
+export async function listStoragePrefix(storageToken, prefix, maxResults = 200) {
   const names = [];
   for (const bucket of STORAGE_BUCKET_CANDIDATES) {
-    const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o?prefix=${encodeURIComponent(prefix)}&maxResults=20&fields=items(name)`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${storageToken}` },
-    });
-    if (!res.ok) continue;
-    const data = await res.json();
-    for (const item of data.items || []) {
-      if (item?.name && !names.includes(item.name)) names.push(item.name);
-    }
+    let pageToken = '';
+    do {
+      const params = new URLSearchParams({
+        prefix,
+        maxResults: String(maxResults),
+        fields: 'items(name),nextPageToken',
+      });
+      if (pageToken) params.set('pageToken', pageToken);
+      const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o?${params}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${storageToken}` },
+      });
+      if (!res.ok) break;
+      const data = await res.json();
+      for (const item of data.items || []) {
+        if (item?.name && !names.includes(item.name)) names.push(item.name);
+      }
+      pageToken = data.nextPageToken || '';
+      // Cap total scanned objects for Hobby time limits.
+      if (names.length >= maxResults) return names;
+    } while (pageToken);
     if (names.length) return names;
   }
   return names;
+}
+
+function basename(objectPath) {
+  const parts = String(objectPath || '').split('/');
+  return parts[parts.length - 1] || '';
+}
+
+function namesMatch(objectPath, fileName) {
+  if (!fileName) return false;
+  const base = basename(objectPath);
+  if (base === fileName) return true;
+  if (base === safeStorageFileName(fileName)) return true;
+  if (base === fileName.replace(/\s+/g, '_')) return true;
+  if (base === safeStorageFileName(fileName.replace(/\s+/g, '_'))) return true;
+  // Case-insensitive fallback
+  return base.toLowerCase() === fileName.toLowerCase();
 }
 
 export function safeStorageFileName(name) {
@@ -211,13 +239,29 @@ export async function resolveFileBytes(storageToken, file, uid) {
 
   if (uid && file.id) {
     const prefix = `users/${uid}/files/${file.id}/`;
-    const listed = await listStoragePrefix(storageToken, prefix);
+    const listed = await listStoragePrefix(storageToken, prefix, 50);
     for (const path of listed) {
       if (tried.includes(path)) continue;
       tried.push(path);
       try {
         const result = await downloadFromStorage(storageToken, path);
         return { ...result, storagePath: path, source: 'gcs-list' };
+      } catch {
+        /* try next */
+      }
+    }
+  }
+
+  // Broad search: object may live under a different fileId folder with the same filename.
+  if (uid && file.name) {
+    const allUnderUser = await listStoragePrefix(storageToken, `users/${uid}/files/`, 500);
+    const matches = allUnderUser.filter((path) => namesMatch(path, file.name));
+    for (const path of matches) {
+      if (tried.includes(path)) continue;
+      tried.push(path);
+      try {
+        const result = await downloadFromStorage(storageToken, path);
+        return { ...result, storagePath: path, source: 'gcs-name-search' };
       } catch {
         /* try next */
       }
@@ -234,5 +278,5 @@ export async function resolveFileBytes(storageToken, file, uid) {
     }
   }
 
-  throw new Error(`storage-object-not-found:${tried.join('|') || 'no-candidates'}`);
+  throw new Error(`storage-object-not-found:${tried.slice(0, 6).join('|') || 'no-candidates'}`);
 }

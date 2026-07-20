@@ -11,7 +11,7 @@ import { readApiResponse, requireIdToken } from './apiHelpers';
 import { fileDownloadUrl, safeStorageFileName, type StoredFile } from './fileTypes';
 
 /** Bump when diagnosing deploy cache — visible in DevTools console. */
-export const FILES_ACCESS_VERSION = 'sdk-first-v4';
+export const FILES_ACCESS_VERSION = 'sdk-first-v5';
 
 const RESOLVE_MS = 12_000;
 export const PROXY_MAX_BYTES = 3_500_000;
@@ -127,6 +127,40 @@ export async function findLiveStorageRef(
     console.warn('[files] listAll failed', err);
   }
 
+  // Broad search under users/{uid}/files/*/{filename}
+  try {
+    const rootRef = ref(storage, `users/${uid}/files`);
+    const rootListed = await withTimeout(listAll(rootRef), RESOLVE_MS, 'listAll-root');
+    const want = new Set(
+      [
+        file.name,
+        safeStorageFileName(file.name),
+        file.name.replace(/\s+/g, '_'),
+      ].filter(Boolean),
+    );
+    const wantLower = new Set([...want].map((s) => s.toLowerCase()));
+    for (const prefix of rootListed.prefixes) {
+      try {
+        const sub = await withTimeout(listAll(prefix), 8_000, 'listAll-sub');
+        for (const item of sub.items) {
+          if (!want.has(item.name) && !wantLower.has(item.name.toLowerCase())) continue;
+          try {
+            const downloadUrl = await withTimeout(getDownloadURL(item), RESOLVE_MS, 'getDownloadURL-broad');
+            console.info('[files] found via broad listAll', item.fullPath);
+            void healFileMeta(file, uid, item.fullPath, downloadUrl);
+            return { storageRef: item, downloadUrl, storagePath: item.fullPath };
+          } catch {
+            /* next */
+          }
+        }
+      } catch {
+        /* next prefix */
+      }
+    }
+  } catch (err) {
+    console.warn('[files] broad listAll failed', err);
+  }
+
   return null;
 }
 
@@ -217,9 +251,7 @@ export async function loadPreviewBlobUrl(file: StoredFile, uid: string): Promise
     throw new Error(`proxy:${res.status} ${message.slice(0, 200)}`);
   } catch (err) {
     throw new Error(
-      `Filen hittades inte i Storage (id=${file.id}). `
-        + `Radera den och ladda upp igen. `
-        + `(${err instanceof Error ? err.message : String(err)})`,
+      `MISSING_IN_STORAGE:${file.id}:${file.name}:${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }
@@ -299,8 +331,5 @@ export async function downloadStoredFile(file: StoredFile, uid: string): Promise
   }
 
   const message = await res.text().catch(() => '');
-  throw new Error(
-    `Filen hittades inte i Storage. Radera och ladda upp igen. `
-      + `(${res.status} ${message.slice(0, 180)})`,
-  );
+  throw new Error(`MISSING_IN_STORAGE:${file.id}:${file.name}:${res.status}:${message.slice(0, 120)}`);
 }

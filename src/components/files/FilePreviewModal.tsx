@@ -13,11 +13,13 @@ export function FilePreviewModal({
   file,
   uid,
   onClose,
+  onDelete,
   t,
 }: {
   file: StoredFile;
   uid: string;
   onClose: () => void;
+  onDelete?: (file: StoredFile) => void;
   t: {
     filesDownload: string;
     filesDownloading: string;
@@ -25,6 +27,8 @@ export function FilePreviewModal({
     filesPreviewFailed: string;
     filesPreviewLoading: string;
     filesDownloadFailed: string;
+    filesMissingInStorage: string;
+    filesDelete: string;
   };
 }) {
   const mode = previewModeFor(file);
@@ -87,7 +91,12 @@ export function FilePreviewModal({
         console.error('[files] preview failed', file.id, err);
         if (!cancelled) {
           setFailed(true);
-          setErrorDetail(err instanceof Error ? err.message : String(err));
+          const msg = err instanceof Error ? err.message : String(err);
+          setErrorDetail(
+            msg.startsWith('MISSING_IN_STORAGE') || /storage-object-not-found/i.test(msg)
+              ? t.filesMissingInStorage
+              : msg,
+          );
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -204,12 +213,26 @@ export function FilePreviewModal({
         {(mode === 'unsupported' || failed) && !loading && (
           <div className="flex max-w-lg flex-col items-center gap-3 text-center">
             <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">
-              {mode === 'unsupported' ? t.filesPreviewUnavailable : t.filesPreviewFailed}
+              {mode === 'unsupported'
+                ? t.filesPreviewUnavailable
+                : (errorDetail || t.filesPreviewFailed)}
             </p>
-            {errorDetail ? (
-              <p className="break-all text-xs text-white/60">{errorDetail}</p>
-            ) : null}
-            {downloadBtn}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {downloadBtn}
+              {onDelete && errorDetail === t.filesMissingInStorage ? (
+                <button
+                  type="button"
+                  className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(file);
+                    onClose();
+                  }}
+                >
+                  {t.filesDelete}
+                </button>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
