@@ -13,7 +13,9 @@ import {
   resolveDownloadUrl,
   resolveFileBytes,
   resolveStoragePath,
+  safeStorageFileName,
   STORAGE_SCOPE,
+  uploadToStorage,
 } from './_lib/storageFiles.js';
 
 /** Stay under Vercel Hobby ~4.5MB response limit. */
@@ -77,6 +79,30 @@ async function resolveDownloadUrlFast(storageToken, file, uid, contentType) {
   }
 
   throw new Error('no-download-url');
+}
+
+/**
+ * When bytes came from RTDB dataUrl, re-upload to Storage and drop the inline blob
+ * so the next list/preview uses a real downloadUrl.
+ */
+async function migrateDataUrlIfNeeded(dbToken, storageToken, file, uid, fileId, resolved) {
+  if (resolved.source !== 'rtdb-dataurl') return resolved;
+  try {
+    const objectPath = resolved.storagePath
+      || `users/${uid}/files/${fileId}/${safeStorageFileName(file.name || 'file')}`;
+    const downloadUrl = await uploadToStorage(
+      storageToken,
+      objectPath,
+      resolved.buffer,
+      resolved.contentType || file.type,
+    );
+    const clean = { ...stripBlob(file), downloadUrl, storagePath: objectPath };
+    await writeRtdb(dbToken, `/users/${uid}/files/${fileId}`, clean);
+    return { ...resolved, storagePath: objectPath, downloadUrl, source: 'rtdb-dataurl-migrated' };
+  } catch (err) {
+    console.warn('dataUrl migrate failed', fileId, err);
+    return resolved;
+  }
 }
 
 export default async function handler(request, response) {
@@ -158,6 +184,18 @@ export default async function handler(request, response) {
           source: fast.source,
         }, origin);
       } catch (err) {
+        // Still recoverable via inline dataUrl — tell the client to use format=inline.
+        if (typeof file.dataUrl === 'string' && file.dataUrl.startsWith('data:')) {
+          return json(response, 200, {
+            downloadUrl: null,
+            storagePath: resolveStoragePath(file, account.uid),
+            name: fileName,
+            type: contentType,
+            size: declaredSize,
+            source: 'rtdb-dataurl-available',
+            useInline: true,
+          }, origin);
+        }
         return json(response, 404, {
           error: 'no-download-url',
           details: err instanceof Error ? err.message : String(err),
@@ -170,6 +208,14 @@ export default async function handler(request, response) {
     let resolved;
     try {
       resolved = await resolveFileBytes(storageToken, file, account.uid);
+      resolved = await migrateDataUrlIfNeeded(
+        dbToken,
+        storageToken,
+        file,
+        account.uid,
+        fileId,
+        resolved,
+      );
     } catch (err) {
       let listedSample = [];
       try {
@@ -185,27 +231,31 @@ export default async function handler(request, response) {
         storagePath: resolveStoragePath(file, account.uid),
         metaDownloadUrl: file.downloadUrl || null,
         metaStoragePath: file.storagePath || null,
+        hasInlineDataUrl: typeof file.dataUrl === 'string' && file.dataUrl.startsWith('data:'),
         listedUnderUserFiles: listedSample,
-        hint: 'If listedUnderUserFiles is empty, objects were never stored or were deleted. If it has paths, metadata storagePath is wrong.',
+        hint: 'If listedUnderUserFiles is empty and hasInlineDataUrl is false, the file is truly orphaned.',
       }, origin);
     }
 
     const { buffer, contentType: detected, storagePath } = resolved;
 
-    if (storagePath && storagePath !== file.storagePath) {
+    if (storagePath && storagePath !== file.storagePath && resolved.source !== 'rtdb-dataurl') {
       void writeRtdb(dbToken, `/users/${account.uid}/files/${fileId}`, {
         ...stripBlob(file),
         storagePath,
+        ...(resolved.downloadUrl ? { downloadUrl: resolved.downloadUrl } : {}),
       });
     }
 
     if (declaredSize > MAX_PROXY_BYTES || buffer.length > MAX_PROXY_BYTES) {
-      let downloadUrl = file.downloadUrl;
-      try {
-        const resolvedUrl = await resolveDownloadUrl(storageToken, storagePath, contentType, false);
-        downloadUrl = resolvedUrl.downloadUrl;
-      } catch {
-        /* keep existing */
+      let downloadUrl = resolved.downloadUrl || file.downloadUrl;
+      if (!downloadUrl && storagePath) {
+        try {
+          const resolvedUrl = await resolveDownloadUrl(storageToken, storagePath, contentType, false);
+          downloadUrl = resolvedUrl.downloadUrl;
+        } catch {
+          /* keep existing */
+        }
       }
       return json(response, 413, {
         error: 'too-large-for-proxy',

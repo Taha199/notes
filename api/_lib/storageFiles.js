@@ -108,9 +108,7 @@ export async function downloadFromStorage(storageToken, objectPath) {
   let lastErr = null;
   for (const bucket of STORAGE_BUCKET_CANDIDATES) {
     const endpoints = [
-      // Firebase Storage REST (what the client SDK talks to)
       `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`,
-      // GCS JSON API
       `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`,
     ];
     for (const url of endpoints) {
@@ -163,7 +161,6 @@ export async function listStoragePrefix(storageToken, prefix, maxResults = 200) 
         if (item?.name && !names.includes(item.name)) names.push(item.name);
       }
       pageToken = data.nextPageToken || '';
-      // Cap total scanned objects for Hobby time limits.
       if (names.length >= maxResults) return names;
     } while (pageToken);
     if (names.length) return names;
@@ -183,7 +180,6 @@ function namesMatch(objectPath, fileName) {
   if (base === safeStorageFileName(fileName)) return true;
   if (base === fileName.replace(/\s+/g, '_')) return true;
   if (base === safeStorageFileName(fileName.replace(/\s+/g, '_'))) return true;
-  // Case-insensitive fallback
   return base.toLowerCase() === fileName.toLowerCase();
 }
 
@@ -196,6 +192,22 @@ export function safeStorageFileName(name) {
   return (cleaned || 'file').slice(0, 180);
 }
 
+/** Decode a legacy RTDB inline data URL into bytes. */
+export function dataUrlToBuffer(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
+    throw new Error('invalid-data-url');
+  }
+  const comma = dataUrl.indexOf(',');
+  const meta = comma === -1 ? '' : dataUrl.slice(5, comma);
+  const payload = comma === -1 ? '' : dataUrl.slice(comma + 1);
+  const contentType = meta.split(';')[0] || 'application/octet-stream';
+  const isBase64 = /;base64/i.test(meta);
+  const buffer = isBase64
+    ? Buffer.from(payload, 'base64')
+    : Buffer.from(decodeURIComponent(payload), 'utf8');
+  return { buffer, contentType };
+}
+
 /**
  * All plausible object paths for a file row.
  * Prefer downloadUrl-derived path — it reflects where the object actually lives.
@@ -205,13 +217,11 @@ export function candidateStoragePaths(file, uid) {
   const add = (p) => {
     if (typeof p === 'string' && p && !paths.includes(p)) paths.push(p);
   };
-  // downloadUrl path first — most accurate when storagePath was guessed wrong.
   if (file.downloadUrl) add(storagePathFromDownloadUrl(file.downloadUrl));
   add(file.storagePath);
   if (uid && file.id && file.name) {
     add(`users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`);
     add(`users/${uid}/files/${file.id}/${file.name}`);
-    // Older uploads may have replaced spaces with underscores.
     const underscored = file.name.replace(/\s+/g, '_');
     if (underscored !== file.name) {
       add(`users/${uid}/files/${file.id}/${underscored}`);
@@ -227,8 +237,9 @@ export function resolveStoragePath(file, uid) {
 }
 
 /**
- * Resolve real bytes for a file: try candidate paths, then prefix listing,
- * then the stored media URL. Returns { buffer, contentType, storagePath }.
+ * Resolve real bytes for a file: Storage paths → listing → media URL → RTDB dataUrl.
+ * dataUrl is last so we do not skip a real Storage object, but it prevents false
+ * "missing" when migrate stripped the blob from the list response.
  */
 export async function resolveFileBytes(storageToken, file, uid) {
   const tried = [];
@@ -259,7 +270,6 @@ export async function resolveFileBytes(storageToken, file, uid) {
     }
   }
 
-  // Broad search: object may live under a different fileId folder with the same filename.
   if (uid && file.name) {
     const allUnderUser = await listStoragePrefix(storageToken, `users/${uid}/files/`, 500);
     const matches = allUnderUser.filter((path) => namesMatch(path, file.name));
@@ -280,6 +290,21 @@ export async function resolveFileBytes(storageToken, file, uid) {
       const result = await downloadViaMediaUrl(file.downloadUrl);
       const path = storagePathFromDownloadUrl(file.downloadUrl) || candidates[0];
       return { ...result, storagePath: path, source: 'media-url' };
+    } catch {
+      /* fall through */
+    }
+  }
+
+  // Legacy inline blob still in RTDB — recoverable even when Storage object is gone.
+  if (typeof file.dataUrl === 'string' && file.dataUrl.startsWith('data:')) {
+    try {
+      const { buffer, contentType } = dataUrlToBuffer(file.dataUrl);
+      return {
+        buffer,
+        contentType,
+        storagePath: candidates[0],
+        source: 'rtdb-dataurl',
+      };
     } catch {
       /* fall through */
     }

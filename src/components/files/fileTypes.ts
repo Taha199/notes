@@ -9,8 +9,6 @@ export interface StoredFile {
   folderId?: string | null;
   dataUrl?: string;
   inlinePending?: boolean;
-  /** Per-file enrich failure — list still returns other files */
-  accessError?: string;
 }
 
 export interface FileFolder {
@@ -48,9 +46,10 @@ export function canPreviewFile(file: StoredFile): boolean {
   return previewModeFor(file) !== 'unsupported';
 }
 
-/** Every file row must expose a direct download URL for instant <a href> clicks. */
+/** Prefer recoverable inline blob over a possibly-stale Storage URL. */
 export function fileDownloadUrl(file: StoredFile): string {
-  return (file.downloadUrl || file.dataUrl || '').trim();
+  if (file.dataUrl?.startsWith('data:')) return file.dataUrl.trim();
+  return (file.downloadUrl || '').trim();
 }
 
 export function isChrome(): boolean {
