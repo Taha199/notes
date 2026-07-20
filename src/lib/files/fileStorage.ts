@@ -142,11 +142,16 @@ async function uploadViaServerProxy(
   onProgress(85);
   if (!res.ok) {
     let details = '';
+    let errorKey = '';
     try {
       const body = await res.json() as { error?: string; details?: string };
-      details = body.details || body.error || '';
+      details = body.details || '';
+      errorKey = body.error || '';
     } catch { /* ignore */ }
-    const code = details || `server-upload-failed:${res.status}`;
+    // Prefer server `details` (e.g. storage-upload-failed:404:bucket). If the
+    // route itself is missing, Vercel returns HTML → label as server HTTP status.
+    const code = details
+      || (errorKey ? `${errorKey}:${res.status}` : `server-upload-failed:${res.status}`);
     throw Object.assign(new Error(code), { code });
   }
 
@@ -322,6 +327,12 @@ export function uploadErrorMessage(
   }
   if (code === 'quota-exceeded' || code === 'storage/quota-exceeded') {
     return t.filesQuotaExceeded;
+  }
+  if (code.startsWith('storage-upload-failed') || code.startsWith('storage-token-failed')) {
+    return `${t.filesUploadFailed}${code ? ` (${code})` : ''}`;
+  }
+  if (code.startsWith('server-upload-failed') || code === 'payload-too-large') {
+    return `${t.filesUploadNetworkError}${code ? ` (${code})` : ''}`;
   }
   return `${t.filesUploadFailed}${code ? ` (${code})` : ''}`;
 }

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { STORAGE_BUCKET } from './firebaseAdmin.js';
+import { STORAGE_BUCKET, STORAGE_BUCKET_ALIAS } from './firebaseAdmin.js';
 
 export const STORAGE_SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
 
-/** Prefer legacy appspot first — older uploads often live there. */
+/** Prefer real appspot bucket first — GCS JSON API 404s on the firebasestorage.app alias. */
 export const STORAGE_BUCKET_CANDIDATES = [
-  'noteclaude-a5b3b.appspot.com',
   STORAGE_BUCKET,
+  STORAGE_BUCKET_ALIAS,
 ].filter((b, i, arr) => b && arr.indexOf(b) === i);
 
 export function safeStorageFileName(name) {
@@ -79,17 +79,29 @@ export function resolveStoragePath(file, uid) {
 }
 
 export async function uploadToStorage(storageToken, objectPath, buffer, contentType) {
-  const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(STORAGE_BUCKET)}/o?uploadType=media&name=${encodeURIComponent(objectPath)}`;
-  const uploadRes = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${storageToken}`,
-      'Content-Type': contentType || 'application/octet-stream',
-    },
-    body: buffer,
-  });
-  if (!uploadRes.ok) throw new Error(`storage-upload-failed:${uploadRes.status}`);
-  return mintDownloadToken(storageToken, objectPath, contentType);
+  let lastStatus = 0;
+  let lastDetail = '';
+  for (const bucket of STORAGE_BUCKET_CANDIDATES) {
+    const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(objectPath)}`;
+    const uploadRes = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${storageToken}`,
+        'Content-Type': contentType || 'application/octet-stream',
+      },
+      body: buffer,
+    });
+    if (uploadRes.ok) {
+      return mintDownloadToken(storageToken, objectPath, contentType, bucket);
+    }
+    lastStatus = uploadRes.status;
+    lastDetail = (await uploadRes.text().catch(() => '')).slice(0, 160);
+    // Wrong bucket name → try next candidate; other errors are fatal.
+    if (uploadRes.status !== 404) {
+      throw new Error(`storage-upload-failed:${uploadRes.status}:${bucket}:${lastDetail}`);
+    }
+  }
+  throw new Error(`storage-upload-failed:${lastStatus}:${STORAGE_BUCKET_CANDIDATES.join('|')}:${lastDetail}`);
 }
 
 /**
@@ -113,9 +125,9 @@ export async function existingDownloadUrl(storageToken, objectPath) {
   return null;
 }
 
-export async function mintDownloadToken(storageToken, objectPath, contentType) {
+export async function mintDownloadToken(storageToken, objectPath, contentType, bucket = STORAGE_BUCKET) {
   const token = randomUUID();
-  const patchUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(STORAGE_BUCKET)}/o/${encodeURIComponent(objectPath)}`;
+  const patchUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}`;
   const body = { metadata: { firebaseStorageDownloadTokens: token } };
   if (contentType) body.contentType = contentType;
   const patchRes = await fetch(patchUrl, {
@@ -126,8 +138,8 @@ export async function mintDownloadToken(storageToken, objectPath, contentType) {
     },
     body: JSON.stringify(body),
   });
-  if (!patchRes.ok) throw new Error(`storage-token-failed:${patchRes.status}`);
-  return firebaseMediaUrl(objectPath, token);
+  if (!patchRes.ok) throw new Error(`storage-token-failed:${patchRes.status}:${bucket}`);
+  return firebaseMediaUrl(objectPath, token, bucket);
 }
 
 /** Prefer existing token; only mint when missing. */
