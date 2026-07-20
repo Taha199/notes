@@ -1,4 +1,4 @@
-import { getBlob, getBytes, getDownloadURL, ref, type FirebaseStorage } from 'firebase/storage';
+import { getBytes, getDownloadURL, ref, type FirebaseStorage } from 'firebase/storage';
 import mammoth from 'mammoth';
 import { storageBuckets } from '../firebase';
 import { getRtdbAuthToken } from '../rtdb';
@@ -6,12 +6,19 @@ import { candidateStoragePaths } from './filePaths';
 import { dataUrlToBlob } from './fileStorage';
 import {
   isMissingStorageError,
+  previewModeFor,
   withTimeout,
   type StoredFile,
 } from './fileTypes';
 
-/** Hard ceiling so preview never spins forever (SDK/XHR hangs). */
-const PREVIEW_ATTEMPT_MS = 15_000;
+/** Stall timeout for CDN XHR — resets on progress so large PDFs aren't killed. */
+const CDN_STALL_MS = 8_000;
+/** Hard ceiling for a single CDN transfer (large files OK with progress). */
+const CDN_HARD_MS = 90_000;
+/** Dead-path probes (API / SDK) — fail fast so the race winner isn't blocked. */
+const PROBE_MS = 5_000;
+/** getDownloadURL per path — keep short; paths raced in parallel. */
+const URL_RESOLVE_MS = 3_500;
 
 function ensurePdfMime(blob: Blob, file: StoredFile): Blob {
   if (
@@ -23,61 +30,89 @@ function ensurePdfMime(blob: Blob, file: StoredFile): Blob {
   return blob;
 }
 
-/** XHR fetch so we can report byte progress and abort on hang. */
+type AbortableBlob = {
+  promise: Promise<Blob>;
+  abort: () => void;
+};
+
+/** XHR fetch with progress + stall timeout (resets on bytes received). */
 export function fetchBlobWithProgress(
   url: string,
   file: StoredFile,
   onProgress?: (loaded: number, total: number) => void,
-  timeoutMs = PREVIEW_ATTEMPT_MS,
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    let settled = false;
-    const timer = window.setTimeout(() => {
+  stallMs = CDN_STALL_MS,
+): AbortableBlob {
+  let xhr: XMLHttpRequest | null = null;
+  let settled = false;
+  let stallTimer = 0;
+  let hardTimer = 0;
+
+  const abort = () => {
+    if (settled) return;
+    settled = true;
+    window.clearTimeout(stallTimer);
+    window.clearTimeout(hardTimer);
+    try { xhr?.abort(); } catch { /* ignore */ }
+  };
+
+  const promise = new Promise<Blob>((resolve, reject) => {
+    xhr = new XMLHttpRequest();
+
+    const fail = (err: Error) => {
       if (settled) return;
       settled = true;
-      try { xhr.abort(); } catch { /* ignore */ }
-      reject(new Error('fetch-timeout'));
-    }, timeoutMs);
+      window.clearTimeout(stallTimer);
+      window.clearTimeout(hardTimer);
+      try { xhr?.abort(); } catch { /* ignore */ }
+      reject(err);
+    };
+
+    const bumpStall = () => {
+      window.clearTimeout(stallTimer);
+      stallTimer = window.setTimeout(() => fail(new Error('fetch-timeout')), stallMs);
+    };
+
+    bumpStall();
+    hardTimer = window.setTimeout(() => fail(new Error('fetch-hard-timeout')), CDN_HARD_MS);
 
     xhr.open('GET', url, true);
     xhr.responseType = 'blob';
     xhr.onprogress = (e) => {
+      bumpStall();
       if (e.lengthComputable) onProgress?.(e.loaded, e.total);
       else if (file.size > 0) onProgress?.(e.loaded, file.size);
     };
     xhr.onload = () => {
       if (settled) return;
       settled = true;
-      window.clearTimeout(timer);
-      if (xhr.status >= 200 && xhr.status < 300) {
+      window.clearTimeout(stallTimer);
+      window.clearTimeout(hardTimer);
+      if (xhr && xhr.status >= 200 && xhr.status < 300) {
         const blob = ensurePdfMime(xhr.response as Blob, file);
         onProgress?.(blob.size, blob.size);
         resolve(blob);
       } else {
-        reject(new Error(`fetch-failed:${xhr.status}`));
+        reject(new Error(`fetch-failed:${xhr?.status ?? 0}`));
       }
     };
-    xhr.onerror = () => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      reject(new Error('fetch-network'));
-    };
+    xhr.onerror = () => fail(new Error('fetch-network'));
     xhr.onabort = () => {
       if (settled) return;
       settled = true;
-      window.clearTimeout(timer);
+      window.clearTimeout(stallTimer);
+      window.clearTimeout(hardTimer);
       reject(new Error('fetch-aborted'));
     };
     xhr.send();
   });
+
+  return { promise, abort };
 }
 
 async function fetchBlobViaApi(
   file: StoredFile,
   onProgress?: (loaded: number, total: number) => void,
-  timeoutMs = PREVIEW_ATTEMPT_MS,
+  timeoutMs = PROBE_MS,
 ): Promise<Blob> {
   const token = await getRtdbAuthToken();
   if (!token) throw new Error('no-token');
@@ -101,7 +136,7 @@ async function fetchBlobViaApi(
   if (contentType.includes('application/json')) {
     const data = await res.json() as { error?: string; downloadUrl?: string };
     if (data.downloadUrl) {
-      return fetchBlobWithProgress(data.downloadUrl, file, onProgress, timeoutMs);
+      return fetchBlobWithProgress(data.downloadUrl, file, onProgress).promise;
     }
     throw new Error(data.error || 'MISSING_IN_STORAGE');
   }
@@ -111,32 +146,64 @@ async function fetchBlobViaApi(
 }
 
 async function tryGetBytesOnce(path: string, timeoutMs: number): Promise<Blob | null> {
-  for (const bucket of storageBuckets) {
-    try {
-      const bytes = await withTimeout(getBytes(ref(bucket, path)), timeoutMs, 'getbytes-timeout');
-      return new Blob([bytes]);
-    } catch {
-      /* try getBlob on same bucket, then next */
+  // First successful bucket wins — single getBytes probe per bucket (no serial getBlob).
+  return new Promise((resolve) => {
+    let pending = storageBuckets.length;
+    if (pending === 0) {
+      resolve(null);
+      return;
     }
-    try {
-      return await withTimeout(getBlob(ref(bucket, path)), timeoutMs, 'getblob-timeout');
-    } catch {
-      /* try next bucket */
+    let done = false;
+    for (const bucket of storageBuckets) {
+      void withTimeout(getBytes(ref(bucket, path)), timeoutMs, 'getbytes-timeout')
+        .then((bytes) => {
+          if (!done) {
+            done = true;
+            resolve(new Blob([bytes]));
+          }
+        })
+        .catch(() => {
+          pending -= 1;
+          if (!done && pending === 0) resolve(null);
+        });
     }
-  }
-  return null;
+  });
 }
 
-/** Read existing download URL — does NOT remint Storage tokens. */
+/** Parallel getDownloadURL across buckets — first success wins. */
 async function tryExistingUrl(path: string, buckets: FirebaseStorage[]): Promise<string | null> {
-  for (const bucket of buckets) {
-    try {
-      return await withTimeout(getDownloadURL(ref(bucket, path)), 4_000, 'url-timeout');
-    } catch {
-      /* next */
+  const results = await Promise.all(
+    buckets.map(async (bucket) => {
+      try {
+        return await withTimeout(getDownloadURL(ref(bucket, path)), URL_RESOLVE_MS, 'url-timeout');
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return results.find((u): u is string => Boolean(u)) ?? null;
+}
+
+/** Parallel getDownloadURL across candidate paths — first success wins. */
+async function resolveUrlFromPaths(paths: string[]): Promise<string | null> {
+  if (paths.length === 0) return null;
+  const limited = paths.slice(0, 5);
+  return new Promise((resolve) => {
+    let pending = limited.length;
+    let done = false;
+    for (const path of limited) {
+      void tryExistingUrl(path, storageBuckets).then((url) => {
+        if (done) return;
+        if (url) {
+          done = true;
+          resolve(url);
+          return;
+        }
+        pending -= 1;
+        if (pending === 0) resolve(null);
+      });
     }
-  }
-  return null;
+  });
 }
 
 export type ResolveDownloadUrlOptions = {
@@ -168,10 +235,8 @@ export async function resolveFileDownloadUrl(
 
   // Healing poisoned tokens: SDK getDownloadURL remints; the API returns metadata as-is.
   if (options?.fresh) {
-    for (const path of paths.slice(0, 5)) {
-      const url = await tryExistingUrl(path, storageBuckets);
-      if (url) return url;
-    }
+    const url = await resolveUrlFromPaths(paths);
+    if (url) return url;
   }
 
   try {
@@ -182,7 +247,7 @@ export async function resolveFileDownloadUrl(
           `/api/file-download?fileId=${encodeURIComponent(file.id)}&format=json`,
           { headers: { Authorization: `Bearer ${token}` } },
         ),
-        12_000,
+        PROBE_MS + 2_000,
         'resolve-api-timeout',
       );
       if (res.ok) {
@@ -197,10 +262,8 @@ export async function resolveFileDownloadUrl(
   }
 
   if (!options?.fresh) {
-    for (const path of paths.slice(0, 5)) {
-      const url = await tryExistingUrl(path, storageBuckets);
-      if (url) return url;
-    }
+    const url = await resolveUrlFromPaths(paths);
+    if (url) return url;
   }
   return null;
 }
@@ -282,11 +345,15 @@ export function navigateToDownloadUrl(href: string): void {
   window.location.assign(href);
 }
 
+type RaceAttempt = {
+  start: () => AbortableBlob | Promise<Blob>;
+};
+
 /**
- * First successful promise wins; losers are ignored.
+ * First successful promise wins; abort/cancel losers immediately.
  * Rejects only when every attempt fails / times out.
  */
-function raceFirstBlob(attempts: Array<() => Promise<Blob>>): Promise<Blob> {
+function raceFirstBlob(attempts: RaceAttempt[]): Promise<Blob> {
   return new Promise((resolve, reject) => {
     if (attempts.length === 0) {
       reject(new Error('no-file-source'));
@@ -295,26 +362,47 @@ function raceFirstBlob(attempts: Array<() => Promise<Blob>>): Promise<Blob> {
     let pending = attempts.length;
     let lastErr: unknown = new Error('no-file-source');
     let settled = false;
-    for (const start of attempts) {
-      start().then(
-        (blob) => {
-          if (settled) return;
-          settled = true;
-          resolve(blob);
-        },
-        (err) => {
-          lastErr = err;
-          pending -= 1;
-          if (!settled && pending === 0) reject(lastErr);
-        },
-      );
+    const aborts: Array<() => void> = [];
+
+    const finish = (blob: Blob) => {
+      if (settled) return;
+      settled = true;
+      for (const a of aborts) {
+        try { a(); } catch { /* ignore */ }
+      }
+      resolve(blob);
+    };
+
+    for (const attempt of attempts) {
+      const started = attempt.start();
+      if (started && typeof started === 'object' && 'promise' in started && 'abort' in started) {
+        const ab = started as AbortableBlob;
+        aborts.push(ab.abort);
+        ab.promise.then(
+          (blob) => finish(blob),
+          (err) => {
+            lastErr = err;
+            pending -= 1;
+            if (!settled && pending === 0) reject(lastErr);
+          },
+        );
+      } else {
+        (started as Promise<Blob>).then(
+          (blob) => finish(blob),
+          (err) => {
+            lastErr = err;
+            pending -= 1;
+            if (!settled && pending === 0) reject(lastErr);
+          },
+        );
+      }
     }
   });
 }
 
 /**
  * Load file bytes as a same-origin-friendly Blob (preview / legacy fallback only).
- * Prefer downloadUrl fetch + API proxy in parallel with a short SDK getBytes race.
+ * Prefer downloadUrl fetch OR getBytes in parallel race — first win, cancel loser.
  * NEVER sequential multi-minute getBytes loops (c81f040 hang).
  */
 export async function loadFileBlob(
@@ -332,39 +420,46 @@ export async function loadFileBlob(
   const paths = candidateStoragePaths(file, uid);
   const primaryPath = paths[0];
 
-  const attempts: Array<() => Promise<Blob>> = [];
+  const attempts: RaceAttempt[] = [];
 
   if (downloadUrl && !downloadUrl.startsWith('data:') && !downloadUrl.startsWith('blob:')) {
-    attempts.push(async () => {
-      const blob = await fetchBlobWithProgress(downloadUrl, file, onProgress, PREVIEW_ATTEMPT_MS);
-      return ensurePdfMime(blob, file);
+    attempts.push({
+      start: () => {
+        const ab = fetchBlobWithProgress(downloadUrl, file, onProgress);
+        return {
+          promise: ab.promise.then((blob) => ensurePdfMime(blob, file)),
+          abort: ab.abort,
+        };
+      },
     });
   }
 
-  attempts.push(async () => {
-    const blob = await fetchBlobViaApi(file, onProgress, PREVIEW_ATTEMPT_MS);
-    return ensurePdfMime(blob, file);
+  // API probe — short timeout; useful when CDN URL missing/stale.
+  attempts.push({
+    start: () => fetchBlobViaApi(file, onProgress, PROBE_MS).then((blob) => ensurePdfMime(blob, file)),
   });
 
   if (primaryPath) {
-    attempts.push(async () => {
-      // Single short SDK probe — must not block the race for long.
-      const blob = await tryGetBytesOnce(primaryPath, PREVIEW_ATTEMPT_MS);
-      if (!blob) throw new Error('getbytes-miss');
-      onProgress?.(blob.size, blob.size);
-      return ensurePdfMime(blob, file);
+    attempts.push({
+      start: async () => {
+        const blob = await tryGetBytesOnce(primaryPath, PROBE_MS);
+        if (!blob) throw new Error('getbytes-miss');
+        onProgress?.(blob.size, blob.size);
+        return ensurePdfMime(blob, file);
+      },
     });
   }
 
   try {
-    return await withTimeout(raceFirstBlob(attempts), PREVIEW_ATTEMPT_MS + 2_000, 'preview-timeout');
+    // Overall ceiling: CDN hard + small buffer (stall-based CDN won't hang forever).
+    return await withTimeout(raceFirstBlob(attempts), CDN_HARD_MS + 5_000, 'preview-timeout');
   } catch (err) {
     // Last resort: resolve a fresh URL then fetch once.
     try {
       const resolved = await resolveFileDownloadUrl(file, uid);
       if (resolved && resolved !== downloadUrl) {
         return ensurePdfMime(
-          await fetchBlobWithProgress(resolved, file, onProgress, PREVIEW_ATTEMPT_MS),
+          await fetchBlobWithProgress(resolved, file, onProgress).promise,
           file,
         );
       }
@@ -458,15 +553,148 @@ export async function loadDocxHtml(
   return result.value || '<p></p>';
 }
 
+/* ── Session blob URL cache (PDF / image recovery) ─────────────────────── */
+
+type CachedPreview = { url: string; fileKey: string };
+const previewBlobCache = new Map<string, CachedPreview>();
+const previewInflight = new Map<string, Promise<string>>();
+
+function previewCacheKey(file: StoredFile): string {
+  return `${file.id}:${file.downloadUrl || ''}:${file.storagePath || ''}:${file.inlinePending ? '1' : '0'}`;
+}
+
+export function getCachedPreviewBlobUrl(file: StoredFile): string | null {
+  const entry = previewBlobCache.get(file.id);
+  if (!entry) return null;
+  if (entry.fileKey !== previewCacheKey(file)) return null;
+  return entry.url;
+}
+
+/** Revoke cached blob URL for one file (on delete) or all (optional). */
+export function revokePreviewBlobCache(fileId?: string): void {
+  if (fileId) {
+    const entry = previewBlobCache.get(fileId);
+    if (entry) {
+      try { URL.revokeObjectURL(entry.url); } catch { /* ignore */ }
+      previewBlobCache.delete(fileId);
+    }
+    previewInflight.delete(fileId);
+    return;
+  }
+  for (const [id, entry] of previewBlobCache) {
+    try { URL.revokeObjectURL(entry.url); } catch { /* ignore */ }
+    previewBlobCache.delete(id);
+  }
+  previewInflight.clear();
+}
+
 /**
  * Create a same-origin blob: URL for PDF/image preview.
  * Chrome cannot embed Firebase attachment URLs in iframes — always use blob:.
+ * Cached by fileId for the session so reopening preview is instant.
  */
 export async function loadPreviewBlobUrl(
   file: StoredFile,
   onProgress?: (loaded: number, total: number) => void,
   uid?: string,
 ): Promise<string> {
-  const blob = await loadFileBlob(file, onProgress, uid);
-  return URL.createObjectURL(blob);
+  const cached = getCachedPreviewBlobUrl(file);
+  if (cached) {
+    onProgress?.(file.size || 1, file.size || 1);
+    return cached;
+  }
+
+  const inflight = previewInflight.get(file.id);
+  if (inflight) return inflight;
+
+  const key = previewCacheKey(file);
+  const work = (async () => {
+    const blob = await loadFileBlob(file, onProgress, uid);
+    const url = URL.createObjectURL(blob);
+    const prev = previewBlobCache.get(file.id);
+    if (prev && prev.url !== url) {
+      try { URL.revokeObjectURL(prev.url); } catch { /* ignore */ }
+    }
+    previewBlobCache.set(file.id, { url, fileKey: key });
+    return url;
+  })();
+
+  previewInflight.set(file.id, work);
+  try {
+    return await work;
+  } finally {
+    previewInflight.delete(file.id);
+  }
+}
+
+/** Warm browser HTTP cache for an image CDN URL (hover / visible card). */
+export function preloadImageUrl(href: string): void {
+  const url = (href || '').trim();
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return;
+  try {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = url;
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Cheap preview warm-up: images → Image() preload; PDFs/docx → start blob fetch into cache.
+ * Safe to call on hover / IntersectionObserver; deduped via previewInflight.
+ */
+export function prefetchPreview(file: StoredFile, uid?: string): void {
+  const mode = previewModeFor(file);
+  if (mode === 'image') {
+    const href = (file.downloadUrl || file.dataUrl || '').trim();
+    if (href) preloadImageUrl(href);
+    return;
+  }
+  if (mode === 'pdf' || mode === 'docx') {
+    if (getCachedPreviewBlobUrl(file)) return;
+    if (previewInflight.has(file.id)) return;
+    // Skip huge files on hover to avoid saturating the network.
+    if (file.size > 8 * 1024 * 1024) return;
+    void loadPreviewBlobUrl(file, undefined, uid).catch(() => { /* ignore prefetch errors */ });
+  }
+}
+
+/**
+ * Background-heal missing downloadUrls after list load so the next download click is instant.
+ * Resolves CDN URLs in small parallel batches; caller persists via onHealed.
+ */
+export async function healMissingDownloadUrls(
+  files: StoredFile[],
+  uid: string,
+  onHealed: (file: StoredFile) => void,
+  cancelled?: () => boolean,
+): Promise<void> {
+  const missing = files.filter((f) => {
+    const url = (f.downloadUrl || '').trim();
+    if (url && !url.startsWith('data:') && !url.startsWith('blob:')) return false;
+    // Need something to resolve from.
+    return Boolean(f.storagePath || f.inlinePending || f.dataUrl);
+  });
+  if (missing.length === 0) return;
+
+  const concurrency = 3;
+  let i = 0;
+  const workers = Array.from({ length: Math.min(concurrency, missing.length) }, async () => {
+    while (i < missing.length) {
+      if (cancelled?.()) return;
+      const file = missing[i++];
+      try {
+        const url = await resolveFileDownloadUrl(file, uid);
+        if (cancelled?.()) return;
+        const healed = (url || '').trim();
+        if (healed && healed !== (file.downloadUrl || '').trim()) {
+          onHealed({ ...file, downloadUrl: healed });
+        }
+      } catch {
+        /* leave missing; click path still heals */
+      }
+    }
+  });
+  await Promise.all(workers);
 }

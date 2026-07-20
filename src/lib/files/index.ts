@@ -65,4 +65,9 @@ export {
   loadTextPreview,
   loadDocxHtml,
   loadPreviewBlobUrl,
+  getCachedPreviewBlobUrl,
+  revokePreviewBlobCache,
+  preloadImageUrl,
+  prefetchPreview,
+  healMissingDownloadUrls,
 } from './filePreview';

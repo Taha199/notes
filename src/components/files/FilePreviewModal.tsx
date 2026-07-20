@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   fileHref,
+  getCachedPreviewBlobUrl,
   isMissingStorageError,
   loadDocxHtml,
   loadPreviewBlobUrl,
@@ -40,17 +41,19 @@ export function FilePreviewModal({
   const href = fileHref(file);
   const mode = previewModeFor(file);
   const fileKey = `${file.id}:${file.downloadUrl || ''}:${file.storagePath || ''}:${file.inlinePending ? '1' : '0'}`;
+  const cachedBlob = mode === 'pdf' || mode === 'image' ? getCachedPreviewBlobUrl(file) : null;
   const [textContent, setTextContent] = useState('');
   const [docxHtml, setDocxHtml] = useState('');
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(cachedBlob);
   const [loading, setLoading] = useState(
     mode === 'pdf'
-    || mode === 'text'
-    || mode === 'docx'
-    || file.inlinePending === true
-    || (mode === 'image' && !href),
+      ? !cachedBlob
+      : mode === 'text'
+      || mode === 'docx'
+      || file.inlinePending === true
+      || (mode === 'image' && !href && !cachedBlob),
   );
-  const [loadProgress, setLoadProgress] = useState(0);
+  const [loadProgress, setLoadProgress] = useState(cachedBlob ? 100 : 0);
   const [loadError, setLoadError] = useState(false);
   const [missingInStorage, setMissingInStorage] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
@@ -68,10 +71,19 @@ export function FilePreviewModal({
 
   // PDF: open modal immediately with spinner; load same-origin blob in parallel.
   // Chrome blanks Firebase attachment URLs in iframes — always use blob:.
+  // Session cache → instant reopen; do NOT revoke cached URLs on unmount.
   useEffect(() => {
     if (mode !== 'pdf') return;
     let cancelled = false;
-    let objectUrl: string | null = null;
+    const hit = getCachedPreviewBlobUrl(file);
+    if (hit) {
+      setBlobUrl(hit);
+      setLoadProgress(100);
+      setLoading(false);
+      setLoadError(false);
+      setMissingInStorage(false);
+      return;
+    }
     setLoading(true);
     setLoadError(false);
     setMissingInStorage(false);
@@ -79,15 +91,12 @@ export function FilePreviewModal({
     setBlobUrl(null);
     (async () => {
       try {
-        objectUrl = await loadPreviewBlobUrl(file, (loaded, total) => {
+        const objectUrl = await loadPreviewBlobUrl(file, (loaded, total) => {
           if (!cancelled && total > 0) {
             setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
           }
         }, uid);
-        if (cancelled) {
-          URL.revokeObjectURL(objectUrl);
-          return;
-        }
+        if (cancelled) return;
         setBlobUrl(objectUrl);
         setLoadProgress(100);
       } catch (err) {
@@ -96,10 +105,7 @@ export function FilePreviewModal({
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
+    return () => { cancelled = true; };
     // fileKey captures identity + recoverable URL fields without restarting on unrelated renames
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable key
   }, [fileKey, mode, uid]);
@@ -109,23 +115,26 @@ export function FilePreviewModal({
     if (mode !== 'image') return;
     const needsBlob = imgFailed || file.inlinePending === true || !href;
     if (!needsBlob || blobUrl) return;
+    const hit = getCachedPreviewBlobUrl(file);
+    if (hit) {
+      setBlobUrl(hit);
+      setLoadProgress(100);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
-    let objectUrl: string | null = null;
     setLoading(true);
     setLoadError(false);
     setMissingInStorage(false);
     setLoadProgress(0);
     (async () => {
       try {
-        objectUrl = await loadPreviewBlobUrl(file, (loaded, total) => {
+        const objectUrl = await loadPreviewBlobUrl(file, (loaded, total) => {
           if (!cancelled && total > 0) {
             setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
           }
         }, uid);
-        if (cancelled) {
-          URL.revokeObjectURL(objectUrl);
-          return;
-        }
+        if (cancelled) return;
         setBlobUrl(objectUrl);
         setLoadProgress(100);
       } catch (err) {
@@ -134,10 +143,7 @@ export function FilePreviewModal({
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable key
   }, [fileKey, mode, imgFailed, blobUrl, href, uid]);
 
@@ -197,6 +203,7 @@ export function FilePreviewModal({
   const errorMessage = missingInStorage ? t.filesMissingInStorage : t.filesPreviewFailed;
   const showError = loadError || mode === 'unsupported';
   const showImageSpinner = mode === 'image' && loading && (imgFailed || file.inlinePending || !href || !imageSrc);
+  const showPct = loadProgress > 0 && loadProgress < 100;
 
   return createPortal(
     <div
@@ -235,7 +242,7 @@ export function FilePreviewModal({
           showImageSpinner ? (
             <div className="text-center text-white">
               <FilesLoadingIndicator text={t.filesLoading} />
-              {loadProgress > 0 && (
+              {showPct && (
                 <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
               )}
             </div>

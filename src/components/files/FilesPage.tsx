@@ -13,10 +13,13 @@ import {
   downloadStoredFile,
   fetchUserProfile,
   formatFileSize,
+  healMissingDownloadUrls,
   isMissingStorageError,
   loadFilesWithFallback,
   migrateInlineFileToStorage,
   openDownloadUrlNow,
+  prefetchPreview,
+  revokePreviewBlobCache,
   runBackgroundMigration,
   saveFileMeta,
   saveFolderMeta,
@@ -170,6 +173,26 @@ export function FilesPage({ search }: { search: string }) {
     return () => { cancelled = true; };
   }, [files, user]);
 
+  // Background-heal missing CDN URLs so the next download/preview click is instant.
+  useEffect(() => {
+    if (!user || loading || files.length === 0) return;
+    let cancelled = false;
+    const snapshot = files;
+    void healMissingDownloadUrls(
+      snapshot,
+      user.uid,
+      (healed) => {
+        if (cancelled) return;
+        setFiles((prev) => prev.map((f) => (f.id === healed.id ? { ...f, downloadUrl: healed.downloadUrl } : f)));
+        void saveFileMeta(user.uid, healed).catch(() => { /* next load retries */ });
+      },
+      () => cancelled,
+    );
+    return () => { cancelled = true; };
+    // Re-run after each list load (loading flip / reload), not on every heal patch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, loading, reloadNonce]);
+
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
   const fileCountInFolder = (folderId: string) =>
     files.filter((f) => f.folderId === folderId).length;
@@ -288,6 +311,7 @@ export function FilesPage({ search }: { search: string }) {
     if (previewFile?.id === file.id) setPreviewFile(null);
     if (renamingId === file.id) setRenamingId(null);
     if (moveMenuFileId === file.id) setMoveMenuFileId(null);
+    revokePreviewBlobCache(file.id);
     try {
       await deleteFileFully(user.uid, file);
     } catch {
@@ -417,7 +441,7 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const downloadFile = async (file: StoredFile) => {
-    // Instant path: open CDN URL during the click gesture — never buffer bytes first.
+    // Instant path: ZERO awaits before window.open when CDN URL is present.
     const direct = (file.downloadUrl || '').trim();
     if (direct && !direct.startsWith('data:') && !direct.startsWith('blob:')) {
       if (openDownloadUrlNow(direct, file.name)) return;
@@ -427,6 +451,7 @@ export function FilesPage({ search }: { search: string }) {
     setError('');
     const clearGuard = window.setTimeout(() => setDownloadingId(null), 20_000);
     try {
+      // Heal URL then navigate — never full-blob when CDN works.
       await downloadStoredFile(file, user?.uid);
     } catch (err) {
       console.error('File download failed', err);
@@ -440,6 +465,10 @@ export function FilesPage({ search }: { search: string }) {
       // Always clear so the Download button never sticks on "…"
       setDownloadingId(null);
     }
+  };
+
+  const warmFile = (file: StoredFile) => {
+    prefetchPreview(file, user?.uid);
   };
 
   const onDragOver = (e: React.DragEvent) => {
@@ -714,7 +743,11 @@ export function FilesPage({ search }: { search: string }) {
           ))}
 
           {visibleFiles.map((file) => (
-            <div key={file.id} className="rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+            <div
+              key={file.id}
+              className="rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5"
+              onMouseEnter={() => warmFile(file)}
+            >
               <div className="flex items-start gap-3">
                 <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">📄</div>
                 <div className="min-w-0 flex-1">
@@ -748,6 +781,8 @@ export function FilesPage({ search }: { search: string }) {
                 {canPreviewFile(file) && (
                   <button
                     type="button"
+                    onMouseEnter={() => warmFile(file)}
+                    onFocus={() => warmFile(file)}
                     onClick={() => setPreviewFile(file)}
                     className="rounded-lg border border-app-border bg-app-bg px-3 py-1.5 text-xs font-semibold text-app-text hover:bg-white dark:border-white/15 dark:bg-white/5 dark:text-gray-100 dark:hover:bg-white/10"
                   >
