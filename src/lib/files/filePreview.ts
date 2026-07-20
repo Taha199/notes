@@ -139,17 +139,39 @@ async function tryExistingUrl(path: string, buckets: FirebaseStorage[]): Promise
   return null;
 }
 
+export type ResolveDownloadUrlOptions = {
+  /** Skip returning the stored downloadUrl; mint/list a fresh CDN URL. */
+  fresh?: boolean;
+};
+
 /**
- * Resolve a CDN download URL without reminting tokens.
- * Order: stored downloadUrl → API format=json → getDownloadURL on candidate paths.
+ * Resolve a CDN download URL.
+ * Default: stored downloadUrl → API format=json → getDownloadURL on candidate paths.
+ * fresh: getDownloadURL first (remints token), then API — skips returning a stale stored URL.
  */
 export async function resolveFileDownloadUrl(
   file: StoredFile,
   uid?: string,
+  options?: ResolveDownloadUrlOptions,
 ): Promise<string | null> {
   const existing = (file.downloadUrl || '').trim();
-  if (existing && !existing.startsWith('data:') && !existing.startsWith('blob:')) {
+  if (
+    !options?.fresh
+    && existing
+    && !existing.startsWith('data:')
+    && !existing.startsWith('blob:')
+  ) {
     return existing;
+  }
+
+  const paths = candidateStoragePaths(file, uid);
+
+  // Healing poisoned tokens: SDK getDownloadURL remints; the API returns metadata as-is.
+  if (options?.fresh) {
+    for (const path of paths.slice(0, 5)) {
+      const url = await tryExistingUrl(path, storageBuckets);
+      if (url) return url;
+    }
   }
 
   try {
@@ -160,31 +182,52 @@ export async function resolveFileDownloadUrl(
           `/api/file-download?fileId=${encodeURIComponent(file.id)}&format=json`,
           { headers: { Authorization: `Bearer ${token}` } },
         ),
-        10_000,
+        12_000,
         'resolve-api-timeout',
       );
       if (res.ok) {
         const data = await res.json() as { downloadUrl?: string | null };
         const url = (data.downloadUrl || '').trim();
-        if (url) return url;
+        // When healing, ignore the same stored URL the API echoes back.
+        if (url && (!options?.fresh || url !== existing)) return url;
       }
     }
   } catch {
     /* fall back to direct SDK resolution */
   }
 
-  const paths = candidateStoragePaths(file, uid);
-  for (const path of paths.slice(0, 3)) {
-    const url = await tryExistingUrl(path, storageBuckets);
-    if (url) return url;
+  if (!options?.fresh) {
+    for (const path of paths.slice(0, 5)) {
+      const url = await tryExistingUrl(path, storageBuckets);
+      if (url) return url;
+    }
   }
   return null;
 }
 
+function clickDownloadAnchor(url: string, filename?: string, newTab = true): boolean {
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    if (newTab) {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+    }
+    if (filename) a.setAttribute('download', filename);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Open a Storage/CDN URL immediately during a user gesture.
- * Chrome ignores cross-origin `<a download>`, so prefer window.open / new tab;
- * Firebase URLs with Content-Disposition:attachment download via CDN without buffering.
+ * Open a Storage/CDN URL during a user gesture.
+ * Chrome ignores cross-origin `<a download>`, so prefer window.open;
+ * if that returns null (popup blocker), still try `<a target=_blank>` —
+ * window.open===null alone is never treated as total failure.
  */
 export function openDownloadUrlNow(href: string, filename?: string): boolean {
   const url = (href || '').trim();
@@ -198,25 +241,43 @@ export function openDownloadUrlNow(href: string, filename?: string): boolean {
       return true;
     }
   } catch {
+    /* popup blocked or denied — continue */
+  }
+
+  // window.open null ≠ failure: try anchor in a new tab next.
+  return clickDownloadAnchor(url, filename, true);
+}
+
+/**
+ * Open a CDN URL, falling back to same-tab navigation when popups are blocked.
+ * Use after awaits: window.open and target=_blank are often both denied once the
+ * user-gesture token is spent — location.assign still starts the download.
+ */
+export function openOrNavigateToDownloadUrl(href: string, filename?: string): boolean {
+  const url = (href || '').trim();
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return false;
+
+  try {
+    const win = window.open(url, '_blank');
+    if (win) {
+      try { win.opener = null; } catch { /* ignore */ }
+      return true;
+    }
+  } catch {
     /* continue */
   }
 
+  // Try new-tab anchor, then always same-tab assign so we never silently no-op.
+  clickDownloadAnchor(url, filename, true);
   try {
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    if (filename) a.setAttribute('download', filename);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    navigateToDownloadUrl(url);
     return true;
   } catch {
-    return false;
+    return clickDownloadAnchor(url, filename, false);
   }
 }
 
-/** Same-tab navigate — not popup-blocked; last resort after awaits. */
+/** Same-tab navigate — not popup-blocked; reliable after awaits. */
 export function navigateToDownloadUrl(href: string): void {
   window.location.assign(href);
 }
@@ -329,15 +390,15 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
 
 /**
  * Fast download: navigate/open CDN URL immediately when available.
- * Blob path ONLY when there is no working download URL (legacy inline / recovery).
- * NEVER await getBytes before starting a download when downloadUrl exists.
+ * Heal missing/stale URLs via API + getDownloadURL before buffering bytes.
+ * Blob path ONLY as last resort (legacy inline / recovery).
  */
 export async function downloadStoredFile(file: StoredFile, uid?: string): Promise<void> {
   const existing = (file.downloadUrl || '').trim();
   if (existing && !existing.startsWith('data:') && !existing.startsWith('blob:')) {
-    if (openDownloadUrlNow(existing, file.name)) return;
-    navigateToDownloadUrl(existing);
-    return;
+    // openOrNavigate: window.open → <a target=_blank> → location.assign.
+    // Never treat window.open===null as failure without the assign fallback.
+    if (openOrNavigateToDownloadUrl(existing, file.name)) return;
   }
 
   if (file.dataUrl?.startsWith('data:')) {
@@ -345,20 +406,32 @@ export async function downloadStoredFile(file: StoredFile, uid?: string): Promis
     return;
   }
 
-  const resolved = await withTimeout(
-    resolveFileDownloadUrl(file, uid),
-    12_000,
-    'download-resolve-timeout',
-  );
-  if (resolved) {
-    if (openDownloadUrlNow(resolved, file.name)) return;
-    navigateToDownloadUrl(resolved);
-    return;
+  // Heal: mint/list a CDN URL without downloading the full file body.
+  let resolved: string | null = null;
+  try {
+    resolved = await resolveFileDownloadUrl(file, uid, {
+      fresh: Boolean(existing),
+    });
+  } catch (err) {
+    console.warn('download URL resolve failed', file.name, err);
   }
 
-  // Legacy / recovery only — may buffer; never used when downloadUrl works.
-  const blob = await loadFileBlob(file, undefined, uid);
-  triggerBlobDownload(blob, file.name);
+  const healed = (resolved || '').trim();
+  if (healed && healed !== existing) {
+    if (openOrNavigateToDownloadUrl(healed, file.name)) return;
+  } else if (healed && !existing) {
+    if (openOrNavigateToDownloadUrl(healed, file.name)) return;
+  }
+
+  // Legacy / recovery only — may buffer; never preferred when a CDN URL works.
+  try {
+    const blob = await loadFileBlob(file, undefined, uid);
+    triggerBlobDownload(blob, file.name);
+  } catch (err) {
+    if (isMissingStorageError(err)) throw new Error('MISSING_IN_STORAGE');
+    const reason = err instanceof Error ? err.message : String(err ?? 'unknown');
+    throw new Error(`DOWNLOAD_FAILED:${file.name}:${reason}`);
+  }
 }
 
 export async function loadTextPreview(file: StoredFile, uid?: string): Promise<string> {

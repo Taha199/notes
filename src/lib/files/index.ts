@@ -58,6 +58,7 @@ export {
   loadFileBlob,
   triggerBlobDownload,
   openDownloadUrlNow,
+  openOrNavigateToDownloadUrl,
   navigateToDownloadUrl,
   resolveFileDownloadUrl,
   downloadStoredFile,

@@ -430,13 +430,15 @@ export function FilesPage({ search }: { search: string }) {
       await downloadStoredFile(file, user?.uid);
     } catch (err) {
       console.error('File download failed', err);
-      const msg = isMissingStorageError(err) ? t.filesMissingInStorage : t.filesDownloadFailed;
+      const base = isMissingStorageError(err) ? t.filesMissingInStorage : t.filesDownloadFailed;
+      const msg = file.name ? `${base}\n\n${file.name}` : base;
       setError(msg);
-      show(msg);
+      show(base);
       window.alert(msg);
     } finally {
       window.clearTimeout(clearGuard);
-      setDownloadingId((id) => (id === file.id ? null : id));
+      // Always clear so the Download button never sticks on "…"
+      setDownloadingId(null);
     }
   };
 
