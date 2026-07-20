@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { deleteObject, getBlob, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import {
+  deleteObject,
+  getBlob,
+  getDownloadURL,
+  ref,
+  uploadBytes,
+  uploadBytesResumable,
+} from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { storage } from '../../lib/firebase';
 import { rtdbFetch } from '../../lib/rtdb';
-import { calculateFilesStorageBytes, getStorageLimitBytes } from '../../lib/storageQuota';
+import { getStorageLimitBytes } from '../../lib/storageQuota';
 
 interface StoredFile {
   id: string;
@@ -29,6 +36,13 @@ interface FileFolder {
 
 type PreviewMode = 'image' | 'pdf' | 'text' | 'unsupported';
 
+type UploadProgressItem = {
+  key: string;
+  name: string;
+  progress: number;
+  status: 'uploading' | 'done' | 'error';
+};
+
 const FILE_INPUT_ID = 'files-upload-input';
 const FILES_FOLDER_KEY = 'malacadhati_files_folder';
 
@@ -36,6 +50,23 @@ function formatSize(size: number) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Storage path segment: strip characters that break object paths across browsers. */
+function safeStorageFileName(name: string): string {
+  const cleaned = name
+    .replace(/[/\\?#%[\]*]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (cleaned || 'file').slice(0, 180);
+}
+
+function firebaseErrorCode(err: unknown): string {
+  if (err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string') {
+    return (err as { code: string }).code;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return '';
 }
 
 function normalizeList<T extends { id: string }>(data: unknown): T[] {
@@ -423,6 +454,7 @@ export function FilesPage({ search }: { search: string }) {
   });
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -577,7 +609,45 @@ export function FilesPage({ search }: { search: string }) {
 
   const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
-  const uploadOneFile = async (file: File, folderId: string | null): Promise<StoredFile> => {
+  const uploadErrorMessage = (err: unknown): string => {
+    const code = firebaseErrorCode(err);
+    if (
+      code.includes('unauthorized')
+      || code.includes('permission-denied')
+      || code === 'storage/unauthorized'
+    ) {
+      return t.filesUploadPermissionDenied;
+    }
+    if (
+      code.includes('unauthenticated')
+      || code === 'storage/unauthenticated'
+      || code === 'auth/user-token-expired'
+    ) {
+      return t.filesUploadAuthError;
+    }
+    if (
+      code.includes('network')
+      || code === 'storage/retry-limit-exceeded'
+      || code === 'storage/canceled'
+      || (err instanceof TypeError && /fetch|network/i.test(err.message))
+    ) {
+      return t.filesUploadNetworkError;
+    }
+    if (code === 'quota-exceeded' || code === 'storage/quota-exceeded') {
+      return t.filesQuotaExceeded;
+    }
+    return t.filesUploadFailed;
+  };
+
+  const updateUploadItem = (key: string, patch: Partial<UploadProgressItem>) => {
+    setUploadItems((prev) => prev.map((item) => (item.key === key ? { ...item, ...patch } : item)));
+  };
+
+  const uploadOneFile = async (
+    file: File,
+    folderId: string | null,
+    onProgress: (pct: number) => void,
+  ): Promise<StoredFile> => {
     if (!user) throw new Error('no-user');
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const base: Omit<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl' | 'folderId'> = {
@@ -592,10 +662,24 @@ export function FilesPage({ search }: { search: string }) {
 
     // Always store the blob in Firebase Storage — never inline base64 in the
     // Realtime Database (inline blobs made the file list download huge/slow).
-    const storagePath = `users/${user.uid}/files/${id}/${file.name}`;
+    const storagePath = `users/${user.uid}/files/${id}/${safeStorageFileName(file.name)}`;
     const storageRef = ref(storage, storagePath);
-    await uploadBytes(storageRef, file, { contentType: base.type });
-    const downloadUrl = await getDownloadURL(storageRef);
+    const task = uploadBytesResumable(storageRef, file, { contentType: base.type });
+
+    await new Promise<void>((resolve, reject) => {
+      task.on(
+        'state_changed',
+        (snapshot) => {
+          const total = snapshot.totalBytes || file.size || 1;
+          onProgress(Math.min(99, Math.round((snapshot.bytesTransferred / total) * 100)));
+        },
+        reject,
+        () => resolve(),
+      );
+    });
+
+    onProgress(100);
+    const downloadUrl = await getDownloadURL(task.snapshot.ref);
     return { ...withFolder, downloadUrl, storagePath };
   };
 
@@ -603,7 +687,7 @@ export function FilesPage({ search }: { search: string }) {
   const migrateInlineFileToStorage = async (file: StoredFile) => {
     if (!user || !file.dataUrl) return;
     const blob = dataUrlToBlob(file.dataUrl);
-    const storagePath = file.storagePath || `users/${user.uid}/files/${file.id}/${file.name}`;
+    const storagePath = file.storagePath || `users/${user.uid}/files/${file.id}/${safeStorageFileName(file.name)}`;
     const storageRef = ref(storage, storagePath);
     await uploadBytes(storageRef, blob, { contentType: file.type || 'application/octet-stream' });
     const downloadUrl = await getDownloadURL(storageRef);
@@ -618,7 +702,7 @@ export function FilesPage({ search }: { search: string }) {
   const handleFiles = async (list: FileList | null) => {
     if (!list?.length) return;
     if (!user) {
-      setError(t.filesUploadFailed);
+      setError(t.filesUploadAuthError);
       return;
     }
 
@@ -630,36 +714,86 @@ export function FilesPage({ search }: { search: string }) {
       return;
     }
 
+    const progressKeys = selected.map(
+      (file, i) => `${Date.now()}-${i}-${file.name}`,
+    );
+    setUploadItems(
+      selected.map((file, i) => ({
+        key: progressKeys[i],
+        name: file.name,
+        progress: 0,
+        status: 'uploading' as const,
+      })),
+    );
     setUploading(true);
     const uploaded: StoredFile[] = [];
+    const failureMessages: string[] = [];
+
     try {
-      const userRes = await rtdbFetch(`/users/${user.uid}`);
-      if (!userRes.ok) throw new Error('profile-load-failed');
-      const userData = (await userRes.json()) ?? {};
-      const profile = (userData.profile ?? {}) as Record<string, unknown>;
-      const usedBytes = calculateFilesStorageBytes(userData);
+      // Quota from already-loaded file list + profile only — never pull the whole
+      // /users/{uid} tree (notes/chats/legacy base64), which timed out uploads.
+      let profile: Record<string, unknown> = {};
+      try {
+        const profileRes = await rtdbFetch(`/users/${user.uid}/profile`);
+        if (profileRes.ok) {
+          const raw = await profileRes.json();
+          if (raw && typeof raw === 'object') profile = raw as Record<string, unknown>;
+        }
+      } catch {
+        /* fall back to default free/plus limits from email */
+      }
+
+      const usedBytes = files.reduce(
+        (sum, f) => sum + (typeof f.size === 'number' && f.size > 0 ? f.size : 0),
+        0,
+      );
       const limitBytes = getStorageLimitBytes(profile, user.email);
       const incomingBytes = selected.reduce((sum, file) => sum + file.size, 0);
       if (usedBytes + incomingBytes > limitBytes) {
         setError(t.filesQuotaExceeded);
+        setUploadItems((prev) => prev.map((item) => ({ ...item, status: 'error', progress: 0 })));
         return;
       }
 
-      for (const file of selected) {
-        const stored = await uploadOneFile(file, currentFolderId);
-        await saveFileMeta(stored);
-        uploaded.push(stored);
+      for (let i = 0; i < selected.length; i++) {
+        const file = selected[i];
+        const key = progressKeys[i];
+        try {
+          const stored = await uploadOneFile(file, currentFolderId, (pct) => {
+            updateUploadItem(key, { progress: pct, status: 'uploading' });
+          });
+          await saveFileMeta(stored);
+          uploaded.push(stored);
+          updateUploadItem(key, { progress: 100, status: 'done' });
+          setFiles((prev) => [stored, ...prev.filter((f) => f.id !== stored.id)]);
+        } catch (err) {
+          console.error('File upload failed', err);
+          const msg = uploadErrorMessage(err);
+          failureMessages.push(`${file.name}: ${msg}`);
+          updateUploadItem(key, { status: 'error' });
+        }
       }
+
       if (uploaded.length) {
-        setFiles((prev) => [...uploaded, ...prev]);
         show(uploaded.length === 1 ? t.filesUploadSuccess : `${uploaded.length} ${t.filesUploadSuccess}`);
+      }
+      if (failureMessages.length) {
+        setError(failureMessages.join(' · '));
       }
     } catch (err) {
       console.error('File upload failed', err);
-      setError(t.filesUploadFailed);
+      setError(uploadErrorMessage(err));
+      setUploadItems((prev) =>
+        prev.map((item) => (item.status === 'uploading' ? { ...item, status: 'error' } : item)),
+      );
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
+      // Keep failed rows visible briefly; clear finished rows after a short pause.
+      const clearDelay = failureMessages.length ? 4000 : 1200;
+      window.setTimeout(() => {
+        setUploadItems((prev) => prev.filter((p) => p.status === 'uploading'));
+      }, clearDelay);
     }
   };
 
@@ -859,26 +993,30 @@ export function FilesPage({ search }: { search: string }) {
               <p className="mt-1 text-xs text-app-text-secondary/80 dark:text-gray-500">{t.filesSizeLimit}</p>
             </div>
           </div>
-          <label
-            htmlFor={FILE_INPUT_ID}
-            className={`relative inline-flex cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark ${
-              uploading ? 'pointer-events-none cursor-not-allowed opacity-60' : ''
-            }`}
-          >
+          <div className="relative">
             <input
               ref={inputRef}
               id={FILE_INPUT_ID}
               type="file"
               multiple
               disabled={uploading}
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              className="sr-only"
               onChange={(e) => {
                 void handleFiles(e.target.files);
               }}
             />
-            <span className="pointer-events-none text-base">{uploading ? '☁️' : '☁️➕'}</span>
-            <span className="pointer-events-none">{uploading ? t.cloudSaving : t.filesUpload}</span>
-          </label>
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => {
+                if (!uploading) inputRef.current?.click();
+              }}
+              className={`inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0`}
+            >
+              <span className="text-base">{uploading ? '☁️' : '☁️➕'}</span>
+              <span>{uploading ? t.cloudSaving : t.filesUpload}</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -946,7 +1084,53 @@ export function FilesPage({ search }: { search: string }) {
         </div>
       )}
 
-      {loading || !hasContent ? (
+      {uploadItems.length > 0 && (
+        <div className="mb-4 space-y-2 rounded-2xl border border-primary/20 bg-primary/5 p-4 dark:border-primary/30 dark:bg-primary/10">
+          <div className="text-xs font-semibold uppercase tracking-wide text-primary">
+            {t.filesUploading}
+          </div>
+          {uploadItems.map((item) => (
+            <div key={item.key} className="min-w-0">
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <div
+                  className={`min-w-0 truncate text-sm font-medium ${
+                    item.status === 'error'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-app-text dark:text-gray-100'
+                  }`}
+                  title={item.name}
+                >
+                  {item.status === 'error' ? '⚠️ ' : item.status === 'done' ? '✓ ' : ''}
+                  {item.name}
+                </div>
+                <div
+                  className={`shrink-0 text-xs font-semibold tabular-nums ${
+                    item.status === 'error'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-app-text-secondary dark:text-gray-400'
+                  }`}
+                >
+                  {item.status === 'error' ? '—' : `${item.progress}%`}
+                </div>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                <div
+                  className={`h-full rounded-full transition-[width] duration-150 ${
+                    item.status === 'error'
+                      ? 'bg-red-500'
+                      : item.status === 'done'
+                        ? 'bg-emerald-500'
+                        : 'bg-primary'
+                  }`}
+                  style={{ width: `${item.status === 'error' ? 100 : item.progress}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {loading ? (
         <div
           className={`animate-fade-in flex flex-col items-center rounded-3xl py-20 text-center text-app-text-secondary/70 transition-colors dark:text-gray-500 ${
             dragging ? 'bg-primary/5' : ''
@@ -955,18 +1139,23 @@ export function FilesPage({ search }: { search: string }) {
           onDragLeave={onDragLeave}
           onDrop={onDrop}
         >
-          {loading ? (
-            <FilesLoadingIndicator text={t.filesLoading} />
-          ) : (
-            <>
-              <span className="mb-3 text-5xl opacity-30">{currentFolderId ? '📁' : '📎'}</span>
-              <p className="text-sm">
-                {search ? t.emptySearch : currentFolderId ? t.filesFolderEmpty : t.filesEmpty}
-              </p>
-            </>
-          )}
+          <FilesLoadingIndicator text={t.filesLoading} />
         </div>
-      ) : (
+      ) : !hasContent && uploadItems.length === 0 ? (
+        <div
+          className={`animate-fade-in flex flex-col items-center rounded-3xl py-20 text-center text-app-text-secondary/70 transition-colors dark:text-gray-500 ${
+            dragging ? 'bg-primary/5' : ''
+          }`}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+        >
+          <span className="mb-3 text-5xl opacity-30">{currentFolderId ? '📁' : '📎'}</span>
+          <p className="text-sm">
+            {search ? t.emptySearch : currentFolderId ? t.filesFolderEmpty : t.filesEmpty}
+          </p>
+        </div>
+      ) : hasContent ? (
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
           {visibleFolders.map((folder) => (
             <div
@@ -1124,7 +1313,7 @@ export function FilesPage({ search }: { search: string }) {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {previewFile && (
         <FilePreviewModal

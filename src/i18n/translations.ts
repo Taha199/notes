@@ -127,6 +127,10 @@ export interface Translation {
   filesUploadFailed: string;
   filesUploadSuccess: string;
   filesQuotaExceeded: string;
+  filesUploading: string;
+  filesUploadPermissionDenied: string;
+  filesUploadNetworkError: string;
+  filesUploadAuthError: string;
   filesAllFiles: string;
   filesNewFolder: string;
   filesFolderEmpty: string;
@@ -582,6 +586,7 @@ export const LANGS: Record<Lang, Translation> = {
     filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesSizeLimit: 'Maximum file size: 20 MB per file.', filesUpload: 'Choose files', filesLoading: 'Loading your files…',
     filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewUnavailable: 'الملف غير مدعوم — Preview is not available for this file type.', filesPreviewFailed: 'Could not load the preview. You can still download the file.', filesDownloadFailed: 'Could not download the file. Please try again.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
+    filesUploading: 'Uploading', filesUploadPermissionDenied: 'No permission to upload. Sign in again and try once more.', filesUploadNetworkError: 'Network error during upload. Check your connection and try again.', filesUploadAuthError: 'Session expired. Sign in again and try once more.',
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
@@ -943,6 +948,7 @@ export const LANGS: Record<Lang, Translation> = {
     filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesSizeLimit: 'Maximal filstorlek: 20 MB per fil.', filesUpload: 'Välj filer', filesLoading: 'Hämtar dina filer…',
     filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewUnavailable: 'الملف غير مدعوم — Förhandsgranskning finns inte för den här filtypen.', filesPreviewFailed: 'Kunde inte ladda förhandsgranskningen. Du kan fortfarande ladda ner filen.', filesDownloadFailed: 'Kunde inte ladda ner filen. Försök igen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
+    filesUploading: 'Laddar upp', filesUploadPermissionDenied: 'Ingen behörighet att ladda upp. Logga in igen och försök på nytt.', filesUploadNetworkError: 'Nätverksfel under uppladdning. Kontrollera anslutningen och försök igen.', filesUploadAuthError: 'Sessionen har gått ut. Logga in igen och försök på nytt.',
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',
