@@ -1,634 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import {
-  deleteObject,
-  getBlob,
-  getDownloadURL,
-  ref,
-  uploadBytes,
-  uploadBytesResumable,
-  type FirebaseStorage,
-} from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
-import { storage, storageBuckets } from '../../lib/firebase';
-import { getRtdbAuthToken, rtdbFetch } from '../../lib/rtdb';
 import { getStorageLimitBytes } from '../../lib/storageQuota';
-
-interface StoredFile {
-  id: string;
-  name: string;
-  type: string;
-  size: number;
-  addedAt: string;
-  downloadUrl?: string;
-  storagePath?: string;
-  folderId?: string | null;
-  /** Legacy uploads stored inline in Realtime Database */
-  dataUrl?: string;
-  /** Server withheld the inline blob; background migrate still pending */
-  inlinePending?: boolean;
-}
-
-const LIST_TIMEOUT_MS = 15_000;
-const UPLOAD_STUCK_MS = 10_000;
-const UPLOAD_TOTAL_MS = 90_000;
-const PROFILE_TIMEOUT_MS = 5_000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error(label)), ms);
-    promise.then(
-      (value) => {
-        window.clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        window.clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
-}
-
-/** Drop heavy base64 payloads so the UI never holds multi‑MB strings. */
-function lightFileMeta(file: StoredFile): StoredFile {
-  if (!file.dataUrl) return file;
-  const { dataUrl, ...rest } = file;
-  void dataUrl;
-  return { ...rest, inlinePending: true };
-}
-
-interface FileFolder {
-  id: string;
-  name: string;
-  createdAt: string;
-}
-
-type PreviewMode = 'image' | 'pdf' | 'text' | 'unsupported';
-
-type UploadProgressItem = {
-  key: string;
-  name: string;
-  progress: number;
-  status: 'uploading' | 'done' | 'error';
-};
-
-const FILE_INPUT_ID = 'files-upload-input';
-const FILES_FOLDER_KEY = 'malacadhati_files_folder';
-
-function formatSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-/** Storage path segment: strip characters that break object paths across browsers. */
-function safeStorageFileName(name: string): string {
-  const cleaned = name
-    .replace(/[/\\?#%[\]*]+/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return (cleaned || 'file').slice(0, 180);
-}
-
-function firebaseErrorCode(err: unknown): string {
-  if (err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string') {
-    return (err as { code: string }).code;
-  }
-  if (err instanceof Error && err.message) return err.message;
-  return '';
-}
-
-function normalizeList<T extends { id: string }>(data: unknown): T[] {
-  if (!data) return [];
-  if (Array.isArray(data)) {
-    return data.filter((item): item is T => !!item && typeof item === 'object' && 'id' in item);
-  }
-  if (typeof data === 'object') {
-    return Object.values(data as Record<string, T>).filter(
-      (item) => !!item && typeof item === 'object' && 'id' in item,
-    );
-  }
-  return [];
-}
-
-function fileHref(file: StoredFile) {
-  // Prefer inline dataUrl when present — a stale downloadUrl must not win.
-  if (file.dataUrl?.startsWith('data:')) return file.dataUrl;
-  return file.downloadUrl || '#';
-}
-
-function previewModeFor(file: StoredFile): PreviewMode {
-  const type = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
-  if (type.startsWith('image/')) return 'image';
-  if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
-  if (type.startsWith('text/') || /\.(txt|md|json|csv|log|xml|html?)$/i.test(name)) return 'text';
-  return 'unsupported';
-}
-
-function canPreview(file: StoredFile) {
-  return previewModeFor(file) !== 'unsupported';
-}
-
-function pathFromDownloadUrl(url: string): string | undefined {
-  try {
-    const u = new URL(url);
-    const idx = u.pathname.indexOf('/o/');
-    if (idx === -1) return undefined;
-    const encoded = u.pathname.slice(idx + 3);
-    return encoded ? decodeURIComponent(encoded) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function candidatePaths(file: StoredFile, uid?: string): string[] {
-  const paths: string[] = [];
-  const add = (p?: string) => {
-    if (p && !paths.includes(p)) paths.push(p);
-  };
-  if (file.downloadUrl) add(pathFromDownloadUrl(file.downloadUrl));
-  add(file.storagePath);
-  if (uid && file.id && file.name) {
-    add(`users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`);
-    add(`users/${uid}/files/${file.id}/${file.name}`);
-  }
-  return paths;
-}
-
-/** Convert a legacy inline base64/text data URL back into a Blob for Storage upload. */
-function dataUrlToBlob(dataUrl: string): Blob {
-  const commaIdx = dataUrl.indexOf(',');
-  const meta = commaIdx === -1 ? '' : dataUrl.slice(5, commaIdx); // strip leading "data:"
-  const payload = commaIdx === -1 ? '' : dataUrl.slice(commaIdx + 1);
-  const contentType = meta.split(';')[0] || 'application/octet-stream';
-  if (/;base64/i.test(meta)) {
-    const binary = atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: contentType });
-  }
-  return new Blob([decodeURIComponent(payload)], { type: contentType });
-}
-
-function ensurePdfMime(blob: Blob, file: StoredFile): Blob {
-  if (
-    (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
-    && blob.type !== 'application/pdf'
-  ) {
-    return new Blob([blob], { type: 'application/pdf' });
-  }
-  return blob;
-}
-
-function isMissingStorageError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err ?? '');
-  const code = firebaseErrorCode(err);
-  return (
-    msg === 'MISSING_IN_STORAGE'
-    || msg === 'no-file-source'
-    || /storage-object-not-found|storage\/object-not-found|object-not-found/i.test(msg)
-    || code === 'storage/object-not-found'
-  );
-}
-
-async function fetchBlobViaApi(file: StoredFile): Promise<Blob> {
-  const token = await getRtdbAuthToken();
-  if (!token) throw new Error('no-token');
-  const res = await fetch(
-    `/api/file-download?fileId=${encodeURIComponent(file.id)}&format=inline`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  if (res.status === 404) {
-    const body = await res.json().catch(() => ({})) as { error?: string; hasInlineDataUrl?: boolean };
-    if (body.error === 'storage-object-not-found' && !body.hasInlineDataUrl) {
-      throw new Error('MISSING_IN_STORAGE');
-    }
-    throw new Error(body.error || 'MISSING_IN_STORAGE');
-  }
-  if (!res.ok) throw new Error(`api-fetch-failed:${res.status}`);
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const data = await res.json() as { error?: string; downloadUrl?: string };
-    if (data.downloadUrl) {
-      return fetchBlobWithProgress(data.downloadUrl, file);
-    }
-    throw new Error(data.error || 'MISSING_IN_STORAGE');
-  }
-  return ensurePdfMime(await res.blob(), file);
-}
-
-async function tryGetBlobOnBuckets(path: string): Promise<Blob | null> {
-  for (const bucket of storageBuckets) {
-    try {
-      return await withTimeout(getBlob(ref(bucket, path)), 8_000, 'getblob-timeout');
-    } catch {
-      /* try next bucket */
-    }
-  }
-  return null;
-}
-
-async function tryRemintUrl(path: string, buckets: FirebaseStorage[]): Promise<string | null> {
-  for (const bucket of buckets) {
-    try {
-      return await withTimeout(getDownloadURL(ref(bucket, path)), 5_000, 'url-timeout');
-    } catch {
-      /* next */
-    }
-  }
-  return null;
-}
-
-/**
- * Load file bytes as a same-origin-friendly Blob.
- * Order: dataUrl → downloadUrl → getBlob (both buckets) → remint URL → API
- * (API still reads RTDB dataUrl). Only then: MISSING_IN_STORAGE.
- */
-async function loadFileBlob(
-  file: StoredFile,
-  onProgress?: (loaded: number, total: number) => void,
-  uid?: string,
-): Promise<Blob> {
-  if (file.dataUrl?.startsWith('data:')) {
-    const blob = dataUrlToBlob(file.dataUrl);
-    onProgress?.(blob.size, blob.size);
-    return ensurePdfMime(blob, file);
-  }
-
-  if (file.downloadUrl) {
-    try {
-      return await fetchBlobWithProgress(file.downloadUrl, file, onProgress);
-    } catch {
-      /* fall through — URL may be stale/token revoked */
-    }
-  }
-
-  const paths = candidatePaths(file, uid);
-  for (const path of paths) {
-    const blob = await tryGetBlobOnBuckets(path);
-    if (blob) {
-      onProgress?.(blob.size, blob.size);
-      return ensurePdfMime(blob, file);
-    }
-  }
-
-  for (const path of paths) {
-    const url = await tryRemintUrl(path, storageBuckets);
-    if (url) {
-      try {
-        return await fetchBlobWithProgress(url, file, onProgress);
-      } catch {
-        /* next */
-      }
-    }
-  }
-
-  // List API strips dataUrl; recover via server (Storage search + RTDB dataUrl + migrate).
-  try {
-    const blob = await fetchBlobViaApi(file);
-    onProgress?.(blob.size, blob.size);
-    return blob;
-  } catch (err) {
-    if (isMissingStorageError(err)) throw new Error('MISSING_IN_STORAGE');
-    throw err;
-  }
-}
-
-/** XHR fetch so we can report byte progress (fetch streams are awkward here). */
-function fetchBlobWithProgress(
-  url: string,
-  file: StoredFile,
-  onProgress?: (loaded: number, total: number) => void,
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', url, true);
-    xhr.responseType = 'blob';
-    xhr.onprogress = (e) => {
-      if (e.lengthComputable) onProgress?.(e.loaded, e.total);
-      else if (file.size > 0) onProgress?.(e.loaded, file.size);
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        const blob = ensurePdfMime(xhr.response as Blob, file);
-        onProgress?.(blob.size, blob.size);
-        resolve(blob);
-      } else {
-        reject(new Error(`fetch-failed:${xhr.status}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error('fetch-network'));
-    xhr.send();
-  });
-}
-
-function triggerBlobDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Revoke after the browser has started the download.
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-async function loadTextPreview(file: StoredFile, uid?: string): Promise<string> {
-  if (file.dataUrl?.startsWith('data:')) {
-    const match = file.dataUrl.match(/^data:([^,]*),(.*)$/s);
-    if (!match) return '';
-    const [, meta, payload] = match;
-    if (meta.includes('base64')) return atob(payload);
-    return decodeURIComponent(payload);
-  }
-  const blob = await loadFileBlob(file, undefined, uid);
-  return blob.text();
-}
-
-function FilePreviewModal({
-  file,
-  uid,
-  onClose,
-  onDelete,
-  t,
-  onDownload,
-  downloading,
-}: {
-  file: StoredFile;
-  uid?: string;
-  onClose: () => void;
-  onDelete?: (file: StoredFile) => void;
-  t: {
-    filesDownload: string;
-    filesPreviewUnavailable: string;
-    filesPreviewFailed: string;
-    filesMissingInStorage: string;
-    filesDelete: string;
-    filesLoading: string;
-  };
-  onDownload: (file: StoredFile) => void;
-  downloading: boolean;
-}) {
-  const href = fileHref(file);
-  const mode = previewModeFor(file);
-  const [textContent, setTextContent] = useState('');
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(mode === 'pdf' || mode === 'text' || file.inlinePending === true);
-  const [loadProgress, setLoadProgress] = useState(0);
-  const [loadError, setLoadError] = useState(false);
-  const [missingInStorage, setMissingInStorage] = useState(false);
-  const [imgFailed, setImgFailed] = useState(false);
-
-  const markFailed = (err?: unknown) => {
-    setLoadError(true);
-    // Claim missing only after recovery threw MISSING_IN_STORAGE (or equivalent).
-    // Generic failures while inlinePending stay as preview-failed (migrate may still help).
-    setMissingInStorage(isMissingStorageError(err));
-  };
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  // PDF: always use a same-origin blob: URL (Chrome cannot embed Firebase attachment URLs).
-  useEffect(() => {
-    if (mode !== 'pdf') return;
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    setLoading(true);
-    setLoadError(false);
-    setMissingInStorage(false);
-    setLoadProgress(0);
-    setBlobUrl(null);
-    (async () => {
-      try {
-        const blob = await loadFileBlob(file, (loaded, total) => {
-          if (!cancelled && total > 0) {
-            setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
-          }
-        }, uid);
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setBlobUrl(objectUrl);
-        setLoadProgress(100);
-      } catch (err) {
-        if (!cancelled) markFailed(err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [file, mode, uid]);
-
-  // Image: try instant URL, then full recovery via blob (dataUrl / dual-bucket / API).
-  useEffect(() => {
-    if (mode !== 'image' || !imgFailed || blobUrl) return;
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    setLoading(true);
-    setLoadError(false);
-    setMissingInStorage(false);
-    (async () => {
-      try {
-        const blob = await loadFileBlob(file, (loaded, total) => {
-          if (!cancelled && total > 0) {
-            setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
-          }
-        }, uid);
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setBlobUrl(objectUrl);
-        setLoadProgress(100);
-      } catch (err) {
-        if (!cancelled) markFailed(err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [file, mode, imgFailed, blobUrl, uid]);
-
-  // inlinePending images: skip broken remote URL — go straight to recovery.
-  useEffect(() => {
-    if (mode !== 'image' || !file.inlinePending || imgFailed || blobUrl) return;
-    setImgFailed(true);
-  }, [mode, file.inlinePending, imgFailed, blobUrl]);
-
-  useEffect(() => {
-    if (mode !== 'text') return;
-    let cancelled = false;
-    setLoading(true);
-    setLoadError(false);
-    setMissingInStorage(false);
-    (async () => {
-      try {
-        const body = await loadTextPreview(file, uid);
-        if (!cancelled) setTextContent(body);
-      } catch (err) {
-        if (!cancelled) {
-          setTextContent(isMissingStorageError(err) ? t.filesMissingInStorage : t.filesPreviewFailed);
-          markFailed(err);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [file, mode, uid, t.filesPreviewFailed, t.filesMissingInStorage]);
-
-  const imageSrc = blobUrl || (file.inlinePending ? '' : href);
-  const errorMessage = missingInStorage ? t.filesMissingInStorage : t.filesPreviewFailed;
-  const showError = loadError || mode === 'unsupported';
-
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={file.name}
-      className="fixed inset-0 z-[10000] flex flex-col bg-black/80 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
-        <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            disabled={downloading || missingInStorage}
-            title={missingInStorage ? t.filesMissingInStorage : undefined}
-            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!missingInStorage) onDownload(file);
-            }}
-          >
-            {downloading ? '…' : t.filesDownload}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {mode === 'image' && !loadError && (
-          loading && (imgFailed || file.inlinePending) ? (
-            <div className="text-center text-white">
-              <FilesLoadingIndicator text={t.filesLoading} />
-              {loadProgress > 0 && (
-                <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
-              )}
-            </div>
-          ) : imageSrc ? (
-            <img
-              src={imageSrc}
-              alt={file.name}
-              className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
-              onError={() => {
-                if (!imgFailed) setImgFailed(true);
-                else markFailed(new Error('MISSING_IN_STORAGE'));
-              }}
-            />
-          ) : null
-        )}
-        {mode === 'pdf' && !showError && (
-          loading ? (
-            <div className="text-center text-white">
-              <FilesLoadingIndicator text={t.filesLoading} />
-              {loadProgress > 0 && (
-                <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
-              )}
-            </div>
-          ) : blobUrl ? (
-            <iframe
-              title={file.name}
-              src={blobUrl}
-              className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
-            />
-          ) : null
-        )}
-        {mode === 'text' && !showError && (
-          <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
-            {loading ? '…' : textContent}
-          </pre>
-        )}
-        {showError && (
-          <div className="flex max-w-lg flex-col items-center gap-3 text-center">
-            <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">
-              {mode === 'unsupported' ? t.filesPreviewUnavailable : errorMessage}
-            </p>
-            {mode !== 'unsupported' && (
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                {!missingInStorage && (
-                  <button
-                    type="button"
-                    disabled={downloading}
-                    className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDownload(file);
-                    }}
-                  >
-                    {downloading ? '…' : t.filesDownload}
-                  </button>
-                )}
-                {onDelete && (
-                  <button
-                    type="button"
-                    className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(file);
-                    }}
-                  >
-                    {t.filesDelete}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-function FilesLoadingIndicator({ text }: { text: string }) {
-  const label = text.replace(/[.…]+\s*$/, '');
-  return (
-    <div className="flex flex-col items-center gap-3">
-      <span className="animate-files-loading-float text-4xl opacity-50" aria-hidden>☁️</span>
-      <p className="flex items-center gap-0.5 text-sm font-medium">
-        <span className="animate-files-loading-shimmer bg-gradient-to-r from-app-text-secondary via-primary to-app-text-secondary bg-[length:220%_100%] bg-clip-text text-transparent dark:from-gray-500 dark:via-primary/90 dark:to-gray-500">
-          {label}
-        </span>
-        <span className="inline-flex min-w-[1.4rem] translate-y-px gap-px text-primary/80 dark:text-primary/90" aria-hidden>
-          <span className="animate-files-loading-dot [animation-delay:0ms]">·</span>
-          <span className="animate-files-loading-dot [animation-delay:180ms]">·</span>
-          <span className="animate-files-loading-dot [animation-delay:360ms]">·</span>
-        </span>
-      </p>
-    </div>
-  );
-}
+import {
+  FILE_INPUT_ID,
+  FILES_FOLDER_KEY,
+  MAX_FILE_SIZE_BYTES,
+  canPreviewFile,
+  deleteFileFully,
+  deleteFolderMeta,
+  downloadStoredFile,
+  fetchUserProfile,
+  formatFileSize,
+  isMissingStorageError,
+  loadFilesWithFallback,
+  migrateInlineFileToStorage,
+  runBackgroundMigration,
+  saveFileMeta,
+  saveFolderMeta,
+  uploadErrorMessage,
+  uploadFileToStorage,
+  withTimeout,
+  type FileFolder,
+  type StoredFile,
+  type UploadProgressItem,
+} from '../../lib/files';
+import { FilePreviewModal } from './FilePreviewModal';
+import { FilesLoadingIndicator } from './FilesLoadingIndicator';
 
 export function FilesPage({ search }: { search: string }) {
   const { t } = useLanguage();
@@ -690,124 +89,40 @@ export function FilesPage({ search }: { search: string }) {
     setLoadError('');
     migrationStartedRef.current = false;
 
-    const paintList = (data: {
-      files?: StoredFile[];
-      folders?: FileFolder[];
-    }) => {
-      if (cancelled) return;
-      setFiles(
-        (data.files ?? [])
-          .map(lightFileMeta)
-          .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()),
-      );
-      setFolders(
-        (data.folders ?? []).sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        ),
-      );
-    };
-
-    const fetchJson = async <T,>(url: string, token: string, signal: AbortSignal): Promise<T> => {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal,
-      });
-      if (!res.ok) throw new Error(`load-failed:${res.status}`);
-      return res.json() as Promise<T>;
-    };
-
     (async () => {
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), LIST_TIMEOUT_MS);
       try {
-        const token = await getRtdbAuthToken();
-        if (!token) throw new Error('no-token');
+        const { list, fromApi } = await loadFilesWithFallback(user.uid);
         if (cancelled) return;
+        setFiles(list.files);
+        setFolders(list.folders);
+        setLoading(false);
+        setLoadError('');
 
-        type ListPayload = {
-          files?: StoredFile[];
-          folders?: FileFolder[];
-          migratedRemaining?: boolean;
-        };
-
-        const data = await fetchJson<ListPayload>('/api/my-files', token, controller.signal);
-        paintList(data);
-        if (!cancelled) {
-          setLoading(false);
-          setLoadError('');
-        }
-
-        // Background migration — never blocks the list UI; failures must not clear it.
-        try {
-          let more = data.migratedRemaining === true;
-          let guard = 0;
-          while (more && !cancelled && guard++ < 40) {
-            const migCtrl = new AbortController();
-            const migTimer = window.setTimeout(() => migCtrl.abort(), 60_000);
-            try {
-              const mig = await fetchJson<ListPayload>(
-                '/api/my-files?migrate=1',
-                token,
-                migCtrl.signal,
-              );
-              paintList(mig);
-              more = mig.migratedRemaining === true;
-            } finally {
-              window.clearTimeout(migTimer);
-            }
-          }
-        } catch (migErr) {
-          console.warn('Background file migration failed', migErr);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        // Fallback: direct RTDB (may be huge if legacy dataUrls remain — strip them).
-        try {
-          const fallbackCtrl = new AbortController();
-          const fallbackTimer = window.setTimeout(() => fallbackCtrl.abort(), LIST_TIMEOUT_MS);
+        if (fromApi && list.migratedRemaining) {
           try {
-            const [filesRes, foldersRes] = await Promise.all([
-              rtdbFetch(`/users/${user.uid}/files`, { signal: fallbackCtrl.signal }),
-              rtdbFetch(`/users/${user.uid}/fileFolders`, { signal: fallbackCtrl.signal }),
-            ]);
-            if (!filesRes.ok || !foldersRes.ok) throw new Error('rtdb-fallback-failed');
-            const cloudFiles = await filesRes.json();
-            const cloudFolders = await foldersRes.json();
-            if (!cancelled) {
-              setFiles(
-                normalizeList<StoredFile>(cloudFiles)
-                  .map(lightFileMeta)
-                  .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()),
-              );
-              setFolders(
-                normalizeList<FileFolder>(cloudFolders).sort(
-                  (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-                ),
-              );
-              setLoadError('');
-            }
-          } finally {
-            window.clearTimeout(fallbackTimer);
+            await runBackgroundMigration(
+              (mig) => {
+                if (cancelled) return;
+                setFiles(mig.files);
+                setFolders(mig.folders);
+              },
+              () => cancelled,
+            );
+          } catch (migErr) {
+            console.warn('Background file migration failed', migErr);
           }
-        } catch {
-          if (!cancelled) {
-            setFiles([]);
-            setFolders([]);
-            const aborted = err instanceof DOMException && err.name === 'AbortError'
-              || (err instanceof Error && /abort|timeout/i.test(err.message));
-            setLoadError(aborted ? t.filesLoadFailed : t.filesLoadFailed);
-          }
-        } finally {
-          if (!cancelled) setLoading(false);
         }
-      } finally {
-        window.clearTimeout(timer);
+      } catch {
+        if (!cancelled) {
+          setFiles([]);
+          setFolders([]);
+          setLoadError(t.filesLoadFailed);
+          setLoading(false);
+        }
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [user, reloadNonce, t.filesLoadFailed]);
 
   useEffect(() => {
@@ -816,8 +131,7 @@ export function FilesPage({ search }: { search: string }) {
     }
   }, [currentFolderId, folders]);
 
-  // Client-side migrate only when we still have an inline dataUrl (RTDB fallback path).
-  // Prefer server migrate via /api/my-files?migrate=1 — never block list paint.
+  // Client-side migrate only when RTDB fallback still has inline dataUrl.
   useEffect(() => {
     if (!user || migrationStartedRef.current) return;
     const legacy = files.filter((f) => f.dataUrl && !f.storagePath && !f.downloadUrl);
@@ -828,232 +142,43 @@ export function FilesPage({ search }: { search: string }) {
       for (const file of legacy) {
         if (cancelled) break;
         try {
-          await migrateInlineFileToStorage(file);
+          const migrated = await migrateInlineFileToStorage(user.uid, file);
+          if (!cancelled) {
+            setFiles((prev) => prev.map((f) => (f.id === file.id ? migrated : f)));
+          }
         } catch {
-          /* keep the inline copy on failure — file stays accessible */
+          /* keep inline copy on failure */
         }
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files, user]);
 
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
-
   const fileCountInFolder = (folderId: string) =>
     files.filter((f) => f.folderId === folderId).length;
-
-  const saveFileMeta = async (file: StoredFile, attempts = 3) => {
-    if (!user) throw new Error('no-user');
-    let lastErr: unknown;
-    for (let i = 0; i < attempts; i++) {
-      try {
-        const res = await rtdbFetch(`/users/${user.uid}/files/${file.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(file),
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (!res.ok) throw new Error(`save-failed:${res.status}`);
-        return;
-      } catch (err) {
-        lastErr = err;
-        if (i < attempts - 1) {
-          await new Promise((r) => window.setTimeout(r, 400 * (i + 1)));
-        }
-      }
-    }
-    throw lastErr instanceof Error ? lastErr : new Error('save-failed');
-  };
-
-  const saveFolderMeta = async (folder: FileFolder) => {
-    if (!user) throw new Error('no-user');
-    const res = await rtdbFetch(`/users/${user.uid}/fileFolders/${folder.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(folder),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) throw new Error('save-failed');
-  };
-
-  const deleteFileMeta = async (fileId: string) => {
-    if (!user) return;
-    await rtdbFetch(`/users/${user.uid}/files/${fileId}`, { method: 'DELETE' });
-  };
-
-  const deleteFolderMeta = async (folderId: string) => {
-    if (!user) return;
-    await rtdbFetch(`/users/${user.uid}/fileFolders/${folderId}`, { method: 'DELETE' });
-  };
 
   const q = search.trim().toLowerCase();
 
   const visibleFolders = useMemo(() => {
     if (currentFolderId) return [];
-    const list = folders;
-    if (!q) return list;
-    return list.filter((f) => f.name.toLowerCase().includes(q));
+    if (!q) return folders;
+    return folders.filter((f) => f.name.toLowerCase().includes(q));
   }, [folders, currentFolderId, q]);
 
   const visibleFiles = useMemo(() => {
-    let list = files.filter((file) =>
-      currentFolderId ? file.folderId === currentFolderId : !file.folderId,
-    );
     if (q) {
-      list = files.filter(
+      return files.filter(
         (file) => file.name.toLowerCase().includes(q) || file.type.toLowerCase().includes(q),
       );
     }
-    return list;
+    return files.filter((file) =>
+      currentFolderId ? file.folderId === currentFolderId : !file.folderId,
+    );
   }, [files, currentFolderId, q]);
-
-  const MAX_FILE_SIZE = 20 * 1024 * 1024;
-
-  const uploadErrorMessage = (err: unknown): string => {
-    const code = firebaseErrorCode(err);
-    if (
-      code.includes('unauthorized')
-      || code.includes('permission-denied')
-      || code === 'storage/unauthorized'
-    ) {
-      return `${t.filesUploadPermissionDenied}${code ? ` (${code})` : ''}`;
-    }
-    if (
-      code.includes('unauthenticated')
-      || code === 'storage/unauthenticated'
-      || code === 'auth/user-token-expired'
-      || code === 'no-token'
-      || code === 'no-user'
-    ) {
-      return `${t.filesUploadAuthError}${code ? ` (${code})` : ''}`;
-    }
-    if (
-      code === 'storage/upload-stuck'
-      || code === 'upload-stuck'
-    ) {
-      return t.filesUploadStuck;
-    }
-    if (
-      code.includes('network')
-      || code === 'storage/retry-limit-exceeded'
-      || code === 'storage/canceled'
-      || code === 'timeout'
-      || (err instanceof TypeError && /fetch|network/i.test(err.message))
-    ) {
-      return `${t.filesUploadNetworkError}${code ? ` (${code})` : ''}`;
-    }
-    if (code === 'quota-exceeded' || code === 'storage/quota-exceeded') {
-      return t.filesQuotaExceeded;
-    }
-    return `${t.filesUploadFailed}${code ? ` (${code})` : ''}`;
-  };
 
   const updateUploadItem = (key: string, patch: Partial<UploadProgressItem>) => {
     setUploadItems((prev) => prev.map((item) => (item.key === key ? { ...item, ...patch } : item)));
-  };
-
-  /** Resumable upload; rejects with storage/upload-stuck if still at 0% after UPLOAD_STUCK_MS. */
-  const uploadResumableOrStuck = (
-    storageRef: ReturnType<typeof ref>,
-    file: File,
-    contentType: string,
-    onProgress: (pct: number) => void,
-  ): Promise<void> => new Promise((resolve, reject) => {
-    const task = uploadBytesResumable(storageRef, file, { contentType });
-    let gotBytes = false;
-    const stuckTimer = window.setTimeout(() => {
-      if (!gotBytes) {
-        try { task.cancel(); } catch { /* ignore */ }
-        reject(new Error('storage/upload-stuck'));
-      }
-    }, UPLOAD_STUCK_MS);
-
-    task.on(
-      'state_changed',
-      (snapshot) => {
-        if (snapshot.bytesTransferred > 0) gotBytes = true;
-        const total = snapshot.totalBytes || file.size || 1;
-        onProgress(Math.min(99, Math.round((snapshot.bytesTransferred / total) * 100)));
-      },
-      (err) => {
-        window.clearTimeout(stuckTimer);
-        reject(err);
-      },
-      () => {
-        window.clearTimeout(stuckTimer);
-        resolve();
-      },
-    );
-  });
-
-  const uploadOneFile = async (
-    file: File,
-    folderId: string | null,
-    onProgress: (pct: number) => void,
-  ): Promise<StoredFile> => {
-    if (!user) throw new Error('no-user');
-    const token = await getRtdbAuthToken();
-    if (!token) throw new Error('no-token');
-
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const base: Omit<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl' | 'folderId'> = {
-      id,
-      name: file.name,
-      type: file.type || 'application/octet-stream',
-      size: file.size,
-      addedAt: new Date().toLocaleString(),
-    };
-
-    const withFolder = folderId ? { ...base, folderId } : base;
-
-    // Always store the blob in Firebase Storage — never inline base64 in the
-    // Realtime Database (inline blobs made the file list download huge/slow).
-    const storagePath = `users/${user.uid}/files/${id}/${safeStorageFileName(file.name)}`;
-    const storageRef = ref(storage, storagePath);
-
-    const runUpload = async () => {
-      try {
-        await uploadResumableOrStuck(storageRef, file, base.type, onProgress);
-      } catch (err) {
-        const code = firebaseErrorCode(err);
-        // Chrome custom-domain CORS / hung resumable: fall back to simple uploadBytes.
-        if (
-          code === 'storage/upload-stuck'
-          || code === 'storage/canceled'
-          || code.includes('network')
-          || code === 'storage/retry-limit-exceeded'
-        ) {
-          onProgress(5);
-          await withTimeout(
-            uploadBytes(storageRef, file, { contentType: base.type }),
-            UPLOAD_TOTAL_MS,
-            'upload-bytes-timeout',
-          );
-        } else {
-          throw err;
-        }
-      }
-    };
-
-    await withTimeout(runUpload(), UPLOAD_TOTAL_MS, 'upload-timeout');
-    onProgress(100);
-    const downloadUrl = await withTimeout(getDownloadURL(storageRef), 20_000, 'download-url-timeout');
-    return { ...withFolder, downloadUrl, storagePath };
-  };
-
-  /** Move a legacy inline (base64) file into Storage and drop the heavy dataUrl. */
-  const migrateInlineFileToStorage = async (file: StoredFile) => {
-    if (!user || !file.dataUrl) return;
-    const blob = dataUrlToBlob(file.dataUrl);
-    const storagePath = file.storagePath || `users/${user.uid}/files/${file.id}/${safeStorageFileName(file.name)}`;
-    const storageRef = ref(storage, storagePath);
-    await uploadBytes(storageRef, blob, { contentType: file.type || 'application/octet-stream' });
-    const downloadUrl = await getDownloadURL(storageRef);
-    const migrated: StoredFile = { ...file, downloadUrl, storagePath };
-    delete migrated.dataUrl;
-    // Persist the light metadata (removes the inline blob from the DB) only after
-    // the Storage upload succeeded, so the file is never lost.
-    await saveFileMeta(migrated);
-    setFiles((prev) => prev.map((f) => (f.id === file.id ? migrated : f)));
   };
 
   const handleFiles = async (list: FileList | null) => {
@@ -1065,15 +190,13 @@ export function FilesPage({ search }: { search: string }) {
 
     setError('');
     const selected = Array.from(list);
-    const oversized = selected.filter((f) => f.size > MAX_FILE_SIZE);
+    const oversized = selected.filter((f) => f.size > MAX_FILE_SIZE_BYTES);
     if (oversized.length) {
       setError(`${t.filesTooLarge} ${oversized.map((f) => f.name).join(', ')}`);
       return;
     }
 
-    const progressKeys = selected.map(
-      (file, i) => `${Date.now()}-${i}-${file.name}`,
-    );
+    const progressKeys = selected.map((file, i) => `${Date.now()}-${i}-${file.name}`);
     setUploadItems(
       selected.map((file, i) => ({
         key: progressKeys[i],
@@ -1087,24 +210,7 @@ export function FilesPage({ search }: { search: string }) {
     const failureMessages: string[] = [];
 
     try {
-      // Quota from already-loaded file list + profile only — never pull the whole
-      // /users/{uid} tree (notes/chats/legacy base64), which timed out uploads.
-      // Cap profile wait so a hung auth/RTDB call cannot leave progress at 0%.
-      let profile: Record<string, unknown> = {};
-      try {
-        const profileRes = await withTimeout(
-          rtdbFetch(`/users/${user.uid}/profile`),
-          PROFILE_TIMEOUT_MS,
-          'profile-timeout',
-        );
-        if (profileRes.ok) {
-          const raw = await withTimeout(profileRes.json(), 5_000, 'profile-json-timeout');
-          if (raw && typeof raw === 'object') profile = raw as Record<string, unknown>;
-        }
-      } catch {
-        /* fall back to default free/plus limits from email */
-      }
-
+      const profile = await fetchUserProfile(user.uid);
       const usedBytes = files.reduce(
         (sum, f) => sum + (typeof f.size === 'number' && f.size > 0 ? f.size : 0),
         0,
@@ -1121,17 +227,17 @@ export function FilesPage({ search }: { search: string }) {
         const file = selected[i];
         const key = progressKeys[i];
         try {
-          const stored = await uploadOneFile(file, currentFolderId, (pct) => {
+          // Storage FIRST → then RTDB meta with retry.
+          const stored = await uploadFileToStorage(user.uid, file, currentFolderId, (pct) => {
             updateUploadItem(key, { progress: pct, status: 'uploading' });
           });
-          await withTimeout(saveFileMeta(stored), 20_000, 'meta-save-timeout');
+          await withTimeout(saveFileMeta(user.uid, stored), 20_000, 'meta-save-timeout');
           uploaded.push(stored);
           updateUploadItem(key, { progress: 100, status: 'done' });
           setFiles((prev) => [stored, ...prev.filter((f) => f.id !== stored.id)]);
         } catch (err) {
           console.error('File upload failed', err);
-          const msg = uploadErrorMessage(err);
-          failureMessages.push(`${file.name}: ${msg}`);
+          failureMessages.push(`${file.name}: ${uploadErrorMessage(err, t)}`);
           updateUploadItem(key, { status: 'error' });
         }
       }
@@ -1144,14 +250,13 @@ export function FilesPage({ search }: { search: string }) {
       }
     } catch (err) {
       console.error('File upload failed', err);
-      setError(uploadErrorMessage(err));
+      setError(uploadErrorMessage(err, t));
       setUploadItems((prev) =>
         prev.map((item) => (item.status === 'uploading' ? { ...item, status: 'error' } : item)),
       );
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
-      // Keep failed rows visible briefly; clear finished rows after a short pause.
       const clearDelay = failureMessages.length ? 4000 : 1200;
       window.setTimeout(() => {
         setUploadItems((prev) => prev.filter((p) => p.status === 'uploading'));
@@ -1160,6 +265,7 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const removeFile = async (file: StoredFile) => {
+    if (!user) return;
     setError('');
     const previous = files;
     setFiles((prev) => prev.filter((item) => item.id !== file.id));
@@ -1167,17 +273,7 @@ export function FilesPage({ search }: { search: string }) {
     if (renamingId === file.id) setRenamingId(null);
     if (moveMenuFileId === file.id) setMoveMenuFileId(null);
     try {
-      if (file.storagePath) {
-        for (const bucket of storageBuckets) {
-          try {
-            await deleteObject(ref(bucket, file.storagePath));
-            break;
-          } catch {
-            /* object may already be gone or in the other bucket */
-          }
-        }
-      }
-      await deleteFileMeta(file.id);
+      await deleteFileFully(user.uid, file);
     } catch {
       setFiles(previous);
       setError(t.filesSaveFailed);
@@ -1185,6 +281,7 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const moveFile = async (file: StoredFile, folderId: string | null) => {
+    if (!user) return;
     const updated: StoredFile = { ...file };
     if (folderId) updated.folderId = folderId;
     else delete updated.folderId;
@@ -1192,7 +289,7 @@ export function FilesPage({ search }: { search: string }) {
     setFiles((prev) => prev.map((item) => (item.id === file.id ? updated : item)));
     setMoveMenuFileId(null);
     try {
-      await saveFileMeta(updated);
+      await saveFileMeta(user.uid, updated);
       show(t.tMoved);
     } catch {
       setFiles(previous);
@@ -1209,7 +306,7 @@ export function FilesPage({ search }: { search: string }) {
       createdAt: new Date().toLocaleString(),
     };
     try {
-      await saveFolderMeta(folder);
+      await saveFolderMeta(user.uid, folder);
       setFolders((prev) => [folder, ...prev]);
       setCreatingFolder(false);
       setNewFolderName('');
@@ -1220,6 +317,7 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const removeFolder = async (folder: FileFolder) => {
+    if (!user) return;
     const previousFiles = files;
     const previousFolders = folders;
     const affected = files.filter((f) => f.folderId === folder.id);
@@ -1229,9 +327,9 @@ export function FilesPage({ search }: { search: string }) {
     );
     if (currentFolderId === folder.id) setCurrentFolderId(null);
     try {
-      await deleteFolderMeta(folder.id);
+      await deleteFolderMeta(user.uid, folder.id);
       await Promise.all(
-        affected.map((f) => saveFileMeta({ ...f, folderId: undefined })),
+        affected.map((f) => saveFileMeta(user.uid, { ...f, folderId: undefined })),
       );
     } catch {
       setFiles(previousFiles);
@@ -1252,24 +350,19 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const commitRename = async (file: StoredFile) => {
+    if (!user) return;
     const next = renameValue.trim();
-    if (!next) {
+    if (!next || next === file.name) {
       cancelRename();
       return;
     }
-    if (next === file.name) {
-      cancelRename();
-      return;
-    }
-
     const updated = { ...file, name: next };
     const previous = files;
     setFiles((prev) => prev.map((item) => (item.id === file.id ? updated : item)));
     if (previewFile?.id === file.id) setPreviewFile(updated);
     cancelRename();
-
     try {
-      await saveFileMeta(updated);
+      await saveFileMeta(user.uid, updated);
       show(t.filesRenameSuccess);
     } catch {
       setFiles(previous);
@@ -1288,6 +381,7 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const commitFolderRename = async (folder: FileFolder) => {
+    if (!user) return;
     const next = folderRenameValue.trim();
     if (!next || next === folder.name) {
       cancelFolderRename();
@@ -1298,7 +392,7 @@ export function FilesPage({ search }: { search: string }) {
     setFolders((prev) => prev.map((f) => (f.id === folder.id ? updated : f)));
     cancelFolderRename();
     try {
-      await saveFolderMeta(updated);
+      await saveFolderMeta(user.uid, updated);
       show(t.filesRenameSuccess);
     } catch {
       setFolders(previous);
@@ -1306,19 +400,12 @@ export function FilesPage({ search }: { search: string }) {
     }
   };
 
-  const onDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (!uploading) setDragging(true);
-  };
-
   const downloadFile = async (file: StoredFile) => {
     if (downloadingId) return;
     setDownloadingId(file.id);
     setError('');
     try {
-      // Same-origin blob + <a download> works in Chrome; cross-origin downloadUrl does not.
-      const blob = await loadFileBlob(file, undefined, user?.uid);
-      triggerBlobDownload(blob, file.name);
+      await downloadStoredFile(file, user?.uid);
     } catch (err) {
       console.error('File download failed', err);
       const msg = isMissingStorageError(err) ? t.filesMissingInStorage : t.filesDownloadFailed;
@@ -1327,6 +414,11 @@ export function FilesPage({ search }: { search: string }) {
     } finally {
       setDownloadingId(null);
     }
+  };
+
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!uploading) setDragging(true);
   };
 
   const onDragLeave = (e: React.DragEvent) => {
@@ -1371,17 +463,13 @@ export function FilesPage({ search }: { search: string }) {
               multiple
               disabled={uploading}
               className="sr-only"
-              onChange={(e) => {
-                void handleFiles(e.target.files);
-              }}
+              onChange={(e) => { void handleFiles(e.target.files); }}
             />
             <button
               type="button"
               disabled={uploading}
-              onClick={() => {
-                if (!uploading) inputRef.current?.click();
-              }}
-              className={`inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0`}
+              onClick={() => { if (!uploading) inputRef.current?.click(); }}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
             >
               <span className="text-base">{uploading ? '☁️' : '☁️➕'}</span>
               <span>{uploading ? t.cloudSaving : t.filesUpload}</span>
@@ -1626,12 +714,12 @@ export function FilesPage({ search }: { search: string }) {
                   ) : (
                     <div className="truncate text-sm font-bold text-app-text dark:text-gray-100" title={file.name}>{file.name}</div>
                   )}
-                  <div className="mt-1 text-xs text-app-text-secondary dark:text-gray-400">{formatSize(file.size)} · {t.filesStored}</div>
+                  <div className="mt-1 text-xs text-app-text-secondary dark:text-gray-400">{formatFileSize(file.size)} · {t.filesStored}</div>
                   <div className="mt-0.5 truncate text-[11px] text-app-text-secondary/70 dark:text-gray-500">{file.addedAt}</div>
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {canPreview(file) && (
+                {canPreviewFile(file) && (
                   <button
                     type="button"
                     onClick={() => setPreviewFile(file)}

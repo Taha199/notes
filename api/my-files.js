@@ -16,19 +16,14 @@ import {
   uploadToStorage,
 } from './_lib/storageFiles.js';
 
-/** Read a node, distinguishing "empty" (null, ok) from a real failure (throws). */
+const MAX_MIGRATIONS_PER_CALL = 5;
+
 async function readNodeStrict(accessToken, path) {
   const url = `${FB_DB_URL}${path}.json?access_token=${encodeURIComponent(accessToken)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`rtdb-read-failed:${res.status}`);
   return res.json();
 }
-
-/**
- * Background migrate only — keep each call small so Hobby functions stay under
- * the time limit. List requests must NEVER wait on these uploads.
- */
-const MAX_MIGRATIONS_PER_CALL = 5;
 
 function normalizeList(data) {
   if (!data) return [];
@@ -48,25 +43,19 @@ function allowOrigin(origin) {
   return isAllowedOrigin(origin) || localDev;
 }
 
-/** Always expose a usable storagePath so the client SDK can getBlob / download. */
-function toClientFile(file, uid) {
+/** Always expose a usable storagePath; never ship base64 blobs to the browser. */
+function toListEntry(file, uid) {
   const stripped = stripBlob(file);
   const storagePath = resolveStoragePath(stripped, uid)
     || (stripped.downloadUrl ? storagePathFromDownloadUrl(stripped.downloadUrl) : undefined)
     || (uid && stripped.id && stripped.name
       ? `users/${uid}/files/${stripped.id}/${safeStorageFileName(stripped.name)}`
       : undefined);
-  return storagePath ? { ...stripped, storagePath } : stripped;
-}
-
-function toListEntry(file, uid) {
-  // Never ship base64 blobs to the browser — that hung Chrome on /files.
-  // Mark inlinePending so the client can recover via /api/file-download
-  // (which still reads dataUrl from RTDB) instead of claiming "missing".
+  const base = storagePath ? { ...stripped, storagePath } : stripped;
   if (file.dataUrl && !file.downloadUrl) {
-    return { ...toClientFile(file, uid), inlinePending: true };
+    return { ...base, inlinePending: true };
   }
-  return toClientFile(file, uid);
+  return base;
 }
 
 async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
@@ -80,8 +69,7 @@ async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
         || `users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`;
       const downloadUrl = await uploadToStorage(storageToken, objectPath, buffer, contentType || file.type);
       const clean = { ...stripBlob(file), downloadUrl, storagePath: objectPath };
-      const ok = await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, clean);
-      if (ok) {
+      if (await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, clean)) {
         migrated += 1;
         updatedById.set(file.id, clean);
       }
@@ -93,7 +81,7 @@ async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
     if (updatedById.has(file.id)) return false;
     return !!(file.dataUrl && !file.downloadUrl);
   });
-  return { migrated, updatedById, remaining };
+  return { updatedById, remaining };
 }
 
 export default async function handler(request, response) {
@@ -108,9 +96,7 @@ export default async function handler(request, response) {
     response.setHeader('Allow', 'GET, OPTIONS');
     return response.status(405).json({ error: 'method-not-allowed' });
   }
-  if (!allowOrigin(origin)) {
-    return response.status(403).json({ error: 'forbidden' });
-  }
+  if (!allowOrigin(origin)) return response.status(403).json({ error: 'forbidden' });
   if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
 
   const idToken = request.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -132,9 +118,11 @@ export default async function handler(request, response) {
       ]);
       const files = normalizeList(filesRaw);
       const folders = normalizeList(foldersRaw);
-      const out = files.map((file) => toListEntry(file, uid));
-      const migratedRemaining = files.some((f) => f.dataUrl && !f.downloadUrl);
-      return response.status(200).json({ files: out, folders, migratedRemaining });
+      return response.status(200).json({
+        files: files.map((f) => toListEntry(f, uid)),
+        folders,
+        migratedRemaining: files.some((f) => f.dataUrl && !f.downloadUrl),
+      });
     }
 
     // Background migrate: small batches after the list has already painted.
@@ -149,11 +137,11 @@ export default async function handler(request, response) {
     const files = normalizeList(filesRaw);
     const folders = normalizeList(foldersRaw);
     const { updatedById, remaining } = await migrateLegacyBatch(files, uid, dbToken, storageToken);
-    const out = files.map((file) => {
-      const clean = updatedById.get(file.id);
-      return toListEntry(clean || file, uid);
+    return response.status(200).json({
+      files: files.map((file) => toListEntry(updatedById.get(file.id) || file, uid)),
+      folders,
+      migratedRemaining: remaining,
     });
-    return response.status(200).json({ files: out, folders, migratedRemaining: remaining });
   } catch (error) {
     console.error('my-files failed', error);
     return response.status(500).json({ error: 'request-failed' });

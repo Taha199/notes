@@ -3,13 +3,21 @@ import { STORAGE_BUCKET } from './firebaseAdmin.js';
 
 export const STORAGE_SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
 
-/** Prefer legacy appspot first — older uploads often live there, not on *.firebasestorage.app. */
+/** Prefer legacy appspot first — older uploads often live there. */
 export const STORAGE_BUCKET_CANDIDATES = [
   'noteclaude-a5b3b.appspot.com',
   STORAGE_BUCKET,
 ].filter((b, i, arr) => b && arr.indexOf(b) === i);
 
-/** Extract Storage object path from a Firebase download URL. */
+export function safeStorageFileName(name) {
+  if (!name || typeof name !== 'string') return 'file';
+  const cleaned = name
+    .replace(/[/\\?#%[\]*]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (cleaned || 'file').slice(0, 180);
+}
+
 export function storagePathFromDownloadUrl(url) {
   if (!url || typeof url !== 'string') return undefined;
   try {
@@ -18,8 +26,7 @@ export function storagePathFromDownloadUrl(url) {
     const idx = u.pathname.indexOf(marker);
     if (idx === -1) return undefined;
     const encoded = u.pathname.slice(idx + marker.length);
-    if (!encoded) return undefined;
-    return decodeURIComponent(encoded);
+    return encoded ? decodeURIComponent(encoded) : undefined;
   } catch {
     return undefined;
   }
@@ -29,7 +36,46 @@ export function firebaseMediaUrl(objectPath, token, bucket = STORAGE_BUCKET) {
   return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`;
 }
 
-/** Upload bytes and attach a Firebase download token. Throws if either step fails. */
+export function dataUrlToBuffer(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
+    throw new Error('invalid-data-url');
+  }
+  const comma = dataUrl.indexOf(',');
+  const meta = comma === -1 ? '' : dataUrl.slice(5, comma);
+  const payload = comma === -1 ? '' : dataUrl.slice(comma + 1);
+  const contentType = meta.split(';')[0] || 'application/octet-stream';
+  const isBase64 = /;base64/i.test(meta);
+  const buffer = isBase64
+    ? Buffer.from(payload, 'base64')
+    : Buffer.from(decodeURIComponent(payload), 'utf8');
+  return { buffer, contentType };
+}
+
+/** All plausible object paths — prefer downloadUrl-derived path. */
+export function candidateStoragePaths(file, uid) {
+  const paths = [];
+  const add = (p) => {
+    if (typeof p === 'string' && p && !paths.includes(p)) paths.push(p);
+  };
+  if (file.downloadUrl) add(storagePathFromDownloadUrl(file.downloadUrl));
+  add(file.storagePath);
+  if (uid && file.id && file.name) {
+    add(`users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`);
+    add(`users/${uid}/files/${file.id}/${file.name}`);
+    const underscored = file.name.replace(/\s+/g, '_');
+    if (underscored !== file.name) {
+      add(`users/${uid}/files/${file.id}/${underscored}`);
+      add(`users/${uid}/files/${file.id}/${safeStorageFileName(underscored)}`);
+    }
+  }
+  return paths;
+}
+
+export function resolveStoragePath(file, uid) {
+  if (!file || typeof file !== 'object') return undefined;
+  return candidateStoragePaths(file, uid)[0];
+}
+
 export async function uploadToStorage(storageToken, objectPath, buffer, contentType) {
   const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(STORAGE_BUCKET)}/o?uploadType=media&name=${encodeURIComponent(objectPath)}`;
   const uploadRes = await fetch(uploadUrl, {
@@ -45,9 +91,8 @@ export async function uploadToStorage(storageToken, objectPath, buffer, contentT
 }
 
 /**
- * Read the existing Firebase download token from object metadata.
- * CRITICAL: never replace a live token unless reminting — that invalidates
- * downloadUrl values already held in the client list state (403 forever).
+ * Read the existing Firebase download token.
+ * CRITICAL: never remint on every request — that invalidates URLs already in RTDB.
  */
 export async function existingDownloadUrl(storageToken, objectPath) {
   for (const bucket of STORAGE_BUCKET_CANDIDATES) {
@@ -66,13 +111,10 @@ export async function existingDownloadUrl(storageToken, objectPath) {
   return null;
 }
 
-/** Attach / refresh a Firebase download token on an existing object. */
 export async function mintDownloadToken(storageToken, objectPath, contentType) {
   const token = randomUUID();
   const patchUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(STORAGE_BUCKET)}/o/${encodeURIComponent(objectPath)}`;
-  const body = {
-    metadata: { firebaseStorageDownloadTokens: token },
-  };
+  const body = { metadata: { firebaseStorageDownloadTokens: token } };
   if (contentType) body.contentType = contentType;
   const patchRes = await fetch(patchUrl, {
     method: 'PATCH',
@@ -86,24 +128,20 @@ export async function mintDownloadToken(storageToken, objectPath, contentType) {
   return firebaseMediaUrl(objectPath, token);
 }
 
-/**
- * Prefer the existing Storage download token. Only mint a new one when missing
- * or when forceRemint is set — reminting invalidates every prior URL.
- */
+/** Prefer existing token; only mint when missing. */
 export async function resolveDownloadUrl(storageToken, objectPath, contentType, forceRemint = false) {
   if (!forceRemint) {
     try {
       const existing = await existingDownloadUrl(storageToken, objectPath);
       if (existing) return { downloadUrl: existing, minted: false };
     } catch {
-      /* fall through to mint */
+      /* fall through */
     }
   }
   const downloadUrl = await mintDownloadToken(storageToken, objectPath, contentType);
   return { downloadUrl, minted: true };
 }
 
-/** Download object bytes via GCS JSON API + Firebase Storage REST (service account). */
 export async function downloadFromStorage(storageToken, objectPath) {
   let lastErr = null;
   for (const bucket of STORAGE_BUCKET_CANDIDATES) {
@@ -116,30 +154,28 @@ export async function downloadFromStorage(storageToken, objectPath) {
         headers: { Authorization: `Bearer ${storageToken}` },
       });
       if (res.ok) {
-        const contentType = res.headers.get('content-type') || 'application/octet-stream';
-        const buffer = Buffer.from(await res.arrayBuffer());
-        return { buffer, contentType, bucket };
+        return {
+          buffer: Buffer.from(await res.arrayBuffer()),
+          contentType: res.headers.get('content-type') || 'application/octet-stream',
+          bucket,
+        };
       }
       lastErr = new Error(`storage-download-failed:${res.status}`);
-      if (res.status !== 404) continue;
     }
   }
   throw lastErr || new Error('storage-download-failed');
 }
 
-/** Fetch bytes via a Firebase media/download URL (works even when metadata path is stale). */
 export async function downloadViaMediaUrl(downloadUrl) {
-  if (!downloadUrl || typeof downloadUrl !== 'string') {
-    throw new Error('missing-download-url');
-  }
+  if (!downloadUrl || typeof downloadUrl !== 'string') throw new Error('missing-download-url');
   const res = await fetch(downloadUrl);
   if (!res.ok) throw new Error(`media-url-failed:${res.status}`);
-  const contentType = res.headers.get('content-type') || 'application/octet-stream';
-  const buffer = Buffer.from(await res.arrayBuffer());
-  return { buffer, contentType };
+  return {
+    buffer: Buffer.from(await res.arrayBuffer()),
+    contentType: res.headers.get('content-type') || 'application/octet-stream',
+  };
 }
 
-/** List object names under a prefix (e.g. users/{uid}/files/{fileId}/). */
 export async function listStoragePrefix(storageToken, prefix, maxResults = 200) {
   const names = [];
   for (const bucket of STORAGE_BUCKET_CANDIDATES) {
@@ -179,67 +215,12 @@ function namesMatch(objectPath, fileName) {
   if (base === fileName) return true;
   if (base === safeStorageFileName(fileName)) return true;
   if (base === fileName.replace(/\s+/g, '_')) return true;
-  if (base === safeStorageFileName(fileName.replace(/\s+/g, '_'))) return true;
   return base.toLowerCase() === fileName.toLowerCase();
 }
 
-export function safeStorageFileName(name) {
-  if (!name || typeof name !== 'string') return 'file';
-  const cleaned = name
-    .replace(/[/\\?#%[\]*]+/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return (cleaned || 'file').slice(0, 180);
-}
-
-/** Decode a legacy RTDB inline data URL into bytes. */
-export function dataUrlToBuffer(dataUrl) {
-  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
-    throw new Error('invalid-data-url');
-  }
-  const comma = dataUrl.indexOf(',');
-  const meta = comma === -1 ? '' : dataUrl.slice(5, comma);
-  const payload = comma === -1 ? '' : dataUrl.slice(comma + 1);
-  const contentType = meta.split(';')[0] || 'application/octet-stream';
-  const isBase64 = /;base64/i.test(meta);
-  const buffer = isBase64
-    ? Buffer.from(payload, 'base64')
-    : Buffer.from(decodeURIComponent(payload), 'utf8');
-  return { buffer, contentType };
-}
-
 /**
- * All plausible object paths for a file row.
- * Prefer downloadUrl-derived path — it reflects where the object actually lives.
- */
-export function candidateStoragePaths(file, uid) {
-  const paths = [];
-  const add = (p) => {
-    if (typeof p === 'string' && p && !paths.includes(p)) paths.push(p);
-  };
-  if (file.downloadUrl) add(storagePathFromDownloadUrl(file.downloadUrl));
-  add(file.storagePath);
-  if (uid && file.id && file.name) {
-    add(`users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`);
-    add(`users/${uid}/files/${file.id}/${file.name}`);
-    const underscored = file.name.replace(/\s+/g, '_');
-    if (underscored !== file.name) {
-      add(`users/${uid}/files/${file.id}/${underscored}`);
-      add(`users/${uid}/files/${file.id}/${safeStorageFileName(underscored)}`);
-    }
-  }
-  return paths;
-}
-
-export function resolveStoragePath(file, uid) {
-  if (!file || typeof file !== 'object') return undefined;
-  return candidateStoragePaths(file, uid)[0];
-}
-
-/**
- * Resolve real bytes for a file: Storage paths → listing → media URL → RTDB dataUrl.
- * dataUrl is last so we do not skip a real Storage object, but it prevents false
- * "missing" when migrate stripped the blob from the list response.
+ * Resolve bytes: Storage paths → listing → media URL → RTDB dataUrl (last).
+ * dataUrl last so we do not skip a real Storage object, but still recover legacy.
  */
 export async function resolveFileBytes(storageToken, file, uid) {
   const tried = [];
@@ -250,64 +231,49 @@ export async function resolveFileBytes(storageToken, file, uid) {
     try {
       const result = await downloadFromStorage(storageToken, path);
       return { ...result, storagePath: path, source: 'gcs-path' };
-    } catch {
-      /* try next */
-    }
+    } catch { /* next */ }
   }
 
   if (uid && file.id) {
-    const prefix = `users/${uid}/files/${file.id}/`;
-    const listed = await listStoragePrefix(storageToken, prefix, 50);
+    const listed = await listStoragePrefix(storageToken, `users/${uid}/files/${file.id}/`, 50);
     for (const path of listed) {
       if (tried.includes(path)) continue;
       tried.push(path);
       try {
         const result = await downloadFromStorage(storageToken, path);
         return { ...result, storagePath: path, source: 'gcs-list' };
-      } catch {
-        /* try next */
-      }
+      } catch { /* next */ }
     }
   }
 
   if (uid && file.name) {
     const allUnderUser = await listStoragePrefix(storageToken, `users/${uid}/files/`, 500);
-    const matches = allUnderUser.filter((path) => namesMatch(path, file.name));
-    for (const path of matches) {
+    for (const path of allUnderUser.filter((p) => namesMatch(p, file.name))) {
       if (tried.includes(path)) continue;
       tried.push(path);
       try {
         const result = await downloadFromStorage(storageToken, path);
         return { ...result, storagePath: path, source: 'gcs-name-search' };
-      } catch {
-        /* try next */
-      }
+      } catch { /* next */ }
     }
   }
 
   if (file.downloadUrl) {
     try {
       const result = await downloadViaMediaUrl(file.downloadUrl);
-      const path = storagePathFromDownloadUrl(file.downloadUrl) || candidates[0];
-      return { ...result, storagePath: path, source: 'media-url' };
-    } catch {
-      /* fall through */
-    }
+      return {
+        ...result,
+        storagePath: storagePathFromDownloadUrl(file.downloadUrl) || candidates[0],
+        source: 'media-url',
+      };
+    } catch { /* fall through */ }
   }
 
-  // Legacy inline blob still in RTDB — recoverable even when Storage object is gone.
   if (typeof file.dataUrl === 'string' && file.dataUrl.startsWith('data:')) {
     try {
       const { buffer, contentType } = dataUrlToBuffer(file.dataUrl);
-      return {
-        buffer,
-        contentType,
-        storagePath: candidates[0],
-        source: 'rtdb-dataurl',
-      };
-    } catch {
-      /* fall through */
-    }
+      return { buffer, contentType, storagePath: candidates[0], source: 'rtdb-dataurl' };
+    } catch { /* fall through */ }
   }
 
   throw new Error(`storage-object-not-found:${tried.slice(0, 6).join('|') || 'no-candidates'}`);

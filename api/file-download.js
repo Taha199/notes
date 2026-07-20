@@ -46,6 +46,7 @@ function stripBlob(file) {
   return rest;
 }
 
+/** Prefer stored downloadUrl; never remint tokens on every request. */
 async function resolveDownloadUrlFast(storageToken, file, uid, contentType) {
   if (file.downloadUrl) {
     return {
@@ -60,9 +61,7 @@ async function resolveDownloadUrlFast(storageToken, file, uid, contentType) {
     try {
       const resolved = await resolveDownloadUrl(storageToken, path, contentType, false);
       return { downloadUrl: resolved.downloadUrl, storagePath: path, source: 'candidate' };
-    } catch {
-      /* try next */
-    }
+    } catch { /* next */ }
   }
 
   if (uid && file.id) {
@@ -72,19 +71,14 @@ async function resolveDownloadUrlFast(storageToken, file, uid, contentType) {
       try {
         const resolved = await resolveDownloadUrl(storageToken, path, contentType, false);
         return { downloadUrl: resolved.downloadUrl, storagePath: path, source: 'listed' };
-      } catch {
-        /* try next */
-      }
+      } catch { /* next */ }
     }
   }
 
   throw new Error('no-download-url');
 }
 
-/**
- * When bytes came from RTDB dataUrl, re-upload to Storage and drop the inline blob
- * so the next list/preview uses a real downloadUrl.
- */
+/** When bytes came from RTDB dataUrl, re-upload to Storage and drop the inline blob. */
 async function migrateDataUrlIfNeeded(dbToken, storageToken, file, uid, fileId, resolved) {
   if (resolved.source !== 'rtdb-dataurl') return resolved;
   try {
@@ -133,9 +127,7 @@ export default async function handler(request, response) {
   }
 
   const fileId = String(request.query?.fileId || '').trim();
-  if (!fileId) {
-    return json(response, 400, { error: 'missing-file-id' }, origin);
-  }
+  if (!fileId) return json(response, 400, { error: 'missing-file-id' }, origin);
 
   const rawFormat = String(request.query?.format || 'attachment').toLowerCase();
   const format = rawFormat === 'inline' || rawFormat === 'json' ? rawFormat : 'attachment';
@@ -184,7 +176,6 @@ export default async function handler(request, response) {
           source: fast.source,
         }, origin);
       } catch (err) {
-        // Still recoverable via inline dataUrl — tell the client to use format=inline.
         if (typeof file.dataUrl === 'string' && file.dataUrl.startsWith('data:')) {
           return json(response, 200, {
             downloadUrl: null,
@@ -209,22 +200,13 @@ export default async function handler(request, response) {
     try {
       resolved = await resolveFileBytes(storageToken, file, account.uid);
       resolved = await migrateDataUrlIfNeeded(
-        dbToken,
-        storageToken,
-        file,
-        account.uid,
-        fileId,
-        resolved,
+        dbToken, storageToken, file, account.uid, fileId, resolved,
       );
     } catch (err) {
       let listedSample = [];
       try {
-        listedSample = (
-          await listStoragePrefix(storageToken, `users/${account.uid}/files/`, 30)
-        ).slice(0, 15);
-      } catch {
-        /* ignore */
-      }
+        listedSample = (await listStoragePrefix(storageToken, `users/${account.uid}/files/`, 30)).slice(0, 15);
+      } catch { /* ignore */ }
       return json(response, 404, {
         error: 'storage-object-not-found',
         details: err instanceof Error ? err.message : String(err),
@@ -233,7 +215,6 @@ export default async function handler(request, response) {
         metaStoragePath: file.storagePath || null,
         hasInlineDataUrl: typeof file.dataUrl === 'string' && file.dataUrl.startsWith('data:'),
         listedUnderUserFiles: listedSample,
-        hint: 'If listedUnderUserFiles is empty and hasInlineDataUrl is false, the file is truly orphaned.',
       }, origin);
     }
 
@@ -253,9 +234,7 @@ export default async function handler(request, response) {
         try {
           const resolvedUrl = await resolveDownloadUrl(storageToken, storagePath, contentType, false);
           downloadUrl = resolvedUrl.downloadUrl;
-        } catch {
-          /* keep existing */
-        }
+        } catch { /* keep existing */ }
       }
       return json(response, 413, {
         error: 'too-large-for-proxy',
