@@ -39,7 +39,9 @@ export const FILE_INPUT_ID = 'files-upload-input';
 export function safeStorageFileName(name: string): string {
   const cleaned = name
     .replace(/[/\\?#%[\]*]+/g, '_')
-    .replace(/\s+/g, ' ')
+    // Spaces / unicode whitespace → underscore (avoids awkward %20 paths)
+    .replace(/[\s\u00A0]+/g, '_')
+    .replace(/_+/g, '_')
     .trim();
   return (cleaned || 'file').slice(0, 180);
 }

@@ -47,6 +47,7 @@ export {
 } from './fileApi';
 
 export {
+  SERVER_UPLOAD_MAX_BYTES,
   dataUrlToBlob,
   uploadFileToStorage,
   migrateInlineFileToStorage,

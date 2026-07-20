@@ -16,6 +16,9 @@ import {
   type StoredFile,
 } from './fileTypes';
 
+/** Stay under Vercel Hobby ~4.5MB request body limit. */
+export const SERVER_UPLOAD_MAX_BYTES = 3_500_000;
+
 /** Convert a legacy inline base64/text data URL back into a Blob. */
 export function dataUrlToBlob(dataUrl: string): Blob {
   const commaIdx = dataUrl.indexOf(',');
@@ -29,6 +32,12 @@ export function dataUrlToBlob(dataUrl: string): Blob {
     return new Blob([bytes], { type: contentType });
   }
   return new Blob([decodeURIComponent(payload)], { type: contentType });
+}
+
+function isChromium(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /Chrome|Chromium|Edg\//.test(ua) && !/OPR\//.test(ua);
 }
 
 /**
@@ -53,7 +62,7 @@ function uploadResumableOrStuck(
       settled = true;
       window.clearInterval(watchdog);
       try { task.cancel(); } catch { /* ignore */ }
-      reject(new Error('storage/upload-stuck'));
+      reject(Object.assign(new Error('storage/upload-stuck'), { code: 'storage/upload-stuck' }));
     };
 
     const watchdog = window.setInterval(() => {
@@ -86,9 +95,76 @@ function uploadResumableOrStuck(
   });
 }
 
+function isClientUploadFailure(err: unknown): boolean {
+  const code = firebaseErrorCode(err);
+  return (
+    code === 'storage/upload-stuck'
+    || code === 'storage/canceled'
+    || code === 'upload-bytes-timeout'
+    || code === 'upload-timeout'
+    || code === 'storage/retry-limit-exceeded'
+    || code.includes('network')
+    || code.includes('cors')
+    || (err instanceof TypeError && /fetch|network|failed/i.test(err.message))
+  );
+}
+
+/**
+ * Server-side Storage write via /api/my-files (bypasses browser CORS entirely).
+ * Limited by Vercel Hobby body size — only for smaller files.
+ */
+async function uploadViaServerProxy(
+  file: File,
+  fileId: string,
+  folderId: string | null,
+  onProgress: (pct: number) => void,
+): Promise<Pick<StoredFile, 'downloadUrl' | 'storagePath'>> {
+  const token = await getRtdbAuthToken(true);
+  if (!token) throw Object.assign(new Error('no-token'), { code: 'no-token' });
+
+  onProgress(15);
+  const res = await withTimeout(
+    fetch('/api/my-files', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-File-Name': encodeURIComponent(file.name),
+        'X-File-Id': fileId,
+        ...(folderId ? { 'X-Folder-Id': folderId } : {}),
+      },
+      body: file,
+    }),
+    UPLOAD_TOTAL_MS,
+    'server-upload-timeout',
+  );
+
+  onProgress(85);
+  if (!res.ok) {
+    let details = '';
+    try {
+      const body = await res.json() as { error?: string; details?: string };
+      details = body.details || body.error || '';
+    } catch { /* ignore */ }
+    const code = details || `server-upload-failed:${res.status}`;
+    throw Object.assign(new Error(code), { code });
+  }
+
+  const data = await res.json() as { downloadUrl?: string; storagePath?: string };
+  if (!data.downloadUrl || !data.storagePath) {
+    throw Object.assign(new Error('server-upload-incomplete'), { code: 'server-upload-incomplete' });
+  }
+  return { downloadUrl: data.downloadUrl, storagePath: data.storagePath };
+}
+
 /**
  * Upload file bytes to Storage FIRST, then return metadata for RTDB.
  * Never writes RTDB until Storage succeeds.
+ *
+ * Strategy (Chrome custom-domain CORS often breaks resumable + PUT):
+ * 1. Prefer simple uploadBytes (single PUT) — especially on Chromium
+ * 2. Fall back to resumable with stuck detection
+ * 3. Fall back to server proxy for files under SERVER_UPLOAD_MAX_BYTES
  */
 export async function uploadFileToStorage(
   uid: string,
@@ -98,7 +174,7 @@ export async function uploadFileToStorage(
 ): Promise<StoredFile> {
   // Ensure auth is ready (fresh token) before touching Storage.
   const token = await getRtdbAuthToken(true);
-  if (!token) throw new Error('no-token');
+  if (!token) throw Object.assign(new Error('no-token'), { code: 'no-token' });
 
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const base: Omit<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl' | 'folderId'> = {
@@ -113,35 +189,71 @@ export async function uploadFileToStorage(
   const storagePath = defaultStoragePath(uid, id, file.name);
   const storageRef = ref(storage, storagePath);
 
-  const runUpload = async () => {
-    try {
-      await uploadResumableOrStuck(storageRef, file, base.type, onProgress);
-    } catch (err) {
-      const code = firebaseErrorCode(err);
-      // Chrome custom-domain CORS / hung resumable: fall back to simple uploadBytes.
-      if (
-        code === 'storage/upload-stuck'
-        || code === 'storage/canceled'
-        || code.includes('network')
-        || code === 'storage/retry-limit-exceeded'
-      ) {
-        onProgress(10);
-        await withTimeout(
-          uploadBytes(storageRef, file, { contentType: base.type }),
-          UPLOAD_TOTAL_MS,
-          'upload-bytes-timeout',
-        );
-      } else {
-        throw err;
+  const tryUploadBytes = async (timeoutMs: number) => {
+    onProgress(5);
+    await withTimeout(
+      uploadBytes(storageRef, file, { contentType: base.type }),
+      timeoutMs,
+      'upload-bytes-timeout',
+    );
+  };
+
+  const tryResumable = async () => {
+    onProgress(5);
+    await uploadResumableOrStuck(storageRef, file, base.type, onProgress);
+  };
+
+  const runClientUpload = async () => {
+    // Chromium + custom domain: resumable often hangs at 0% — try simple PUT first.
+    // Fail fast (~12s) so server proxy can take over before the user gives up.
+    // Other browsers: try resumable first for better progress, then simple PUT.
+    if (isChromium()) {
+      try {
+        await tryUploadBytes(12_000);
+        return;
+      } catch (err) {
+        if (!isClientUploadFailure(err)) throw err;
       }
+      await tryResumable();
+      return;
+    }
+
+    try {
+      await tryResumable();
+    } catch (err) {
+      if (!isClientUploadFailure(err)) throw err;
+      onProgress(10);
+      await tryUploadBytes(45_000);
     }
   };
 
-  await withTimeout(runUpload(), UPLOAD_TOTAL_MS, 'upload-timeout');
+  let downloadUrl: string;
+  let finalPath = storagePath;
+
+  try {
+    await withTimeout(runClientUpload(), UPLOAD_TOTAL_MS, 'upload-timeout');
+    onProgress(95);
+    downloadUrl = await withTimeout(getDownloadURL(storageRef), 20_000, 'download-url-timeout');
+  } catch (clientErr) {
+    // Do not surface "stuck at 0%" until server fallback has been tried (when eligible).
+    if (file.size <= SERVER_UPLOAD_MAX_BYTES && isClientUploadFailure(clientErr)) {
+      try {
+        const proxied = await uploadViaServerProxy(file, id, folderId, onProgress);
+        downloadUrl = proxied.downloadUrl!;
+        finalPath = proxied.storagePath!;
+      } catch (serverErr) {
+        // Prefer the more specific server error; keep client code as cause chain.
+        const serverCode = firebaseErrorCode(serverErr);
+        if (serverCode) throw serverErr;
+        throw clientErr;
+      }
+    } else {
+      throw clientErr;
+    }
+  }
+
   onProgress(100);
-  // getDownloadURL reads the existing token — it does not remint.
-  const downloadUrl = await withTimeout(getDownloadURL(storageRef), 20_000, 'download-url-timeout');
-  return { ...withFolder, downloadUrl, storagePath };
+  return { ...withFolder, downloadUrl, storagePath: finalPath };
 }
 
 /**
@@ -194,6 +306,7 @@ export function uploadErrorMessage(
     || code === 'upload-stuck'
     || code === 'upload-bytes-timeout'
     || code === 'upload-timeout'
+    || code === 'server-upload-timeout'
   ) {
     return t.filesUploadStuck;
   }
@@ -202,6 +315,7 @@ export function uploadErrorMessage(
     || code === 'storage/retry-limit-exceeded'
     || code === 'storage/canceled'
     || code === 'timeout'
+    || code.includes('server-upload')
     || (err instanceof TypeError && /fetch|network/i.test(err.message))
   ) {
     return `${t.filesUploadNetworkError}${code ? ` (${code})` : ''}`;
