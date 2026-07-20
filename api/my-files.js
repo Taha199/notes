@@ -8,10 +8,11 @@ import {
   writeRtdb,
 } from './_lib/firebaseAdmin.js';
 import {
-  STORAGE_SCOPE,
+  resolveDownloadUrl,
   resolveStoragePath,
   storagePathFromDownloadUrl,
   uploadToStorage,
+  STORAGE_SCOPE,
 } from './_lib/storageFiles.js';
 
 /** Read a node, distinguishing "empty" (null, ok) from a real failure (throws). */
@@ -72,6 +73,29 @@ function toListEntry(file, uid) {
   return toClientFile(file, uid);
 }
 
+/** Ensure every Storage-backed row has a working downloadUrl (reuse token when possible). */
+async function enrichFileUrls(files, uid, storageToken) {
+  return Promise.all(
+    files.map(async (file) => {
+      const entry = toListEntry(file, uid);
+      if (entry.downloadUrl && entry.storagePath) return entry;
+      const path = resolveStoragePath(entry, uid);
+      if (!path || !storageToken) return entry;
+      try {
+        const { downloadUrl } = await resolveDownloadUrl(
+          storageToken,
+          path,
+          file.type || 'application/octet-stream',
+          false,
+        );
+        return { ...entry, downloadUrl, storagePath: path };
+      } catch {
+        return entry;
+      }
+    }),
+  );
+}
+
 async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
   let migrated = 0;
   const updatedById = new Map();
@@ -130,16 +154,19 @@ export default async function handler(request, response) {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
     const uid = account.uid;
 
-    // Fast list: metadata only — never block the UI on Storage uploads.
+    // Fast list: metadata only + fresh download URLs when missing.
     if (!doMigrate) {
-      const dbToken = await getGoogleAccessToken(serviceAccount, RTDB_SCOPES);
+      const [dbToken, storageToken] = await Promise.all([
+        getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
+        getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
+      ]);
       const [filesRaw, foldersRaw] = await Promise.all([
         readNodeStrict(dbToken, `/users/${uid}/files`),
         readNodeStrict(dbToken, `/users/${uid}/fileFolders`),
       ]);
       const files = normalizeList(filesRaw);
       const folders = normalizeList(foldersRaw);
-      const out = files.map((file) => toListEntry(file, uid));
+      const out = await enrichFileUrls(files, uid, storageToken);
       const migratedRemaining = files.some((f) => f.dataUrl && !f.downloadUrl);
       return response.status(200).json({ files: out, folders, migratedRemaining });
     }
@@ -156,10 +183,8 @@ export default async function handler(request, response) {
     const files = normalizeList(filesRaw);
     const folders = normalizeList(foldersRaw);
     const { updatedById, remaining } = await migrateLegacyBatch(files, uid, dbToken, storageToken);
-    const out = files.map((file) => {
-      const clean = updatedById.get(file.id);
-      return toListEntry(clean || file, uid);
-    });
+    const merged = files.map((file) => updatedById.get(file.id) || file);
+    const out = await enrichFileUrls(merged, uid, storageToken);
     return response.status(200).json({ files: out, folders, migratedRemaining: remaining });
   } catch (error) {
     console.error('my-files failed', error);
