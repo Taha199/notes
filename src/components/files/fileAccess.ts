@@ -12,7 +12,7 @@ import { readApiResponse, requireIdToken } from './apiHelpers';
 import { fileDownloadUrl, safeStorageFileName, type StoredFile } from './fileTypes';
 
 /** Bump when diagnosing deploy cache — visible in DevTools console. */
-export const FILES_ACCESS_VERSION = 'dual-bucket-v7';
+export const FILES_ACCESS_VERSION = 'direct-fast-v8';
 
 const RESOLVE_MS = 12_000;
 export const PROXY_MAX_BYTES = 3_500_000;
@@ -338,26 +338,26 @@ export async function downloadStoredFile(file: StoredFile, uid: string): Promise
   console.info(`[files] ${FILES_ACCESS_VERSION} downloadStoredFile`, file.id);
   const fileName = file.name || 'download';
 
-  // 1) Safari-style: resolve a live media URL and navigate/download it.
+  // 1) Instant path: if metadata already has a Firebase media URL, use it immediately.
+  // Fetching the whole file first made the button look stuck on slower connections.
+  const stored = fileDownloadUrl(file);
+  if (stored) {
+    triggerUrlDownload(stored, fileName);
+    return;
+  }
+
+  // 2) Resolve a live media URL and navigate/download it.
   try {
     const live = await findLiveStorageRef(file, uid);
     if (live?.downloadUrl) {
-      try {
-        const blob = await withTimeout(getBlob(live.storageRef), 45_000, 'getBlob-download');
-        triggerBlobDownload(ensureTypedBlob(blob, file), fileName);
-        return;
-      } catch (err) {
-        console.warn('[files] getBlob failed — opening media URL like Safari', err);
-        triggerUrlDownload(live.downloadUrl, fileName);
-        return;
-      }
+      triggerUrlDownload(live.downloadUrl, fileName);
+      return;
     }
   } catch (err) {
     console.warn('[files] SDK resolve failed', err);
   }
 
-  // 2) Stored downloadUrl (may still work even when reconstructed paths 404)
-  const stored = fileDownloadUrl(file);
+  // 3) Last metadata fallback.
   if (stored) {
     try {
       const mediaRes = await withTimeout(fetch(stored), 45_000, 'stored-url-fetch');
@@ -372,7 +372,7 @@ export async function downloadStoredFile(file: StoredFile, uid: string): Promise
     return;
   }
 
-  // 3) API fallback
+  // 4) API fallback
   const { token } = await requireIdToken();
   const res = await withTimeout(
     fetch(

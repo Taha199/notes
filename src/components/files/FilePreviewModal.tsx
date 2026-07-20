@@ -4,6 +4,7 @@ import {
   FILES_ACCESS_VERSION,
   loadPreviewBlobUrl,
   resolveImagePreviewSrc,
+  resolvePublicDownloadUrl,
 } from './fileAccess';
 import { FileDownloadButton } from './FileDownloadButton';
 import { previewModeFor, type StoredFile } from './fileTypes';
@@ -76,6 +77,13 @@ export function FilePreviewModal({
           const url = await resolveImagePreviewSrc(file, uid);
           if (cancelled) return;
           if (url.startsWith('blob:')) blobRef.current = url;
+          setSrc(url);
+          return;
+        }
+
+        if (mode === 'pdf') {
+          const url = await resolvePublicDownloadUrl(file, uid);
+          if (cancelled) return;
           setSrc(url);
           return;
         }
