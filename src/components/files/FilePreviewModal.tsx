@@ -7,7 +7,7 @@ import {
   resolvePublicDownloadUrl,
 } from './fileAccess';
 import { FileDownloadButton } from './FileDownloadButton';
-import { previewModeFor, type StoredFile } from './fileTypes';
+import { fileDownloadUrl, previewModeFor, type StoredFile } from './fileTypes';
 import { FilesLoadingIndicator } from './FilesLoadingIndicator';
 
 export function FilePreviewModal({
@@ -61,10 +61,18 @@ export function FilePreviewModal({
 
   useEffect(() => () => revoke(), []);
 
-  // Image: direct media URL (no CORS). PDF/text: blob via SDK.
   useEffect(() => {
     if (mode !== 'image' && mode !== 'pdf') return;
     let cancelled = false;
+    const quickUrl = fileDownloadUrl(file);
+    const timeout = window.setTimeout(() => {
+      if (cancelled) return;
+      setLoading(false);
+      if (!quickUrl) {
+        setFailed(true);
+        setErrorDetail(t.filesPreviewFailed);
+      }
+    }, 15_000);
 
     (async () => {
       setLoading(true);
@@ -73,28 +81,19 @@ export function FilePreviewModal({
       revoke();
 
       try {
-        if (mode === 'image') {
-          const url = await resolveImagePreviewSrc(file, uid);
+        if (quickUrl) {
           if (cancelled) return;
-          if (url.startsWith('blob:')) blobRef.current = url;
-          setSrc(url);
+          setSrc(quickUrl);
+          setLoading(false);
           return;
         }
 
-        if (mode === 'pdf') {
-          const url = await resolvePublicDownloadUrl(file, uid);
-          if (cancelled) return;
-          setSrc(url);
-          return;
-        }
-
-        const blobUrl = await loadPreviewBlobUrl(file, uid);
-        if (cancelled) {
-          if (blobUrl.startsWith('blob:')) URL.revokeObjectURL(blobUrl);
-          return;
-        }
-        if (blobUrl.startsWith('blob:')) blobRef.current = blobUrl;
-        setSrc(blobUrl);
+        const url = mode === 'image'
+          ? await resolveImagePreviewSrc(file, uid)
+          : await resolvePublicDownloadUrl(file, uid);
+        if (cancelled) return;
+        if (url.startsWith('blob:')) blobRef.current = url;
+        setSrc(url);
       } catch (err) {
         console.error('[files] preview failed', file.id, err);
         if (!cancelled) {
@@ -107,19 +106,29 @@ export function FilePreviewModal({
           );
         }
       } finally {
+        window.clearTimeout(timeout);
         if (!cancelled) setLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
       revoke();
     };
-  }, [file, mode, uid]);
+  }, [file, mode, uid, t.filesMissingInStorage, t.filesPreviewFailed]);
 
   useEffect(() => {
     if (mode !== 'text') return;
     let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      if (!cancelled) {
+        setLoading(false);
+        setFailed(true);
+        setErrorDetail(t.filesPreviewFailed);
+      }
+    }, 15_000);
+
     (async () => {
       setLoading(true);
       setFailed(false);
@@ -146,11 +155,13 @@ export function FilePreviewModal({
           setErrorDetail(err instanceof Error ? err.message : String(err));
         }
       } finally {
+        window.clearTimeout(timeout);
         if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
     };
   }, [file, mode, uid, t.filesPreviewFailed]);
 
