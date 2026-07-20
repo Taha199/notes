@@ -14,6 +14,7 @@ import { FilesLoadingIndicator } from './FilesLoadingIndicator';
 
 type PreviewLabels = {
   filesDownload: string;
+  filesDownloading: string;
   filesPreviewUnavailable: string;
   filesPreviewFailed: string;
   filesMissingInStorage: string;
@@ -29,6 +30,7 @@ export function FilePreviewModal({
   t,
   onDownload,
   downloading,
+  downloadPct = 0,
 }: {
   file: StoredFile;
   uid?: string;
@@ -37,6 +39,7 @@ export function FilePreviewModal({
   t: PreviewLabels;
   onDownload: (file: StoredFile) => void;
   downloading: boolean;
+  downloadPct?: number;
 }) {
   const href = fileHref(file);
   const mode = previewModeFor(file);
@@ -204,6 +207,9 @@ export function FilePreviewModal({
   const showError = loadError || mode === 'unsupported';
   const showImageSpinner = mode === 'image' && loading && (imgFailed || file.inlinePending || !href || !imageSrc);
   const showPct = loadProgress > 0 && loadProgress < 100;
+  const downloadLabel = downloading
+    ? t.filesDownloading.replace('{n}', String(downloadPct))
+    : t.filesDownload;
 
   return createPortal(
     <div
@@ -225,7 +231,7 @@ export function FilePreviewModal({
               onDownload(file);
             }}
           >
-            {downloading ? '…' : t.filesDownload}
+            {downloadLabel}
           </button>
           <button
             type="button"
@@ -310,7 +316,7 @@ export function FilePreviewModal({
                     onDownload(file);
                   }}
                 >
-                  {downloading ? '…' : t.filesDownload}
+                  {downloadLabel}
                 </button>
                 {onDelete && (
                   <button

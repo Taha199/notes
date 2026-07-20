@@ -64,6 +64,7 @@ export function FilesPage({ search }: { search: string }) {
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadPct, setDownloadPct] = useState(0);
 
   useEffect(() => {
     localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
@@ -403,15 +404,31 @@ export function FilesPage({ search }: { search: string }) {
     // Instant path: ZERO awaits before window.open when CDN URL is present.
     const direct = (file.downloadUrl || '').trim();
     if (direct && !direct.startsWith('data:') && !direct.startsWith('blob:')) {
-      if (openDownloadUrlNow(direct, file.name)) return;
+      if (openDownloadUrlNow(direct, file.name)) {
+        // Brief 100% so the button never sticks on "…" for CDN opens.
+        setDownloadingId(file.id);
+        setDownloadPct(100);
+        window.setTimeout(() => {
+          setDownloadingId((id) => {
+            if (id !== file.id) return id;
+            setDownloadPct(0);
+            return null;
+          });
+        }, 400);
+        return;
+      }
     }
     if (downloadingId === file.id) return;
     setDownloadingId(file.id);
+    setDownloadPct(0);
     setError('');
-    const clearGuard = window.setTimeout(() => setDownloadingId(null), 20_000);
+    const clearGuard = window.setTimeout(() => {
+      setDownloadingId(null);
+      setDownloadPct(0);
+    }, 20_000);
     try {
       // Heal URL then navigate — never full-blob when CDN works.
-      await downloadStoredFile(file, user?.uid);
+      await downloadStoredFile(file, user?.uid, setDownloadPct);
     } catch (err) {
       console.error('File download failed', err);
       const base = isMissingStorageError(err) ? t.filesMissingInStorage : t.filesDownloadFailed;
@@ -423,7 +440,13 @@ export function FilesPage({ search }: { search: string }) {
       window.clearTimeout(clearGuard);
       // Always clear so the Download button never sticks on "…"
       setDownloadingId(null);
+      setDownloadPct(0);
     }
+  };
+
+  const downloadButtonLabel = (fileId: string) => {
+    if (downloadingId !== fileId) return t.filesDownload;
+    return t.filesDownloading.replace('{n}', String(downloadPct));
   };
 
   const warmFile = (file: StoredFile) => {
@@ -753,8 +776,9 @@ export function FilesPage({ search }: { search: string }) {
                   disabled={downloadingId === file.id}
                   onClick={() => void downloadFile(file)}
                   className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
+                  aria-live="polite"
                 >
-                  {downloadingId === file.id ? '…' : t.filesDownload}
+                  {downloadButtonLabel(file.id)}
                 </button>
                 <button
                   type="button"
@@ -815,6 +839,7 @@ export function FilesPage({ search }: { search: string }) {
           t={t}
           onDownload={(f) => void downloadFile(f)}
           downloading={downloadingId === previewFile.id}
+          downloadPct={downloadingId === previewFile.id ? downloadPct : 0}
         />
       )}
     </div>

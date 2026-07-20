@@ -3,7 +3,7 @@ import mammoth from 'mammoth';
 import { storageBuckets } from '../firebase';
 import { getRtdbAuthToken } from '../rtdb';
 import { candidateStoragePaths } from './filePaths';
-import { dataUrlToBlob } from './fileStorage';
+import { dataUrlToBlob, dataUrlToBlobWithProgress } from './fileStorage';
 import {
   isMissingStorageError,
   previewModeFor,
@@ -487,21 +487,32 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
  * Fast download: navigate/open CDN URL immediately when available.
  * Heal missing/stale URLs via API + getDownloadURL before buffering bytes.
  * Blob path ONLY as last resort (legacy inline / recovery).
+ * onProgress: 0–100 while working (CDN open → 100; dataUrl decode; XHR bytes).
  */
-export async function downloadStoredFile(file: StoredFile, uid?: string): Promise<void> {
+export async function downloadStoredFile(
+  file: StoredFile,
+  uid?: string,
+  onProgress?: (pct: number) => void,
+): Promise<void> {
+  const report = (pct: number) => onProgress?.(Math.max(0, Math.min(100, Math.round(pct))));
+
   const existing = (file.downloadUrl || '').trim();
   if (existing && !existing.startsWith('data:') && !existing.startsWith('blob:')) {
     // openOrNavigate: window.open → <a target=_blank> → location.assign.
     // Never treat window.open===null as failure without the assign fallback.
+    report(100);
     if (openOrNavigateToDownloadUrl(existing, file.name)) return;
   }
 
   if (file.dataUrl?.startsWith('data:')) {
-    triggerBlobDownload(dataUrlToBlob(file.dataUrl), file.name);
+    const blob = await dataUrlToBlobWithProgress(file.dataUrl, report);
+    triggerBlobDownload(blob, file.name);
+    report(100);
     return;
   }
 
   // Heal: mint/list a CDN URL without downloading the full file body.
+  report(5);
   let resolved: string | null = null;
   try {
     resolved = await resolveFileDownloadUrl(file, uid, {
@@ -513,15 +524,26 @@ export async function downloadStoredFile(file: StoredFile, uid?: string): Promis
 
   const healed = (resolved || '').trim();
   if (healed && healed !== existing) {
+    report(100);
     if (openOrNavigateToDownloadUrl(healed, file.name)) return;
   } else if (healed && !existing) {
+    report(100);
     if (openOrNavigateToDownloadUrl(healed, file.name)) return;
   }
 
   // Legacy / recovery only — may buffer; never preferred when a CDN URL works.
   try {
-    const blob = await loadFileBlob(file, undefined, uid);
+    report(8);
+    const blob = await loadFileBlob(
+      file,
+      (loaded, total) => {
+        if (total > 0) report(8 + (loaded / total) * 90);
+        else if (file.size > 0) report(8 + (loaded / file.size) * 90);
+      },
+      uid,
+    );
     triggerBlobDownload(blob, file.name);
+    report(100);
   } catch (err) {
     if (isMissingStorageError(err)) throw new Error('MISSING_IN_STORAGE');
     const reason = err instanceof Error ? err.message : String(err ?? 'unknown');

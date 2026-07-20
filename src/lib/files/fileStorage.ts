@@ -31,6 +31,57 @@ export function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([decodeURIComponent(payload)], { type: contentType });
 }
 
+/**
+ * Fast async dataUrl → Blob for downloads.
+ * Prefer native fetch decode (non-blocking); fall back to chunked atob with progress.
+ */
+export async function dataUrlToBlobWithProgress(
+  dataUrl: string,
+  onProgress?: (pct: number) => void,
+): Promise<Blob> {
+  const report = (pct: number) => onProgress?.(Math.max(0, Math.min(100, Math.round(pct))));
+  report(5);
+
+  // Browser-native decode is much faster than a main-thread atob loop.
+  try {
+    const res = await fetch(dataUrl);
+    report(55);
+    const blob = await res.blob();
+    report(100);
+    if (blob.size > 0) return blob;
+  } catch {
+    /* fall through to chunked decode */
+  }
+
+  const commaIdx = dataUrl.indexOf(',');
+  const meta = commaIdx === -1 ? '' : dataUrl.slice(5, commaIdx);
+  const payload = commaIdx === -1 ? '' : dataUrl.slice(commaIdx + 1);
+  const contentType = meta.split(';')[0] || 'application/octet-stream';
+
+  if (!/;base64/i.test(meta)) {
+    report(80);
+    const blob = new Blob([decodeURIComponent(payload)], { type: contentType });
+    report(100);
+    return blob;
+  }
+
+  // Chunked base64 decode (multiples of 4) so the UI can paint % progress.
+  const chunkChars = 256 * 1024;
+  const parts: BlobPart[] = [];
+  const total = payload.length || 1;
+  for (let i = 0; i < payload.length; i += chunkChars) {
+    const slice = payload.slice(i, Math.min(i + chunkChars, payload.length));
+    const binary = atob(slice);
+    const bytes = new Uint8Array(binary.length);
+    for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+    parts.push(bytes);
+    report(Math.min(99, 10 + ((i + slice.length) / total) * 90));
+    await new Promise<void>((r) => setTimeout(r, 0));
+  }
+  report(100);
+  return new Blob(parts, { type: contentType });
+}
+
 function readFileAsDataUrl(file: File, onProgress?: (pct: number) => void): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

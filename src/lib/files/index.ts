@@ -49,6 +49,7 @@ export {
 export {
   MAX_RTDB_FILE_SIZE,
   dataUrlToBlob,
+  dataUrlToBlobWithProgress,
   uploadFileToStorage,
   migrateInlineFileToStorage,
   uploadErrorMessage,
