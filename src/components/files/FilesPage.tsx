@@ -172,20 +172,23 @@ async function loadFileBlob(
     return ensurePdfMime(blob, file);
   }
 
-  // Prefer download URL + XHR when available (reports byte progress).
-  // Fall back to authenticated getBlob if the token URL fails.
-  if (file.downloadUrl) {
+  // Authenticated SDK read first — Chrome often hangs on XHR to Firebase token URLs.
+  if (file.storagePath) {
     try {
-      return await fetchBlobWithProgress(file.downloadUrl, file, onProgress);
+      const blob = await getBlob(ref(storage, file.storagePath));
+      onProgress?.(blob.size, blob.size);
+      return ensurePdfMime(blob, file);
     } catch {
       /* fall through */
     }
   }
 
-  if (file.storagePath) {
-    const blob = await getBlob(ref(storage, file.storagePath));
-    onProgress?.(blob.size, blob.size);
-    return ensurePdfMime(blob, file);
+  if (file.downloadUrl) {
+    return await withTimeout(
+      fetchBlobWithProgress(file.downloadUrl, file, onProgress),
+      15_000,
+      'xhr-timeout',
+    );
   }
 
   throw new Error('no-file-source');
@@ -215,6 +218,7 @@ function fetchBlobWithProgress(
       }
     };
     xhr.onerror = () => reject(new Error('fetch-network'));
+    xhr.onabort = () => reject(new Error('fetch-abort'));
     xhr.send();
   });
 }
@@ -265,10 +269,14 @@ function FilePreviewModal({
   const href = fileHref(file);
   const hasDirectSrc = Boolean(file.downloadUrl || file.dataUrl);
   const mode = previewModeFor(file);
+  /** Chrome blocks Firebase URLs in <img>; load via SDK when we know the Storage path. */
+  const imageNeedsSdkBlob = mode === 'image' && Boolean(file.storagePath || file.dataUrl);
   const [textContent, setTextContent] = useState('');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   /** Preview-only resolving state — never reuse the files-list "Hämtar dina filer" copy. */
-  const [previewResolving, setPreviewResolving] = useState(mode === 'pdf' || mode === 'text');
+  const [previewResolving, setPreviewResolving] = useState(
+    mode === 'pdf' || mode === 'text' || imageNeedsSdkBlob,
+  );
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
@@ -326,17 +334,52 @@ function FilePreviewModal({
     };
   }, [file, mode]);
 
+  // Storage-backed images: load bytes via SDK immediately (Chrome-safe).
+  useEffect(() => {
+    if (!imageNeedsSdkBlob) return;
+    let cancelled = false;
+    setPreviewResolving(true);
+    setLoadError(false);
+    setLoadProgress(0);
+    setBlobUrl(null);
+    revokeBlobUrl();
+    (async () => {
+      try {
+        const blob = await withTimeout(
+          loadFileBlob(file, (loaded, total) => {
+            if (!cancelled && total > 0) {
+              setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
+            }
+          }),
+          PREVIEW_BLOB_TIMEOUT_MS,
+          'preview-timeout',
+        );
+        if (cancelled) return;
+        const objectUrl = URL.createObjectURL(blob);
+        blobUrlRef.current = objectUrl;
+        setBlobUrl(objectUrl);
+        setLoadProgress(100);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setPreviewResolving(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      revokeBlobUrl();
+    };
+  }, [file, imageNeedsSdkBlob]);
+
   // No direct URL (legacy stripped dataUrl) — go straight to blob / error.
   useEffect(() => {
-    if (mode !== 'image' || hasDirectSrc || imgFailed || loadError) return;
-    if (file.storagePath) setImgFailed(true);
-    else setLoadError(true);
-  }, [mode, hasDirectSrc, imgFailed, loadError, file.storagePath]);
+    if (mode !== 'image' || hasDirectSrc || imgFailed || loadError || imageNeedsSdkBlob) return;
+    setLoadError(true);
+  }, [mode, hasDirectSrc, imgFailed, loadError, imageNeedsSdkBlob]);
 
-  // Image fallback: remote <img> failed (or no direct URL) → blob via getBlob/XHR.
-  // Do NOT depend on blobUrl (that revoked the object URL on success in Chrome).
+  // Image fallback: remote <img> failed → blob via getBlob (SDK first).
   useEffect(() => {
-    if (mode !== 'image' || !imgFailed) return;
+    if (mode !== 'image' || !imgFailed || imageNeedsSdkBlob) return;
     let cancelled = false;
     setPreviewResolving(true);
     setLoadError(false);
@@ -394,8 +437,8 @@ function FilePreviewModal({
     return () => { cancelled = true; };
   }, [file, mode, t.filesPreviewFailed]);
 
-  const imageSrc = blobUrl || (hasDirectSrc && !imgFailed ? href : null);
-  const showImageSpinner = mode === 'image' && !loadError && imgFailed && previewResolving && !blobUrl;
+  const imageSrc = blobUrl || (hasDirectSrc && !imgFailed && !imageNeedsSdkBlob ? href : null);
+  const showImageSpinner = mode === 'image' && !loadError && previewResolving && !imageSrc;
 
   return createPortal(
     <div
