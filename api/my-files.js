@@ -10,6 +10,7 @@ import {
 import {
   resolveDownloadUrl,
   resolveStoragePath,
+  safeStorageFileName,
   storagePathFromDownloadUrl,
   uploadToStorage,
   STORAGE_SCOPE,
@@ -60,7 +61,7 @@ function toClientFile(file, uid) {
   const storagePath = resolveStoragePath(stripped, uid)
     || (stripped.downloadUrl ? storagePathFromDownloadUrl(stripped.downloadUrl) : undefined)
     || (uid && stripped.id && stripped.name
-      ? `users/${uid}/files/${stripped.id}/${stripped.name}`
+      ? `users/${uid}/files/${stripped.id}/${safeStorageFileName(stripped.name)}`
       : undefined);
   return storagePath ? { ...stripped, storagePath } : stripped;
 }
@@ -73,22 +74,31 @@ function toListEntry(file, uid) {
   return toClientFile(file, uid);
 }
 
-/** Ensure every Storage-backed row has a working downloadUrl (reuse token when possible). */
-async function enrichFileUrls(files, uid, storageToken) {
+/** Ensure every Storage-backed row has a working downloadUrl; persist when minted. */
+async function enrichFileUrls(files, uid, storageToken, dbToken) {
   return Promise.all(
     files.map(async (file) => {
       const entry = toListEntry(file, uid);
+      const path = resolveStoragePath(entry, uid)
+        || (entry.storagePath ? entry.storagePath : undefined);
       if (entry.downloadUrl && entry.storagePath) return entry;
-      const path = resolveStoragePath(entry, uid);
       if (!path || !storageToken) return entry;
       try {
         const { downloadUrl } = await resolveDownloadUrl(
           storageToken,
           path,
           file.type || 'application/octet-stream',
-          false,
+          !entry.downloadUrl,
         );
-        return { ...entry, downloadUrl, storagePath: path };
+        const enriched = { ...entry, downloadUrl, storagePath: path };
+        if (dbToken && downloadUrl && downloadUrl !== file.downloadUrl) {
+          await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, {
+            ...stripBlob(file),
+            downloadUrl,
+            storagePath: path,
+          });
+        }
+        return enriched;
       } catch {
         return entry;
       }
@@ -103,7 +113,8 @@ async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
     if (!(file.dataUrl && !file.downloadUrl) || migrated >= MAX_MIGRATIONS_PER_CALL) continue;
     try {
       const { buffer, contentType } = dataUrlToBuffer(file.dataUrl);
-      const objectPath = resolveStoragePath(file, uid) || `users/${uid}/files/${file.id}/${file.name}`;
+      const objectPath = resolveStoragePath(file, uid)
+        || `users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`;
       const downloadUrl = await uploadToStorage(storageToken, objectPath, buffer, contentType || file.type);
       const clean = { ...stripBlob(file), downloadUrl, storagePath: objectPath };
       const ok = await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, clean);
@@ -166,7 +177,7 @@ export default async function handler(request, response) {
       ]);
       const files = normalizeList(filesRaw);
       const folders = normalizeList(foldersRaw);
-      const out = await enrichFileUrls(files, uid, storageToken);
+      const out = await enrichFileUrls(files, uid, storageToken, dbToken);
       const migratedRemaining = files.some((f) => f.dataUrl && !f.downloadUrl);
       return response.status(200).json({ files: out, folders, migratedRemaining });
     }
@@ -184,7 +195,7 @@ export default async function handler(request, response) {
     const folders = normalizeList(foldersRaw);
     const { updatedById, remaining } = await migrateLegacyBatch(files, uid, dbToken, storageToken);
     const merged = files.map((file) => updatedById.get(file.id) || file);
-    const out = await enrichFileUrls(merged, uid, storageToken);
+    const out = await enrichFileUrls(merged, uid, storageToken, dbToken);
     return response.status(200).json({ files: out, folders, migratedRemaining: remaining });
   } catch (error) {
     console.error('my-files failed', error);

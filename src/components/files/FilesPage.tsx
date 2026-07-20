@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   deleteObject,
-  getBlob,
   getDownloadURL,
   ref,
   uploadBytes,
@@ -14,26 +12,31 @@ import { useToast } from '../../contexts/ToastContext';
 import { storage } from '../../lib/firebase';
 import { getRtdbAuthToken, rtdbFetch } from '../../lib/rtdb';
 import { getStorageLimitBytes } from '../../lib/storageQuota';
-
-interface StoredFile {
-  id: string;
-  name: string;
-  type: string;
-  size: number;
-  addedAt: string;
-  downloadUrl?: string;
-  storagePath?: string;
-  folderId?: string | null;
-  /** Legacy uploads stored inline in Realtime Database */
-  dataUrl?: string;
-  /** Server withheld the inline blob; background migrate still pending */
-  inlinePending?: boolean;
-}
+import { FileDownloadButton } from './FileDownloadButton';
+import { FilePreviewModal } from './FilePreviewModal';
+import { FilesLoadingIndicator } from './FilesLoadingIndicator';
+import {
+  canPreviewFile,
+  fileDownloadUrl,
+  formatFileSize,
+  safeStorageFileName,
+  type FileFolder,
+  type StoredFile,
+} from './fileTypes';
 
 const LIST_TIMEOUT_MS = 15_000;
 const UPLOAD_STUCK_MS = 10_000;
 const UPLOAD_TOTAL_MS = 90_000;
 const PROFILE_TIMEOUT_MS = 5_000;
+const FILE_INPUT_ID = 'files-upload-input';
+const FILES_FOLDER_KEY = 'malacadhati_files_folder';
+
+type UploadProgressItem = {
+  key: string;
+  name: string;
+  progress: number;
+  status: 'uploading' | 'done' | 'error';
+};
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -51,47 +54,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Pro
   });
 }
 
-/** Drop heavy base64 payloads so the UI never holds multi‑MB strings. */
-function lightFileMeta(file: StoredFile): StoredFile {
-  if (!file.dataUrl) return file;
-  const { dataUrl, ...rest } = file;
-  void dataUrl;
-  return { ...rest, inlinePending: true };
-}
-
-interface FileFolder {
-  id: string;
-  name: string;
-  createdAt: string;
-}
-
-type PreviewMode = 'image' | 'pdf' | 'text' | 'unsupported';
-
-type UploadProgressItem = {
-  key: string;
-  name: string;
-  progress: number;
-  status: 'uploading' | 'done' | 'error';
-};
-
-const FILE_INPUT_ID = 'files-upload-input';
-const FILES_FOLDER_KEY = 'malacadhati_files_folder';
-
-function formatSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-/** Storage path segment: strip characters that break object paths across browsers. */
-function safeStorageFileName(name: string): string {
-  const cleaned = name
-    .replace(/[/\\?#%[\]*]+/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return (cleaned || 'file').slice(0, 180);
-}
-
 function firebaseErrorCode(err: unknown): string {
   if (err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string') {
     return (err as { code: string }).code;
@@ -100,410 +62,12 @@ function firebaseErrorCode(err: unknown): string {
   return '';
 }
 
-function normalizeList<T extends { id: string }>(data: unknown): T[] {
-  if (!data) return [];
-  if (Array.isArray(data)) {
-    return data.filter((item): item is T => !!item && typeof item === 'object' && 'id' in item);
-  }
-  if (typeof data === 'object') {
-    return Object.values(data as Record<string, T>).filter(
-      (item) => !!item && typeof item === 'object' && 'id' in item,
-    );
-  }
-  return [];
+function sortFiles(list: StoredFile[]) {
+  return [...list].sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
 }
 
-function fileHref(file: StoredFile) {
-  return file.downloadUrl || file.dataUrl || '#';
-}
-
-function previewModeFor(file: StoredFile): PreviewMode {
-  const type = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
-  if (type.startsWith('image/')) return 'image';
-  if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
-  if (type.startsWith('text/') || /\.(txt|md|json|csv|log|xml|html?)$/i.test(name)) return 'text';
-  return 'unsupported';
-}
-
-function canPreview(file: StoredFile) {
-  return previewModeFor(file) !== 'unsupported';
-}
-
-/** Convert a legacy inline base64/text data URL back into a Blob for Storage upload. */
-function dataUrlToBlob(dataUrl: string): Blob {
-  const commaIdx = dataUrl.indexOf(',');
-  const meta = commaIdx === -1 ? '' : dataUrl.slice(5, commaIdx); // strip leading "data:"
-  const payload = commaIdx === -1 ? '' : dataUrl.slice(commaIdx + 1);
-  const contentType = meta.split(';')[0] || 'application/octet-stream';
-  if (/;base64/i.test(meta)) {
-    const binary = atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: contentType });
-  }
-  return new Blob([decodeURIComponent(payload)], { type: contentType });
-}
-
-function ensurePdfMime(blob: Blob, file: StoredFile): Blob {
-  if (
-    (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
-    && blob.type !== 'application/pdf'
-  ) {
-    return new Blob([blob], { type: 'application/pdf' });
-  }
-  return blob;
-}
-
-function isChromeBrowser(): boolean {
-  const ua = navigator.userAgent;
-  return /Chrome\//.test(ua) && !/Edg\//.test(ua) && !/OPR\//.test(ua);
-}
-
-function resolveClientStoragePath(file: StoredFile, uid: string): string | undefined {
-  if (file.storagePath) return file.storagePath;
-  if (file.downloadUrl) {
-    try {
-      const u = new URL(file.downloadUrl);
-      const idx = u.pathname.indexOf('/o/');
-      if (idx !== -1) {
-        const encoded = u.pathname.slice(idx + 3);
-        if (encoded) return decodeURIComponent(encoded);
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  if (uid && file.id && file.name) {
-    return `users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`;
-  }
-  return undefined;
-}
-
-async function refreshFileAccess(file: StoredFile): Promise<{ downloadUrl: string; storagePath?: string } | null> {
-  const token = await getRtdbAuthToken();
-  if (!token) return null;
-  const res = await fetch(`/api/file-download?fileId=${encodeURIComponent(file.id)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as { downloadUrl?: string; storagePath?: string };
-  if (!data.downloadUrl) return null;
-  return { downloadUrl: data.downloadUrl, storagePath: data.storagePath };
-}
-
-/** Reliable bytes for preview/download — SDK first, then fresh token URL. */
-async function loadPreviewBlob(file: StoredFile, uid: string): Promise<Blob> {
-  if (file.dataUrl) return dataUrlToBlob(file.dataUrl);
-
-  const path = resolveClientStoragePath(file, uid);
-  if (path) {
-    try {
-      return ensurePdfMime(await getBlob(ref(storage, path)), file);
-    } catch {
-      /* fall through */
-    }
-  }
-
-  let url = file.downloadUrl;
-  if (!url) {
-    const refreshed = await refreshFileAccess(file);
-    url = refreshed?.downloadUrl;
-  }
-  if (url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`fetch:${res.status}`);
-    return ensurePdfMime(await res.blob(), file);
-  }
-
-  throw new Error('no-file-source');
-}
-
-async function loadTextPreview(file: StoredFile, href: string): Promise<string> {
-  if (file.dataUrl?.startsWith('data:')) {
-    const match = file.dataUrl.match(/^data:([^,]*),(.*)$/s);
-    if (!match) return '';
-    const [, meta, payload] = match;
-    if (meta.includes('base64')) return atob(payload);
-    return decodeURIComponent(payload);
-  }
-  const res = await fetch(href);
-  if (!res.ok) throw new Error(`fetch:${res.status}`);
-  return res.text();
-}
-
-async function loadTextPreviewFromBlob(file: StoredFile, uid: string): Promise<string> {
-  const blob = await loadPreviewBlob(file, uid);
-  return blob.text();
-}
-
-async function resolveDownloadHref(file: StoredFile, uid: string): Promise<string> {
-  if (file.downloadUrl) return file.downloadUrl;
-  if (file.dataUrl) return file.dataUrl;
-  const path = resolveClientStoragePath(file, uid);
-  if (path) {
-    try {
-      return await getDownloadURL(ref(storage, path));
-    } catch {
-      /* fall through */
-    }
-  }
-  const refreshed = await refreshFileAccess(file);
-  return refreshed?.downloadUrl || '';
-}
-
-/** Instant download link — label never changes to an ellipsis. */
-function FileDownloadLink({
-  file,
-  uid,
-  label,
-  className,
-  onClickExtra,
-}: {
-  file: StoredFile;
-  uid: string;
-  label: string;
-  className: string;
-  onClickExtra?: (e: React.MouseEvent) => void;
-}) {
-  const { show } = useToast();
-  const { t } = useLanguage();
-  const [href, setHref] = useState(file.downloadUrl || file.dataUrl || '');
-
-  useEffect(() => {
-    let cancelled = false;
-    if (href) return;
-    void (async () => {
-      const url = await resolveDownloadHref(file, uid);
-      if (!cancelled && url) setHref(url);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [file, uid, href]);
-
-  return (
-    <a
-      href={href || '#'}
-      download={file.name}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={className}
-      onClick={(e) => {
-        onClickExtra?.(e);
-        if (href) return;
-        e.preventDefault();
-        void (async () => {
-          const url = await resolveDownloadHref(file, uid);
-          if (url) {
-            setHref(url);
-            window.open(url, '_blank', 'noopener,noreferrer');
-          } else {
-            show(t.filesDownloadFailed);
-          }
-        })();
-      }}
-    >
-      {label}
-    </a>
-  );
-}
-
-function FilePreviewModal({
-  file,
-  uid,
-  onClose,
-  t,
-}: {
-  file: StoredFile;
-  uid: string;
-  onClose: () => void;
-  t: {
-    filesDownload: string;
-    filesPreviewUnavailable: string;
-    filesPreviewFailed: string;
-    filesPreviewLoading: string;
-  };
-}) {
-  const mode = previewModeFor(file);
-  const [textContent, setTextContent] = useState('');
-  const [loadingText, setLoadingText] = useState(mode === 'text');
-  const [src, setSrc] = useState('');
-  const [resolving, setResolving] = useState(mode === 'image' || mode === 'pdf');
-  const [failed, setFailed] = useState(false);
-  const blobRef = useRef<string | null>(null);
-
-  const revokeBlob = () => {
-    if (blobRef.current) {
-      URL.revokeObjectURL(blobRef.current);
-      blobRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  useEffect(() => () => revokeBlob(), []);
-
-  useEffect(() => {
-    if (mode !== 'image' && mode !== 'pdf') return;
-    let cancelled = false;
-    setResolving(true);
-    setFailed(false);
-    revokeBlob();
-
-    (async () => {
-      try {
-        let url = file.downloadUrl || file.dataUrl || '';
-        if (!url) {
-          const refreshed = await withTimeout(refreshFileAccess(file), 12_000, 'url-refresh');
-          url = refreshed?.downloadUrl || '';
-        }
-        if (cancelled) return;
-        if (!url) throw new Error('no-url');
-
-        if (mode === 'pdf' && isChromeBrowser()) {
-          const res = await withTimeout(fetch(url), 20_000, 'pdf-fetch');
-          if (!res.ok) throw new Error(`pdf:${res.status}`);
-          const blob = ensurePdfMime(await res.blob(), file);
-          const blobUrl = URL.createObjectURL(blob);
-          blobRef.current = blobUrl;
-          setSrc(blobUrl);
-        } else {
-          setSrc(url);
-        }
-      } catch {
-        if (!cancelled) {
-          try {
-            const blob = ensurePdfMime(
-              await withTimeout(loadPreviewBlob(file, uid), 25_000, 'blob'),
-              file,
-            );
-            if (cancelled) return;
-            const blobUrl = URL.createObjectURL(blob);
-            blobRef.current = blobUrl;
-            setSrc(blobUrl);
-          } catch {
-            if (!cancelled) setFailed(true);
-          }
-        }
-      } finally {
-        if (!cancelled) setResolving(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      revokeBlob();
-    };
-  }, [file, mode, uid]);
-
-  useEffect(() => {
-    if (mode !== 'text') return;
-    let cancelled = false;
-    setLoadingText(true);
-    setFailed(false);
-    (async () => {
-      try {
-        const href = file.downloadUrl || file.dataUrl || '';
-        const body = href
-          ? await loadTextPreview(file, href)
-          : await loadTextPreviewFromBlob(file, uid);
-        if (!cancelled) setTextContent(body);
-      } catch {
-        if (!cancelled) {
-          setTextContent(t.filesPreviewFailed);
-          setFailed(true);
-        }
-      } finally {
-        if (!cancelled) setLoadingText(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [file, mode, uid, t.filesPreviewFailed]);
-
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={file.name}
-      className="fixed inset-0 z-[10000] flex flex-col bg-black/80 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
-        <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
-        <div className="flex shrink-0 items-center gap-2">
-          <FileDownloadLink
-            file={file}
-            uid={uid}
-            label={t.filesDownload}
-            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
-            onClickExtra={(e) => e.stopPropagation()}
-          />
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {resolving && !failed && (
-          <FilesLoadingIndicator text={t.filesPreviewLoading} />
-        )}
-        {mode === 'image' && !failed && src && !resolving && (
-          <img
-            src={src}
-            alt={file.name}
-            className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
-          />
-        )}
-        {mode === 'pdf' && !failed && src && !resolving && (
-          <iframe
-            title={file.name}
-            src={src}
-            className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
-          />
-        )}
-        {mode === 'text' && (
-          <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
-            {loadingText ? '…' : textContent}
-          </pre>
-        )}
-        {(mode === 'unsupported' || failed) && (
-          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">
-            {mode === 'unsupported' ? t.filesPreviewUnavailable : t.filesPreviewFailed}
-          </p>
-        )}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-function FilesLoadingIndicator({ text }: { text: string }) {
-  const label = text.replace(/[.…]+\s*$/, '');
-  return (
-    <div className="flex flex-col items-center gap-3">
-      <span className="animate-files-loading-float text-4xl opacity-50" aria-hidden>☁️</span>
-      <p className="flex items-center gap-0.5 text-sm font-medium">
-        <span className="animate-files-loading-shimmer bg-gradient-to-r from-app-text-secondary via-primary to-app-text-secondary bg-[length:220%_100%] bg-clip-text text-transparent dark:from-gray-500 dark:via-primary/90 dark:to-gray-500">
-          {label}
-        </span>
-        <span className="inline-flex min-w-[1.4rem] translate-y-px gap-px text-primary/80 dark:text-primary/90" aria-hidden>
-          <span className="animate-files-loading-dot [animation-delay:0ms]">·</span>
-          <span className="animate-files-loading-dot [animation-delay:180ms]">·</span>
-          <span className="animate-files-loading-dot [animation-delay:360ms]">·</span>
-        </span>
-      </p>
-    </div>
-  );
+function sortFolders(list: FileFolder[]) {
+  return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export function FilesPage({ search }: { search: string }) {
@@ -513,6 +77,7 @@ export function FilesPage({ search }: { search: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const folderRenameRef = useRef<HTMLInputElement>(null);
+
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [folders, setFolders] = useState<FileFolder[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(() => {
@@ -538,7 +103,6 @@ export function FilesPage({ search }: { search: string }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
-  const migrationStartedRef = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
@@ -552,6 +116,7 @@ export function FilesPage({ search }: { search: string }) {
     if (renamingFolderId) folderRenameRef.current?.focus();
   }, [renamingFolderId]);
 
+  // Load file list — API only (metadata + guaranteed downloadUrl).
   useEffect(() => {
     let cancelled = false;
     if (!user) {
@@ -561,34 +126,14 @@ export function FilesPage({ search }: { search: string }) {
       setLoading(false);
       return;
     }
+
     setLoading(true);
     setLoadError('');
-    migrationStartedRef.current = false;
 
-    const paintList = (data: {
-      files?: StoredFile[];
-      folders?: FileFolder[];
-    }) => {
+    const paint = (data: { files?: StoredFile[]; folders?: FileFolder[] }) => {
       if (cancelled) return;
-      setFiles(
-        (data.files ?? [])
-          .map(lightFileMeta)
-          .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()),
-      );
-      setFolders(
-        (data.folders ?? []).sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        ),
-      );
-    };
-
-    const fetchJson = async <T,>(url: string, token: string, signal: AbortSignal): Promise<T> => {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal,
-      });
-      if (!res.ok) throw new Error(`load-failed:${res.status}`);
-      return res.json() as Promise<T>;
+      setFiles(sortFiles(data.files ?? []));
+      setFolders(sortFolders(data.folders ?? []));
     };
 
     (async () => {
@@ -597,83 +142,44 @@ export function FilesPage({ search }: { search: string }) {
       try {
         const token = await getRtdbAuthToken();
         if (!token) throw new Error('no-token');
-        if (cancelled) return;
 
-        type ListPayload = {
-          files?: StoredFile[];
-          folders?: FileFolder[];
-          migratedRemaining?: boolean;
-        };
-
-        const data = await fetchJson<ListPayload>('/api/my-files', token, controller.signal);
-        paintList(data);
+        type Payload = { files?: StoredFile[]; folders?: FileFolder[]; migratedRemaining?: boolean };
+        const res = await fetch('/api/my-files', {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`load:${res.status}`);
+        const data = (await res.json()) as Payload;
+        paint(data);
         if (!cancelled) {
           setLoading(false);
           setLoadError('');
         }
 
-        // Background migration — never blocks the list UI; failures must not clear it.
-        try {
-          let more = data.migratedRemaining === true;
+        // Background legacy migration — never blocks UI.
+        if (data.migratedRemaining) {
+          let more = true;
           let guard = 0;
           while (more && !cancelled && guard++ < 40) {
-            const migCtrl = new AbortController();
-            const migTimer = window.setTimeout(() => migCtrl.abort(), 60_000);
             try {
-              const mig = await fetchJson<ListPayload>(
-                '/api/my-files?migrate=1',
-                token,
-                migCtrl.signal,
-              );
-              paintList(mig);
-              more = mig.migratedRemaining === true;
-            } finally {
-              window.clearTimeout(migTimer);
+              const mig = await fetch('/api/my-files?migrate=1', {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!mig.ok) break;
+              const migData = (await mig.json()) as Payload;
+              paint(migData);
+              more = migData.migratedRemaining === true;
+            } catch {
+              break;
             }
           }
-        } catch (migErr) {
-          console.warn('Background file migration failed', migErr);
         }
-      } catch (err) {
-        if (cancelled) return;
-        // Fallback: direct RTDB (may be huge if legacy dataUrls remain — strip them).
-        try {
-          const fallbackCtrl = new AbortController();
-          const fallbackTimer = window.setTimeout(() => fallbackCtrl.abort(), LIST_TIMEOUT_MS);
-          try {
-            const [filesRes, foldersRes] = await Promise.all([
-              rtdbFetch(`/users/${user.uid}/files`, { signal: fallbackCtrl.signal }),
-              rtdbFetch(`/users/${user.uid}/fileFolders`, { signal: fallbackCtrl.signal }),
-            ]);
-            if (!filesRes.ok || !foldersRes.ok) throw new Error('rtdb-fallback-failed');
-            const cloudFiles = await filesRes.json();
-            const cloudFolders = await foldersRes.json();
-            if (!cancelled) {
-              setFiles(
-                normalizeList<StoredFile>(cloudFiles)
-                  .map(lightFileMeta)
-                  .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()),
-              );
-              setFolders(
-                normalizeList<FileFolder>(cloudFolders).sort(
-                  (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-                ),
-              );
-              setLoadError('');
-            }
-          } finally {
-            window.clearTimeout(fallbackTimer);
-          }
-        } catch {
-          if (!cancelled) {
-            setFiles([]);
-            setFolders([]);
-            const aborted = err instanceof DOMException && err.name === 'AbortError'
-              || (err instanceof Error && /abort|timeout/i.test(err.message));
-            setLoadError(aborted ? t.filesLoadFailed : t.filesLoadFailed);
-          }
-        } finally {
-          if (!cancelled) setLoading(false);
+      } catch {
+        if (!cancelled) {
+          setFiles([]);
+          setFolders([]);
+          setLoadError(t.filesLoadFailed);
+          setLoading(false);
         }
       } finally {
         window.clearTimeout(timer);
@@ -691,38 +197,16 @@ export function FilesPage({ search }: { search: string }) {
     }
   }, [currentFolderId, folders]);
 
-  // Client-side migrate only when we still have an inline dataUrl (RTDB fallback path).
-  // Prefer server migrate via /api/my-files?migrate=1 — never block list paint.
-  useEffect(() => {
-    if (!user || migrationStartedRef.current) return;
-    const legacy = files.filter((f) => f.dataUrl && !f.storagePath && !f.downloadUrl);
-    if (legacy.length === 0) return;
-    migrationStartedRef.current = true;
-    let cancelled = false;
-    (async () => {
-      for (const file of legacy) {
-        if (cancelled) break;
-        try {
-          await migrateInlineFileToStorage(file);
-        } catch {
-          /* keep the inline copy on failure — file stays accessible */
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, user]);
-
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
-
-  const fileCountInFolder = (folderId: string) =>
-    files.filter((f) => f.folderId === folderId).length;
+  const fileCountInFolder = (folderId: string) => files.filter((f) => f.folderId === folderId).length;
 
   const saveFileMeta = async (file: StoredFile) => {
     if (!user) throw new Error('no-user');
+    const payload = { ...file };
+    delete payload.dataUrl;
     const res = await rtdbFetch(`/users/${user.uid}/files/${file.id}`, {
       method: 'PUT',
-      body: JSON.stringify(file),
+      body: JSON.stringify(payload),
       headers: { 'Content-Type': 'application/json' },
     });
     if (!res.ok) throw new Error('save-failed');
@@ -773,11 +257,7 @@ export function FilesPage({ search }: { search: string }) {
 
   const uploadErrorMessage = (err: unknown): string => {
     const code = firebaseErrorCode(err);
-    if (
-      code.includes('unauthorized')
-      || code.includes('permission-denied')
-      || code === 'storage/unauthorized'
-    ) {
+    if (code.includes('unauthorized') || code.includes('permission-denied') || code === 'storage/unauthorized') {
       return `${t.filesUploadPermissionDenied}${code ? ` (${code})` : ''}`;
     }
     if (
@@ -789,12 +269,7 @@ export function FilesPage({ search }: { search: string }) {
     ) {
       return `${t.filesUploadAuthError}${code ? ` (${code})` : ''}`;
     }
-    if (
-      code === 'storage/upload-stuck'
-      || code === 'upload-stuck'
-    ) {
-      return t.filesUploadStuck;
-    }
+    if (code === 'storage/upload-stuck' || code === 'upload-stuck') return t.filesUploadStuck;
     if (
       code.includes('network')
       || code === 'storage/retry-limit-exceeded'
@@ -804,9 +279,7 @@ export function FilesPage({ search }: { search: string }) {
     ) {
       return `${t.filesUploadNetworkError}${code ? ` (${code})` : ''}`;
     }
-    if (code === 'quota-exceeded' || code === 'storage/quota-exceeded') {
-      return t.filesQuotaExceeded;
-    }
+    if (code === 'quota-exceeded' || code === 'storage/quota-exceeded') return t.filesQuotaExceeded;
     return `${t.filesUploadFailed}${code ? ` (${code})` : ''}`;
   };
 
@@ -814,7 +287,6 @@ export function FilesPage({ search }: { search: string }) {
     setUploadItems((prev) => prev.map((item) => (item.key === key ? { ...item, ...patch } : item)));
   };
 
-  /** Resumable upload; rejects with storage/upload-stuck if still at 0% after UPLOAD_STUCK_MS. */
   const uploadResumableOrStuck = (
     storageRef: ReturnType<typeof ref>,
     file: File,
@@ -858,18 +330,14 @@ export function FilesPage({ search }: { search: string }) {
     if (!token) throw new Error('no-token');
 
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const base: Omit<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl' | 'folderId'> = {
+    const base = {
       id,
       name: file.name,
       type: file.type || 'application/octet-stream',
       size: file.size,
       addedAt: new Date().toLocaleString(),
     };
-
     const withFolder = folderId ? { ...base, folderId } : base;
-
-    // Always store the blob in Firebase Storage — never inline base64 in the
-    // Realtime Database (inline blobs made the file list download huge/slow).
     const storagePath = `users/${user.uid}/files/${id}/${safeStorageFileName(file.name)}`;
     const storageRef = ref(storage, storagePath);
 
@@ -878,7 +346,6 @@ export function FilesPage({ search }: { search: string }) {
         await uploadResumableOrStuck(storageRef, file, base.type, onProgress);
       } catch (err) {
         const code = firebaseErrorCode(err);
-        // Chrome custom-domain CORS / hung resumable: fall back to simple uploadBytes.
         if (
           code === 'storage/upload-stuck'
           || code === 'storage/canceled'
@@ -903,26 +370,9 @@ export function FilesPage({ search }: { search: string }) {
     return { ...withFolder, downloadUrl, storagePath };
   };
 
-  /** Move a legacy inline (base64) file into Storage and drop the heavy dataUrl. */
-  const migrateInlineFileToStorage = async (file: StoredFile) => {
-    if (!user || !file.dataUrl) return;
-    const blob = dataUrlToBlob(file.dataUrl);
-    const storagePath = file.storagePath || `users/${user.uid}/files/${file.id}/${safeStorageFileName(file.name)}`;
-    const storageRef = ref(storage, storagePath);
-    await uploadBytes(storageRef, blob, { contentType: file.type || 'application/octet-stream' });
-    const downloadUrl = await getDownloadURL(storageRef);
-    const migrated: StoredFile = { ...file, downloadUrl, storagePath };
-    delete migrated.dataUrl;
-    // Persist the light metadata (removes the inline blob from the DB) only after
-    // the Storage upload succeeded, so the file is never lost.
-    await saveFileMeta(migrated);
-    setFiles((prev) => prev.map((f) => (f.id === file.id ? migrated : f)));
-  };
-
   const handleFiles = async (list: FileList | null) => {
-    if (!list?.length) return;
-    if (!user) {
-      setError(t.filesUploadAuthError);
+    if (!list?.length || !user) {
+      if (!user) setError(t.filesUploadAuthError);
       return;
     }
 
@@ -934,9 +384,7 @@ export function FilesPage({ search }: { search: string }) {
       return;
     }
 
-    const progressKeys = selected.map(
-      (file, i) => `${Date.now()}-${i}-${file.name}`,
-    );
+    const progressKeys = selected.map((file, i) => `${Date.now()}-${i}-${file.name}`);
     setUploadItems(
       selected.map((file, i) => ({
         key: progressKeys[i],
@@ -950,9 +398,6 @@ export function FilesPage({ search }: { search: string }) {
     const failureMessages: string[] = [];
 
     try {
-      // Quota from already-loaded file list + profile only — never pull the whole
-      // /users/{uid} tree (notes/chats/legacy base64), which timed out uploads.
-      // Cap profile wait so a hung auth/RTDB call cannot leave progress at 0%.
       let profile: Record<string, unknown> = {};
       try {
         const profileRes = await withTimeout(
@@ -965,13 +410,10 @@ export function FilesPage({ search }: { search: string }) {
           if (raw && typeof raw === 'object') profile = raw as Record<string, unknown>;
         }
       } catch {
-        /* fall back to default free/plus limits from email */
+        /* default quota */
       }
 
-      const usedBytes = files.reduce(
-        (sum, f) => sum + (typeof f.size === 'number' && f.size > 0 ? f.size : 0),
-        0,
-      );
+      const usedBytes = files.reduce((sum, f) => sum + (f.size > 0 ? f.size : 0), 0);
       const limitBytes = getStorageLimitBytes(profile, user.email);
       const incomingBytes = selected.reduce((sum, file) => sum + file.size, 0);
       if (usedBytes + incomingBytes > limitBytes) {
@@ -990,11 +432,10 @@ export function FilesPage({ search }: { search: string }) {
           await withTimeout(saveFileMeta(stored), 20_000, 'meta-save-timeout');
           uploaded.push(stored);
           updateUploadItem(key, { progress: 100, status: 'done' });
-          setFiles((prev) => [stored, ...prev.filter((f) => f.id !== stored.id)]);
+          setFiles((prev) => sortFiles([stored, ...prev.filter((f) => f.id !== stored.id)]));
         } catch (err) {
           console.error('File upload failed', err);
-          const msg = uploadErrorMessage(err);
-          failureMessages.push(`${file.name}: ${msg}`);
+          failureMessages.push(`${file.name}: ${uploadErrorMessage(err)}`);
           updateUploadItem(key, { status: 'error' });
         }
       }
@@ -1002,9 +443,7 @@ export function FilesPage({ search }: { search: string }) {
       if (uploaded.length) {
         show(uploaded.length === 1 ? t.filesUploadSuccess : `${uploaded.length} ${t.filesUploadSuccess}`);
       }
-      if (failureMessages.length) {
-        setError(failureMessages.join(' · '));
-      }
+      if (failureMessages.length) setError(failureMessages.join(' · '));
     } catch (err) {
       console.error('File upload failed', err);
       setError(uploadErrorMessage(err));
@@ -1014,11 +453,9 @@ export function FilesPage({ search }: { search: string }) {
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
-      // Keep failed rows visible briefly; clear finished rows after a short pause.
-      const clearDelay = failureMessages.length ? 4000 : 1200;
       window.setTimeout(() => {
         setUploadItems((prev) => prev.filter((p) => p.status === 'uploading'));
-      }, clearDelay);
+      }, failureMessages.length ? 4000 : 1200);
     }
   };
 
@@ -1030,9 +467,7 @@ export function FilesPage({ search }: { search: string }) {
     if (renamingId === file.id) setRenamingId(null);
     if (moveMenuFileId === file.id) setMoveMenuFileId(null);
     try {
-      if (file.storagePath) {
-        await deleteObject(ref(storage, file.storagePath));
-      }
+      if (file.storagePath) await deleteObject(ref(storage, file.storagePath));
       await deleteFileMeta(file.id);
     } catch {
       setFiles(previous);
@@ -1086,9 +521,7 @@ export function FilesPage({ search }: { search: string }) {
     if (currentFolderId === folder.id) setCurrentFolderId(null);
     try {
       await deleteFolderMeta(folder.id);
-      await Promise.all(
-        affected.map((f) => saveFileMeta({ ...f, folderId: undefined })),
-      );
+      await Promise.all(affected.map((f) => saveFileMeta({ ...f, folderId: undefined })));
     } catch {
       setFiles(previousFiles);
       setFolders(previousFolders);
@@ -1109,21 +542,15 @@ export function FilesPage({ search }: { search: string }) {
 
   const commitRename = async (file: StoredFile) => {
     const next = renameValue.trim();
-    if (!next) {
+    if (!next || next === file.name) {
       cancelRename();
       return;
     }
-    if (next === file.name) {
-      cancelRename();
-      return;
-    }
-
     const updated = { ...file, name: next };
     const previous = files;
     setFiles((prev) => prev.map((item) => (item.id === file.id ? updated : item)));
     if (previewFile?.id === file.id) setPreviewFile(updated);
     cancelRename();
-
     try {
       await saveFileMeta(updated);
       show(t.filesRenameSuccess);
@@ -1209,17 +636,13 @@ export function FilesPage({ search }: { search: string }) {
               multiple
               disabled={uploading}
               className="sr-only"
-              onChange={(e) => {
-                void handleFiles(e.target.files);
-              }}
+              onChange={(e) => { void handleFiles(e.target.files); }}
             />
             <button
               type="button"
               disabled={uploading}
-              onClick={() => {
-                if (!uploading) inputRef.current?.click();
-              }}
-              className={`inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0`}
+              onClick={() => { if (!uploading) inputRef.current?.click(); }}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
             >
               <span className="text-base">{uploading ? '☁️' : '☁️➕'}</span>
               <span>{uploading ? t.cloudSaving : t.filesUpload}</span>
@@ -1262,10 +685,7 @@ export function FilesPage({ search }: { search: string }) {
       {creatingFolder && (
         <form
           className="mb-4 flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void createFolder();
-          }}
+          onSubmit={(e) => { e.preventDefault(); void createFolder(); }}
         >
           <input
             value={newFolderName}
@@ -1307,41 +727,29 @@ export function FilesPage({ search }: { search: string }) {
 
       {uploadItems.length > 0 && (
         <div className="mb-4 space-y-2 rounded-2xl border border-primary/20 bg-primary/5 p-4 dark:border-primary/30 dark:bg-primary/10">
-          <div className="text-xs font-semibold uppercase tracking-wide text-primary">
-            {t.filesUploading}
-          </div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-primary">{t.filesUploading}</div>
           {uploadItems.map((item) => (
             <div key={item.key} className="min-w-0">
               <div className="mb-1 flex items-center justify-between gap-3">
                 <div
                   className={`min-w-0 truncate text-sm font-medium ${
-                    item.status === 'error'
-                      ? 'text-red-600 dark:text-red-400'
-                      : 'text-app-text dark:text-gray-100'
+                    item.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-app-text dark:text-gray-100'
                   }`}
                   title={item.name}
                 >
                   {item.status === 'error' ? '⚠️ ' : item.status === 'done' ? '✓ ' : ''}
                   {item.name}
                 </div>
-                <div
-                  className={`shrink-0 text-xs font-semibold tabular-nums ${
-                    item.status === 'error'
-                      ? 'text-red-600 dark:text-red-400'
-                      : 'text-app-text-secondary dark:text-gray-400'
-                  }`}
-                >
+                <div className={`shrink-0 text-xs font-semibold tabular-nums ${
+                  item.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-app-text-secondary dark:text-gray-400'
+                }`}>
                   {item.status === 'error' ? '—' : `${item.progress}%`}
                 </div>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
                 <div
                   className={`h-full rounded-full transition-[width] duration-150 ${
-                    item.status === 'error'
-                      ? 'bg-red-500'
-                      : item.status === 'done'
-                        ? 'bg-emerald-500'
-                        : 'bg-primary'
+                    item.status === 'error' ? 'bg-red-500' : item.status === 'done' ? 'bg-emerald-500' : 'bg-primary'
                   }`}
                   style={{ width: `${item.status === 'error' ? 100 : item.progress}%` }}
                 />
@@ -1393,11 +801,7 @@ export function FilesPage({ search }: { search: string }) {
                   {renamingFolderId === folder.id ? (
                     <form
                       className="flex items-center gap-1.5"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        void commitFolderRename(folder);
-                      }}
+                      onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); void commitFolderRename(folder); }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <input
@@ -1445,10 +849,7 @@ export function FilesPage({ search }: { search: string }) {
                   {renamingId === file.id ? (
                     <form
                       className="flex items-center gap-1.5"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void commitRename(file);
-                      }}
+                      onSubmit={(e) => { e.preventDefault(); void commitRename(file); }}
                     >
                       <input
                         ref={renameInputRef}
@@ -1464,12 +865,14 @@ export function FilesPage({ search }: { search: string }) {
                   ) : (
                     <div className="truncate text-sm font-bold text-app-text dark:text-gray-100" title={file.name}>{file.name}</div>
                   )}
-                  <div className="mt-1 text-xs text-app-text-secondary dark:text-gray-400">{formatSize(file.size)} · {t.filesStored}</div>
+                  <div className="mt-1 text-xs text-app-text-secondary dark:text-gray-400">
+                    {formatFileSize(file.size)} · {t.filesStored}
+                  </div>
                   <div className="mt-0.5 truncate text-[11px] text-app-text-secondary/70 dark:text-gray-500">{file.addedAt}</div>
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {canPreview(file) && (
+                {canPreviewFile(file) && (
                   <button
                     type="button"
                     onClick={() => setPreviewFile(file)}
@@ -1478,14 +881,11 @@ export function FilesPage({ search }: { search: string }) {
                     {t.filesPreview}
                   </button>
                 )}
-                {user && (
-                  <FileDownloadLink
-                    file={file}
-                    uid={user.uid}
-                    label={t.filesDownload}
-                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
-                  />
-                )}
+                <FileDownloadButton
+                  url={fileDownloadUrl(file)}
+                  label={t.filesDownload}
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+                />
                 <button
                   type="button"
                   onClick={() => startRename(file)}
@@ -1527,7 +927,10 @@ export function FilesPage({ search }: { search: string }) {
                     </>
                   )}
                 </div>
-                <button onClick={() => void removeFile(file)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10">
+                <button
+                  onClick={() => void removeFile(file)}
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10"
+                >
                   {t.filesDelete}
                 </button>
               </div>
@@ -1536,11 +939,10 @@ export function FilesPage({ search }: { search: string }) {
         </div>
       ) : null}
 
-      {previewFile && user && (
+      {previewFile && (
         <FilePreviewModal
           key={previewFile.id}
           file={previewFile}
-          uid={user.uid}
           onClose={() => setPreviewFile(null)}
           t={t}
         />
