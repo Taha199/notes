@@ -6,13 +6,13 @@ import {
   type FirebaseStorage,
   type StorageReference,
 } from 'firebase/storage';
-import { storage, storageBuckets } from '../../lib/firebase';
+import { storageBuckets } from '../../lib/firebase';
 import { rtdbFetch } from '../../lib/rtdb';
 import { readApiResponse, requireIdToken } from './apiHelpers';
 import { fileDownloadUrl, safeStorageFileName, type StoredFile } from './fileTypes';
 
 /** Bump when diagnosing deploy cache — visible in DevTools console. */
-export const FILES_ACCESS_VERSION = 'direct-preview-v9';
+export const FILES_ACCESS_VERSION = 'direct-preview-v10';
 
 const RESOLVE_MS = 12_000;
 export const PROXY_MAX_BYTES = 3_500_000;
@@ -49,7 +49,6 @@ function bucketFromDownloadUrl(url: string): string | undefined {
   try {
     const u = new URL(url);
     const parts = u.pathname.split('/');
-    // /v0/b/{bucket}/o/...
     const bIdx = parts.indexOf('b');
     if (bIdx !== -1 && parts[bIdx + 1]) return decodeURIComponent(parts[bIdx + 1]);
   } catch {
@@ -58,7 +57,6 @@ function bucketFromDownloadUrl(url: string): string | undefined {
   return undefined;
 }
 
-/** Every plausible Storage object path for this metadata row. */
 export function candidateStoragePaths(file: StoredFile, uid: string): string[] {
   const paths: string[] = [];
   const add = (p?: string) => {
@@ -118,23 +116,21 @@ async function tryPathOnBucket(
   }
 }
 
-/**
- * Find a live Storage ref across BOTH buckets (legacy appspot + firebasestorage.app).
- */
 export async function findLiveStorageRef(
   file: StoredFile,
   uid: string,
 ): Promise<{ storageRef: StorageReference; downloadUrl: string; storagePath: string } | null> {
   console.info(`[files] ${FILES_ACCESS_VERSION} findLiveStorageRef`, file.id, file.name);
 
-  // If downloadUrl names a bucket, try that bucket first.
   const urlBucket = file.downloadUrl ? bucketFromDownloadUrl(file.downloadUrl) : undefined;
   const orderedBuckets = [...storageBuckets];
   if (urlBucket) {
     orderedBuckets.sort((a, b) => {
-      const aMatch = (a.app.options.storageBucket || '').includes(urlBucket.replace(/\.firebasestorage\.app|\.appspot\.com/, '')) ||
-        a.app.options.storageBucket === urlBucket ? -1 : 0;
-      const bMatch = b.app.options.storageBucket === urlBucket ? -1 : 0;
+      const aBucket = a.app.options.storageBucket || '';
+      const bBucket = b.app.options.storageBucket || '';
+      const normalized = urlBucket.replace(/\.firebasestorage\.app|\.appspot\.com/, '');
+      const aMatch = aBucket === urlBucket || aBucket.includes(normalized) ? -1 : 0;
+      const bMatch = bBucket === urlBucket || bBucket.includes(normalized) ? -1 : 0;
       return aMatch - bMatch;
     });
   }
@@ -147,7 +143,6 @@ export async function findLiveStorageRef(
     }
   }
 
-  // listAll on each bucket under this file id
   for (const bucket of orderedBuckets) {
     try {
       const folderRef = ref(bucket, `users/${uid}/files/${file.id}`);
@@ -167,7 +162,6 @@ export async function findLiveStorageRef(
     }
   }
 
-  // Broad name search on both buckets
   const want = new Set(
     [file.name, safeStorageFileName(file.name), file.name.replace(/\s+/g, '_')].filter(Boolean),
   );
@@ -203,13 +197,9 @@ export async function findLiveStorageRef(
   return null;
 }
 
-/** Resolve a working media URL. Prefer already-saved URLs so preview/download never waits on Storage listing. */
 export async function resolvePublicDownloadUrl(file: StoredFile, uid: string): Promise<string> {
   const existing = fileDownloadUrl(file);
   if (existing) return existing;
-
-  const live = await findLiveStorageRef(file, uid);
-  if (live) return live.downloadUrl;
 
   const { token } = await requireIdToken();
   const res = await withTimeout(
@@ -220,11 +210,12 @@ export async function resolvePublicDownloadUrl(file: StoredFile, uid: string): P
     'api-url-timeout',
   );
   const data = await readApiResponse<{ downloadUrl?: string; error?: string; details?: string }>(res);
-  if (!res.ok) {
-    throw new Error(data.details || data.error || `api:${res.status}`);
-  }
-  if (!data.downloadUrl) throw new Error('no-download-url');
-  return data.downloadUrl;
+  if (res.ok && data.downloadUrl) return data.downloadUrl;
+
+  const live = await findLiveStorageRef(file, uid);
+  if (live) return live.downloadUrl;
+
+  throw new Error(data.details || data.error || `api:${res.status}`);
 }
 
 function ensureTypedBlob(blob: Blob, file: StoredFile): Blob {
@@ -233,10 +224,6 @@ function ensureTypedBlob(blob: Blob, file: StoredFile): Blob {
   return blob;
 }
 
-/**
- * Load bytes for preview. SDK getBlob / listAll first — API proxy only as fallback.
- * Returns a blob object URL — caller must revoke it.
- */
 export async function loadPreviewBlobUrl(file: StoredFile, uid: string): Promise<string> {
   console.info(`[files] ${FILES_ACCESS_VERSION} loadPreviewBlobUrl`, file.id);
 
@@ -250,54 +237,33 @@ export async function loadPreviewBlobUrl(file: StoredFile, uid: string): Promise
       return URL.createObjectURL(blob);
     } catch (err) {
       console.warn('[files] getBlob failed, using downloadUrl for preview', err);
-      // Images can use the media URL directly; for PDF Chrome needs a blob — try fetch.
       try {
         const res = await withTimeout(fetch(live.downloadUrl), 25_000, 'media-fetch');
-        if (res.ok) {
-          return URL.createObjectURL(ensureTypedBlob(await res.blob(), file));
-        }
+        if (res.ok) return URL.createObjectURL(ensureTypedBlob(await res.blob(), file));
       } catch {
-        /* fall through to return URL as object-less — caller for images can use href */
+        /* fall through */
       }
-      // Last resort for images: use the media URL itself (no blob).
       return live.downloadUrl;
     }
   }
 
-  // API proxy fallback
-  try {
-    const { token } = await requireIdToken();
-    const res = await withTimeout(
-      fetch(
-        `/api/file-download?fileId=${encodeURIComponent(file.id)}&format=inline`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      ),
-      30_000,
-      'preview-proxy-timeout',
-    );
-    if (res.ok) {
-      return URL.createObjectURL(ensureTypedBlob(await res.blob(), file));
-    }
-    const message = await res.text();
-    throw new Error(`proxy:${res.status} ${message.slice(0, 200)}`);
-  } catch (err) {
-    throw new Error(
-      `MISSING_IN_STORAGE:${file.id}:${file.name}:${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+  const { token } = await requireIdToken();
+  const res = await withTimeout(
+    fetch(`/api/file-download?fileId=${encodeURIComponent(file.id)}&format=inline`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    30_000,
+    'preview-proxy-timeout',
+  );
+  if (res.ok) return URL.createObjectURL(ensureTypedBlob(await res.blob(), file));
+  const message = await res.text();
+  throw new Error(`proxy:${res.status} ${message.slice(0, 200)}`);
 }
 
-/**
- * For image preview: return direct media URL immediately (no Storage listing, no blob/CORS wait).
- */
 export async function resolveImagePreviewSrc(file: StoredFile, uid: string): Promise<string> {
   const stored = fileDownloadUrl(file);
   if (stored) return stored;
-
-  const live = await findLiveStorageRef(file, uid);
-  if (live) return live.downloadUrl;
-
-  return loadPreviewBlobUrl(file, uid);
+  return resolvePublicDownloadUrl(file, uid);
 }
 
 function triggerBlobDownload(blob: Blob, fileName: string) {
@@ -321,41 +287,13 @@ function triggerUrlDownload(url: string, fileName: string) {
   anchor.remove();
 }
 
-/**
- * Download via the same method Safari used successfully: a live Firebase media URL.
- * Prefer getDownloadURL / stored downloadUrl — do NOT require the API proxy path to exist.
- */
-export async function downloadStoredFile(file: StoredFile, uid: string): Promise<void> {
-  console.info(`[files] ${FILES_ACCESS_VERSION} downloadStoredFile`, file.id);
-  const fileName = file.name || 'download';
-
-  // 1) Instant path: if metadata already has a Firebase media URL, use it immediately.
-  // Fetching the whole file first made the button look stuck on slower connections.
-  const stored = fileDownloadUrl(file);
-  if (stored) {
-    triggerUrlDownload(stored, fileName);
-    return;
-  }
-
-  // 2) Resolve a live media URL and navigate/download it.
-  try {
-    const live = await findLiveStorageRef(file, uid);
-    if (live?.downloadUrl) {
-      triggerUrlDownload(live.downloadUrl, fileName);
-      return;
-    }
-  } catch (err) {
-    console.warn('[files] SDK resolve failed', err);
-  }
-
-  // 3) API fallback
+async function downloadViaAppProxy(file: StoredFile, fileName: string): Promise<void> {
   const { token } = await requireIdToken();
   const res = await withTimeout(
-    fetch(
-      `/api/file-download?fileId=${encodeURIComponent(file.id)}&format=attachment`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    ),
-    60_000,
+    fetch(`/api/file-download?fileId=${encodeURIComponent(file.id)}&format=attachment`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    45_000,
     'download-proxy-timeout',
   );
 
@@ -373,5 +311,33 @@ export async function downloadStoredFile(file: StoredFile, uid: string): Promise
   }
 
   const message = await res.text().catch(() => '');
-  throw new Error(`MISSING_IN_STORAGE:${file.id}:${file.name}:${res.status}:${message.slice(0, 120)}`);
+  throw new Error(`${res.status}:${message.slice(0, 120)}`);
+}
+
+export async function downloadStoredFile(file: StoredFile, uid: string): Promise<void> {
+  console.info(`[files] ${FILES_ACCESS_VERSION} downloadStoredFile`, file.id);
+  const fileName = file.name || 'download';
+
+  if (!file.size || file.size <= PROXY_MAX_BYTES) {
+    try {
+      await downloadViaAppProxy(file, fileName);
+      return;
+    } catch (err) {
+      console.warn('[files] proxy download failed, falling back to media URL', err);
+    }
+  }
+
+  const stored = fileDownloadUrl(file);
+  if (stored) {
+    triggerUrlDownload(stored, fileName);
+    return;
+  }
+
+  const live = await findLiveStorageRef(file, uid);
+  if (live?.downloadUrl) {
+    triggerUrlDownload(live.downloadUrl, fileName);
+    return;
+  }
+
+  await downloadViaAppProxy(file, fileName);
 }
