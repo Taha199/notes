@@ -39,6 +39,7 @@ export function resolveStoragePath(file: StoredFile, uid?: string): string | und
   return candidateStoragePaths(file, uid)[0];
 }
 
+/** Friday path shape — raw file.name (matches historical client uploads). */
 export function defaultStoragePath(uid: string, fileId: string, fileName: string): string {
-  return `users/${uid}/files/${fileId}/${safeStorageFileName(fileName)}`;
+  return `users/${uid}/files/${fileId}/${fileName}`;
 }

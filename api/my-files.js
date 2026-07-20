@@ -17,13 +17,8 @@ import {
 } from './_lib/storageFiles.js';
 
 const MAX_MIGRATIONS_PER_CALL = 5;
-/** Stay under Vercel Hobby ~4.5MB request body limit. */
-const MAX_UPLOAD_BYTES = 3_500_000;
 
 export const config = {
-  api: {
-    bodyParser: false,
-  },
   maxDuration: 60,
 };
 
@@ -99,93 +94,6 @@ async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
   return { updatedById, remaining };
 }
 
-function readRawBody(request, limitBytes) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let total = 0;
-    request.on('data', (chunk) => {
-      total += chunk.length;
-      if (total > limitBytes) {
-        reject(Object.assign(new Error('payload-too-large'), { code: 'payload-too-large' }));
-        try { request.destroy(); } catch { /* ignore */ }
-        return;
-      }
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    request.on('end', () => resolve(Buffer.concat(chunks)));
-    request.on('error', reject);
-  });
-}
-
-/** Prefer already-buffered body (Vercel Node); else read the stream. */
-async function getUploadBuffer(request, limitBytes) {
-  const contentLength = Number(request.headers['content-length'] || 0);
-  if (contentLength > limitBytes) {
-    throw Object.assign(new Error('payload-too-large'), { code: 'payload-too-large' });
-  }
-
-  const body = request.body;
-  if (Buffer.isBuffer(body)) return body;
-  if (typeof body === 'string') return Buffer.from(body);
-  if (body instanceof ArrayBuffer) return Buffer.from(body);
-  if (body && typeof body === 'object' && Array.isArray(body.data)) {
-    return Buffer.from(body.data);
-  }
-  if (body instanceof Uint8Array) return Buffer.from(body);
-
-  return readRawBody(request, limitBytes);
-}
-
-async function handleUpload(request, response, origin, account) {
-  let buffer;
-  try {
-    buffer = await getUploadBuffer(request, MAX_UPLOAD_BYTES);
-  } catch (err) {
-    if (err?.code === 'payload-too-large' || err?.message === 'payload-too-large') {
-      return json(response, 413, { error: 'payload-too-large', maxBytes: MAX_UPLOAD_BYTES }, origin);
-    }
-    throw err;
-  }
-
-  if (!buffer.length) {
-    return json(response, 400, { error: 'empty-body' }, origin);
-  }
-
-  const rawName = String(request.headers['x-file-name'] || '').trim();
-  let fileName = 'file';
-  if (rawName) {
-    try {
-      fileName = decodeURIComponent(rawName).slice(0, 180) || 'file';
-    } catch {
-      fileName = rawName.slice(0, 180) || 'file';
-    }
-  }
-
-  const fileId = String(request.headers['x-file-id'] || '').trim()
-    || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const folderId = String(request.headers['x-folder-id'] || '').trim() || null;
-  const contentType = String(
-    request.headers['x-content-type']
-    || request.headers['content-type']
-    || 'application/octet-stream',
-  ).split(';')[0].trim() || 'application/octet-stream';
-
-  const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
-  const storageToken = await getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]);
-  const objectPath = `users/${account.uid}/files/${fileId}/${safeStorageFileName(fileName)}`;
-  const downloadUrl = await uploadToStorage(storageToken, objectPath, buffer, contentType);
-
-  return json(response, 200, {
-    id: fileId,
-    name: fileName,
-    type: contentType,
-    size: buffer.length,
-    downloadUrl,
-    storagePath: objectPath,
-    ...(folderId ? { folderId } : {}),
-  }, origin);
-}
-
 export default async function handler(request, response) {
   const origin = request.headers.origin || '';
   if (request.method === 'OPTIONS') {
@@ -210,15 +118,14 @@ export default async function handler(request, response) {
   if (!account) return json(response, 403, { error: 'forbidden' }, origin);
 
   if (request.method === 'POST') {
-    try {
-      return await handleUpload(request, response, origin, account);
-    } catch (error) {
-      console.error('my-files upload failed', error);
-      return json(response, 500, {
-        error: 'upload-failed',
-        details: error instanceof Error ? error.message : String(error),
-      }, origin);
-    }
+    // Disabled: service-account GCS uploads 404 ("bucket does not exist").
+    // Browser clients must use Firebase SDK uploadBytes on firebasestorage.app
+    // (Friday / b18c0ca path). Legacy dataUrl migration still uses uploadToStorage
+    // via Firebase Storage REST on GET ?migrate=1.
+    return json(response, 501, {
+      error: 'proxy-upload-disabled',
+      details: 'Use client Firebase Storage uploadBytes',
+    }, origin);
   }
 
   const doMigrate = String(request.query?.migrate || '') === '1';

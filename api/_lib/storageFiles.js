@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { STORAGE_BUCKET, STORAGE_BUCKET_ALIAS } from './firebaseAdmin.js';
+import { STORAGE_BUCKET, STORAGE_BUCKET_LEGACY } from './firebaseAdmin.js';
 
 export const STORAGE_SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
 
-/** Prefer real appspot bucket first — GCS JSON API 404s on the firebasestorage.app alias. */
+/** Friday client bucket first; legacy appspot second for older objects. */
 export const STORAGE_BUCKET_CANDIDATES = [
   STORAGE_BUCKET,
-  STORAGE_BUCKET_ALIAS,
+  STORAGE_BUCKET_LEGACY,
 ].filter((b, i, arr) => b && arr.indexOf(b) === i);
 
 export function safeStorageFileName(name) {
@@ -78,11 +78,16 @@ export function resolveStoragePath(file, uid) {
   return candidateStoragePaths(file, uid)[0];
 }
 
+/**
+ * Upload via Firebase Storage REST (firebasestorage.googleapis.com).
+ * Raw GCS JSON API returns "The specified bucket does not exist" for both
+ * bucket names on this project when using the service account.
+ */
 export async function uploadToStorage(storageToken, objectPath, buffer, contentType) {
   let lastStatus = 0;
   let lastDetail = '';
   for (const bucket of STORAGE_BUCKET_CANDIDATES) {
-    const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(objectPath)}`;
+    const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o?name=${encodeURIComponent(objectPath)}`;
     const uploadRes = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
@@ -92,11 +97,18 @@ export async function uploadToStorage(storageToken, objectPath, buffer, contentT
       body: buffer,
     });
     if (uploadRes.ok) {
+      const data = await uploadRes.json().catch(() => ({}));
+      const raw = data?.downloadTokens
+        || data?.metadata?.firebaseStorageDownloadTokens
+        || data?.metadata?.downloadTokens;
+      if (typeof raw === 'string' && raw.trim()) {
+        const dlToken = raw.split(',')[0]?.trim();
+        if (dlToken) return firebaseMediaUrl(objectPath, dlToken, bucket);
+      }
       return mintDownloadToken(storageToken, objectPath, contentType, bucket);
     }
     lastStatus = uploadRes.status;
     lastDetail = (await uploadRes.text().catch(() => '')).slice(0, 160);
-    // Wrong bucket name → try next candidate; other errors are fatal.
     if (uploadRes.status !== 404) {
       throw new Error(`storage-upload-failed:${uploadRes.status}:${bucket}:${lastDetail}`);
     }
@@ -110,36 +122,58 @@ export async function uploadToStorage(storageToken, objectPath, buffer, contentT
  */
 export async function existingDownloadUrl(storageToken, objectPath) {
   for (const bucket of STORAGE_BUCKET_CANDIDATES) {
-    const metaUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?fields=metadata`;
-    const res = await fetch(metaUrl, {
-      headers: { Authorization: `Bearer ${storageToken}` },
-    });
-    if (!res.ok) continue;
-    const data = await res.json();
-    const raw = data?.metadata?.firebaseStorageDownloadTokens;
-    if (!raw || typeof raw !== 'string') continue;
-    const token = raw.split(',')[0]?.trim();
-    if (!token) continue;
-    return firebaseMediaUrl(objectPath, token, bucket);
+    const endpoints = [
+      `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}`,
+      `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?fields=metadata`,
+    ];
+    for (const metaUrl of endpoints) {
+      const res = await fetch(metaUrl, {
+        headers: { Authorization: `Bearer ${storageToken}` },
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const raw = data?.downloadTokens
+        || data?.metadata?.firebaseStorageDownloadTokens
+        || data?.metadata?.downloadTokens;
+      if (!raw || typeof raw !== 'string') continue;
+      const token = raw.split(',')[0]?.trim();
+      if (!token) continue;
+      return firebaseMediaUrl(objectPath, token, bucket);
+    }
   }
   return null;
 }
 
 export async function mintDownloadToken(storageToken, objectPath, contentType, bucket = STORAGE_BUCKET) {
   const token = randomUUID();
-  const patchUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}`;
   const body = { metadata: { firebaseStorageDownloadTokens: token } };
   if (contentType) body.contentType = contentType;
-  const patchRes = await fetch(patchUrl, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${storageToken}`,
-      'Content-Type': 'application/json',
+
+  // Prefer Firebase Storage REST; fall back to GCS JSON if the bucket is visible there.
+  const endpoints = [
+    {
+      url: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}`,
+      payload: body,
     },
-    body: JSON.stringify(body),
-  });
-  if (!patchRes.ok) throw new Error(`storage-token-failed:${patchRes.status}:${bucket}`);
-  return firebaseMediaUrl(objectPath, token, bucket);
+    {
+      url: `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}`,
+      payload: body,
+    },
+  ];
+  let lastStatus = 0;
+  for (const { url, payload } of endpoints) {
+    const patchRes = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${storageToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    if (patchRes.ok) return firebaseMediaUrl(objectPath, token, bucket);
+    lastStatus = patchRes.status;
+  }
+  throw new Error(`storage-token-failed:${lastStatus}:${bucket}`);
 }
 
 /** Prefer existing token; only mint when missing. */
