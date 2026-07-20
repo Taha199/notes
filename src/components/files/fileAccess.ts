@@ -11,7 +11,7 @@ import { readApiResponse, requireIdToken } from './apiHelpers';
 import { fileDownloadUrl, safeStorageFileName, type StoredFile } from './fileTypes';
 
 /** Bump when diagnosing deploy cache — visible in DevTools console. */
-export const FILES_ACCESS_VERSION = 'sdk-first-v5';
+export const FILES_ACCESS_VERSION = 'safari-url-first-v6';
 
 const RESOLVE_MS = 12_000;
 export const PROXY_MAX_BYTES = 3_500_000;
@@ -260,8 +260,13 @@ export async function loadPreviewBlobUrl(file: StoredFile, uid: string): Promise
  * For image preview: prefer a direct media URL (no CORS blob needed).
  */
 export async function resolveImagePreviewSrc(file: StoredFile, uid: string): Promise<string> {
+  // Same as Safari: prefer a live media URL in <img src>, no blob/CORS needed.
   const live = await findLiveStorageRef(file, uid);
   if (live) return live.downloadUrl;
+
+  const stored = fileDownloadUrl(file);
+  if (stored) return stored;
+
   return loadPreviewBlobUrl(file, uid);
 }
 
@@ -287,26 +292,48 @@ function triggerUrlDownload(url: string, fileName: string) {
 }
 
 /**
- * Download via Firebase SDK first. API proxy only if SDK cannot find the object.
+ * Download via the same method Safari used successfully: a live Firebase media URL.
+ * Prefer getDownloadURL / stored downloadUrl — do NOT require the API proxy path to exist.
  */
 export async function downloadStoredFile(file: StoredFile, uid: string): Promise<void> {
   console.info(`[files] ${FILES_ACCESS_VERSION} downloadStoredFile`, file.id);
   const fileName = file.name || 'download';
 
-  const live = await findLiveStorageRef(file, uid);
-  if (live) {
-    try {
-      const blob = await withTimeout(getBlob(live.storageRef), 60_000, 'getBlob-download');
-      triggerBlobDownload(ensureTypedBlob(blob, file), fileName);
-      return;
-    } catch (err) {
-      console.warn('[files] getBlob download failed, opening media URL', err);
-      triggerUrlDownload(live.downloadUrl, fileName);
-      return;
+  // 1) Safari-style: resolve a live media URL and navigate/download it.
+  try {
+    const live = await findLiveStorageRef(file, uid);
+    if (live?.downloadUrl) {
+      try {
+        const blob = await withTimeout(getBlob(live.storageRef), 45_000, 'getBlob-download');
+        triggerBlobDownload(ensureTypedBlob(blob, file), fileName);
+        return;
+      } catch (err) {
+        console.warn('[files] getBlob failed — opening media URL like Safari', err);
+        triggerUrlDownload(live.downloadUrl, fileName);
+        return;
+      }
     }
+  } catch (err) {
+    console.warn('[files] SDK resolve failed', err);
   }
 
-  // API fallback
+  // 2) Stored downloadUrl (may still work even when reconstructed paths 404)
+  const stored = fileDownloadUrl(file);
+  if (stored) {
+    try {
+      const mediaRes = await withTimeout(fetch(stored), 45_000, 'stored-url-fetch');
+      if (mediaRes.ok) {
+        triggerBlobDownload(ensureTypedBlob(await mediaRes.blob(), file), fileName);
+        return;
+      }
+    } catch {
+      /* fall through — open URL anyway (Safari did this) */
+    }
+    triggerUrlDownload(stored, fileName);
+    return;
+  }
+
+  // 3) API fallback
   const { token } = await requireIdToken();
   const res = await withTimeout(
     fetch(

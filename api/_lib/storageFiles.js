@@ -103,21 +103,28 @@ export async function resolveDownloadUrl(storageToken, objectPath, contentType, 
   return { downloadUrl, minted: true };
 }
 
-/** Download object bytes via GCS JSON API (service account). Tries known bucket aliases. */
+/** Download object bytes via GCS JSON API + Firebase Storage REST (service account). */
 export async function downloadFromStorage(storageToken, objectPath) {
   let lastErr = null;
   for (const bucket of STORAGE_BUCKET_CANDIDATES) {
-    const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${storageToken}` },
-    });
-    if (res.ok) {
-      const contentType = res.headers.get('content-type') || 'application/octet-stream';
-      const buffer = Buffer.from(await res.arrayBuffer());
-      return { buffer, contentType, bucket };
+    const endpoints = [
+      // Firebase Storage REST (what the client SDK talks to)
+      `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`,
+      // GCS JSON API
+      `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`,
+    ];
+    for (const url of endpoints) {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${storageToken}` },
+      });
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || 'application/octet-stream';
+        const buffer = Buffer.from(await res.arrayBuffer());
+        return { buffer, contentType, bucket };
+      }
+      lastErr = new Error(`storage-download-failed:${res.status}`);
+      if (res.status !== 404) continue;
     }
-    lastErr = new Error(`storage-download-failed:${res.status}`);
-    if (res.status !== 404) break;
   }
   throw lastErr || new Error('storage-download-failed');
 }
