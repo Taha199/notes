@@ -16,19 +16,25 @@ import {
   STORAGE_SCOPE,
 } from './_lib/storageFiles.js';
 
-/** Read a node, distinguishing "empty" (null, ok) from a real failure (throws). */
+const MAX_MIGRATIONS_PER_CALL = 5;
+
+function allowOrigin(origin) {
+  const localDev = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || '');
+  return isAllowedOrigin(origin) || localDev;
+}
+
+function json(response, status, body, origin) {
+  response.setHeader('Content-Type', 'application/json; charset=utf-8');
+  if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
+  return response.status(status).json(body);
+}
+
 async function readNodeStrict(accessToken, path) {
   const url = `${FB_DB_URL}${path}.json?access_token=${encodeURIComponent(accessToken)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`rtdb-read-failed:${res.status}`);
   return res.json();
 }
-
-/**
- * Background migrate only — keep each call small so Hobby functions stay under
- * the time limit. List requests must NEVER wait on these uploads.
- */
-const MAX_MIGRATIONS_PER_CALL = 5;
 
 function normalizeList(data) {
   if (!data) return [];
@@ -55,7 +61,6 @@ function dataUrlToBuffer(dataUrl) {
   return { buffer, contentType };
 }
 
-/** Always expose a usable storagePath so the client SDK can getBlob / download. */
 function toClientFile(file, uid) {
   const stripped = stripBlob(file);
   const storagePath = resolveStoragePath(stripped, uid)
@@ -67,40 +72,61 @@ function toClientFile(file, uid) {
 }
 
 function toListEntry(file, uid) {
-  // Never ship base64 blobs to the browser — that hung Chrome on /files.
   if (file.dataUrl && !file.downloadUrl) {
     return { ...toClientFile(file, uid), inlinePending: true };
   }
   return toClientFile(file, uid);
 }
 
-/** Ensure every Storage-backed row has a working downloadUrl; persist when minted. */
+/**
+ * Enrich downloadUrl when missing. Never throw — mark broken rows with accessError
+ * so one bad file cannot wipe the whole list.
+ */
 async function enrichFileUrls(files, uid, storageToken, dbToken) {
   return Promise.all(
     files.map(async (file) => {
-      const entry = toListEntry(file, uid);
-      const path = resolveStoragePath(entry, uid)
-        || (entry.storagePath ? entry.storagePath : undefined);
-      if (entry.downloadUrl && entry.storagePath) return entry;
-      if (!path || !storageToken) return entry;
       try {
-        const { downloadUrl } = await resolveDownloadUrl(
-          storageToken,
-          path,
-          file.type || 'application/octet-stream',
-          !entry.downloadUrl,
-        );
-        const enriched = { ...entry, downloadUrl, storagePath: path };
-        if (dbToken && downloadUrl && downloadUrl !== file.downloadUrl) {
-          await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, {
-            ...stripBlob(file),
-            downloadUrl,
-            storagePath: path,
-          });
+        const entry = toListEntry(file, uid);
+        if (entry.downloadUrl && entry.storagePath) return entry;
+
+        const path = resolveStoragePath(entry, uid) || entry.storagePath;
+        if (!path || !storageToken) {
+          return {
+            ...entry,
+            accessError: entry.inlinePending ? 'inline-pending' : 'missing-storage-path',
+          };
         }
-        return enriched;
-      } catch {
-        return entry;
+
+        try {
+          const { downloadUrl } = await resolveDownloadUrl(
+            storageToken,
+            path,
+            file.type || 'application/octet-stream',
+            false,
+          );
+          const enriched = { ...entry, downloadUrl, storagePath: path };
+          delete enriched.accessError;
+          if (dbToken && downloadUrl && downloadUrl !== file.downloadUrl) {
+            // Persist in background — don't fail the list if write fails.
+            void writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, {
+              ...stripBlob(file),
+              downloadUrl,
+              storagePath: path,
+            });
+          }
+          return enriched;
+        } catch (err) {
+          return {
+            ...entry,
+            storagePath: path,
+            accessError: err instanceof Error ? err.message : 'url-enrich-failed',
+          };
+        }
+      } catch (err) {
+        return {
+          ...stripBlob(file),
+          accessError: err instanceof Error ? err.message : 'enrich-failed',
+        };
       }
     }),
   );
@@ -123,7 +149,7 @@ async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
         updatedById.set(file.id, clean);
       }
     } catch {
-      /* keep legacy inline for a later pass */
+      /* keep legacy for a later pass */
     }
   }
   const remaining = files.some((file) => {
@@ -131,11 +157,6 @@ async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
     return !!(file.dataUrl && !file.downloadUrl);
   });
   return { migrated, updatedById, remaining };
-}
-
-function allowOrigin(origin) {
-  const localDev = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || '');
-  return isAllowedOrigin(origin) || localDev;
 }
 
 export default async function handler(request, response) {
@@ -148,57 +169,64 @@ export default async function handler(request, response) {
   }
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET, OPTIONS');
-    return response.status(405).json({ error: 'method-not-allowed' });
+    return json(response, 405, { error: 'method-not-allowed' }, origin);
   }
   if (!allowOrigin(origin)) {
-    return response.status(403).json({ error: 'forbidden' });
+    return json(response, 403, { error: 'forbidden', details: 'origin-not-allowed' }, origin);
   }
   if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
 
   const idToken = request.headers.authorization?.replace(/^Bearer\s+/i, '');
-  const account = idToken ? await verifyUser(idToken) : null;
-  if (!account) return response.status(403).json({ error: 'forbidden' });
+  if (!idToken) {
+    return json(response, 401, { error: 'unauthorized', details: 'missing-bearer-token' }, origin);
+  }
+
+  const account = await verifyUser(idToken);
+  if (!account?.uid) {
+    return json(response, 401, { error: 'unauthorized', details: 'invalid-token' }, origin);
+  }
 
   const doMigrate = String(request.query?.migrate || '') === '1';
+  const uid = account.uid;
 
   try {
-    const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
-    const uid = account.uid;
-
-    // Fast list: metadata only + fresh download URLs when missing.
-    if (!doMigrate) {
-      const [dbToken, storageToken] = await Promise.all([
-        getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
-        getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
-      ]);
-      const [filesRaw, foldersRaw] = await Promise.all([
-        readNodeStrict(dbToken, `/users/${uid}/files`),
-        readNodeStrict(dbToken, `/users/${uid}/fileFolders`),
-      ]);
-      const files = normalizeList(filesRaw);
-      const folders = normalizeList(foldersRaw);
-      const out = await enrichFileUrls(files, uid, storageToken, dbToken);
-      const migratedRemaining = files.some((f) => f.dataUrl && !f.downloadUrl);
-      return response.status(200).json({ files: out, folders, migratedRemaining });
+    let serviceAccount;
+    try {
+      serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
+    } catch (err) {
+      return json(response, 500, {
+        error: 'missing-service-account',
+        details: err instanceof Error ? err.message : String(err),
+      }, origin);
     }
 
-    // Background migrate: small batches after the list has already painted.
     const [dbToken, storageToken] = await Promise.all([
       getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
       getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
     ]);
+
     const [filesRaw, foldersRaw] = await Promise.all([
       readNodeStrict(dbToken, `/users/${uid}/files`),
       readNodeStrict(dbToken, `/users/${uid}/fileFolders`),
     ]);
     const files = normalizeList(filesRaw);
     const folders = normalizeList(foldersRaw);
+
+    if (!doMigrate) {
+      const out = await enrichFileUrls(files, uid, storageToken, dbToken);
+      const migratedRemaining = files.some((f) => f.dataUrl && !f.downloadUrl);
+      return json(response, 200, { files: out, folders, migratedRemaining }, origin);
+    }
+
     const { updatedById, remaining } = await migrateLegacyBatch(files, uid, dbToken, storageToken);
     const merged = files.map((file) => updatedById.get(file.id) || file);
     const out = await enrichFileUrls(merged, uid, storageToken, dbToken);
-    return response.status(200).json({ files: out, folders, migratedRemaining: remaining });
+    return json(response, 200, { files: out, folders, migratedRemaining: remaining }, origin);
   } catch (error) {
     console.error('my-files failed', error);
-    return response.status(500).json({ error: 'request-failed' });
+    return json(response, 500, {
+      error: 'request-failed',
+      details: error instanceof Error ? error.message : String(error),
+    }, origin);
   }
 }

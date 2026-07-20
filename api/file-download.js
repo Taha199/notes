@@ -14,16 +14,25 @@ import {
 } from './_lib/storageFiles.js';
 
 /** Stay under Vercel Hobby ~4.5MB response limit. */
-const MAX_INLINE_BYTES = 3_500_000;
+const MAX_PROXY_BYTES = 3_500_000;
 
 function allowOrigin(origin) {
   const localDev = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || '');
   return isAllowedOrigin(origin) || localDev;
 }
 
-function asciiFallbackName(name) {
-  const base = String(name || 'file').replace(/[^\x20-\x7E]/g, '_').trim() || 'file';
-  return base.slice(0, 120);
+function json(response, status, body, origin) {
+  response.setHeader('Content-Type', 'application/json; charset=utf-8');
+  if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
+  return response.status(status).json(body);
+}
+
+function contentDisposition(format, fileName) {
+  const raw = String(fileName || 'file').slice(0, 180);
+  const ascii = raw.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '') || 'file';
+  const encoded = encodeURIComponent(raw);
+  const type = format === 'attachment' ? 'attachment' : 'inline';
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 export default async function handler(request, response) {
@@ -36,83 +45,137 @@ export default async function handler(request, response) {
   }
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET, OPTIONS');
-    return response.status(405).json({ error: 'method-not-allowed' });
+    return json(response, 405, { error: 'method-not-allowed' }, origin);
   }
   if (!allowOrigin(origin)) {
-    return response.status(403).json({ error: 'forbidden' });
+    return json(response, 403, { error: 'forbidden', details: 'origin-not-allowed' }, origin);
   }
   if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
 
   const idToken = request.headers.authorization?.replace(/^Bearer\s+/i, '');
-  const account = idToken ? await verifyUser(idToken) : null;
-  if (!account) return response.status(403).json({ error: 'forbidden' });
+  if (!idToken) {
+    return json(response, 401, { error: 'unauthorized', details: 'missing-bearer-token' }, origin);
+  }
+
+  const account = await verifyUser(idToken);
+  if (!account?.uid) {
+    return json(response, 401, { error: 'unauthorized', details: 'invalid-token' }, origin);
+  }
 
   const fileId = String(request.query?.fileId || '').trim();
-  if (!fileId) return response.status(400).json({ error: 'missing-file-id' });
+  if (!fileId) {
+    return json(response, 400, { error: 'missing-file-id' }, origin);
+  }
 
-  const format = String(request.query?.format || 'json').toLowerCase();
+  // Default to attachment for safety; explicit json for URL-only clients.
+  const rawFormat = String(request.query?.format || 'attachment').toLowerCase();
+  const format = rawFormat === 'inline' || rawFormat === 'json' ? rawFormat : 'attachment';
 
   try {
-    const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
+    let serviceAccount;
+    try {
+      serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
+    } catch (err) {
+      return json(response, 500, {
+        error: 'missing-service-account',
+        details: err instanceof Error ? err.message : String(err),
+      }, origin);
+    }
+
     const [dbToken, storageToken] = await Promise.all([
       getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
       getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
     ]);
 
+    // Ownership: path is scoped to verified UID — never trust client-supplied uid.
     const file = await readRtdb(dbToken, `/users/${account.uid}/files/${fileId}`);
     if (!file || typeof file !== 'object') {
-      return response.status(404).json({ error: 'file-not-found' });
+      return json(response, 404, { error: 'file-not-found' }, origin);
     }
 
     const storagePath = resolveStoragePath(file, account.uid);
     if (!storagePath) {
-      return response.status(404).json({ error: 'no-storage-path' });
+      return json(response, 404, {
+        error: 'no-storage-path',
+        details: 'File metadata has no storagePath or recoverable path',
+      }, origin);
     }
 
     const contentType = file.type || 'application/octet-stream';
     const fileName = file.name || 'file';
 
-    // Same-origin stream for preview (bypasses Chrome CORS + attachment disposition).
-    if (format === 'inline' || format === 'attachment') {
-      const size = typeof file.size === 'number' ? file.size : 0;
-      if (size > MAX_INLINE_BYTES) {
-        return response.status(413).json({ error: 'too-large-for-proxy', size });
-      }
-
-      const { buffer, contentType: detected } = await downloadFromStorage(storageToken, storagePath);
-      if (buffer.length > MAX_INLINE_BYTES) {
-        return response.status(413).json({ error: 'too-large-for-proxy', size: buffer.length });
-      }
-
-      const mime = detected || contentType;
-      const disposition = format === 'attachment' ? 'attachment' : 'inline';
-      const safeName = asciiFallbackName(fileName);
-      response.setHeader('Content-Type', mime);
-      response.setHeader(
-        'Content-Disposition',
-        `${disposition}; filename="${safeName.replace(/"/g, '')}"`,
+    if (format === 'json') {
+      const { downloadUrl } = await resolveDownloadUrl(
+        storageToken,
+        storagePath,
+        contentType,
+        false,
       );
-      response.setHeader('Cache-Control', 'private, max-age=60');
-      response.setHeader('Content-Length', String(buffer.length));
-      return response.status(200).send(buffer);
+      return json(response, 200, {
+        downloadUrl,
+        storagePath,
+        name: fileName,
+        type: contentType,
+        size: typeof file.size === 'number' ? file.size : undefined,
+      }, origin);
     }
 
-    const { downloadUrl } = await resolveDownloadUrl(
-      storageToken,
-      storagePath,
-      contentType,
-      false,
-    );
+    // inline | attachment → stream bytes (authenticated, same-origin).
+    const declaredSize = typeof file.size === 'number' ? file.size : 0;
+    if (declaredSize > MAX_PROXY_BYTES) {
+      const { downloadUrl } = await resolveDownloadUrl(
+        storageToken,
+        storagePath,
+        contentType,
+        false,
+      );
+      return json(response, 413, {
+        error: 'too-large-for-proxy',
+        size: declaredSize,
+        downloadUrl,
+        storagePath,
+      }, origin);
+    }
 
-    return response.status(200).json({
-      downloadUrl,
-      storagePath,
-      name: fileName,
-      type: contentType,
-      size: typeof file.size === 'number' ? file.size : undefined,
-    });
+    let buffer;
+    let detected;
+    try {
+      ({ buffer, contentType: detected } = await downloadFromStorage(storageToken, storagePath));
+    } catch (err) {
+      return json(response, 502, {
+        error: 'storage-download-failed',
+        details: err instanceof Error ? err.message : String(err),
+        storagePath,
+      }, origin);
+    }
+
+    if (buffer.length > MAX_PROXY_BYTES) {
+      const { downloadUrl } = await resolveDownloadUrl(
+        storageToken,
+        storagePath,
+        contentType,
+        false,
+      );
+      return json(response, 413, {
+        error: 'too-large-for-proxy',
+        size: buffer.length,
+        downloadUrl,
+        storagePath,
+      }, origin);
+    }
+
+    const mime = detected || contentType;
+    response.setHeader('Content-Type', mime);
+    response.setHeader('Content-Disposition', contentDisposition(format, fileName));
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('Content-Length', String(buffer.length));
+    if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
+    return response.status(200).send(buffer);
   } catch (error) {
     console.error('file-download failed', error);
-    return response.status(500).json({ error: 'request-failed' });
+    return json(response, 500, {
+      error: 'request-failed',
+      details: error instanceof Error ? error.message : String(error),
+    }, origin);
   }
 }

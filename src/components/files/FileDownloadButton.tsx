@@ -1,34 +1,51 @@
-/** Instant download — plain anchor, no async state, no ellipsis. */
+import { useState } from 'react';
+import { useToast } from '../../contexts/ToastContext';
+import { downloadStoredFile } from './fileAccess';
+import type { StoredFile } from './fileTypes';
+
+/** Authenticated download button — never a bare href to a stale Firebase URL. */
 export function FileDownloadButton({
-  url,
+  file,
+  uid,
   label,
+  loadingLabel,
   className,
+  onErrorMessage,
 }: {
-  url: string;
+  file: StoredFile;
+  uid: string;
   label: string;
+  loadingLabel?: string;
   className: string;
+  onErrorMessage?: string;
 }) {
-  if (!url) {
-    return (
-      <span
-        className={`${className} cursor-not-allowed opacity-50`}
-        title={label}
-      >
-        {label}
-      </span>
-    );
-  }
+  const { show } = useToast();
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      await downloadStoredFile(file, uid);
+    } catch (err) {
+      console.error('[files] download failed', err);
+      const detail = err instanceof Error ? err.message : String(err);
+      show(onErrorMessage ? `${onErrorMessage} (${detail})` : detail);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={className}
-      // Cross-origin Firebase URLs ignore `download`; attachment disposition opens/saves the file.
-      onClick={(e) => e.stopPropagation()}
+    <button
+      type="button"
+      onClick={(e) => { void handleDownload(e); }}
+      disabled={downloading}
+      className={`${className} disabled:cursor-wait disabled:opacity-70`}
     >
-      {label}
-    </a>
+      {downloading ? (loadingLabel || '…') : label}
+    </button>
   );
 }

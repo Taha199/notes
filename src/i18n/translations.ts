@@ -114,6 +114,7 @@ export interface Translation {
   filesLoading: string;
   filesEmpty: string;
   filesDownload: string;
+  filesDownloading: string;
   filesPreview: string;
   filesRename: string;
   filesRenameSuccess: string;
@@ -588,7 +589,7 @@ export const LANGS: Record<Lang, Translation> = {
     notesViewExpandedTitle: 'Full note view',
     notesViewLabel: 'View',
     filesTitle: 'Upload files', filesSub: 'Files are saved securely in your cloud account.', filesSizeLimit: 'Maximum file size: 20 MB per file.', filesUpload: 'Choose files', filesLoading: 'Loading your files…',
-    filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewLoading: 'Loading preview…', filesPreviewUnavailable: 'الملف غير مدعوم — Preview is not available for this file type.', filesPreviewFailed: 'Could not load the preview. You can still download the file.', filesDownloadFailed: 'Could not download the file. Please try again.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
+    filesEmpty: 'No files uploaded yet', filesDownload: 'Download', filesDownloading: 'Downloading…', filesPreview: 'Preview', filesRename: 'Rename', filesRenameSuccess: 'File renamed', filesPreviewLoading: 'Loading preview…', filesPreviewUnavailable: 'الملف غير مدعوم — Preview is not available for this file type.', filesPreviewFailed: 'Could not load the preview. You can still download the file.', filesDownloadFailed: 'Could not download the file. Please try again.', filesDelete: 'Delete', filesStored: 'Saved in cloud',
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
     filesUploading: 'Uploading', filesUploadPermissionDenied: 'No permission to upload. Sign in again and try once more.', filesUploadNetworkError: 'Network error during upload. Check your connection and try again.', filesUploadAuthError: 'Session expired. Sign in again and try once more.',
     filesLoadFailed: 'Could not load your files. Check your connection and try again.', filesRetry: 'Try again', filesUploadStuck: 'Upload never started (stuck at 0%). Check your connection or try another browser.',
@@ -951,7 +952,7 @@ export const LANGS: Record<Lang, Translation> = {
     notesViewExpandedTitle: 'Visa hela anteckningen',
     notesViewLabel: 'Visning',
     filesTitle: 'Ladda upp filer', filesSub: 'Filer sparas säkert i ditt molnkonto.', filesSizeLimit: 'Maximal filstorlek: 20 MB per fil.', filesUpload: 'Välj filer', filesLoading: 'Hämtar dina filer…',
-    filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewLoading: 'Laddar förhandsgranskning…', filesPreviewUnavailable: 'الملف غير مدعوم — Förhandsgranskning finns inte för den här filtypen.', filesPreviewFailed: 'Kunde inte ladda förhandsgranskningen. Du kan fortfarande ladda ner filen.', filesDownloadFailed: 'Kunde inte ladda ner filen. Försök igen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
+    filesEmpty: 'Inga filer uppladdade ännu', filesDownload: 'Ladda ner', filesDownloading: 'Laddar ner…', filesPreview: 'Förhandsgranska', filesRename: 'Byt namn', filesRenameSuccess: 'Filnamn uppdaterat', filesPreviewLoading: 'Laddar förhandsgranskning…', filesPreviewUnavailable: 'الملف غير مدعوم — Förhandsgranskning finns inte för den här filtypen.', filesPreviewFailed: 'Kunde inte ladda förhandsgranskningen. Du kan fortfarande ladda ner filen.', filesDownloadFailed: 'Kunde inte ladda ner filen. Försök igen.', filesDelete: 'Radera', filesStored: 'Sparad i molnet',
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
     filesUploading: 'Laddar upp', filesUploadPermissionDenied: 'Ingen behörighet att ladda upp. Logga in igen och försök på nytt.', filesUploadNetworkError: 'Nätverksfel under uppladdning. Kontrollera anslutningen och försök igen.', filesUploadAuthError: 'Sessionen har gått ut. Logga in igen och försök på nytt.',
     filesLoadFailed: 'Kunde inte hämta dina filer. Kontrollera anslutningen och försök igen.', filesRetry: 'Försök igen', filesUploadStuck: 'Uppladdningen startade aldrig (fastnade på 0%). Kontrollera anslutningen eller prova en annan webbläsare.',

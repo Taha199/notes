@@ -9,6 +9,8 @@ export interface StoredFile {
   folderId?: string | null;
   dataUrl?: string;
   inlinePending?: boolean;
+  /** Per-file enrich failure — list still returns other files */
+  accessError?: string;
 }
 
 export interface FileFolder {

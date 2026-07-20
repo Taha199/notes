@@ -10,9 +10,10 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { storage } from '../../lib/firebase';
-import { getRtdbAuthToken, rtdbFetch } from '../../lib/rtdb';
+import { rtdbFetch } from '../../lib/rtdb';
 import { getStorageLimitBytes } from '../../lib/storageQuota';
 import { clientStoragePath, resolvePublicDownloadUrl } from './fileAccess';
+import { readApiResponse, requireIdToken } from './apiHelpers';
 import { FileDownloadButton } from './FileDownloadButton';
 import { FilePreviewModal } from './FilePreviewModal';
 import { FilesLoadingIndicator } from './FilesLoadingIndicator';
@@ -143,16 +144,23 @@ export function FilesPage({ search }: { search: string }) {
       const controller = new AbortController();
       const timer = window.setTimeout(() => controller.abort(), LIST_TIMEOUT_MS);
       try {
-        const token = await getRtdbAuthToken();
-        if (!token) throw new Error('no-token');
+        const { token } = await requireIdToken();
 
-        type Payload = { files?: StoredFile[]; folders?: FileFolder[]; migratedRemaining?: boolean };
+        type Payload = {
+          files?: StoredFile[];
+          folders?: FileFolder[];
+          migratedRemaining?: boolean;
+          error?: string;
+          details?: string;
+        };
         const res = await fetch('/api/my-files', {
           headers: { Authorization: `Bearer ${token}` },
           signal: controller.signal,
         });
-        if (!res.ok) throw new Error(`load:${res.status}`);
-        const data = (await res.json()) as Payload;
+        const data = await readApiResponse<Payload>(res);
+        if (!res.ok) {
+          throw new Error(data.details || data.error || `load:${res.status}`);
+        }
         paint(data);
         if (!cancelled) {
           setLoading(false);
@@ -168,20 +176,23 @@ export function FilesPage({ search }: { search: string }) {
               const mig = await fetch('/api/my-files?migrate=1', {
                 headers: { Authorization: `Bearer ${token}` },
               });
+              const migData = await readApiResponse<Payload>(mig);
               if (!mig.ok) break;
-              const migData = (await mig.json()) as Payload;
               paint(migData);
               more = migData.migratedRemaining === true;
-            } catch {
+            } catch (migErr) {
+              console.warn('[files] migration pass failed', migErr);
               break;
             }
           }
         }
-      } catch {
+      } catch (err) {
+        console.error('[files] list load failed', err);
         if (!cancelled) {
           setFiles([]);
           setFolders([]);
-          setLoadError(t.filesLoadFailed);
+          const detail = err instanceof Error ? err.message : String(err);
+          setLoadError(`${t.filesLoadFailed} (${detail})`);
           setLoading(false);
         }
       } finally {
@@ -304,8 +315,9 @@ export function FilesPage({ search }: { search: string }) {
 
   const uploadErrorMessage = (err: unknown): string => {
     const code = firebaseErrorCode(err);
+    const raw = err instanceof Error ? err.message : String(err);
     if (code.includes('unauthorized') || code.includes('permission-denied') || code === 'storage/unauthorized') {
-      return `${t.filesUploadPermissionDenied}${code ? ` (${code})` : ''}`;
+      return `${t.filesUploadPermissionDenied} [${code || raw}]`;
     }
     if (
       code.includes('unauthenticated')
@@ -313,10 +325,11 @@ export function FilesPage({ search }: { search: string }) {
       || code === 'auth/user-token-expired'
       || code === 'no-token'
       || code === 'no-user'
+      || /signed in|ID token/i.test(raw)
     ) {
-      return `${t.filesUploadAuthError}${code ? ` (${code})` : ''}`;
+      return `${t.filesUploadAuthError} [${code || raw}]`;
     }
-    if (code === 'storage/upload-stuck' || code === 'upload-stuck') return t.filesUploadStuck;
+    if (code === 'storage/upload-stuck' || code === 'upload-stuck') return `${t.filesUploadStuck} [${raw}]`;
     if (
       code.includes('network')
       || code === 'storage/retry-limit-exceeded'
@@ -324,10 +337,10 @@ export function FilesPage({ search }: { search: string }) {
       || code === 'timeout'
       || (err instanceof TypeError && /fetch|network/i.test(err.message))
     ) {
-      return `${t.filesUploadNetworkError}${code ? ` (${code})` : ''}`;
+      return `${t.filesUploadNetworkError} [${code || raw}]`;
     }
     if (code === 'quota-exceeded' || code === 'storage/quota-exceeded') return t.filesQuotaExceeded;
-    return `${t.filesUploadFailed}${code ? ` (${code})` : ''}`;
+    return `${t.filesUploadFailed} [${code || raw}]`;
   };
 
   const updateUploadItem = (key: string, patch: Partial<UploadProgressItem>) => {
@@ -342,8 +355,9 @@ export function FilesPage({ search }: { search: string }) {
   ): Promise<void> => new Promise((resolve, reject) => {
     const task = uploadBytesResumable(storageRef, file, { contentType });
     let gotBytes = false;
+    let completed = false;
     const stuckTimer = window.setTimeout(() => {
-      if (!gotBytes) {
+      if (!gotBytes && !completed) {
         try { task.cancel(); } catch { /* ignore */ }
         reject(new Error('storage/upload-stuck'));
       }
@@ -354,13 +368,17 @@ export function FilesPage({ search }: { search: string }) {
       (snapshot) => {
         if (snapshot.bytesTransferred > 0) gotBytes = true;
         const total = snapshot.totalBytes || file.size || 1;
-        onProgress(Math.min(99, Math.round((snapshot.bytesTransferred / total) * 100)));
+        const pct = Math.min(99, Math.round((snapshot.bytesTransferred / total) * 100));
+        console.info('[files] upload progress', { name: file.name, pct, bytes: snapshot.bytesTransferred });
+        onProgress(pct);
       },
       (err) => {
         window.clearTimeout(stuckTimer);
+        console.error('[files] resumable error', { name: file.name, code: firebaseErrorCode(err), err });
         reject(err);
       },
       () => {
+        completed = true;
         window.clearTimeout(stuckTimer);
         resolve();
       },
@@ -372,11 +390,12 @@ export function FilesPage({ search }: { search: string }) {
     folderId: string | null,
     onProgress: (pct: number) => void,
   ): Promise<StoredFile> => {
-    if (!user) throw new Error('no-user');
-    const token = await getRtdbAuthToken();
-    if (!token) throw new Error('no-token');
+    if (!user?.uid) throw new Error('no-user');
+    // Ensure auth token is valid before Storage write (rules require request.auth).
+    await requireIdToken();
 
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const safeName = safeStorageFileName(file.name);
     const base = {
       id,
       name: file.name,
@@ -385,35 +404,56 @@ export function FilesPage({ search }: { search: string }) {
       addedAt: new Date().toLocaleString(),
     };
     const withFolder = folderId ? { ...base, folderId } : base;
-    const storagePath = `users/${user.uid}/files/${id}/${safeStorageFileName(file.name)}`;
+    const storagePath = `users/${user.uid}/files/${id}/${safeName}`;
     const storageRef = ref(storage, storagePath);
 
-    const runUpload = async () => {
-      try {
-        await uploadResumableOrStuck(storageRef, file, base.type, onProgress);
-      } catch (err) {
-        const code = firebaseErrorCode(err);
-        if (
-          code === 'storage/upload-stuck'
-          || code === 'storage/canceled'
-          || code.includes('network')
-          || code === 'storage/retry-limit-exceeded'
-        ) {
-          onProgress(5);
-          await withTimeout(
-            uploadBytes(storageRef, file, { contentType: base.type }),
-            UPLOAD_TOTAL_MS,
-            'upload-bytes-timeout',
-          );
-        } else {
-          throw err;
-        }
-      }
-    };
+    console.info('[files] upload start', {
+      storagePath,
+      fileName: file.name,
+      safeName,
+      size: file.size,
+      type: base.type,
+      uid: user.uid,
+    });
 
-    await withTimeout(runUpload(), UPLOAD_TOTAL_MS, 'upload-timeout');
+    let usedFallback = false;
+    try {
+      await withTimeout(
+        uploadResumableOrStuck(storageRef, file, base.type, onProgress),
+        UPLOAD_TOTAL_MS,
+        'upload-timeout',
+      );
+    } catch (err) {
+      const code = firebaseErrorCode(err);
+      // Only fall back when resumable never made progress / network hung — not after a real success.
+      if (
+        code === 'storage/upload-stuck'
+        || code === 'storage/canceled'
+        || code.includes('network')
+        || code === 'storage/retry-limit-exceeded'
+        || code === 'upload-timeout'
+      ) {
+        console.warn('[files] resumable failed — trying uploadBytes', { code, fileName: file.name });
+        usedFallback = true;
+        onProgress(5);
+        await withTimeout(
+          uploadBytes(storageRef, file, { contentType: base.type }),
+          UPLOAD_TOTAL_MS,
+          'upload-bytes-timeout',
+        );
+      } else {
+        console.error('[files] upload failed (no fallback)', {
+          code,
+          message: err instanceof Error ? err.message : String(err),
+          storagePath,
+        });
+        throw err;
+      }
+    }
+
     onProgress(100);
     const downloadUrl = await withTimeout(getDownloadURL(storageRef), 20_000, 'download-url-timeout');
+    console.info('[files] upload done', { storagePath, usedFallback, downloadUrl: downloadUrl.slice(0, 80) });
     return { ...withFolder, downloadUrl, storagePath };
   };
 
@@ -928,11 +968,16 @@ export function FilesPage({ search }: { search: string }) {
                     {t.filesPreview}
                   </button>
                 )}
-                <FileDownloadButton
-                  url={fileDownloadUrl(file)}
-                  label={t.filesDownload}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
-                />
+                {user && (
+                  <FileDownloadButton
+                    file={file}
+                    uid={user.uid}
+                    label={t.filesDownload}
+                    loadingLabel={t.filesDownloading}
+                    onErrorMessage={t.filesDownloadFailed}
+                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => startRename(file)}
