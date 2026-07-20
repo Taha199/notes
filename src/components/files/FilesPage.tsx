@@ -160,21 +160,62 @@ function isChromeBrowser(): boolean {
   return /Chrome\//.test(ua) && !/Edg\//.test(ua) && !/OPR\//.test(ua);
 }
 
-/** Load bytes from Storage / legacy data — no XHR (Chrome can hang on token URLs). */
-async function loadStorageBlob(file: StoredFile): Promise<Blob> {
-  if (file.dataUrl) return dataUrlToBlob(file.dataUrl);
-  if (file.storagePath) {
+function resolveClientStoragePath(file: StoredFile, uid: string): string | undefined {
+  if (file.storagePath) return file.storagePath;
+  if (file.downloadUrl) {
     try {
-      return await getBlob(ref(storage, file.storagePath));
+      const u = new URL(file.downloadUrl);
+      const idx = u.pathname.indexOf('/o/');
+      if (idx !== -1) {
+        const encoded = u.pathname.slice(idx + 3);
+        if (encoded) return decodeURIComponent(encoded);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (uid && file.id && file.name) {
+    return `users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`;
+  }
+  return undefined;
+}
+
+async function refreshFileAccess(file: StoredFile): Promise<{ downloadUrl: string; storagePath?: string } | null> {
+  const token = await getRtdbAuthToken();
+  if (!token) return null;
+  const res = await fetch(`/api/file-download?fileId=${encodeURIComponent(file.id)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { downloadUrl?: string; storagePath?: string };
+  if (!data.downloadUrl) return null;
+  return { downloadUrl: data.downloadUrl, storagePath: data.storagePath };
+}
+
+/** Reliable bytes for preview/download — SDK first, then fresh token URL. */
+async function loadPreviewBlob(file: StoredFile, uid: string): Promise<Blob> {
+  if (file.dataUrl) return dataUrlToBlob(file.dataUrl);
+
+  const path = resolveClientStoragePath(file, uid);
+  if (path) {
+    try {
+      return ensurePdfMime(await getBlob(ref(storage, path)), file);
     } catch {
       /* fall through */
     }
   }
-  if (file.downloadUrl) {
-    const res = await fetch(file.downloadUrl);
-    if (!res.ok) throw new Error(`fetch:${res.status}`);
-    return res.blob();
+
+  let url = file.downloadUrl;
+  if (!url) {
+    const refreshed = await refreshFileAccess(file);
+    url = refreshed?.downloadUrl;
   }
+  if (url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch:${res.status}`);
+    return ensurePdfMime(await res.blob(), file);
+  }
+
   throw new Error('no-file-source');
 }
 
@@ -204,19 +245,21 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-async function loadTextPreviewFromBlob(file: StoredFile): Promise<string> {
-  const blob = await loadStorageBlob(file);
+async function loadTextPreviewFromBlob(file: StoredFile, uid: string): Promise<string> {
+  const blob = await loadPreviewBlob(file, uid);
   return blob.text();
 }
 
 function FilePreviewModal({
   file,
+  uid,
   onClose,
   t,
   onDownload,
   downloading,
 }: {
   file: StoredFile;
+  uid: string;
   onClose: () => void;
   t: {
     filesDownload: string;
@@ -229,13 +272,14 @@ function FilePreviewModal({
 }) {
   const href = fileHref(file);
   const mode = previewModeFor(file);
-  const chrome = isChromeBrowser();
+  const chromePdf = mode === 'pdf' && isChromeBrowser();
   const [textContent, setTextContent] = useState('');
   const [loadingText, setLoadingText] = useState(mode === 'text');
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [blobLoading, setBlobLoading] = useState(mode === 'pdf' && chrome);
-  const [loadError, setLoadError] = useState(false);
+  const [src, setSrc] = useState(chromePdf || href === '#' ? '' : href);
+  const [resolving, setResolving] = useState(chromePdf || href === '#');
+  const [failed, setFailed] = useState(false);
   const blobRef = useRef<string | null>(null);
+  const blobAttemptRef = useRef(false);
 
   const revokeBlob = () => {
     if (blobRef.current) {
@@ -252,77 +296,56 @@ function FilePreviewModal({
 
   useEffect(() => () => revokeBlob(), []);
 
-  // Chrome cannot embed Firebase PDF URLs (Content-Disposition: attachment).
-  useEffect(() => {
-    if (mode !== 'pdf' || !chrome) return;
-    let cancelled = false;
-    setBlobLoading(true);
-    setLoadError(false);
-    setBlobUrl(null);
-    revokeBlob();
-    (async () => {
-      try {
-        const blob = ensurePdfMime(await loadStorageBlob(file), file);
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        blobRef.current = url;
-        setBlobUrl(url);
-      } catch {
-        if (!cancelled) setLoadError(true);
-      } finally {
-        if (!cancelled) setBlobLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
+  const switchToBlob = async () => {
+    if (blobAttemptRef.current || failed) return;
+    blobAttemptRef.current = true;
+    setResolving(true);
+    setFailed(false);
+    try {
+      const blob = ensurePdfMime(
+        await withTimeout(loadPreviewBlob(file, uid), 45_000, 'preview-timeout'),
+        file,
+      );
       revokeBlob();
-    };
-  }, [file, mode, chrome]);
+      const url = URL.createObjectURL(blob);
+      blobRef.current = url;
+      setSrc(url);
+    } catch {
+      setFailed(true);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (chromePdf || ((mode === 'image' || mode === 'pdf') && href === '#')) {
+      void switchToBlob();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file.id, mode, chromePdf, href]);
 
   useEffect(() => {
     if (mode !== 'text') return;
     let cancelled = false;
     setLoadingText(true);
-    setLoadError(false);
+    setFailed(false);
     (async () => {
       try {
         const body = href && href !== '#'
           ? await loadTextPreview(file, href)
-          : await loadTextPreviewFromBlob(file);
+          : await loadTextPreviewFromBlob(file, uid);
         if (!cancelled) setTextContent(body);
       } catch {
         if (!cancelled) {
           setTextContent(t.filesPreviewFailed);
-          setLoadError(true);
+          setFailed(true);
         }
       } finally {
         if (!cancelled) setLoadingText(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [file, href, mode, t.filesPreviewFailed]);
-
-  const loadImageBlob = () => {
-    if (blobUrl || blobLoading || loadError) return;
-    setBlobLoading(true);
-    void (async () => {
-      try {
-        const blob = await loadStorageBlob(file);
-        revokeBlob();
-        const url = URL.createObjectURL(blob);
-        blobRef.current = url;
-        setBlobUrl(url);
-      } catch {
-        setLoadError(true);
-      } finally {
-        setBlobLoading(false);
-      }
-    })();
-  };
-
-  const imageSrc = blobUrl || href;
-  const pdfSrc = chrome ? blobUrl : href;
-  const showPreviewSpinner = blobLoading && !blobUrl && !loadError;
+  }, [file, href, mode, uid, t.filesPreviewFailed]);
 
   return createPortal(
     <div
@@ -335,30 +358,17 @@ function FilePreviewModal({
       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
         <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
         <div className="flex shrink-0 items-center gap-2">
-          {href !== '#' ? (
-            <a
-              href={href}
-              download={file.name}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {t.filesDownload}
-            </a>
-          ) : (
-            <button
-              type="button"
-              disabled={downloading}
-              className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDownload(file);
-              }}
-            >
-              {downloading ? '…' : t.filesDownload}
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={downloading}
+            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDownload(file);
+            }}
+          >
+            {downloading ? '…' : t.filesDownload}
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -370,21 +380,21 @@ function FilePreviewModal({
         </div>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {showPreviewSpinner && (
+        {resolving && !failed && (
           <FilesLoadingIndicator text={t.filesPreviewLoading} />
         )}
-        {mode === 'image' && !loadError && href !== '#' && (
+        {mode === 'image' && !failed && src && !resolving && (
           <img
-            src={imageSrc}
+            src={src}
             alt={file.name}
             className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
-            onError={loadImageBlob}
+            onError={() => { void switchToBlob(); }}
           />
         )}
-        {mode === 'pdf' && !loadError && !showPreviewSpinner && pdfSrc && (
+        {mode === 'pdf' && !failed && src && !resolving && (
           <iframe
             title={file.name}
-            src={pdfSrc}
+            src={src}
             className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
           />
         )}
@@ -393,7 +403,7 @@ function FilePreviewModal({
             {loadingText ? '…' : textContent}
           </pre>
         )}
-        {(mode === 'unsupported' || loadError) && (
+        {(mode === 'unsupported' || failed) && (
           <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">
             {mode === 'unsupported' ? t.filesPreviewUnavailable : t.filesPreviewFailed}
           </p>
@@ -1086,6 +1096,7 @@ export function FilesPage({ search }: { search: string }) {
   };
 
   const downloadFile = (file: StoredFile) => {
+    if (!user) return;
     const href = fileHref(file);
     if (href && href !== '#') {
       const a = document.createElement('a');
@@ -1103,9 +1114,23 @@ export function FilesPage({ search }: { search: string }) {
     setError('');
     void (async () => {
       try {
-        triggerBlobDownload(await loadStorageBlob(file), file.name);
+        triggerBlobDownload(await loadPreviewBlob(file, user.uid), file.name);
       } catch (err) {
         console.error('File download failed', err);
+        try {
+          const refreshed = await refreshFileAccess(file);
+          if (refreshed?.downloadUrl) {
+            const a = document.createElement('a');
+            a.href = refreshed.downloadUrl;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.download = file.name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            return;
+          }
+        } catch { /* fall through */ }
         setError(t.filesDownloadFailed);
         show(t.filesDownloadFailed);
       } finally {
@@ -1483,10 +1508,11 @@ export function FilesPage({ search }: { search: string }) {
         </div>
       ) : null}
 
-      {previewFile && (
+      {previewFile && user && (
         <FilePreviewModal
           key={previewFile.id}
           file={previewFile}
+          uid={user.uid}
           onClose={() => setPreviewFile(null)}
           t={t}
           onDownload={(f) => void downloadFile(f)}

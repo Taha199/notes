@@ -106,11 +106,22 @@ export async function downloadFromStorage(storageToken, objectPath) {
   return { buffer, contentType };
 }
 
+export function safeStorageFileName(name) {
+  if (!name || typeof name !== 'string') return 'file';
+  const cleaned = name
+    .replace(/[/\\?#%[\]*]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (cleaned || 'file').slice(0, 180);
+}
+
 export function resolveStoragePath(file, uid) {
   if (!file || typeof file !== 'object') return undefined;
   return (
     file.storagePath
     || (file.downloadUrl ? storagePathFromDownloadUrl(file.downloadUrl) : undefined)
-    || (uid && file.id && file.name ? `users/${uid}/files/${file.id}/${file.name}` : undefined)
+    || (uid && file.id && file.name
+      ? `users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`
+      : undefined)
   );
 }
