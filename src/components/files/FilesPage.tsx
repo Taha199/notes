@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { deleteObject, getBlob, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -83,7 +83,92 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([decodeURIComponent(payload)], { type: contentType });
 }
 
-async function loadTextPreview(file: StoredFile, href: string): Promise<string> {
+function ensurePdfMime(blob: Blob, file: StoredFile): Blob {
+  if (
+    (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
+    && blob.type !== 'application/pdf'
+  ) {
+    return new Blob([blob], { type: 'application/pdf' });
+  }
+  return blob;
+}
+
+/**
+ * Load file bytes as a same-origin-friendly Blob.
+ * Chrome blanks Firebase download URLs in <iframe> (Content-Disposition: attachment)
+ * and ignores cross-origin <a download>. Blob URLs fix both for all browsers.
+ */
+async function loadFileBlob(
+  file: StoredFile,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<Blob> {
+  if (file.dataUrl) {
+    const blob = dataUrlToBlob(file.dataUrl);
+    onProgress?.(blob.size, blob.size);
+    return ensurePdfMime(blob, file);
+  }
+
+  // Prefer download URL + XHR when available (reports byte progress).
+  // Fall back to authenticated getBlob if the token URL fails.
+  if (file.downloadUrl) {
+    try {
+      return await fetchBlobWithProgress(file.downloadUrl, file, onProgress);
+    } catch {
+      /* fall through */
+    }
+  }
+
+  if (file.storagePath) {
+    const blob = await getBlob(ref(storage, file.storagePath));
+    onProgress?.(blob.size, blob.size);
+    return ensurePdfMime(blob, file);
+  }
+
+  throw new Error('no-file-source');
+}
+
+/** XHR fetch so we can report byte progress (fetch streams are awkward here). */
+function fetchBlobWithProgress(
+  url: string,
+  file: StoredFile,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'blob';
+    xhr.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded, e.total);
+      else if (file.size > 0) onProgress?.(e.loaded, file.size);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const blob = ensurePdfMime(xhr.response as Blob, file);
+        onProgress?.(blob.size, blob.size);
+        resolve(blob);
+      } else {
+        reject(new Error(`fetch-failed:${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('fetch-network'));
+    xhr.send();
+  });
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke after the browser has started the download.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+async function loadTextPreview(file: StoredFile): Promise<string> {
   if (file.dataUrl?.startsWith('data:')) {
     const match = file.dataUrl.match(/^data:([^,]*),(.*)$/s);
     if (!match) return '';
@@ -91,15 +176,36 @@ async function loadTextPreview(file: StoredFile, href: string): Promise<string> 
     if (meta.includes('base64')) return atob(payload);
     return decodeURIComponent(payload);
   }
-  const res = await fetch(href);
-  return res.text();
+  const blob = await loadFileBlob(file);
+  return blob.text();
 }
 
-function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () => void; t: { filesDownload: string; filesPreviewUnavailable: string } }) {
+function FilePreviewModal({
+  file,
+  onClose,
+  t,
+  onDownload,
+  downloading,
+}: {
+  file: StoredFile;
+  onClose: () => void;
+  t: {
+    filesDownload: string;
+    filesPreviewUnavailable: string;
+    filesPreviewFailed: string;
+    filesLoading: string;
+  };
+  onDownload: (file: StoredFile) => void;
+  downloading: boolean;
+}) {
   const href = fileHref(file);
   const mode = previewModeFor(file);
   const [textContent, setTextContent] = useState('');
-  const [loadingText, setLoadingText] = useState(mode === 'text');
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(mode === 'pdf' || mode === 'text');
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [loadError, setLoadError] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -107,22 +213,90 @@ function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () 
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // PDF: always use a same-origin blob: URL (Chrome cannot embed Firebase attachment URLs).
+  useEffect(() => {
+    if (mode !== 'pdf') return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setLoadError(false);
+    setLoadProgress(0);
+    setBlobUrl(null);
+    (async () => {
+      try {
+        const blob = await loadFileBlob(file, (loaded, total) => {
+          if (!cancelled && total > 0) {
+            setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
+          }
+        });
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+        setLoadProgress(100);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [file, mode]);
+
+  // Image fallback: if remote <img> fails (rare CORP), load via blob.
+  useEffect(() => {
+    if (mode !== 'image' || !imgFailed || blobUrl) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setLoadError(false);
+    (async () => {
+      try {
+        const blob = await loadFileBlob(file, (loaded, total) => {
+          if (!cancelled && total > 0) {
+            setLoadProgress(Math.min(99, Math.round((loaded / total) * 100)));
+          }
+        });
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+        setLoadProgress(100);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [file, mode, imgFailed, blobUrl]);
+
   useEffect(() => {
     if (mode !== 'text') return;
     let cancelled = false;
-    setLoadingText(true);
+    setLoading(true);
+    setLoadError(false);
     (async () => {
       try {
-        const body = await loadTextPreview(file, href);
+        const body = await loadTextPreview(file);
         if (!cancelled) setTextContent(body);
       } catch {
-        if (!cancelled) setTextContent(t.filesPreviewUnavailable);
+        if (!cancelled) {
+          setTextContent(t.filesPreviewFailed);
+          setLoadError(true);
+        }
       } finally {
-        if (!cancelled) setLoadingText(false);
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [file, href, mode, t.filesPreviewUnavailable]);
+  }, [file, mode, t.filesPreviewFailed]);
+
+  const imageSrc = blobUrl || href;
 
   return createPortal(
     <div
@@ -135,14 +309,17 @@ function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () 
       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
         <div className="min-w-0 truncate text-sm font-semibold text-white">{file.name}</div>
         <div className="flex shrink-0 items-center gap-2">
-          <a
-            href={href}
-            download={file.name}
-            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100"
-            onClick={(e) => e.stopPropagation()}
+          <button
+            type="button"
+            disabled={downloading}
+            className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-60"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDownload(file);
+            }}
           >
-            {t.filesDownload}
-          </a>
+            {downloading ? '…' : t.filesDownload}
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -154,19 +331,53 @@ function FilePreviewModal({ file, onClose, t }: { file: StoredFile; onClose: () 
         </div>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
-        {mode === 'image' && (
-          <img src={href} alt={file.name} className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl" />
+        {mode === 'image' && !loadError && (
+          loading && imgFailed ? (
+            <div className="text-center text-white">
+              <FilesLoadingIndicator text={t.filesLoading} />
+              {loadProgress > 0 && (
+                <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
+              )}
+            </div>
+          ) : (
+            <img
+              src={imageSrc}
+              alt={file.name}
+              className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
+              onError={() => {
+                if (!imgFailed && !file.dataUrl) setImgFailed(true);
+                else setLoadError(true);
+              }}
+            />
+          )
         )}
         {mode === 'pdf' && (
-          <iframe title={file.name} src={href} className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl" />
+          loading ? (
+            <div className="text-center text-white">
+              <FilesLoadingIndicator text={t.filesLoading} />
+              {loadProgress > 0 && (
+                <p className="mt-2 text-xs text-white/70">{loadProgress}%</p>
+              )}
+            </div>
+          ) : loadError || !blobUrl ? (
+            <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewFailed}</p>
+          ) : (
+            <iframe
+              title={file.name}
+              src={blobUrl}
+              className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
+            />
+          )
         )}
         {mode === 'text' && (
           <pre className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-4 text-left text-sm text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-gray-100">
-            {loadingText ? '…' : textContent}
+            {loading ? '…' : textContent}
           </pre>
         )}
-        {mode === 'unsupported' && (
-          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">{t.filesPreviewUnavailable}</p>
+        {(mode === 'unsupported' || (mode === 'image' && loadError)) && (
+          <p className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white">
+            {mode === 'unsupported' ? t.filesPreviewUnavailable : t.filesPreviewFailed}
+          </p>
         )}
       </div>
     </div>,
@@ -222,6 +433,7 @@ export function FilesPage({ search }: { search: string }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const migrationStartedRef = useRef(false);
 
   useEffect(() => {
@@ -596,6 +808,23 @@ export function FilesPage({ search }: { search: string }) {
     if (!uploading) setDragging(true);
   };
 
+  const downloadFile = async (file: StoredFile) => {
+    if (downloadingId) return;
+    setDownloadingId(file.id);
+    setError('');
+    try {
+      // Same-origin blob + <a download> works in Chrome; cross-origin downloadUrl does not.
+      const blob = await loadFileBlob(file);
+      triggerBlobDownload(blob, file.name);
+    } catch (err) {
+      console.error('File download failed', err);
+      setError(t.filesDownloadFailed);
+      show(t.filesDownloadFailed);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   const onDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
@@ -839,13 +1068,14 @@ export function FilesPage({ search }: { search: string }) {
                     {t.filesPreview}
                   </button>
                 )}
-                <a
-                  href={fileHref(file)}
-                  download={file.name}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+                <button
+                  type="button"
+                  disabled={downloadingId === file.id}
+                  onClick={() => void downloadFile(file)}
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
                 >
-                  {t.filesDownload}
-                </a>
+                  {downloadingId === file.id ? '…' : t.filesDownload}
+                </button>
                 <button
                   type="button"
                   onClick={() => startRename(file)}
@@ -897,7 +1127,13 @@ export function FilesPage({ search }: { search: string }) {
       )}
 
       {previewFile && (
-        <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} t={t} />
+        <FilePreviewModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+          t={t}
+          onDownload={(f) => void downloadFile(f)}
+          downloading={downloadingId === previewFile.id}
+        />
       )}
     </div>
   );
