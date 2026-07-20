@@ -12,6 +12,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { storage } from '../../lib/firebase';
 import { getRtdbAuthToken, rtdbFetch } from '../../lib/rtdb';
 import { getStorageLimitBytes } from '../../lib/storageQuota';
+import { clientStoragePath, resolvePublicDownloadUrl } from './fileAccess';
 import { FileDownloadButton } from './FileDownloadButton';
 import { FilePreviewModal } from './FilePreviewModal';
 import { FilesLoadingIndicator } from './FilesLoadingIndicator';
@@ -103,6 +104,7 @@ export function FilesPage({ search }: { search: string }) {
   const [newFolderName, setNewFolderName] = useState('');
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
+  const urlHydrateAttempted = useRef(new Set<string>());
 
   useEffect(() => {
     localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
@@ -129,6 +131,7 @@ export function FilesPage({ search }: { search: string }) {
 
     setLoading(true);
     setLoadError('');
+    urlHydrateAttempted.current = new Set();
 
     const paint = (data: { files?: StoredFile[]; folders?: FileFolder[] }) => {
       if (cancelled) return;
@@ -196,6 +199,50 @@ export function FilesPage({ search }: { search: string }) {
       setCurrentFolderId(null);
     }
   }, [currentFolderId, folders]);
+
+  // Fill missing downloadUrl so Ladda ner is always a real instant link.
+  useEffect(() => {
+    if (!user || loading) return;
+    const missing = files.filter(
+      (f) => !fileDownloadUrl(f) && !urlHydrateAttempted.current.has(f.id) && (f.storagePath || f.id),
+    );
+    if (missing.length === 0) return;
+    let cancelled = false;
+
+    for (const file of missing) urlHydrateAttempted.current.add(file.id);
+
+    (async () => {
+      const updates = new Map<string, Partial<StoredFile>>();
+      await Promise.all(
+        missing.slice(0, 30).map(async (file) => {
+          try {
+            const path = clientStoragePath(file, user.uid);
+            const enriched = path ? { ...file, storagePath: path } : file;
+            const url = await resolvePublicDownloadUrl(enriched, user.uid);
+            if (url) {
+              updates.set(file.id, {
+                downloadUrl: url,
+                ...(path ? { storagePath: path } : {}),
+              });
+            }
+          } catch {
+            /* leave button disabled for this row */
+          }
+        }),
+      );
+      if (cancelled || updates.size === 0) return;
+      setFiles((prev) =>
+        prev.map((f) => {
+          const patch = updates.get(f.id);
+          return patch ? { ...f, ...patch } : f;
+        }),
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [files, user, loading]);
 
   const currentFolder = folders.find((f) => f.id === currentFolderId) ?? null;
   const fileCountInFolder = (folderId: string) => files.filter((f) => f.folderId === folderId).length;
@@ -939,10 +986,11 @@ export function FilesPage({ search }: { search: string }) {
         </div>
       ) : null}
 
-      {previewFile && (
+      {previewFile && user && (
         <FilePreviewModal
           key={previewFile.id}
           file={previewFile}
+          uid={user.uid}
           onClose={() => setPreviewFile(null)}
           t={t}
         />

@@ -7,14 +7,23 @@ import {
   verifyUser,
 } from './_lib/firebaseAdmin.js';
 import {
+  downloadFromStorage,
   resolveDownloadUrl,
   resolveStoragePath,
   STORAGE_SCOPE,
 } from './_lib/storageFiles.js';
 
+/** Stay under Vercel Hobby ~4.5MB response limit. */
+const MAX_INLINE_BYTES = 3_500_000;
+
 function allowOrigin(origin) {
   const localDev = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || '');
   return isAllowedOrigin(origin) || localDev;
+}
+
+function asciiFallbackName(name) {
+  const base = String(name || 'file').replace(/[^\x20-\x7E]/g, '_').trim() || 'file';
+  return base.slice(0, 120);
 }
 
 export default async function handler(request, response) {
@@ -41,6 +50,8 @@ export default async function handler(request, response) {
   const fileId = String(request.query?.fileId || '').trim();
   if (!fileId) return response.status(400).json({ error: 'missing-file-id' });
 
+  const format = String(request.query?.format || 'json').toLowerCase();
+
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
     const [dbToken, storageToken] = await Promise.all([
@@ -58,18 +69,47 @@ export default async function handler(request, response) {
       return response.status(404).json({ error: 'no-storage-path' });
     }
 
+    const contentType = file.type || 'application/octet-stream';
+    const fileName = file.name || 'file';
+
+    // Same-origin stream for preview (bypasses Chrome CORS + attachment disposition).
+    if (format === 'inline' || format === 'attachment') {
+      const size = typeof file.size === 'number' ? file.size : 0;
+      if (size > MAX_INLINE_BYTES) {
+        return response.status(413).json({ error: 'too-large-for-proxy', size });
+      }
+
+      const { buffer, contentType: detected } = await downloadFromStorage(storageToken, storagePath);
+      if (buffer.length > MAX_INLINE_BYTES) {
+        return response.status(413).json({ error: 'too-large-for-proxy', size: buffer.length });
+      }
+
+      const mime = detected || contentType;
+      const disposition = format === 'attachment' ? 'attachment' : 'inline';
+      const safeName = asciiFallbackName(fileName);
+      response.setHeader('Content-Type', mime);
+      response.setHeader(
+        'Content-Disposition',
+        `${disposition}; filename="${safeName.replace(/"/g, '')}"`,
+      );
+      response.setHeader('Cache-Control', 'private, max-age=60');
+      response.setHeader('Content-Length', String(buffer.length));
+      return response.status(200).send(buffer);
+    }
+
     const { downloadUrl } = await resolveDownloadUrl(
       storageToken,
       storagePath,
-      file.type || 'application/octet-stream',
+      contentType,
       false,
     );
 
     return response.status(200).json({
       downloadUrl,
       storagePath,
-      name: file.name || 'file',
-      type: file.type || 'application/octet-stream',
+      name: fileName,
+      type: contentType,
+      size: typeof file.size === 'number' ? file.size : undefined,
     });
   } catch (error) {
     console.error('file-download failed', error);
