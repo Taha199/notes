@@ -39,11 +39,16 @@ export function FilePreviewModal({
 }) {
   const href = fileHref(file);
   const mode = previewModeFor(file);
+  const fileKey = `${file.id}:${file.downloadUrl || ''}:${file.storagePath || ''}:${file.inlinePending ? '1' : '0'}`;
   const [textContent, setTextContent] = useState('');
   const [docxHtml, setDocxHtml] = useState('');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(
-    mode === 'pdf' || mode === 'text' || mode === 'docx' || file.inlinePending === true,
+    mode === 'pdf'
+    || mode === 'text'
+    || mode === 'docx'
+    || file.inlinePending === true
+    || (mode === 'image' && !href),
   );
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadError, setLoadError] = useState(false);
@@ -61,7 +66,8 @@ export function FilePreviewModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // PDF: always same-origin blob: URL (Chrome cannot embed Firebase attachment URLs).
+  // PDF: open modal immediately with spinner; load same-origin blob in parallel.
+  // Chrome blanks Firebase attachment URLs in iframes — always use blob:.
   useEffect(() => {
     if (mode !== 'pdf') return;
     let cancelled = false;
@@ -94,16 +100,21 @@ export function FilePreviewModal({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, mode, uid]);
+    // fileKey captures identity + recoverable URL fields without restarting on unrelated renames
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable key
+  }, [fileKey, mode, uid]);
 
-  // Image recovery after direct URL fails, or when inlinePending.
+  // Image: instant <img src={downloadUrl}>; recover via blob when URL missing/fails.
   useEffect(() => {
-    if (mode !== 'image' || !imgFailed || blobUrl) return;
+    if (mode !== 'image') return;
+    const needsBlob = imgFailed || file.inlinePending === true || !href;
+    if (!needsBlob || blobUrl) return;
     let cancelled = false;
     let objectUrl: string | null = null;
     setLoading(true);
     setLoadError(false);
     setMissingInStorage(false);
+    setLoadProgress(0);
     (async () => {
       try {
         objectUrl = await loadPreviewBlobUrl(file, (loaded, total) => {
@@ -127,12 +138,8 @@ export function FilePreviewModal({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, mode, imgFailed, blobUrl, uid]);
-
-  useEffect(() => {
-    if (mode !== 'image' || !file.inlinePending || imgFailed || blobUrl) return;
-    setImgFailed(true);
-  }, [mode, file.inlinePending, imgFailed, blobUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable key
+  }, [fileKey, mode, imgFailed, blobUrl, href, uid]);
 
   useEffect(() => {
     if (mode !== 'text') return;
@@ -154,7 +161,8 @@ export function FilePreviewModal({
       }
     })();
     return () => { cancelled = true; };
-  }, [file, mode, uid, t.filesPreviewFailed, t.filesMissingInStorage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable key
+  }, [fileKey, mode, uid, t.filesPreviewFailed, t.filesMissingInStorage]);
 
   useEffect(() => {
     if (mode !== 'docx') return;
@@ -182,11 +190,13 @@ export function FilePreviewModal({
       }
     })();
     return () => { cancelled = true; };
-  }, [file, mode, uid]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable key
+  }, [fileKey, mode, uid]);
 
-  const imageSrc = blobUrl || (file.inlinePending ? '' : href);
+  const imageSrc = blobUrl || (file.inlinePending || imgFailed ? '' : href);
   const errorMessage = missingInStorage ? t.filesMissingInStorage : t.filesPreviewFailed;
   const showError = loadError || mode === 'unsupported';
+  const showImageSpinner = mode === 'image' && loading && (imgFailed || file.inlinePending || !href || !imageSrc);
 
   return createPortal(
     <div
@@ -223,7 +233,7 @@ export function FilePreviewModal({
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" onClick={(e) => e.stopPropagation()}>
         {mode === 'image' && !loadError && (
-          loading && (imgFailed || file.inlinePending) ? (
+          showImageSpinner ? (
             <div className="text-center text-white">
               <FilesLoadingIndicator text={t.filesLoading} />
               {loadProgress > 0 && (

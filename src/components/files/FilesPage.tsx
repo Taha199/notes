@@ -16,6 +16,7 @@ import {
   isMissingStorageError,
   loadFilesWithFallback,
   migrateInlineFileToStorage,
+  openDownloadUrlNow,
   runBackgroundMigration,
   saveFileMeta,
   saveFolderMeta,
@@ -130,6 +131,21 @@ export function FilesPage({ search }: { search: string }) {
       setCurrentFolderId(null);
     }
   }, [currentFolderId, folders]);
+
+  // Keep open preview in sync when list migration fills downloadUrl/storagePath.
+  useEffect(() => {
+    if (!previewFile) return;
+    const latest = files.find((f) => f.id === previewFile.id);
+    if (!latest) return;
+    if (
+      latest.downloadUrl !== previewFile.downloadUrl
+      || latest.storagePath !== previewFile.storagePath
+      || latest.inlinePending !== previewFile.inlinePending
+      || latest.dataUrl !== previewFile.dataUrl
+    ) {
+      setPreviewFile(latest);
+    }
+  }, [files, previewFile]);
 
   // Client-side migrate only when RTDB fallback still has inline dataUrl.
   useEffect(() => {
@@ -402,6 +418,10 @@ export function FilesPage({ search }: { search: string }) {
 
   const downloadFile = async (file: StoredFile) => {
     if (downloadingId) return;
+    // Open CDN URL synchronously during the click gesture — never buffer the whole file first.
+    if (file.downloadUrl && openDownloadUrlNow(file.downloadUrl, file.name)) {
+      return;
+    }
     setDownloadingId(file.id);
     setError('');
     try {
