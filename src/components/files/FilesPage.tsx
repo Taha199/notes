@@ -12,7 +12,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { storage } from '../../lib/firebase';
-import { rtdbFetch } from '../../lib/rtdb';
+import { getRtdbAuthToken, rtdbFetch } from '../../lib/rtdb';
 import { getStorageLimitBytes } from '../../lib/storageQuota';
 
 interface StoredFile {
@@ -26,6 +26,37 @@ interface StoredFile {
   folderId?: string | null;
   /** Legacy uploads stored inline in Realtime Database */
   dataUrl?: string;
+  /** Server withheld the inline blob; background migrate still pending */
+  inlinePending?: boolean;
+}
+
+const LIST_TIMEOUT_MS = 15_000;
+const UPLOAD_STUCK_MS = 10_000;
+const UPLOAD_TOTAL_MS = 90_000;
+const PROFILE_TIMEOUT_MS = 5_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(label)), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        window.clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** Drop heavy base64 payloads so the UI never holds multi‑MB strings. */
+function lightFileMeta(file: StoredFile): StoredFile {
+  if (!file.dataUrl) return file;
+  const { dataUrl, ...rest } = file;
+  void dataUrl;
+  return { ...rest, inlinePending: true };
 }
 
 interface FileFolder {
@@ -453,6 +484,8 @@ export function FilesPage({ search }: { search: string }) {
     }
   });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -485,43 +518,133 @@ export function FilesPage({ search }: { search: string }) {
     if (!user) {
       setFiles([]);
       setFolders([]);
+      setLoadError('');
       setLoading(false);
       return;
     }
     setLoading(true);
+    setLoadError('');
+    migrationStartedRef.current = false;
+
+    const paintList = (data: {
+      files?: StoredFile[];
+      folders?: FileFolder[];
+    }) => {
+      if (cancelled) return;
+      setFiles(
+        (data.files ?? [])
+          .map(lightFileMeta)
+          .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()),
+      );
+      setFolders(
+        (data.folders ?? []).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+      );
+    };
+
+    const fetchJson = async <T,>(url: string, token: string, signal: AbortSignal): Promise<T> => {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+      });
+      if (!res.ok) throw new Error(`load-failed:${res.status}`);
+      return res.json() as Promise<T>;
+    };
+
     (async () => {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), LIST_TIMEOUT_MS);
       try {
-        const [filesRes, foldersRes] = await Promise.all([
-          rtdbFetch(`/users/${user.uid}/files`),
-          rtdbFetch(`/users/${user.uid}/fileFolders`),
-        ]);
-        const cloudFiles = await filesRes.json();
-        const cloudFolders = await foldersRes.json();
+        const token = await getRtdbAuthToken();
+        if (!token) throw new Error('no-token');
+        if (cancelled) return;
+
+        type ListPayload = {
+          files?: StoredFile[];
+          folders?: FileFolder[];
+          migratedRemaining?: boolean;
+        };
+
+        const data = await fetchJson<ListPayload>('/api/my-files', token, controller.signal);
+        paintList(data);
         if (!cancelled) {
-          setFiles(
-            normalizeList<StoredFile>(cloudFiles).sort(
-              (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
-            ),
-          );
-          setFolders(
-            normalizeList<FileFolder>(cloudFolders).sort(
-              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-            ),
-          );
+          setLoading(false);
+          setLoadError('');
         }
-      } catch {
-        if (!cancelled) {
-          setFiles([]);
-          setFolders([]);
+
+        // Background migration — never blocks the list UI; failures must not clear it.
+        try {
+          let more = data.migratedRemaining === true;
+          let guard = 0;
+          while (more && !cancelled && guard++ < 40) {
+            const migCtrl = new AbortController();
+            const migTimer = window.setTimeout(() => migCtrl.abort(), 60_000);
+            try {
+              const mig = await fetchJson<ListPayload>(
+                '/api/my-files?migrate=1',
+                token,
+                migCtrl.signal,
+              );
+              paintList(mig);
+              more = mig.migratedRemaining === true;
+            } finally {
+              window.clearTimeout(migTimer);
+            }
+          }
+        } catch (migErr) {
+          console.warn('Background file migration failed', migErr);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        // Fallback: direct RTDB (may be huge if legacy dataUrls remain — strip them).
+        try {
+          const fallbackCtrl = new AbortController();
+          const fallbackTimer = window.setTimeout(() => fallbackCtrl.abort(), LIST_TIMEOUT_MS);
+          try {
+            const [filesRes, foldersRes] = await Promise.all([
+              rtdbFetch(`/users/${user.uid}/files`, { signal: fallbackCtrl.signal }),
+              rtdbFetch(`/users/${user.uid}/fileFolders`, { signal: fallbackCtrl.signal }),
+            ]);
+            if (!filesRes.ok || !foldersRes.ok) throw new Error('rtdb-fallback-failed');
+            const cloudFiles = await filesRes.json();
+            const cloudFolders = await foldersRes.json();
+            if (!cancelled) {
+              setFiles(
+                normalizeList<StoredFile>(cloudFiles)
+                  .map(lightFileMeta)
+                  .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()),
+              );
+              setFolders(
+                normalizeList<FileFolder>(cloudFolders).sort(
+                  (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+                ),
+              );
+              setLoadError('');
+            }
+          } finally {
+            window.clearTimeout(fallbackTimer);
+          }
+        } catch {
+          if (!cancelled) {
+            setFiles([]);
+            setFolders([]);
+            const aborted = err instanceof DOMException && err.name === 'AbortError'
+              || (err instanceof Error && /abort|timeout/i.test(err.message));
+            setLoadError(aborted ? t.filesLoadFailed : t.filesLoadFailed);
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        window.clearTimeout(timer);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, reloadNonce, t.filesLoadFailed]);
 
   useEffect(() => {
     if (currentFolderId && !folders.some((f) => f.id === currentFolderId)) {
@@ -529,11 +652,11 @@ export function FilesPage({ search }: { search: string }) {
     }
   }, [currentFolderId, folders]);
 
-  // Background: migrate any legacy inline (base64) files to Storage so future
-  // loads (and the admin panel) stay fast. Runs once, never blocks the UI.
+  // Client-side migrate only when we still have an inline dataUrl (RTDB fallback path).
+  // Prefer server migrate via /api/my-files?migrate=1 — never block list paint.
   useEffect(() => {
     if (!user || migrationStartedRef.current) return;
-    const legacy = files.filter((f) => f.dataUrl && !f.storagePath);
+    const legacy = files.filter((f) => f.dataUrl && !f.storagePath && !f.downloadUrl);
     if (legacy.length === 0) return;
     migrationStartedRef.current = true;
     let cancelled = false;
@@ -616,32 +739,75 @@ export function FilesPage({ search }: { search: string }) {
       || code.includes('permission-denied')
       || code === 'storage/unauthorized'
     ) {
-      return t.filesUploadPermissionDenied;
+      return `${t.filesUploadPermissionDenied}${code ? ` (${code})` : ''}`;
     }
     if (
       code.includes('unauthenticated')
       || code === 'storage/unauthenticated'
       || code === 'auth/user-token-expired'
+      || code === 'no-token'
+      || code === 'no-user'
     ) {
-      return t.filesUploadAuthError;
+      return `${t.filesUploadAuthError}${code ? ` (${code})` : ''}`;
+    }
+    if (
+      code === 'storage/upload-stuck'
+      || code === 'upload-stuck'
+    ) {
+      return t.filesUploadStuck;
     }
     if (
       code.includes('network')
       || code === 'storage/retry-limit-exceeded'
       || code === 'storage/canceled'
+      || code === 'timeout'
       || (err instanceof TypeError && /fetch|network/i.test(err.message))
     ) {
-      return t.filesUploadNetworkError;
+      return `${t.filesUploadNetworkError}${code ? ` (${code})` : ''}`;
     }
     if (code === 'quota-exceeded' || code === 'storage/quota-exceeded') {
       return t.filesQuotaExceeded;
     }
-    return t.filesUploadFailed;
+    return `${t.filesUploadFailed}${code ? ` (${code})` : ''}`;
   };
 
   const updateUploadItem = (key: string, patch: Partial<UploadProgressItem>) => {
     setUploadItems((prev) => prev.map((item) => (item.key === key ? { ...item, ...patch } : item)));
   };
+
+  /** Resumable upload; rejects with storage/upload-stuck if still at 0% after UPLOAD_STUCK_MS. */
+  const uploadResumableOrStuck = (
+    storageRef: ReturnType<typeof ref>,
+    file: File,
+    contentType: string,
+    onProgress: (pct: number) => void,
+  ): Promise<void> => new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef, file, { contentType });
+    let gotBytes = false;
+    const stuckTimer = window.setTimeout(() => {
+      if (!gotBytes) {
+        try { task.cancel(); } catch { /* ignore */ }
+        reject(new Error('storage/upload-stuck'));
+      }
+    }, UPLOAD_STUCK_MS);
+
+    task.on(
+      'state_changed',
+      (snapshot) => {
+        if (snapshot.bytesTransferred > 0) gotBytes = true;
+        const total = snapshot.totalBytes || file.size || 1;
+        onProgress(Math.min(99, Math.round((snapshot.bytesTransferred / total) * 100)));
+      },
+      (err) => {
+        window.clearTimeout(stuckTimer);
+        reject(err);
+      },
+      () => {
+        window.clearTimeout(stuckTimer);
+        resolve();
+      },
+    );
+  });
 
   const uploadOneFile = async (
     file: File,
@@ -649,6 +815,9 @@ export function FilesPage({ search }: { search: string }) {
     onProgress: (pct: number) => void,
   ): Promise<StoredFile> => {
     if (!user) throw new Error('no-user');
+    const token = await getRtdbAuthToken();
+    if (!token) throw new Error('no-token');
+
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const base: Omit<StoredFile, 'downloadUrl' | 'storagePath' | 'dataUrl' | 'folderId'> = {
       id,
@@ -664,22 +833,34 @@ export function FilesPage({ search }: { search: string }) {
     // Realtime Database (inline blobs made the file list download huge/slow).
     const storagePath = `users/${user.uid}/files/${id}/${safeStorageFileName(file.name)}`;
     const storageRef = ref(storage, storagePath);
-    const task = uploadBytesResumable(storageRef, file, { contentType: base.type });
 
-    await new Promise<void>((resolve, reject) => {
-      task.on(
-        'state_changed',
-        (snapshot) => {
-          const total = snapshot.totalBytes || file.size || 1;
-          onProgress(Math.min(99, Math.round((snapshot.bytesTransferred / total) * 100)));
-        },
-        reject,
-        () => resolve(),
-      );
-    });
+    const runUpload = async () => {
+      try {
+        await uploadResumableOrStuck(storageRef, file, base.type, onProgress);
+      } catch (err) {
+        const code = firebaseErrorCode(err);
+        // Chrome custom-domain CORS / hung resumable: fall back to simple uploadBytes.
+        if (
+          code === 'storage/upload-stuck'
+          || code === 'storage/canceled'
+          || code.includes('network')
+          || code === 'storage/retry-limit-exceeded'
+        ) {
+          onProgress(5);
+          await withTimeout(
+            uploadBytes(storageRef, file, { contentType: base.type }),
+            UPLOAD_TOTAL_MS,
+            'upload-bytes-timeout',
+          );
+        } else {
+          throw err;
+        }
+      }
+    };
 
+    await withTimeout(runUpload(), UPLOAD_TOTAL_MS, 'upload-timeout');
     onProgress(100);
-    const downloadUrl = await getDownloadURL(task.snapshot.ref);
+    const downloadUrl = await withTimeout(getDownloadURL(storageRef), 20_000, 'download-url-timeout');
     return { ...withFolder, downloadUrl, storagePath };
   };
 
@@ -732,11 +913,16 @@ export function FilesPage({ search }: { search: string }) {
     try {
       // Quota from already-loaded file list + profile only — never pull the whole
       // /users/{uid} tree (notes/chats/legacy base64), which timed out uploads.
+      // Cap profile wait so a hung auth/RTDB call cannot leave progress at 0%.
       let profile: Record<string, unknown> = {};
       try {
-        const profileRes = await rtdbFetch(`/users/${user.uid}/profile`);
+        const profileRes = await withTimeout(
+          rtdbFetch(`/users/${user.uid}/profile`),
+          PROFILE_TIMEOUT_MS,
+          'profile-timeout',
+        );
         if (profileRes.ok) {
-          const raw = await profileRes.json();
+          const raw = await withTimeout(profileRes.json(), 5_000, 'profile-json-timeout');
           if (raw && typeof raw === 'object') profile = raw as Record<string, unknown>;
         }
       } catch {
@@ -762,7 +948,7 @@ export function FilesPage({ search }: { search: string }) {
           const stored = await uploadOneFile(file, currentFolderId, (pct) => {
             updateUploadItem(key, { progress: pct, status: 'uploading' });
           });
-          await saveFileMeta(stored);
+          await withTimeout(saveFileMeta(stored), 20_000, 'meta-save-timeout');
           uploaded.push(stored);
           updateUploadItem(key, { progress: 100, status: 'done' });
           setFiles((prev) => [stored, ...prev.filter((f) => f.id !== stored.id)]);
@@ -1081,6 +1267,19 @@ export function FilesPage({ search }: { search: string }) {
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
           ⚠️ {error}
+        </div>
+      )}
+
+      {loadError && !loading && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <span>⚠️ {loadError}</span>
+          <button
+            type="button"
+            onClick={() => setReloadNonce((n) => n + 1)}
+            className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900 dark:bg-amber-600"
+          >
+            {t.filesRetry}
+          </button>
         </div>
       )}
 

@@ -1,0 +1,22 @@
+[
+  {
+    "origin": [
+      "https://tahanote.com",
+      "https://www.tahanote.com",
+      "https://notes-woad-pi.vercel.app",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": [
+      "Content-Type",
+      "Authorization",
+      "Content-Length",
+      "User-Agent",
+      "x-goog-resumable",
+      "x-goog-meta-*",
+      "x-firebase-storage-version"
+    ]
+  }
+]

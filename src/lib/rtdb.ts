@@ -19,11 +19,30 @@ export async function waitForAuthUser(maxMs = 8000): Promise<User | null> {
   });
 }
 
+/** Cap getIdToken so a stuck IndexedDB/auth refresh cannot hang list/upload forever (Chrome). */
+const ID_TOKEN_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export async function getRtdbAuthToken(forceRefresh = false): Promise<string | null> {
   const user = auth.currentUser ?? await waitForAuthUser(5000);
   if (!user) return null;
   try {
-    return await user.getIdToken(forceRefresh);
+    return await withTimeout(user.getIdToken(forceRefresh), ID_TOKEN_TIMEOUT_MS);
   } catch {
     return null;
   }
@@ -46,7 +65,7 @@ export async function rtdbUrl(path: string, forceRefresh = false): Promise<strin
 }
 
 /** Default network timeout so a stalled connection never leaves pages spinning forever. */
-const RTDB_TIMEOUT_MS = 60000;
+const RTDB_TIMEOUT_MS = 30000;
 
 async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = RTDB_TIMEOUT_MS): Promise<Response> {
   // Respect a caller-provided signal while still enforcing our own timeout.
