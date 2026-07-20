@@ -12,7 +12,7 @@ import { readApiResponse, requireIdToken } from './apiHelpers';
 import { fileDownloadUrl, safeStorageFileName, type StoredFile } from './fileTypes';
 
 /** Bump when diagnosing deploy cache — visible in DevTools console. */
-export const FILES_ACCESS_VERSION = 'direct-fast-v8';
+export const FILES_ACCESS_VERSION = 'direct-preview-v9';
 
 const RESOLVE_MS = 12_000;
 export const PROXY_MAX_BYTES = 3_500_000;
@@ -203,21 +203,13 @@ export async function findLiveStorageRef(
   return null;
 }
 
-/** Resolve a working media URL via SDK first, then API. */
+/** Resolve a working media URL. Prefer already-saved URLs so preview/download never waits on Storage listing. */
 export async function resolvePublicDownloadUrl(file: StoredFile, uid: string): Promise<string> {
+  const existing = fileDownloadUrl(file);
+  if (existing) return existing;
+
   const live = await findLiveStorageRef(file, uid);
   if (live) return live.downloadUrl;
-
-  const existing = fileDownloadUrl(file);
-  if (existing) {
-    // May be stale — still return as last local guess before API.
-    try {
-      const probe = await withTimeout(fetch(existing, { method: 'HEAD' }), 8_000, 'head-probe');
-      if (probe.ok || probe.status === 405) return existing;
-    } catch {
-      /* continue */
-    }
-  }
 
   const { token } = await requireIdToken();
   const res = await withTimeout(
@@ -296,15 +288,14 @@ export async function loadPreviewBlobUrl(file: StoredFile, uid: string): Promise
 }
 
 /**
- * For image preview: prefer a direct media URL (no CORS blob needed).
+ * For image preview: return direct media URL immediately (no Storage listing, no blob/CORS wait).
  */
 export async function resolveImagePreviewSrc(file: StoredFile, uid: string): Promise<string> {
-  // Same as Safari: prefer a live media URL in <img src>, no blob/CORS needed.
-  const live = await findLiveStorageRef(file, uid);
-  if (live) return live.downloadUrl;
-
   const stored = fileDownloadUrl(file);
   if (stored) return stored;
+
+  const live = await findLiveStorageRef(file, uid);
+  if (live) return live.downloadUrl;
 
   return loadPreviewBlobUrl(file, uid);
 }
@@ -357,22 +348,7 @@ export async function downloadStoredFile(file: StoredFile, uid: string): Promise
     console.warn('[files] SDK resolve failed', err);
   }
 
-  // 3) Last metadata fallback.
-  if (stored) {
-    try {
-      const mediaRes = await withTimeout(fetch(stored), 45_000, 'stored-url-fetch');
-      if (mediaRes.ok) {
-        triggerBlobDownload(ensureTypedBlob(await mediaRes.blob(), file), fileName);
-        return;
-      }
-    } catch {
-      /* fall through — open URL anyway (Safari did this) */
-    }
-    triggerUrlDownload(stored, fileName);
-    return;
-  }
-
-  // 4) API fallback
+  // 3) API fallback
   const { token } = await requireIdToken();
   const res = await withTimeout(
     fetch(
