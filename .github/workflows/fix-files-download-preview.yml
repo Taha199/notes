@@ -1,0 +1,78 @@
+name: Fix files download preview
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-files-download-preview.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Patch files download, preview, and upload speed
+        shell: python
+        run: |
+          from pathlib import Path
+
+          access_path = Path('src/components/files/fileAccess.ts')
+          access = access_path.read_text()
+          access = access.replace("export const FILES_ACCESS_VERSION = 'dual-bucket-v7';", "export const FILES_ACCESS_VERSION = 'direct-fast-v8';")
+
+          old_download_start = """export async function downloadStoredFile(file: StoredFile, uid: string): Promise<void> {\n  console.info(`[files] ${FILES_ACCESS_VERSION} downloadStoredFile`, file.id);\n  const fileName = file.name || 'download';\n\n  // 1) Safari-style: resolve a live media URL and navigate/download it.\n  try {\n    const live = await findLiveStorageRef(file, uid);\n    if (live?.downloadUrl) {\n      try {\n        const blob = await withTimeout(getBlob(live.storageRef), 45_000, 'getBlob-download');\n        triggerBlobDownload(ensureTypedBlob(blob, file), fileName);\n        return;\n      } catch (err) {\n        console.warn('[files] getBlob failed — opening media URL like Safari', err);\n        triggerUrlDownload(live.downloadUrl, fileName);\n        return;\n      }\n    }\n  } catch (err) {\n    console.warn('[files] SDK resolve failed', err);\n  }\n\n  // 2) Stored downloadUrl (may still work even when reconstructed paths 404)\n  const stored = fileDownloadUrl(file);\n"""
+          new_download_start = """export async function downloadStoredFile(file: StoredFile, uid: string): Promise<void> {\n  console.info(`[files] ${FILES_ACCESS_VERSION} downloadStoredFile`, file.id);\n  const fileName = file.name || 'download';\n\n  // 1) Instant path: if metadata already has a Firebase media URL, use it immediately.\n  // Fetching the whole file first made the button look stuck on slower connections.\n  const stored = fileDownloadUrl(file);\n  if (stored) {\n    triggerUrlDownload(stored, fileName);\n    return;\n  }\n\n  // 2) Resolve a live media URL and navigate/download it.\n  try {\n    const live = await findLiveStorageRef(file, uid);\n    if (live?.downloadUrl) {\n      triggerUrlDownload(live.downloadUrl, fileName);\n      return;\n    }\n  } catch (err) {\n    console.warn('[files] SDK resolve failed', err);\n  }\n\n  // 3) Last metadata fallback.\n"""
+          if old_download_start not in access:
+            raise SystemExit('download block start not found')
+          access = access.replace(old_download_start, new_download_start)
+          access = access.replace("  // 3) API fallback\n", "  // 4) API fallback\n")
+          access_path.write_text(access)
+
+          modal_path = Path('src/components/files/FilePreviewModal.tsx')
+          modal = modal_path.read_text()
+          modal = modal.replace(
+            "  loadPreviewBlobUrl,\n  resolveImagePreviewSrc,\n} from './fileAccess';",
+            "  loadPreviewBlobUrl,\n  resolveImagePreviewSrc,\n  resolvePublicDownloadUrl,\n} from './fileAccess';"
+          )
+          old_modal = """        if (mode === 'image') {\n          const url = await resolveImagePreviewSrc(file, uid);\n          if (cancelled) return;\n          if (url.startsWith('blob:')) blobRef.current = url;\n          setSrc(url);\n          return;\n        }\n\n        const blobUrl = await loadPreviewBlobUrl(file, uid);\n"""
+          new_modal = """        if (mode === 'image') {\n          const url = await resolveImagePreviewSrc(file, uid);\n          if (cancelled) return;\n          if (url.startsWith('blob:')) blobRef.current = url;\n          setSrc(url);\n          return;\n        }\n\n        if (mode === 'pdf') {\n          const url = await resolvePublicDownloadUrl(file, uid);\n          if (cancelled) return;\n          setSrc(url);\n          return;\n        }\n\n        const blobUrl = await loadPreviewBlobUrl(file, uid);\n"""
+          if old_modal not in modal:
+            raise SystemExit('preview modal block not found')
+          modal = modal.replace(old_modal, new_modal)
+          modal_path.write_text(modal)
+
+          files_path = Path('src/components/files/FilesPage.tsx')
+          files = files_path.read_text()
+          old_loop = """      for (let i = 0; i < selected.length; i++) {\n        const file = selected[i];\n        const key = progressKeys[i];\n        try {\n          const stored = await uploadOneFile(file, currentFolderId, (pct) => {\n            updateUploadItem(key, { progress: pct, status: 'uploading' });\n          });\n          await withTimeout(saveFileMeta(stored), 20_000, 'meta-save-timeout');\n          uploaded.push(stored);\n          updateUploadItem(key, { progress: 100, status: 'done' });\n          setFiles((prev) => sortFiles([stored, ...prev.filter((f) => f.id !== stored.id)]));\n        } catch (err) {\n          console.error('File upload failed', err);\n          failureMessages.push(`${file.name}: ${uploadErrorMessage(err)}`);\n          updateUploadItem(key, { status: 'error' });\n        }\n      }\n"""
+          new_loop = """      const uploadAndSave = async (file: File, key: string) => {\n        try {\n          const stored = await uploadOneFile(file, currentFolderId, (pct) => {\n            updateUploadItem(key, { progress: pct, status: 'uploading' });\n          });\n          await withTimeout(saveFileMeta(stored), 20_000, 'meta-save-timeout');\n          uploaded.push(stored);\n          updateUploadItem(key, { progress: 100, status: 'done' });\n          setFiles((prev) => sortFiles([stored, ...prev.filter((f) => f.id !== stored.id)]));\n        } catch (err) {\n          console.error('File upload failed', err);\n          failureMessages.push(`${file.name}: ${uploadErrorMessage(err)}`);\n          updateUploadItem(key, { status: 'error' });\n        }\n      };\n\n      const CONCURRENT_UPLOADS = 3;\n      for (let i = 0; i < selected.length; i += CONCURRENT_UPLOADS) {\n        const chunk = selected.slice(i, i + CONCURRENT_UPLOADS);\n        await Promise.all(chunk.map((file, offset) => uploadAndSave(file, progressKeys[i + offset])));\n      }\n"""
+          if old_loop not in files:
+            raise SystemExit('upload loop not found')
+          files = files.replace(old_loop, new_loop)
+          files_path.write_text(files)
+
+          Path('.github/workflows/fix-files-download-preview.yml').unlink(missing_ok=True)
+      - name: Verify build
+        run: npm install && npm run build
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          git add src/components/files/fileAccess.ts src/components/files/FilePreviewModal.tsx src/components/files/FilesPage.tsx .github/workflows/fix-files-download-preview.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Fix file preview downloads and upload speed"
+          git push
+# trigger: 2026-07-20-1
