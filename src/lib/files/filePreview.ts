@@ -122,26 +122,32 @@ export async function resolveFileDownloadUrl(
     return existing;
   }
 
+  // Server resolves old/new bucket locations in one request. Prefer this over
+  // probing every candidate path in the browser (each getDownloadURL has a 5s
+  // timeout and made the download button sit on an ellipsis for a long time).
+  try {
+    const token = await getRtdbAuthToken();
+    if (token) {
+      const res = await fetch(
+        `/api/file-download?fileId=${encodeURIComponent(file.id)}&format=json`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (res.ok) {
+        const data = await res.json() as { downloadUrl?: string | null };
+        const url = (data.downloadUrl || '').trim();
+        if (url) return url;
+      }
+    }
+  } catch {
+    /* fall back to direct SDK resolution */
+  }
+
   const paths = candidateStoragePaths(file, uid);
   for (const path of paths) {
     const url = await tryExistingUrl(path, storageBuckets);
     if (url) return url;
   }
-
-  try {
-    const token = await getRtdbAuthToken();
-    if (!token) return null;
-    const res = await fetch(
-      `/api/file-download?fileId=${encodeURIComponent(file.id)}&format=json`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    if (!res.ok) return null;
-    const data = await res.json() as { downloadUrl?: string | null };
-    const url = (data.downloadUrl || '').trim();
-    return url || null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 /**
@@ -186,7 +192,9 @@ export function navigateToDownloadUrl(href: string): void {
 
 /**
  * Load file bytes as a same-origin-friendly Blob (preview / legacy fallback only).
- * Order: dataUrl → downloadUrl → getBytes/getBlob → fresh URL fetch → API
+ * Order: dataUrl → getBytes/getBlob (auth SDK, no CORS) → downloadUrl fetch →
+ * fresh URL fetch → API. Chrome PDF preview needs a same-origin blob:; the SDK
+ * path avoids hanging XHR when Storage CORS is missing on the download URL.
  */
 export async function loadFileBlob(
   file: StoredFile,
@@ -199,14 +207,6 @@ export async function loadFileBlob(
     return ensurePdfMime(blob, file);
   }
 
-  if (file.downloadUrl) {
-    try {
-      return await fetchBlobWithProgress(file.downloadUrl, file, onProgress);
-    } catch {
-      /* fall through — URL may be stale */
-    }
-  }
-
   const timeoutMs = blobTimeoutMs(file);
   const paths = candidateStoragePaths(file, uid);
   for (const path of paths) {
@@ -214,6 +214,14 @@ export async function loadFileBlob(
     if (blob) {
       onProgress?.(blob.size, blob.size);
       return ensurePdfMime(blob, file);
+    }
+  }
+
+  if (file.downloadUrl) {
+    try {
+      return await fetchBlobWithProgress(file.downloadUrl, file, onProgress);
+    } catch {
+      /* fall through — URL may be stale or CORS may be missing */
     }
   }
 
