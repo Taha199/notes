@@ -47,6 +47,7 @@ export {
 } from './fileApi';
 
 export {
+  MAX_RTDB_FILE_SIZE,
   dataUrlToBlob,
   uploadFileToStorage,
   migrateInlineFileToStorage,

@@ -5,18 +5,12 @@ import {
   readServiceAccount,
   RTDB_SCOPES,
   verifyUser,
-  writeRtdb,
 } from './_lib/firebaseAdmin.js';
 import {
-  STORAGE_SCOPE,
-  dataUrlToBuffer,
   resolveStoragePath,
   safeStorageFileName,
   storagePathFromDownloadUrl,
-  uploadToStorage,
 } from './_lib/storageFiles.js';
-
-const MAX_MIGRATIONS_PER_CALL = 5;
 
 export const config = {
   maxDuration: 60,
@@ -53,45 +47,22 @@ function json(response, status, body, origin) {
   return response.status(status).json(body);
 }
 
-/** Always expose a usable storagePath; never ship base64 blobs to the browser. */
+/**
+ * Metadata-only list entry. Never ship base64 to the browser.
+ * Inline RTDB files (dataUrl, no downloadUrl) stay as inlinePending — do NOT invent
+ * a Storage path that does not exist (Friday ≤7MB path).
+ */
 function toListEntry(file, uid) {
   const stripped = stripBlob(file);
+  if (file.dataUrl && !file.downloadUrl) {
+    return { ...stripped, inlinePending: true };
+  }
   const storagePath = resolveStoragePath(stripped, uid)
     || (stripped.downloadUrl ? storagePathFromDownloadUrl(stripped.downloadUrl) : undefined)
     || (uid && stripped.id && stripped.name
       ? `users/${uid}/files/${stripped.id}/${safeStorageFileName(stripped.name)}`
       : undefined);
-  const base = storagePath ? { ...stripped, storagePath } : stripped;
-  if (file.dataUrl && !file.downloadUrl) {
-    return { ...base, inlinePending: true };
-  }
-  return base;
-}
-
-async function migrateLegacyBatch(files, uid, dbToken, storageToken) {
-  let migrated = 0;
-  const updatedById = new Map();
-  for (const file of files) {
-    if (!(file.dataUrl && !file.downloadUrl) || migrated >= MAX_MIGRATIONS_PER_CALL) continue;
-    try {
-      const { buffer, contentType } = dataUrlToBuffer(file.dataUrl);
-      const objectPath = resolveStoragePath(file, uid)
-        || `users/${uid}/files/${file.id}/${safeStorageFileName(file.name)}`;
-      const downloadUrl = await uploadToStorage(storageToken, objectPath, buffer, contentType || file.type);
-      const clean = { ...stripBlob(file), downloadUrl, storagePath: objectPath };
-      if (await writeRtdb(dbToken, `/users/${uid}/files/${file.id}`, clean)) {
-        migrated += 1;
-        updatedById.set(file.id, clean);
-      }
-    } catch {
-      /* keep legacy inline for a later pass */
-    }
-  }
-  const remaining = files.some((file) => {
-    if (updatedById.has(file.id)) return false;
-    return !!(file.dataUrl && !file.downloadUrl);
-  });
-  return { updatedById, remaining };
+  return storagePath ? { ...stripped, storagePath } : stripped;
 }
 
 export default async function handler(request, response) {
@@ -118,54 +89,29 @@ export default async function handler(request, response) {
   if (!account) return json(response, 403, { error: 'forbidden' }, origin);
 
   if (request.method === 'POST') {
-    // Disabled: service-account GCS uploads 404 ("bucket does not exist").
-    // Browser clients must use Firebase SDK uploadBytes on firebasestorage.app
-    // (Friday / b18c0ca path). Legacy dataUrl migration still uses uploadToStorage
-    // via Firebase Storage REST on GET ?migrate=1.
+    // Disabled: broken server GCS proxy. Client uses Friday dual-path upload.
     return json(response, 501, {
       error: 'proxy-upload-disabled',
-      details: 'Use client Firebase Storage uploadBytes',
+      details: 'Use client dual-path upload (dataUrl ≤7MB, Storage for larger)',
     }, origin);
   }
-
-  const doMigrate = String(request.query?.migrate || '') === '1';
 
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
     const uid = account.uid;
 
-    // Fast list: metadata only — never block the UI on Storage uploads.
-    if (!doMigrate) {
-      const dbToken = await getGoogleAccessToken(serviceAccount, RTDB_SCOPES);
-      const [filesRaw, foldersRaw] = await Promise.all([
-        readNodeStrict(dbToken, `/users/${uid}/files`),
-        readNodeStrict(dbToken, `/users/${uid}/fileFolders`),
-      ]);
-      const files = normalizeList(filesRaw);
-      const folders = normalizeList(foldersRaw);
-      return response.status(200).json({
-        files: files.map((f) => toListEntry(f, uid)),
-        folders,
-        migratedRemaining: files.some((f) => f.dataUrl && !f.downloadUrl),
-      });
-    }
-
-    // Background migrate: small batches after the list has already painted.
-    const [dbToken, storageToken] = await Promise.all([
-      getGoogleAccessToken(serviceAccount, RTDB_SCOPES),
-      getGoogleAccessToken(serviceAccount, [STORAGE_SCOPE]),
-    ]);
+    // Fast list only. Inline dataUrl files are intentional (Friday ≤7MB) — do not migrate.
+    const dbToken = await getGoogleAccessToken(serviceAccount, RTDB_SCOPES);
     const [filesRaw, foldersRaw] = await Promise.all([
       readNodeStrict(dbToken, `/users/${uid}/files`),
       readNodeStrict(dbToken, `/users/${uid}/fileFolders`),
     ]);
     const files = normalizeList(filesRaw);
     const folders = normalizeList(foldersRaw);
-    const { updatedById, remaining } = await migrateLegacyBatch(files, uid, dbToken, storageToken);
     return response.status(200).json({
-      files: files.map((file) => toListEntry(updatedById.get(file.id) || file, uid)),
+      files: files.map((f) => toListEntry(f, uid)),
       folders,
-      migratedRemaining: remaining,
+      migratedRemaining: false,
     });
   } catch (error) {
     console.error('my-files failed', error);

@@ -13,6 +13,9 @@ import {
   type StoredFile,
 } from './fileTypes';
 
+/** Friday threshold: files at or under this size go inline in RTDB (no Storage). */
+export const MAX_RTDB_FILE_SIZE = 7 * 1024 * 1024;
+
 /** Convert a legacy inline base64/text data URL back into a Blob. */
 export function dataUrlToBlob(dataUrl: string): Blob {
   const commaIdx = dataUrl.indexOf(',');
@@ -28,13 +31,28 @@ export function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([decodeURIComponent(payload)], { type: contentType });
 }
 
+function readFileAsDataUrl(file: File, onProgress?: (pct: number) => void): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('read-failed'));
+    reader.onprogress = (ev) => {
+      if (ev.lengthComputable && ev.total > 0) {
+        onProgress?.(Math.min(95, Math.round((ev.loaded / ev.total) * 100)));
+      }
+    };
+    reader.onload = () => {
+      onProgress?.(100);
+      resolve(String(reader.result));
+    };
+    onProgress?.(5);
+    reader.readAsDataURL(file);
+  });
+}
+
 /**
- * Upload file bytes to Storage FIRST, then return metadata for RTDB.
- * Never writes RTDB until Storage succeeds.
- *
- * Friday working path (b18c0ca): client SDK uploadBytes + getDownloadURL only.
- * No server proxy — GCS JSON API via service account returns "bucket does not exist"
- * for both firebasestorage.app and appspot.com on this project.
+ * Friday upload (b18c0ca):
+ * - ≤7MB → read as dataUrl, save to RTDB only (no Storage — rocket fast)
+ * - >7MB → client SDK uploadBytes + getDownloadURL
  */
 export async function uploadFileToStorage(
   uid: string,
@@ -42,7 +60,6 @@ export async function uploadFileToStorage(
   folderId: string | null,
   onProgress: (pct: number) => void,
 ): Promise<StoredFile> {
-  // Ensure auth is ready (fresh token) before touching Storage.
   const token = await getRtdbAuthToken(true);
   if (!token) throw Object.assign(new Error('no-token'), { code: 'no-token' });
 
@@ -56,7 +73,13 @@ export async function uploadFileToStorage(
   };
   const withFolder = folderId ? { ...base, folderId } : base;
 
-  // Same path shape as Friday FilesPage: users/{uid}/files/{id}/{file.name}
+  // Small files: inline dataUrl in RTDB — never touch Storage (avoids Chrome CORS).
+  if (file.size <= MAX_RTDB_FILE_SIZE) {
+    const dataUrl = await readFileAsDataUrl(file, onProgress);
+    return { ...withFolder, dataUrl };
+  }
+
+  // Large files only: Friday Storage path with original file.name.
   const storagePath = `users/${uid}/files/${id}/${file.name}`;
   const storageRef = ref(storage, storagePath);
 
@@ -77,8 +100,8 @@ export async function uploadFileToStorage(
 }
 
 /**
- * Move a legacy inline (base64) file into Storage and drop the heavy dataUrl.
- * Storage success FIRST → then RTDB meta (retry via saveFileMeta).
+ * Optional one-off move of an inline file into Storage.
+ * Not used automatically — small files stay as dataUrl (Friday behavior).
  */
 export async function migrateInlineFileToStorage(uid: string, file: StoredFile): Promise<StoredFile> {
   if (!file.dataUrl) return file;

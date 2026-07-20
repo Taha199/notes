@@ -16,11 +16,9 @@ import {
   healMissingDownloadUrls,
   isMissingStorageError,
   loadFilesWithFallback,
-  migrateInlineFileToStorage,
   openDownloadUrlNow,
   prefetchPreview,
   revokePreviewBlobCache,
-  runBackgroundMigration,
   saveFileMeta,
   saveFolderMeta,
   uploadErrorMessage,
@@ -66,7 +64,6 @@ export function FilesPage({ search }: { search: string }) {
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const migrationStartedRef = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
@@ -91,31 +88,15 @@ export function FilesPage({ search }: { search: string }) {
     }
     setLoading(true);
     setLoadError('');
-    migrationStartedRef.current = false;
 
     (async () => {
       try {
-        const { list, fromApi } = await loadFilesWithFallback(user.uid);
+        const { list } = await loadFilesWithFallback(user.uid);
         if (cancelled) return;
         setFiles(list.files);
         setFolders(list.folders);
         setLoading(false);
         setLoadError('');
-
-        if (fromApi && list.migratedRemaining) {
-          try {
-            await runBackgroundMigration(
-              (mig) => {
-                if (cancelled) return;
-                setFiles(mig.files);
-                setFolders(mig.folders);
-              },
-              () => cancelled,
-            );
-          } catch (migErr) {
-            console.warn('Background file migration failed', migErr);
-          }
-        }
       } catch {
         if (!cancelled) {
           setFiles([]);
@@ -150,34 +131,12 @@ export function FilesPage({ search }: { search: string }) {
     }
   }, [files, previewFile]);
 
-  // Client-side migrate only when RTDB fallback still has inline dataUrl.
-  useEffect(() => {
-    if (!user || migrationStartedRef.current) return;
-    const legacy = files.filter((f) => f.dataUrl && !f.storagePath && !f.downloadUrl);
-    if (legacy.length === 0) return;
-    migrationStartedRef.current = true;
-    let cancelled = false;
-    (async () => {
-      for (const file of legacy) {
-        if (cancelled) break;
-        try {
-          const migrated = await migrateInlineFileToStorage(user.uid, file);
-          if (!cancelled) {
-            setFiles((prev) => prev.map((f) => (f.id === file.id ? migrated : f)));
-          }
-        } catch {
-          /* keep inline copy on failure */
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [files, user]);
-
-  // Background-heal missing CDN URLs so the next download/preview click is instant.
+  // Background-heal missing CDN URLs for Storage-backed files only (skip inline dataUrl).
   useEffect(() => {
     if (!user || loading || files.length === 0) return;
     let cancelled = false;
-    const snapshot = files;
+    const snapshot = files.filter((f) => f.storagePath && !f.inlinePending && !f.dataUrl);
+    if (snapshot.length === 0) return;
     void healMissingDownloadUrls(
       snapshot,
       user.uid,
@@ -266,7 +225,7 @@ export function FilesPage({ search }: { search: string }) {
         const file = selected[i];
         const key = progressKeys[i];
         try {
-          // Storage FIRST → then RTDB meta with retry.
+          // ≤7MB → dataUrl in RTDB; >7MB → Storage then RTDB meta.
           const stored = await uploadFileToStorage(user.uid, file, currentFolderId, (pct) => {
             updateUploadItem(key, { progress: pct, status: 'uploading' });
           });

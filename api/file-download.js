@@ -78,25 +78,9 @@ async function resolveDownloadUrlFast(storageToken, file, uid, contentType) {
   throw new Error('no-download-url');
 }
 
-/** When bytes came from RTDB dataUrl, re-upload to Storage and drop the inline blob. */
-async function migrateDataUrlIfNeeded(dbToken, storageToken, file, uid, fileId, resolved) {
-  if (resolved.source !== 'rtdb-dataurl') return resolved;
-  try {
-    const objectPath = resolved.storagePath
-      || `users/${uid}/files/${fileId}/${safeStorageFileName(file.name || 'file')}`;
-    const downloadUrl = await uploadToStorage(
-      storageToken,
-      objectPath,
-      resolved.buffer,
-      resolved.contentType || file.type,
-    );
-    const clean = { ...stripBlob(file), downloadUrl, storagePath: objectPath };
-    await writeRtdb(dbToken, `/users/${uid}/files/${fileId}`, clean);
-    return { ...resolved, storagePath: objectPath, downloadUrl, source: 'rtdb-dataurl-migrated' };
-  } catch (err) {
-    console.warn('dataUrl migrate failed', fileId, err);
-    return resolved;
-  }
+/** Keep Friday inline dataUrl files as-is — do not force them into Storage. */
+async function migrateDataUrlIfNeeded(_dbToken, _storageToken, _file, _uid, _fileId, resolved) {
+  return resolved;
 }
 
 export default async function handler(request, response) {

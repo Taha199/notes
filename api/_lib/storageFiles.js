@@ -267,12 +267,26 @@ function namesMatch(objectPath, fileName) {
 }
 
 /**
- * Resolve bytes: Storage paths → listing → media URL → RTDB dataUrl (last).
- * dataUrl last so we do not skip a real Storage object, but still recover legacy.
+ * Resolve bytes: prefer RTDB dataUrl when there is no real Storage object
+ * (Friday ≤7MB inline path). Otherwise Storage paths → listing → media URL → dataUrl.
  */
 export async function resolveFileBytes(storageToken, file, uid) {
   const tried = [];
   const candidates = candidateStoragePaths(file, uid);
+  const hasRealStorage = Boolean(
+    (file.storagePath && String(file.storagePath).trim())
+    || (file.downloadUrl && String(file.downloadUrl).trim() && !String(file.downloadUrl).startsWith('data:')),
+  );
+
+  // Inline-only files: serve dataUrl immediately (no Storage round-trips).
+  if (
+    !hasRealStorage
+    && typeof file.dataUrl === 'string'
+    && file.dataUrl.startsWith('data:')
+  ) {
+    const { buffer, contentType } = dataUrlToBuffer(file.dataUrl);
+    return { buffer, contentType, storagePath: undefined, source: 'rtdb-dataurl' };
+  }
 
   for (const path of candidates) {
     tried.push(path);

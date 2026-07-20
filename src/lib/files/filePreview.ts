@@ -673,8 +673,9 @@ export async function healMissingDownloadUrls(
   const missing = files.filter((f) => {
     const url = (f.downloadUrl || '').trim();
     if (url && !url.startsWith('data:') && !url.startsWith('blob:')) return false;
-    // Need something to resolve from.
-    return Boolean(f.storagePath || f.inlinePending || f.dataUrl);
+    // Skip intentional inline RTDB files (Friday ≤7MB) — they have no CDN URL.
+    if (f.inlinePending || f.dataUrl?.startsWith('data:')) return false;
+    return Boolean(f.storagePath);
   });
   if (missing.length === 0) return;
 
