@@ -563,6 +563,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (imgResizeModeRef.current) return;
       if (hoveredImgElRef.current) {
         if (target instanceof Node && activeFrameRef.current?.contains(target)) return;
+        if (target instanceof Element && target.closest(`.${NOTE_IMG_TOOLBAR}`)) return;
         hideImageToolbar();
       }
     });
@@ -4555,6 +4556,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           if (isResizingImg.current || imgResizeMode) return;
           const rt = e.relatedTarget;
           if (rt instanceof Node && editorRef.current?.contains(rt)) return;
+          // Toolbar is portaled to <body> — leaving the editor onto it must not dismiss.
+          if (rt instanceof Element && rt.closest(`.${NOTE_IMG_TOOLBAR}`)) return;
           hideImageToolbar();
         }}
         onClick={(event) => {
@@ -4699,32 +4702,57 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         getTableToolbarHost(activeTableCtx.wrap),
       )}
 
-      {/* Image toolbar — portaled inside the image frame */}
+      {/* Image toolbar — portaled to <body> so overflow:hidden on the frame (and
+          justify-center + overflow-x-auto) cannot clip left/right controls. */}
       {editable && hoveredImg && createPortal((() => {
         const imgBtn = 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] text-app-text hover:bg-primary/10 dark:text-gray-100';
+        const fr = hoveredImg.frame.getBoundingClientRect();
+        const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
+        const leave = (e: React.MouseEvent) => {
+          if (isResizingImg.current || imgResizeModeRef.current) return;
+          const rt = e.relatedTarget;
+          if (rt instanceof Node && activeFrameRef.current?.contains(rt)) return;
+          hideImageToolbar();
+        };
         return (
           <div
-            className={`${NOTE_IMG_TOOLBAR} flex w-full flex-nowrap items-center justify-center gap-0.5 overflow-x-auto border-t border-app-border/60 bg-white/96 px-1 py-1 shadow-[0_-4px_12px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-gray-900/96 dark:shadow-[0_-4px_12px_rgba(0,0,0,0.35)]`}
-            onMouseDown={(e) => e.preventDefault()}
+            style={{
+              position: 'fixed',
+              left: 8,
+              right: 8,
+              top: Math.max(8, fr.bottom - NOTE_IMG_TOOLBAR_RESERVE_PX),
+              zIndex: 100000,
+              display: 'flex',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            }}
           >
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
-            <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, hoveredImg.frame); }} className={imgBtn} title={t.titleInsertLineAboveBlock}>↵</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'up'); }} className={imgBtn} title={t.titleMoveImageUp}>↑</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
-            <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; activeFrameRef.current?.classList.remove('note-img-frame--resizing'); setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => {
-              const next = !v;
-              activeFrameRef.current?.classList.toggle('note-img-frame--resizing', next);
-              return next;
-            }); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(); }} className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15" title="Delete">✕</button>
+            <div
+              className={`${NOTE_IMG_TOOLBAR} flex w-max max-w-full flex-nowrap items-center justify-center gap-0.5 overflow-x-auto rounded-lg border border-app-border/60 bg-white/96 px-1.5 py-1 shadow-[0_4px_16px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-gray-900/96 dark:shadow-[0_4px_16px_rgba(0,0,0,0.45)]`}
+              style={{ pointerEvents: 'auto' }}
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={keep}
+              onMouseLeave={leave}
+            >
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
+              <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, hoveredImg.frame); }} className={imgBtn} title={t.titleInsertLineAboveBlock}>↵</button>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'up'); }} className={imgBtn} title={t.titleMoveImageUp}>↑</button>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
+              <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; activeFrameRef.current?.classList.remove('note-img-frame--resizing'); setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => {
+                const next = !v;
+                activeFrameRef.current?.classList.toggle('note-img-frame--resizing', next);
+                return next;
+              }); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(); }} className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15" title="Delete">✕</button>
+            </div>
           </div>
         );
-      })(), hoveredImg.host)}
+      })(), document.body)}
 
       {/* Image resize handles — only after tapping ↔ (avoids accidental resize when viewing).
           Portaled to <body> so position:fixed is viewport-relative even inside
