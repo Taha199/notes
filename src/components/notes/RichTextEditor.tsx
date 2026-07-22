@@ -8,7 +8,9 @@ import {
   insertYouTubeEmbedAtRange,
   normalizeYouTubeEmbeds,
   placeCaretAroundYouTubeEmbed,
+  removeYouTubeEmbed,
   NOTE_YT_FRAME,
+  NOTE_YT_REMOVE,
 } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
@@ -240,7 +242,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   /** Serialize without cloning — avoids duplicating large base64 images in memory. */
   const serializeEditorHtml = (ed: HTMLElement): string => {
     const detached: { parent: HTMLElement; host: HTMLElement }[] = [];
-    ed.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}, .${NOTE_TABLE_TOOLBAR_HOST}`).forEach((node) => {
+    ed.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}, .${NOTE_TABLE_TOOLBAR_HOST}, .${NOTE_YT_REMOVE}`).forEach((node) => {
       if (node instanceof HTMLElement && node.parentElement instanceof HTMLElement) {
         detached.push({ parent: node.parentElement, host: node });
         node.remove();
@@ -257,6 +259,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       clearedFrames.push({ frame: node, scale, active, resizing });
       node.classList.remove('note-img-frame--active', 'note-img-frame--resizing');
       node.style.removeProperty('--note-img-select-scale');
+    });
+    const clearedYt: HTMLElement[] = [];
+    ed.querySelectorAll(`.${NOTE_YT_FRAME}.note-yt-frame--active`).forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      clearedYt.push(node);
+      node.classList.remove('note-yt-frame--active');
     });
     const unwrappedBodies: { wrap: HTMLElement; table: HTMLTableElement }[] = [];
     ed.querySelectorAll(`.${NOTE_TABLE_BODY}`).forEach((node) => {
@@ -280,8 +288,40 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (resizing) frame.classList.add('note-img-frame--resizing');
       if (scale) frame.style.setProperty('--note-img-select-scale', scale);
     });
+    clearedYt.forEach((frame) => frame.classList.add('note-yt-frame--active'));
     // Guarantee any pasted "• …" / "1. …" pseudo-lists persist as real ul/ol.
     return normalizePseudoListsInHtmlString(html);
+  };
+
+  const youtubeRemoveLabel = lang === 'sv' ? 'Ta bort video' : 'Remove video';
+
+  const ensureYouTubeRemoveButton = (frame: HTMLElement) => {
+    if (!(frame instanceof HTMLElement) || !frame.classList.contains(NOTE_YT_FRAME)) return;
+    const existing = frame.querySelector(`:scope > .${NOTE_YT_REMOVE}`);
+    if (existing instanceof HTMLButtonElement) {
+      existing.setAttribute('aria-label', youtubeRemoveLabel);
+      existing.title = youtubeRemoveLabel;
+      return;
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = NOTE_YT_REMOVE;
+    btn.setAttribute('contenteditable', 'false');
+    btn.setAttribute('tabindex', '-1');
+    btn.setAttribute('aria-label', youtubeRemoveLabel);
+    btn.title = youtubeRemoveLabel;
+    btn.textContent = '✕';
+    frame.appendChild(btn);
+  };
+
+  const syncYouTubeRemoveChrome = (ed: HTMLElement) => {
+    if (editable) {
+      ed.querySelectorAll(`.${NOTE_YT_FRAME}`).forEach((node) => {
+        if (node instanceof HTMLElement) ensureYouTubeRemoveButton(node);
+      });
+    } else {
+      ed.querySelectorAll(`.${NOTE_YT_REMOVE}`).forEach((el) => el.remove());
+    }
   };
 
   const normalizeEditorImages = (ed: HTMLElement) => {
@@ -297,6 +337,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (frame instanceof HTMLElement) getToolbarHost(frame);
     });
     normalizeYouTubeEmbeds(ed);
+    syncYouTubeRemoveChrome(ed);
     normalizeAutoLinks(ed);
   };
 
@@ -311,6 +352,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       img.parentNode?.removeChild(img);
       if (next?.nodeName === 'BR') next.parentNode?.removeChild(next);
     }
+  };
+
+  const clearYouTubeSelection = () => {
+    const frame = selectedYtFrameRef.current;
+    if (frame?.isConnected) frame.classList.remove('note-yt-frame--active');
+    selectedYtFrameRef.current = null;
+  };
+
+  const selectYouTubeFrame = (frame: HTMLElement) => {
+    if (selectedYtFrameRef.current && selectedYtFrameRef.current !== frame) {
+      selectedYtFrameRef.current.classList.remove('note-yt-frame--active');
+    }
+    selectedYtFrameRef.current = frame;
+    frame.classList.add('note-yt-frame--active');
+    ensureYouTubeRemoveButton(frame);
+  };
+
+  const removeYouTubeBlock = (frame: HTMLElement) => {
+    clearYouTubeSelection();
+    removeYouTubeEmbed(frame);
   };
 
   const savedRange = useRef<Range | null>(null);
@@ -341,6 +402,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   imgResizeModeRef.current = imgResizeMode;
   const isResizingImg = useRef(false);
   const activeFrameRef = useRef<HTMLElement | null>(null);
+  const selectedYtFrameRef = useRef<HTMLElement | null>(null);
   const hoveredImgElRef = useRef<HTMLImageElement | null>(null);
   const hoverMoveRafRef = useRef<number | null>(null);
 
@@ -2678,16 +2740,38 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return;
     const target = e.target;
     if (!(target instanceof Element)) return;
+
+    const removeBtn = target.closest(`.${NOTE_YT_REMOVE}`);
+    if (removeBtn instanceof HTMLElement) {
+      const frame = removeBtn.closest(`.${NOTE_YT_FRAME}`);
+      if (frame instanceof HTMLElement && ed.contains(frame)) {
+        e.preventDefault();
+        e.stopPropagation();
+        ed.focus({ preventScroll: true });
+        pushUndoCheckpoint();
+        removeYouTubeBlock(frame);
+        saveSel();
+        emitHtml();
+      }
+      return;
+    }
+
     // Let clicks on the iframe control the player; only handle the frame chrome.
-    if (target.closest('iframe')) return;
+    if (target.closest('iframe') || target.closest(`.note-yt-player`)) return;
     const frame = target.closest(`.${NOTE_YT_FRAME}`);
-    if (!(frame instanceof HTMLElement) || !ed.contains(frame)) return;
+    if (!(frame instanceof HTMLElement) || !ed.contains(frame)) {
+      if (selectedYtFrameRef.current && !selectedYtFrameRef.current.contains(target)) {
+        clearYouTubeSelection();
+      }
+      return;
+    }
 
     const rect = frame.getBoundingClientRect();
     const midY = rect.top + rect.height / 2;
     const position = e.clientY < midY ? 'before' : 'after';
     e.preventDefault();
     ed.focus({ preventScroll: true });
+    selectYouTubeFrame(frame);
     placeCaretAroundYouTubeEmbed(frame, position);
     saveSel();
     emitHtml();
@@ -3118,6 +3202,40 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return false;
     }
 
+    // Selected YouTube embed: Backspace removes only the video.
+    const selectedYt = selectedYtFrameRef.current;
+    if (selectedYt?.isConnected && ed.contains(selectedYt)) {
+      e.preventDefault();
+      removeYouTubeBlock(selectedYt);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return handled();
+    }
+
+    // Caret at start of block after a YouTube embed → remove the embed only.
+    {
+      const ytBlock = getLineBlock(range.startContainer, ed);
+      if (
+        ytBlock
+        && ytBlock.tagName !== 'LI'
+        && !ytBlock.closest('li')
+        && !ytBlock.classList.contains(NOTE_YT_FRAME)
+        && isCaretAtStartOfBlock(ytBlock, range)
+      ) {
+        const prev = ytBlock.previousElementSibling;
+        if (prev instanceof HTMLElement && prev.classList.contains(NOTE_YT_FRAME)) {
+          e.preventDefault();
+          removeYouTubeBlock(prev);
+          placeCaretInBlock(ytBlock, true);
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return handled();
+        }
+      }
+    }
+
     if (tryCompletePendingListMarginExit(range, ed)) {
       e.preventDefault();
       return handled();
@@ -3244,6 +3362,41 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
       return false;
     }
+
+    // Selected YouTube embed: Delete removes only the video.
+    const selectedYt = selectedYtFrameRef.current;
+    if (selectedYt?.isConnected && ed.contains(selectedYt)) {
+      e.preventDefault();
+      removeYouTubeBlock(selectedYt);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return true;
+    }
+
+    // Caret at end of block before a YouTube embed → remove the embed only.
+    {
+      const ytBlock = getLineBlock(range.startContainer, ed);
+      if (
+        ytBlock
+        && ytBlock.tagName !== 'LI'
+        && !ytBlock.closest('li')
+        && !ytBlock.classList.contains(NOTE_YT_FRAME)
+        && isCaretAtEndOfBlock(ytBlock, range)
+      ) {
+        const next = ytBlock.nextElementSibling;
+        if (next instanceof HTMLElement && next.classList.contains(NOTE_YT_FRAME)) {
+          e.preventDefault();
+          removeYouTubeBlock(next);
+          placeCaretInBlock(ytBlock, false);
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return true;
+        }
+      }
+    }
+
     const li = resolveListItemAtSelection(range, ed);
     if (!li || !isLiEffectivelyEmpty(li)) return false;
     e.preventDefault();
@@ -4223,6 +4376,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         }}
         onBlur={() => {
           hideImageToolbar();
+          clearYouTubeSelection();
           if (tableToolbarClickRef.current) {
             tableToolbarClickRef.current = false;
             flushEmitHtml();
@@ -4304,6 +4458,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             const promoted = promotePseudoListsToNative(live);
             const listsCleared = cleanupOrphanEmptyLists(live);
             const ytChanged = normalizeYouTubeEmbeds(live);
+            syncYouTubeRemoveChrome(live);
             const linkChanged = normalizeAutoLinks(live);
             const tableChanged = normalizeTablesInEditor(live);
             if (promoted || listsCleared || ytChanged || linkChanged || tableChanged) {
@@ -4362,6 +4517,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               if (videoId) {
                 e.preventDefault();
                 insertYouTubeEmbedAtRange(sel.getRangeAt(0), videoId, plainTrimmed);
+                syncYouTubeRemoveChrome(ed);
                 saveSel();
                 emitHtml();
                 return;
@@ -4382,6 +4538,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             normalizePastedBlocks(live);
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             normalizeYouTubeEmbeds(live);
+            syncYouTubeRemoveChrome(live);
             normalizeAutoLinks(live);
             normalizeTablesInEditor(live);
             readCommandState();

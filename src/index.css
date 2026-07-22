@@ -293,6 +293,7 @@ body {
 .note-yt-frame,
 .note-content .note-yt-frame,
 [contenteditable] .note-yt-frame {
+  position: relative;
   display: block;
   width: 100%;
   max-width: 32rem;
@@ -308,6 +309,74 @@ body {
 .dark [contenteditable] .note-yt-frame {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(17, 24, 39, 0.28);
+}
+
+.note-yt-frame--active,
+.note-content .note-yt-frame--active,
+[contenteditable] .note-yt-frame--active {
+  border-color: rgba(83, 74, 183, 0.45);
+  box-shadow: 0 0 0 1px rgba(83, 74, 183, 0.2);
+}
+
+.dark .note-yt-frame--active,
+.dark .note-content .note-yt-frame--active,
+.dark [contenteditable] .note-yt-frame--active {
+  border-color: rgba(83, 74, 183, 0.4);
+  box-shadow: 0 0 0 1px rgba(83, 74, 183, 0.25);
+}
+
+/* Editor-only delete control — stripped on serialize */
+.note-yt-frame__remove,
+.note-content .note-yt-frame__remove,
+[contenteditable] .note-yt-frame__remove {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.96);
+  color: #dc2626;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
+  transition: opacity 0.12s ease;
+}
+
+.dark .note-yt-frame__remove,
+.dark .note-content .note-yt-frame__remove,
+.dark [contenteditable] .note-yt-frame__remove {
+  background: rgba(17, 24, 39, 0.96);
+  color: #fca5a5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.note-yt-frame:hover > .note-yt-frame__remove,
+.note-yt-frame--active > .note-yt-frame__remove,
+.note-content .note-yt-frame:hover > .note-yt-frame__remove,
+.note-content .note-yt-frame--active > .note-yt-frame__remove,
+[contenteditable] .note-yt-frame:hover > .note-yt-frame__remove,
+[contenteditable] .note-yt-frame--active > .note-yt-frame__remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.note-yt-frame__remove:hover {
+  background: #fef2f2;
+}
+
+.dark .note-yt-frame__remove:hover {
+  background: rgba(239, 68, 68, 0.18);
 }
 
 .note-yt-link,

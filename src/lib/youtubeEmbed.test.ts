@@ -6,6 +6,7 @@ import {
   ensureYouTubeEmbedCaretSiblingsIn,
   insertYouTubeEmbedAtRange,
   normalizeYouTubeEmbeds,
+  removeYouTubeEmbed,
 } from './youtubeEmbed';
 
 describe('youtubeEmbed caret siblings', () => {
@@ -55,18 +56,37 @@ describe('youtubeEmbed caret siblings', () => {
     expect(readonly.querySelector(`.${NOTE_YT_FRAME}`)?.nextSibling).toBeNull();
   });
 
-  it('ensureYouTubeEmbedCaretSiblingsIn updates every embed', () => {
+  it('removeYouTubeEmbed deletes only the frame and keeps caret siblings', () => {
     const root = document.createElement('div');
-    root.appendChild(createYouTubeEmbedElement('aaaaaaaaaaa'));
-    root.appendChild(document.createElement('div')).innerHTML = '<br>';
-    root.appendChild(createYouTubeEmbedElement('bbbbbbbbbbb'));
+    root.contentEditable = 'true';
+    document.body.appendChild(root);
+    const before = document.createElement('div');
+    before.textContent = 'Question text';
+    const frame = createYouTubeEmbedElement('dQw4w9WgXcQ');
+    const after = document.createElement('div');
+    after.innerHTML = '<br>';
+    root.append(before, frame, after);
 
-    expect(ensureYouTubeEmbedCaretSiblingsIn(root)).toBe(true);
-    const frames = root.querySelectorAll(`.${NOTE_YT_FRAME}`);
-    expect(frames).toHaveLength(2);
-    frames.forEach((frame) => {
-      expect(frame.previousSibling).toBeTruthy();
-      expect(frame.nextSibling).toBeTruthy();
-    });
+    expect(removeYouTubeEmbed(frame)).toBe(true);
+    expect(root.querySelector(`.${NOTE_YT_FRAME}`)).toBeNull();
+    expect(root.textContent).toContain('Question text');
+    expect(root.contains(before)).toBe(true);
+    root.remove();
+  });
+
+  it('removeYouTubeEmbed collapses duplicate empty caret sentinels', () => {
+    const root = document.createElement('div');
+    root.contentEditable = 'true';
+    const prev = document.createElement('div');
+    prev.innerHTML = '<br>';
+    const frame = createYouTubeEmbedElement('dQw4w9WgXcQ');
+    const next = document.createElement('div');
+    next.innerHTML = '<br>';
+    root.append(prev, frame, next);
+
+    expect(removeYouTubeEmbed(frame)).toBe(true);
+    expect(root.querySelector(`.${NOTE_YT_FRAME}`)).toBeNull();
+    expect(root.children).toHaveLength(1);
+    expect(root.firstElementChild).toBe(prev);
   });
 });

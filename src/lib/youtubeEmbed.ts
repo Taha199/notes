@@ -1,6 +1,7 @@
 export const NOTE_YT_FRAME = 'note-yt-frame';
 export const NOTE_YT_LINK = 'note-yt-link';
 export const NOTE_YT_PLAYER = 'note-yt-player';
+export const NOTE_YT_REMOVE = 'note-yt-frame__remove';
 
 const YOUTUBE_VIDEO_ID_RE = /[\w-]{11}/;
 
@@ -113,6 +114,52 @@ export function placeCaretAroundYouTubeEmbed(frame: HTMLElement, position: 'befo
   const sel = window.getSelection();
   sel?.removeAllRanges();
   sel?.addRange(range);
+}
+
+function isEmptyCaretSentinel(node: Node | null): boolean {
+  if (!(node instanceof HTMLElement)) return false;
+  if (node.classList.contains(NOTE_YT_FRAME)) return false;
+  if (node.getAttribute('contenteditable') === 'false') return false;
+  const text = node.textContent?.replace(/\u200B/g, '').trim() ?? '';
+  if (text) return false;
+  return !node.querySelector('img, table, iframe, .note-table-wrap, .note-img-frame, .note-yt-frame');
+}
+
+function placeCaretInSibling(node: Node | null, collapseToStart: boolean): boolean {
+  if (!(node instanceof HTMLElement)) return false;
+  if (node.classList.contains(NOTE_YT_FRAME)) return false;
+  if (node.getAttribute('contenteditable') === 'false') return false;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  range.collapse(collapseToStart);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  return true;
+}
+
+/**
+ * Remove only the YouTube embed frame. Leaves surrounding text / Q&A card intact.
+ * Places the caret in an adjacent editable block when possible.
+ */
+export function removeYouTubeEmbed(frame: HTMLElement): boolean {
+  if (!(frame instanceof HTMLElement) || !frame.classList.contains(NOTE_YT_FRAME)) return false;
+  if (!frame.parentNode) return false;
+
+  const prev = frame.previousSibling;
+  const next = frame.nextSibling;
+  frame.remove();
+
+  // If both caret sentinels are empty, drop the trailing one so we don't leave a double blank.
+  if (isEmptyCaretSentinel(prev) && isEmptyCaretSentinel(next) && next instanceof HTMLElement) {
+    next.remove();
+    placeCaretInSibling(prev, false);
+    return true;
+  }
+
+  if (placeCaretInSibling(next, true)) return true;
+  if (placeCaretInSibling(prev, false)) return true;
+  return true;
 }
 
 function findYouTubeUrls(text: string): { index: number; length: number; videoId: string; url: string }[] {
