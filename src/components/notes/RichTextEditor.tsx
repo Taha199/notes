@@ -2,7 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
-import { extractYouTubeVideoId, insertYouTubeEmbedAtRange, normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
+import {
+  extractYouTubeVideoId,
+  ensureYouTubeEmbedCaretSiblingsIn,
+  insertYouTubeEmbedAtRange,
+  normalizeYouTubeEmbeds,
+  placeCaretAroundYouTubeEmbed,
+  NOTE_YT_FRAME,
+} from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
@@ -2615,11 +2622,75 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return;
     const sel = window.getSelection();
     if (!sel?.rangeCount || !sel.isCollapsed) return;
-    const target = canInsertLineAboveAtCaret(ed, sel.getRangeAt(0));
+    const range = sel.getRangeAt(0);
+    const block = getLineBlock(range.startContainer, ed);
+    if (block) {
+      const prev = block.previousElementSibling;
+      if (prev instanceof HTMLElement && prev.classList.contains(NOTE_YT_FRAME)) {
+        e.preventDefault();
+        placeCaretAroundYouTubeEmbed(prev, 'before');
+        saveSel();
+        return;
+      }
+      if (block.classList.contains(NOTE_YT_FRAME)) {
+        e.preventDefault();
+        placeCaretAroundYouTubeEmbed(block, 'before');
+        saveSel();
+        return;
+      }
+    }
+    const target = canInsertLineAboveAtCaret(ed, range);
     if (!target) return;
     e.preventDefault();
     insertEmptyLineAboveBlock(ed, target);
     finishNewLineEditing(ed);
+  };
+
+  const handleEditorYouTubeArrowDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowDown' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || !sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const block = getLineBlock(range.startContainer, ed);
+    if (!block) return;
+
+    const next = block.nextElementSibling;
+    if (next instanceof HTMLElement && next.classList.contains(NOTE_YT_FRAME)) {
+      e.preventDefault();
+      placeCaretAroundYouTubeEmbed(next, 'after');
+      saveSel();
+      emitHtml();
+      return;
+    }
+    if (block.classList.contains(NOTE_YT_FRAME)) {
+      e.preventDefault();
+      placeCaretAroundYouTubeEmbed(block, 'after');
+      saveSel();
+      emitHtml();
+    }
+  };
+
+  const handleYouTubeEmbedMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!editable || e.button !== 0) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    // Let clicks on the iframe control the player; only handle the frame chrome.
+    if (target.closest('iframe')) return;
+    const frame = target.closest(`.${NOTE_YT_FRAME}`);
+    if (!(frame instanceof HTMLElement) || !ed.contains(frame)) return;
+
+    const rect = frame.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const position = e.clientY < midY ? 'before' : 'after';
+    e.preventDefault();
+    ed.focus({ preventScroll: true });
+    placeCaretAroundYouTubeEmbed(frame, position);
+    saveSel();
+    emitHtml();
   };
 
   const applyBlockAlignment = (align: BlockAlign) => {
@@ -2676,13 +2747,21 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const normalizeEmptyFontBlocks = (ed: HTMLElement) => {
     ed.querySelectorAll<HTMLElement>('div, p').forEach((block) => {
       if (block.closest('li, ul, ol')) return;
+      if (
+        block.classList.contains(NOTE_YT_FRAME)
+        || block.classList.contains(NOTE_IMG_FRAME)
+        || block.classList.contains('note-table-wrap')
+        || block.closest(`.${NOTE_YT_FRAME}, .${NOTE_IMG_FRAME}, .note-table-wrap`)
+      ) {
+        return;
+      }
       block.querySelectorAll<HTMLElement>('span[style*="font-size"]').forEach((span) => {
         const text = span.textContent?.replace(/\u200B/g, '').trim() ?? '';
         if (!text && !span.querySelector('img')) span.remove();
       });
       const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
-      // Blocks that hold an image have no text but must not be wiped.
-      if (!text && !block.querySelector('img')) {
+      // Blocks that hold media have no text but must not be wiped.
+      if (!text && !block.querySelector('img, table, iframe, .note-table-wrap, .note-img-frame, .note-yt-frame')) {
         block.innerHTML = '<br>';
         block.style.removeProperty('font-size');
         block.style.removeProperty('line-height');
@@ -2693,8 +2772,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     for (let i = 1; i < topBlocks.length - 1; i++) {
       const block = topBlocks[i];
       if (!['DIV', 'P'].includes(block.tagName)) continue;
+      if (
+        block.classList.contains(NOTE_YT_FRAME)
+        || block.classList.contains(NOTE_IMG_FRAME)
+        || block.classList.contains('note-table-wrap')
+      ) {
+        continue;
+      }
       const text = block.textContent?.replace(/\u200B/g, '').trim() ?? '';
-      if (text || block.querySelector('img')) continue;
+      if (text || block.querySelector('img, table, iframe, .note-table-wrap, .note-img-frame, .note-yt-frame')) continue;
+      // Keep empty caret sentinels adjacent to YouTube embeds.
+      if (
+        topBlocks[i - 1]?.classList.contains(NOTE_YT_FRAME)
+        || topBlocks[i + 1]?.classList.contains(NOTE_YT_FRAME)
+      ) {
+        continue;
+      }
       const prevText = topBlocks[i - 1].textContent?.replace(/\u200B/g, '').trim() ?? '';
       const nextText = topBlocks[i + 1].textContent?.replace(/\u200B/g, '').trim() ?? '';
       if (prevText && nextText) block.remove();
@@ -4107,6 +4200,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         onMouseDown={(e) => {
           const ed = editorRef.current;
           if (!ed) return;
+          handleYouTubeEmbedMouseDown(e);
           handleCenteredLineClick(e);
           clearPendingFontMarker();
           requestAnimationFrame(() => sanitizeCaretFontContext(ed));
@@ -4119,8 +4213,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           const ed = editorRef.current;
           if (!ed) return;
           sanitizeCaretFontContext(ed);
+          const ytSiblings = ensureYouTubeEmbedCaretSiblingsIn(ed);
           // Fix already-pasted ChatGPT "• …" lines into real lists on focus.
-          if (promotePseudoListsToNative(ed)) {
+          const lists = promotePseudoListsToNative(ed);
+          if (ytSiblings || lists) {
             readCommandState();
             emitHtml();
           }
@@ -4149,6 +4245,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           handleEditorEnter(e);
           handleEditorShiftEnter(e);
           handleEditorArrowUp(e);
+          handleEditorYouTubeArrowDown(e);
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             requestAnimationFrame(() => {
               const ed = editorRef.current;

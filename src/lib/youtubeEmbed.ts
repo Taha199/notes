@@ -53,6 +53,68 @@ export function createYouTubeEmbedElement(videoId: string, watchUrl?: string): H
   return frame;
 }
 
+function createEmptyCaretBlock(): HTMLDivElement {
+  const div = document.createElement('div');
+  div.setAttribute('dir', 'auto');
+  div.innerHTML = '<br>';
+  return div;
+}
+
+/** True when a sibling can host the caret (text / br / editable block). */
+function isCaretAnchorSibling(node: Node | null): boolean {
+  if (!node) return false;
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent?.length ?? 0) > 0;
+  if (node.nodeName === 'BR') return true;
+  if (!(node instanceof HTMLElement)) return false;
+  if (node.getAttribute('contenteditable') === 'false') return false;
+  if (node.classList.contains(NOTE_YT_FRAME)) return false;
+  return true;
+}
+
+/**
+ * Ensure editable blocks exist immediately before and after a YouTube embed so
+ * contenteditable can place a caret around the non-editable iframe wrapper.
+ */
+export function ensureYouTubeEmbedCaretSiblings(frame: HTMLElement): boolean {
+  if (!(frame instanceof HTMLElement) || !frame.classList.contains(NOTE_YT_FRAME)) return false;
+  const parent = frame.parentNode;
+  if (!parent) return false;
+
+  let changed = false;
+  if (!isCaretAnchorSibling(frame.previousSibling)) {
+    parent.insertBefore(createEmptyCaretBlock(), frame);
+    changed = true;
+  }
+  if (!isCaretAnchorSibling(frame.nextSibling)) {
+    const after = createEmptyCaretBlock();
+    if (frame.nextSibling) parent.insertBefore(after, frame.nextSibling);
+    else parent.appendChild(after);
+    changed = true;
+  }
+  return changed;
+}
+
+/** Ensure every YouTube embed in `root` has caret anchors before and after. */
+export function ensureYouTubeEmbedCaretSiblingsIn(root: HTMLElement): boolean {
+  let changed = false;
+  root.querySelectorAll(`.${NOTE_YT_FRAME}`).forEach((node) => {
+    if (node instanceof HTMLElement && ensureYouTubeEmbedCaretSiblings(node)) changed = true;
+  });
+  return changed;
+}
+
+export function placeCaretAroundYouTubeEmbed(frame: HTMLElement, position: 'before' | 'after'): void {
+  ensureYouTubeEmbedCaretSiblings(frame);
+  const target = position === 'before' ? frame.previousSibling : frame.nextSibling;
+  if (!(target instanceof HTMLElement)) return;
+  const range = document.createRange();
+  range.selectNodeContents(target);
+  range.collapse(position === 'before');
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
 function findYouTubeUrls(text: string): { index: number; length: number; videoId: string; url: string }[] {
   const matches: { index: number; length: number; videoId: string; url: string }[] = [];
   for (const pattern of YOUTUBE_URL_PATTERNS) {
@@ -148,6 +210,13 @@ export function normalizeYouTubeEmbeds(root: HTMLElement): boolean {
     const iframe = node.querySelector('iframe');
     const expectedSrc = `https://www.youtube-nocookie.com/embed/${videoId}`;
     if (iframe instanceof HTMLIFrameElement && !iframe.getAttribute('src')) iframe.src = expectedSrc;
+    // Ensure caret siblings in editable roots only (not read-only displays).
+    const editableRoot =
+      root.isContentEditable === true
+      || root.contentEditable === 'true'
+      || root.getAttribute('contenteditable') === 'true'
+      || !!root.closest('[contenteditable="true"]');
+    if (editableRoot && ensureYouTubeEmbedCaretSiblings(node)) changed = true;
   });
 
   return changed;
@@ -157,11 +226,20 @@ export function insertYouTubeEmbedAtRange(range: Range, videoId: string, watchUr
   range.deleteContents();
   const embed = createYouTubeEmbedElement(videoId, watchUrl);
   range.insertNode(embed);
+  ensureYouTubeEmbedCaretSiblings(embed);
 
-  const after = document.createRange();
-  after.setStartAfter(embed);
-  after.collapse(true);
+  const after = embed.nextSibling;
   const sel = window.getSelection();
   sel?.removeAllRanges();
-  sel?.addRange(after);
+  if (after instanceof HTMLElement) {
+    const afterRange = document.createRange();
+    afterRange.selectNodeContents(after);
+    afterRange.collapse(true);
+    sel?.addRange(afterRange);
+  } else {
+    const afterRange = document.createRange();
+    afterRange.setStartAfter(embed);
+    afterRange.collapse(true);
+    sel?.addRange(afterRange);
+  }
 }
