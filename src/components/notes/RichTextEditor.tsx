@@ -239,6 +239,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         node.remove();
       }
     });
+    // Ephemeral selection chrome must not persist into saved HTML.
+    const clearedFrames: { frame: HTMLElement; scale: string; active: boolean; resizing: boolean }[] = [];
+    ed.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      const active = node.classList.contains('note-img-frame--active');
+      const resizing = node.classList.contains('note-img-frame--resizing');
+      const scale = node.style.getPropertyValue('--note-img-select-scale');
+      if (!active && !resizing && !scale) return;
+      clearedFrames.push({ frame: node, scale, active, resizing });
+      node.classList.remove('note-img-frame--active', 'note-img-frame--resizing');
+      node.style.removeProperty('--note-img-select-scale');
+    });
     const unwrappedBodies: { wrap: HTMLElement; table: HTMLTableElement }[] = [];
     ed.querySelectorAll(`.${NOTE_TABLE_BODY}`).forEach((node) => {
       if (!(node instanceof HTMLElement) || !(node.parentElement instanceof HTMLElement)) return;
@@ -256,6 +268,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       nextBody.appendChild(table);
     });
     detached.forEach(({ parent, host }) => parent.appendChild(host));
+    clearedFrames.forEach(({ frame, scale, active, resizing }) => {
+      if (active) frame.classList.add('note-img-frame--active');
+      if (resizing) frame.classList.add('note-img-frame--resizing');
+      if (scale) frame.style.setProperty('--note-img-select-scale', scale);
+    });
     // Guarantee any pasted "• …" / "1. …" pseudo-lists persist as real ul/ol.
     return normalizePseudoListsInHtmlString(html);
   };
@@ -327,9 +344,27 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     rect: img.getBoundingClientRect(),
   });
 
+  /** Toolbar is ~38px tall; scale image so that space opens at the bottom for the overlay. */
+  const NOTE_IMG_TOOLBAR_RESERVE_PX = 38;
+
+  const clearImageSelectionChrome = (frame: HTMLElement | null) => {
+    if (!frame) return;
+    frame.classList.remove('note-img-frame--active', 'note-img-frame--resizing');
+    frame.style.removeProperty('--note-img-select-scale');
+  };
+
+  const applyImageSelectScale = (img: HTMLImageElement, frame: HTMLElement) => {
+    // offsetHeight ignores CSS transform, so re-entry while scaled stays stable.
+    const layoutH = img.offsetHeight || img.getBoundingClientRect().height;
+    const scale = layoutH > 0
+      ? Math.max(0.72, Math.min(1, (layoutH - NOTE_IMG_TOOLBAR_RESERVE_PX) / layoutH))
+      : 0.9;
+    frame.style.setProperty('--note-img-select-scale', String(scale));
+  };
+
   const hideImageToolbar = () => {
     if (isResizingImg.current || imgResizeModeRef.current) return;
-    activeFrameRef.current?.classList.remove('note-img-frame--active');
+    clearImageSelectionChrome(activeFrameRef.current);
     activeFrameRef.current = null;
     hoveredImgElRef.current = null;
     setHoveredImg(null);
@@ -435,9 +470,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const frame = ensureImageFrame(img, ed);
     if (hoveredImgElRef.current === img && activeFrameRef.current === frame) return;
     if (activeFrameRef.current && activeFrameRef.current !== frame) {
-      activeFrameRef.current.classList.remove('note-img-frame--active');
+      clearImageSelectionChrome(activeFrameRef.current);
     }
+    applyImageSelectScale(img, frame);
     frame.classList.add('note-img-frame--active');
+    if (imgResizeModeRef.current) frame.classList.add('note-img-frame--resizing');
     activeFrameRef.current = frame;
     hoveredImgElRef.current = img;
     setHoveredImg(syncHoveredImg(img, frame));
@@ -3719,6 +3756,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       isResizingImg.current = false;
       if (resizeStarted) {
         const frame = ensureImageFrame(img, ed);
+        applyImageSelectScale(img, frame);
         setHoveredImg(syncHoveredImg(img, frame));
         emitHtml();
       }
@@ -4290,6 +4328,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               return;
             }
             setHoveredImg(null);
+            clearImageSelectionChrome(activeFrameRef.current);
+            activeFrameRef.current = null;
+            hoveredImgElRef.current = null;
             setImgResizeMode(false);
           }
         }}
@@ -4409,7 +4450,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         const imgBtn = 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] text-app-text hover:bg-primary/10 dark:text-gray-100';
         return (
           <div
-            className={`${NOTE_IMG_TOOLBAR} flex w-full flex-nowrap items-center justify-center gap-0.5 overflow-x-auto border-t border-app-border/60 bg-white/96 px-1 py-1 dark:border-white/10 dark:bg-gray-900/96`}
+            className={`${NOTE_IMG_TOOLBAR} flex w-full flex-nowrap items-center justify-center gap-0.5 overflow-x-auto border-t border-app-border/60 bg-white/96 px-1 py-1 shadow-[0_-4px_12px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-gray-900/96 dark:shadow-[0_-4px_12px_rgba(0,0,0,0.35)]`}
             onMouseDown={(e) => e.preventDefault()}
           >
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
@@ -4420,8 +4461,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'up'); }} className={imgBtn} title={t.titleMoveImageUp}>↑</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
             <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => !v); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; activeFrameRef.current?.classList.remove('note-img-frame--resizing'); setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => {
+              const next = !v;
+              activeFrameRef.current?.classList.toggle('note-img-frame--resizing', next);
+              return next;
+            }); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(); }} className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15" title="Delete">✕</button>
           </div>
         );
