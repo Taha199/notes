@@ -95,7 +95,7 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
           )}
           {expanded ? (
             <div
-              className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100 [&_img]:mx-auto [&_img]:my-2 [&_img]:block [&_img]:h-auto [&_img]:max-h-64 [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:rounded-lg [&_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+              className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_.note-img-frame]:cursor-zoom-in [&_.note-img-frame]:max-w-full [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:max-h-none [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:cursor-zoom-in [&_.note-img-frame_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
               dangerouslySetInnerHTML={{
                 __html: hasSearch
                   ? highlightHtmlContent(previewHtml, search, hitCounter, activeSearchHitIndex)

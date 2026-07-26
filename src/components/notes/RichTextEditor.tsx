@@ -311,7 +311,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     img.style.margin = '0';
     img.style.borderRadius = '0';
     frame.style.display = 'block';
-    frame.style.width = 'fit-content';
+    if (!frame.style.width) frame.style.width = 'fit-content';
     frame.style.maxWidth = '100%';
     getToolbarHost(frame);
     return frame;
@@ -427,7 +427,29 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
     });
     ed.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((frame) => {
-      if (frame instanceof HTMLElement) getToolbarHost(frame);
+      if (!(frame instanceof HTMLElement)) return;
+      getToolbarHost(frame);
+      // Migrate legacy px width on <img> onto the frame so view mode matches edit.
+      const img = frame.querySelector(':scope > img');
+      if (!(img instanceof HTMLImageElement)) return;
+      const imgW = img.style.width;
+      if ((!frame.style.width || frame.style.width === 'fit-content') && imgW && imgW.endsWith('px')) {
+        const px = parseFloat(imgW);
+        const maxW = Math.max(120, ed.clientWidth - 32);
+        if (px > 0 && maxW > 0) {
+          const pct = Math.min(100, Math.max(8, (px / maxW) * 100));
+          frame.style.width = `${Math.round(pct * 10) / 10}%`;
+          frame.style.maxWidth = '100%';
+          img.style.width = '100%';
+          img.style.maxWidth = '100%';
+          if (!img.style.height || img.style.height === 'auto') img.style.height = 'auto';
+          img.style.maxHeight = 'none';
+        }
+      } else if (frame.style.width && frame.style.width.endsWith('%')) {
+        img.style.width = '100%';
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = 'none';
+      }
     });
     normalizeYouTubeEmbeds(ed);
     syncYouTubeRemoveChrome(ed);
@@ -2655,8 +2677,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return;
     const frame = ensureImageFrame(img, ed);
     frame.style.display = 'block';
-    frame.style.width = 'fit-content';
     frame.style.maxWidth = '100%';
+    // Keep author-chosen width (% or px); only default to fit-content when unset.
+    if (!frame.style.width) frame.style.width = 'fit-content';
     img.style.marginLeft = '0';
     img.style.marginRight = '0';
     if (align === 'center') {
@@ -4147,7 +4170,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     reader.onload = () => {
       const url = reader.result as string;
       ensureFocus(true);
-      document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto"><img src="${url}" loading="lazy" decoding="async" style="display:block;max-width:160px;max-height:160px;height:auto;cursor:zoom-in;" /></div><br>`);
+      document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto" style="width:160px;max-width:100%"><img src="${url}" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;max-height:none;cursor:zoom-in;" /></div><br>`);
       normalizeEditorImages(ed);
       saveSel();
       emitHtml();
@@ -4156,21 +4179,31 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   // ── Image resize: drag a handle to grow/shrink (corner keeps ratio) ────
+  /** Persist width as % of the editor so view/read columns match edit size. */
   const applyImageSize = (img: HTMLImageElement, mode: 'both' | 'width' | 'height', startWidth: number, startHeight: number, ratio: number, maxW: number, dx: number, dy: number) => {
-    img.style.maxWidth = 'none';
+    const frame = img.closest(`.${NOTE_IMG_FRAME}`);
     img.style.maxHeight = 'none';
+    img.style.objectFit = 'contain';
     if (mode === 'height') {
+      // Keep current visual width; only change height in px.
+      img.style.maxWidth = 'none';
       img.style.width = `${Math.round(startWidth)}px`;
       img.style.height = `${Math.max(40, Math.round(startHeight + dy))}px`;
-    } else if (mode === 'width') {
-      const w = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
-      img.style.width = `${w}px`;
-      img.style.height = `${Math.round(startHeight)}px`;
-      img.style.objectFit = 'fill';
-    } else {
-      const w = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
-      img.style.width = `${w}px`;
-      img.style.height = `${Math.round(w * ratio)}px`;
+      if (frame instanceof HTMLElement) {
+        frame.style.width = `${Math.round(startWidth)}px`;
+        frame.style.maxWidth = '100%';
+      }
+      return;
+    }
+    const w = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
+    const pct = Math.min(100, Math.max(8, (w / maxW) * 100));
+    img.style.maxWidth = '100%';
+    img.style.width = '100%';
+    img.style.height = mode === 'width' ? `${Math.max(40, Math.round(startHeight))}px` : 'auto';
+    if (mode === 'width') img.style.objectFit = 'fill';
+    if (frame instanceof HTMLElement) {
+      frame.style.width = `${Math.round(pct * 10) / 10}%`;
+      frame.style.maxWidth = '100%';
     }
   };
 
@@ -4197,7 +4230,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (!resizeStarted) {
         if (Math.hypot(dx, dy) < 4) return;
         resizeStarted = true;
-        img.style.maxWidth = 'none';
         img.style.maxHeight = 'none';
       }
       ev.preventDefault();
@@ -4395,7 +4427,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div ref={editorWrapRef} className={'relative min-w-0 max-w-full w-full overflow-x-hidden ' + (flexToolbar ? 'flex min-h-0 flex-col ' : '') + (editable ? '' : '[&_.note-img-frame]:mx-auto [&_.note-img-frame]:cursor-zoom-in [&_img]:mx-auto [&_img]:block [&_img]:h-auto [&_img]:max-h-[280px] [&_img]:max-w-full [&_img]:cursor-zoom-in [&_img]:object-contain')}>
+    <div ref={editorWrapRef} className={'relative min-w-0 max-w-full w-full overflow-x-hidden ' + (flexToolbar ? 'flex min-h-0 flex-col ' : '') + (editable ? '' : '[&_.note-img-frame]:cursor-zoom-in [&_.note-img-frame]:max-w-full [&_.note-img-frame_img]:block [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:max-h-none [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:cursor-zoom-in [&_.note-img-frame_img]:object-contain')}>
       {/* Toolbar */}
       <div
         className={
