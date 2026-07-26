@@ -1,12 +1,7 @@
 name: Apply quiz image cloud save fix
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/apply-quiz-image-cloud-save-fix.yml
+'on':
+  workflow_dispatch: {}
 
 permissions:
   contents: write
