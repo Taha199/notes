@@ -1,11 +1,12 @@
 name: Apply quiz image cloud save fix
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - .github/workflows/apply-quiz-image-cloud-save-fix.yml
+      - '.github/workflows/apply-quiz-image-cloud-save-fix.yml'
 
 permissions:
   contents: write
@@ -91,9 +92,9 @@ jobs:
   };
 '''
           if old in text:
-            text = text.replace(old, new)
+              text = text.replace(old, new)
           elif 'optimizeImageForCloud' not in text:
-            raise SystemExit('Could not find image insert block')
+              raise SystemExit('Could not find image insert block')
           rt.write_text(text)
 
           ctx = Path('src/contexts/NotesContext.tsx')
