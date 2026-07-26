@@ -429,9 +429,7 @@ body {
 
 .note-content .note-table-wrap,
 [contenteditable] .note-table-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  display: block;
   margin: 0.75rem 0;
   max-width: 100%;
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -443,12 +441,14 @@ body {
 .note-content .note-table-toolbar-host,
 [contenteditable] .note-table-toolbar-host {
   display: block;
-  flex: 0 0 auto;
   position: relative;
   width: 100%;
   margin: 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   background: rgba(108, 99, 255, 0.06);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
 }
 
 .note-content .note-table-toolbar-host:empty,
@@ -467,12 +467,14 @@ body {
   padding: 0.5rem 0.625rem;
   position: relative;
   box-sizing: border-box;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .note-content .note-table-body,
 [contenteditable] .note-table-body {
   display: block;
-  flex: 1 1 auto;
   width: 100%;
   overflow-x: auto;
 }
@@ -486,6 +488,8 @@ body {
   padding: 8px 10px;
   text-align: start;
   vertical-align: top;
+  user-select: text;
+  cursor: text;
 }
 
 .note-content table.note-table th,

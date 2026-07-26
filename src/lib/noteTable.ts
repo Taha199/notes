@@ -158,6 +158,19 @@ export function deleteTable(ctx: TableCellContext) {
   ctx.wrap.remove();
 }
 
+function suppressToolbarHostCaret(host: HTMLElement) {
+  if (host.dataset.noteTableHostBound === '1') return;
+  host.dataset.noteTableHostBound = '1';
+  // Do NOT set contenteditable=false on the host: in Chrome/Safari that makes the
+  // surrounding table wrap behave like a non-editable island, so clicks never land
+  // in cells. Keep the strip non-editable via preventDefault + CSS user-select.
+  host.addEventListener('mousedown', (e) => {
+    const target = e.target;
+    if (target instanceof Element && target.closest('button, [data-note-table-toolbar]')) return;
+    e.preventDefault();
+  });
+}
+
 export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTMLElement; table: HTMLTableElement | null } {
   const existingHost = wrap.querySelector(`:scope > .${NOTE_TABLE_TOOLBAR_HOST}`);
   let toolbarHost: HTMLElement;
@@ -166,9 +179,11 @@ export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTML
   } else {
     toolbarHost = document.createElement('div');
     toolbarHost.className = NOTE_TABLE_TOOLBAR_HOST;
-    toolbarHost.setAttribute('contenteditable', 'false');
     wrap.insertBefore(toolbarHost, wrap.firstChild);
   }
+  // Legacy saved notes may still have contenteditable=false on the host — clear it.
+  toolbarHost.removeAttribute('contenteditable');
+  suppressToolbarHostCaret(toolbarHost);
 
   const table = wrap.querySelector(`:scope > table.${NOTE_TABLE_CLASS}`)
     ?? wrap.querySelector(`:scope > .${NOTE_TABLE_BODY} > table.${NOTE_TABLE_CLASS}`);
@@ -180,6 +195,7 @@ export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTML
       body.className = NOTE_TABLE_BODY;
       wrap.appendChild(body);
     }
+    body.removeAttribute('contenteditable');
     if (table.parentElement !== body) body.appendChild(table);
     if (toolbarHost.nextElementSibling !== body) wrap.insertBefore(body, toolbarHost.nextSibling);
     if (wrap.firstElementChild !== toolbarHost) wrap.insertBefore(toolbarHost, wrap.firstChild);

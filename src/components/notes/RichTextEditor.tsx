@@ -516,6 +516,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const tableWrapsRef = useRef<HTMLElement[]>([]);
   const tableCtxByWrapRef = useRef(new WeakMap<HTMLElement, TableCellContext>());
   const tableWrapIdSeqRef = useRef(0);
+  const tableToolbarHostsRef = useRef(new WeakMap<HTMLElement, HTMLElement>());
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
@@ -580,7 +581,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     activeTableWrapRef.current = ctx.wrap;
     setActiveTableWrap(ctx.wrap);
-    ensureTableWrapStructure(ctx.wrap);
+    const { toolbarHost } = ensureTableWrapStructure(ctx.wrap);
+    tableToolbarHostsRef.current.set(ctx.wrap, toolbarHost);
     if (!ctx.wrap.dataset.noteTableId) {
       tableWrapIdSeqRef.current += 1;
       ctx.wrap.dataset.noteTableId = `nt-${tableWrapIdSeqRef.current}`;
@@ -600,7 +602,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         node instanceof HTMLElement && !!node.querySelector(`table.${NOTE_TABLE_CLASS}`),
     );
     wraps.forEach((wrap) => {
-      ensureTableWrapStructure(wrap);
+      const { toolbarHost } = ensureTableWrapStructure(wrap);
+      tableToolbarHostsRef.current.set(wrap, toolbarHost);
       if (!wrap.dataset.noteTableId) {
         tableWrapIdSeqRef.current += 1;
         wrap.dataset.noteTableId = `nt-${tableWrapIdSeqRef.current}`;
@@ -1086,8 +1089,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const getBlockParent = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
     let el: Node | null = node;
     if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    const cell = closestTableCell(el);
     while (el instanceof HTMLElement && el !== ed) {
+      if (
+        el.classList.contains(NOTE_TABLE_WRAP)
+        || el.classList.contains(NOTE_TABLE_BODY)
+        || el.classList.contains(NOTE_TABLE_TOOLBAR_HOST)
+      ) {
+        return null;
+      }
       if (BLOCK_TAGS.has(el.tagName)) return el;
+      if (cell && el === cell) return null;
       el = el.parentElement;
     }
     return null;
@@ -2445,12 +2457,23 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const getLineBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
     let el: Node | null = node;
     if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
+    const cell = closestTableCell(el);
     let nestedBlock: HTMLElement | null = null;
     while (el instanceof HTMLElement && el !== ed) {
+      // Table chrome (.note-table-body / wrap) is a DIV but must never be treated as a
+      // text line — that was pulling the caret out of cells onto the blank line above.
+      if (
+        el.classList.contains(NOTE_TABLE_WRAP)
+        || el.classList.contains(NOTE_TABLE_BODY)
+        || el.classList.contains(NOTE_TABLE_TOOLBAR_HOST)
+      ) {
+        break;
+      }
       if (el.tagName === 'CENTER') return el;
       // Prefer the list item over ChatGPT's nested <p>/<div> inside <li>.
       if (el.tagName === 'LI') return el;
       if (BLOCK_TAGS.has(el.tagName) && !nestedBlock) nestedBlock = el;
+      if (cell && el === cell) break;
       el = el.parentElement;
     }
     return nestedBlock;
@@ -2465,6 +2488,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     let innermost: HTMLElement | null = null;
     let outermostAligned: HTMLElement | null = null;
     while (el instanceof HTMLElement && el !== ed) {
+      if (
+        el.classList.contains(NOTE_TABLE_WRAP)
+        || el.classList.contains(NOTE_TABLE_BODY)
+        || el.classList.contains(NOTE_TABLE_TOOLBAR_HOST)
+      ) {
+        break;
+      }
       if (el.tagName === 'CENTER') outermostAligned = el;
       if (BLOCK_TAGS.has(el.tagName)) {
         if (!innermost) innermost = el;
@@ -2555,6 +2585,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (el instanceof Node && ed.contains(el)) targetNode = el;
     }
     if (!targetNode || !ed.contains(targetNode)) return;
+
+    // Never hijack clicks inside tables — let the browser place the caret in the cell.
+    const hitEl = targetNode.nodeType === Node.TEXT_NODE ? targetNode.parentElement : (targetNode as Element | null);
+    if (hitEl?.closest?.(`td, th, table, .${NOTE_TABLE_WRAP}, .${NOTE_TABLE_TOOLBAR_HOST}`)) return;
 
     const block = getAlignmentTargetBlock(targetNode, ed);
     if (!block || readBlockAlignment(block) === 'left') return;
@@ -3226,6 +3260,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const sel = window.getSelection();
     if (!sel?.rangeCount) return false;
     const range = sel.getRangeAt(0);
+    // Table cells are not "lines" — leave the caret alone.
+    if (closestTableCell(range.startContainer) || closestTableCell(range.endContainer)) return false;
     const block = getLineBlock(range.startContainer, ed);
     if (!block) return false;
 
@@ -3861,7 +3897,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     // Table-safe path: apply per cell so we never format across td/th/tr structure,
     // and expand a caret-in-cell to the cell contents (same as font size/color).
     let tableRange: Range | null = null;
-    if (document.activeElement === ed) {
+    const active = document.activeElement;
+    if (active === ed || (active instanceof Node && ed.contains(active))) {
       const s = window.getSelection();
       if (s && s.rangeCount > 0 && !s.isCollapsed && ed.contains(s.anchorNode)) {
         tableRange = s.getRangeAt(0);
@@ -3982,7 +4019,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return null;
 
-    if (document.activeElement === ed) {
+    const active = document.activeElement;
+    if (active === ed || (active instanceof Node && ed.contains(active))) {
       const s = window.getSelection();
       if (s && s.rangeCount > 0 && !s.isCollapsed && ed.contains(s.anchorNode)) {
         return s.getRangeAt(0);
@@ -5102,7 +5140,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         document.body,
       )}
 
-      {/* Table toolbars — pinned above every table while edit mode is open */}
+      {/* Table toolbars — pinned above every table while edit mode is open.
+          Hosted in the in-flow strip (not contenteditable=false) so cells stay editable. */}
       {editable && tableWraps.map((wrap) => {
         if (!wrap.isConnected) return null;
         const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
@@ -5113,6 +5152,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           : resolveTableContextAt(table, cached?.rowIndex ?? 0, cached?.colIndex ?? 0, editorRef.current);
         if (!ctx) return null;
         const wrapKey = wrap.dataset.noteTableId ?? `wrap-${tableWraps.indexOf(wrap)}`;
+        let host = tableToolbarHostsRef.current.get(wrap);
+        if (!host?.isConnected || !wrap.contains(host)) {
+          host = getTableToolbarHost(wrap);
+          tableToolbarHostsRef.current.set(wrap, host);
+        }
         return (
           <span key={wrapKey} style={{ display: 'contents' }}>
             {createPortal(
@@ -5133,7 +5177,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                 <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
                 <button type="button" title={t.tableDelete} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => { deleteTable(c); return 'deleted'; }, wrap); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">✕ {t.tableDelete}</button>
               </div>,
-              getTableToolbarHost(wrap),
+              host,
             )}
           </span>
         );
