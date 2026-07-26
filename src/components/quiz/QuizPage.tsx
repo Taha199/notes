@@ -99,22 +99,22 @@ interface QuizItemRowProps {
   canReorder?: boolean;
   questionNumber?: number;
   totalQuestions?: number;
-  onSwapToPosition?: (targetPosition: number) => void;
+  onMoveToPosition?: (targetPosition: number) => void;
 }
 
-const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, questionNumber, totalQuestions, onSwapToPosition }: QuizItemRowProps) {
+const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition }: QuizItemRowProps) {
   const { t } = useLanguage();
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [targetPos, setTargetPos] = useState('');
-  const commitSwap = () => {
+  const commitMove = () => {
     const n = parseInt(targetPos, 10);
     if (!n || n === questionNumber || n < 1 || n > (totalQuestions ?? 0)) {
       setTargetPos('');
       return;
     }
-    onSwapToPosition?.(n);
+    onMoveToPosition?.(n);
     setTargetPos('');
   };
   // Re-hide a revealed card whenever the global toggle flips
@@ -147,12 +147,12 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      commitSwap();
+                      commitMove();
                     }
                     if (e.key === 'Escape') setTargetPos('');
                   }}
-                  onBlur={commitSwap}
-                  placeholder="↔"
+                  onBlur={commitMove}
+                  placeholder="#"
                   title={t.quizReorderHint}
                   aria-label={t.quizReorderAria}
                   className="h-7 w-9 rounded-lg border border-app-border bg-white text-center text-[11px] font-semibold tabular-nums text-app-text outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-white/10 dark:bg-gray-900 dark:text-gray-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
@@ -1144,12 +1144,14 @@ export function QuizPage({
     else setQuizzesOrder(ids);
   };
 
-  const handleSwapToPosition = (itemId: number, targetPosition: number) => {
+  const handleMoveToPosition = (itemId: number, targetPosition: number) => {
     const list = [...orderedItems];
     const fromIdx = list.findIndex((i) => i.id === itemId);
     const toIdx = targetPosition - 1;
     if (fromIdx < 0 || toIdx < 0 || toIdx >= list.length || fromIdx === toIdx) return;
-    [list[fromIdx], list[toIdx]] = [list[toIdx], list[fromIdx]];
+    // Insert-and-shift (not swap): remove from current index, insert at target.
+    const [item] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, item);
     applyItemOrder(list.map((i) => i.id));
   };
 
@@ -1178,7 +1180,7 @@ export function QuizPage({
         canReorder={canReorder}
         questionNumber={questionNumber}
         totalQuestions={orderedItems.length}
-        onSwapToPosition={(targetPosition) => handleSwapToPosition(item.id, targetPosition)}
+        onMoveToPosition={(targetPosition) => handleMoveToPosition(item.id, targetPosition)}
       />
     );
   };
