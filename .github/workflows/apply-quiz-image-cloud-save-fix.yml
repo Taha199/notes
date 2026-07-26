@@ -1,0 +1,258 @@
+name: Apply quiz image cloud save fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-quiz-image-cloud-save-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch editor save and image handling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          rt = Path('src/components/notes/RichTextEditor.tsx')
+          text = rt.read_text()
+          text = text.replace(
+              "import { useEffect, useRef, useState, type ReactNode } from 'react';",
+              "import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';",
+          )
+          text = text.replace(
+              "interface Props {\n  html: string;",
+              "interface Props {\n  html: string;",
+          )
+          if 'export type RichTextEditorHandle' not in text:
+              text = text.replace(
+                  "type EditorSelectionBookmark = {",
+                  "export type RichTextEditorHandle = {\n  flush: () => string;\n};\n\ntype EditorSelectionBookmark = {",
+              )
+          old_sig = "export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {"
+          new_sig = "export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props, ref) {"
+          if old_sig in text:
+              text = text.replace(old_sig, new_sig)
+          elif new_sig not in text:
+              raise SystemExit('RichTextEditor signature not found')
+          marker = "  const flushEmitHtml = () => {\n    const ed = editorRef.current;\n    if (!ed) return;\n    const next = serializeEditorHtml(ed);\n    lastLocalHtmlRef.current = next;\n    onLiveChangeRef.current?.(next);\n    if (emitTimerRef.current) {\n      clearTimeout(emitTimerRef.current);\n      emitTimerRef.current = null;\n    }\n    onChangeRef.current(next);\n  };\n"
+          addition = marker + "\n  useImperativeHandle(ref, () => ({\n    flush: () => {\n      flushEmitHtml();\n      return lastLocalHtmlRef.current;\n    },\n  }), []);\n"
+          if marker in text and 'useImperativeHandle(ref' not in text:
+              text = text.replace(marker, addition)
+          elif 'useImperativeHandle(ref' not in text:
+              raise SystemExit('flushEmitHtml block not found')
+          old_img = """  // ── Image ─────────────────────────────────────────────────────────────
+  const insertImage = (file: File) => {
+    const ed = editorRef.current;
+    if (!ed || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      ensureFocus(true);
+      document.execCommand('insertHTML', false, `<div class=\"${NOTE_IMG_FRAME}\" contenteditable=\"false\" dir=\"auto\"><img src=\"${url}\" loading=\"lazy\" decoding=\"async\" style=\"display:block;max-width:160px;max-height:160px;height:auto;cursor:zoom-in;\" /></div><br>`);
+      normalizeEditorImages(ed);
+      saveSel();
+      emitHtml();
+    };
+    reader.readAsDataURL(file);
+  };
+"""
+          new_img = """  // ── Image ─────────────────────────────────────────────────────────────
+  const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error ?? new Error('Image read failed'));
+    reader.readAsDataURL(file);
+  });
+
+  const optimizeImageForCloud = async (file: File): Promise<string> => {
+    const original = await readFileAsDataUrl(file);
+    if (/image\/(gif|svg\+xml)/i.test(file.type)) return original;
+    try {
+      const img = new Image();
+      img.decoding = 'async';
+      const loaded = new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Image decode failed'));
+      });
+      img.src = original;
+      await loaded;
+      const maxSide = 1600;
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+      const width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+      const height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return original;
+      ctx.drawImage(img, 0, 0, width, height);
+      const compressed = canvas.toDataURL('image/jpeg', 0.86);
+      return compressed.length < original.length ? compressed : original;
+    } catch {
+      return original;
+    }
+  };
+
+  const insertImage = async (file: File) => {
+    const ed = editorRef.current;
+    if (!ed || !file.type.startsWith('image/')) return;
+    const url = await optimizeImageForCloud(file);
+    ensureFocus(true);
+    document.execCommand('insertHTML', false, `<div class=\"${NOTE_IMG_FRAME}\" contenteditable=\"false\" dir=\"auto\"><img src=\"${url}\" loading=\"lazy\" decoding=\"async\" style=\"display:block;max-width:160px;max-height:160px;height:auto;cursor:zoom-in;\" /></div><br>`);
+    normalizeEditorImages(ed);
+    saveSel();
+    flushEmitHtml();
+  };
+"""
+          if old_img in text:
+              text = text.replace(old_img, new_img)
+          elif 'optimizeImageForCloud' not in text:
+              raise SystemExit('insertImage block not found')
+          if text.rstrip().endswith('\n}'):
+              text = text.rstrip()[:-1] + '});\n'
+          elif not text.rstrip().endswith('});'):
+              raise SystemExit('RichTextEditor closing brace not found')
+          rt.write_text(text)
+
+          app = Path('src/components/notes/AppRichTextEditor.tsx')
+          app.write_text("""import { forwardRef, type ComponentPropsWithoutRef } from 'react';
+import { RichTextEditor, type RichTextEditorHandle } from './RichTextEditor';
+
+type Props = ComponentPropsWithoutRef<typeof RichTextEditor>;
+export type AppRichTextEditorHandle = RichTextEditorHandle;
+
+/**
+ * Site-wide rich text writing box.
+ * Same toolbar, list keyboard behavior, and defaults everywhere (notes, quiz, …).
+ */
+export const AppRichTextEditor = forwardRef<AppRichTextEditorHandle, Props>(function AppRichTextEditor(props, ref) {
+  return <RichTextEditor ref={ref} stickyToolbar {...props} />;
+});
+""")
+
+          quiz = Path('src/components/quiz/QuizPage.tsx')
+          q = quiz.read_text()
+          q = q.replace(
+              "import { AppRichTextEditor } from '../notes/AppRichTextEditor';",
+              "import { AppRichTextEditor, type AppRichTextEditorHandle } from '../notes/AppRichTextEditor';",
+          )
+          q = q.replace(
+              "  const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');\n",
+              "  const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');\n  const questionEditorRef = useRef<AppRichTextEditorHandle>(null);\n  const answerEditorRef = useRef<AppRichTextEditorHandle>(null);\n  const explanationEditorRef = useRef<AppRichTextEditorHandle>(null);\n",
+          )
+          old_handle = """  const handleSave = () => {
+    if (!mcq) { onSave(); return; }
+    const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
+    if (kept.length < 2) return;
+    const finalOptions = kept.map((x) => x.o);
+    const newCorrectIndexes = kept
+      .map((x, newIdx) => ({ newIdx, old: x.i }))
+      .filter((x) => correctSet.has(x.old))
+      .map((x) => x.newIdx);
+    const safeCorrects = newCorrectIndexes.length ? newCorrectIndexes : [0];
+    const optionsHtml = finalOptions
+      .map((o, i) => `<div>${OPT_LETTERS[i]}) ${escapeHtml(o)}</div>`)
+      .join('');
+    const composedQ = `${question}<div style=\"margin-top:6px\">${optionsHtml}</div>`;
+    const composedA = safeCorrects.map((ci) => `${OPT_LETTERS[ci]}) ${escapeHtml(finalOptions[ci])} ✓`).join('<br>');
+    onSave({
+      question: composedQ,
+      answer: composedA,
+      options: finalOptions,
+      correctIndexes: safeCorrects,
+      explanation: hasContent(explanation) ? explanation : undefined,
+    });
+  };
+"""
+          new_handle = """  const handleSave = () => {
+    const freshQuestion = questionEditorRef.current?.flush() ?? question;
+    const freshAnswer = answerEditorRef.current?.flush() ?? answer;
+    const freshExplanation = explanationEditorRef.current?.flush() ?? explanation;
+    onChangeQ(freshQuestion);
+    onChangeA(freshAnswer);
+    if (!mcq) {
+      onSave({ question: freshQuestion, answer: freshAnswer });
+      return;
+    }
+    const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
+    if (kept.length < 2) return;
+    const finalOptions = kept.map((x) => x.o);
+    const newCorrectIndexes = kept
+      .map((x, newIdx) => ({ newIdx, old: x.i }))
+      .filter((x) => correctSet.has(x.old))
+      .map((x) => x.newIdx);
+    const safeCorrects = newCorrectIndexes.length ? newCorrectIndexes : [0];
+    const optionsHtml = finalOptions
+      .map((o, i) => `<div>${OPT_LETTERS[i]}) ${escapeHtml(o)}</div>`)
+      .join('');
+    const composedQ = `${freshQuestion}<div style=\"margin-top:6px\">${optionsHtml}</div>`;
+    const composedA = safeCorrects.map((ci) => `${OPT_LETTERS[ci]}) ${escapeHtml(finalOptions[ci])} ✓`).join('<br>');
+    onSave({
+      question: composedQ,
+      answer: composedA,
+      options: finalOptions,
+      correctIndexes: safeCorrects,
+      explanation: hasContent(freshExplanation) ? freshExplanation : undefined,
+    });
+  };
+"""
+          if old_handle in q:
+              q = q.replace(old_handle, new_handle)
+          elif 'questionEditorRef.current?.flush()' not in q:
+              raise SystemExit('handleSave block not found')
+          q = q.replace('<AppRichTextEditor\n            html={question}', '<AppRichTextEditor\n            ref={questionEditorRef}\n            html={question}')
+          q = q.replace('<AppRichTextEditor\n                html={explanation}', '<AppRichTextEditor\n                ref={explanationEditorRef}\n                html={explanation}')
+          q = q.replace('<AppRichTextEditor\n            html={answer}', '<AppRichTextEditor\n            ref={answerEditorRef}\n            html={answer}')
+          old_save_form = """  const handleSaveForm = (formId: string, override?: SavePayload) => {
+    const savedId = flushForm(formId, override, true);
+    if (savedId !== null) finalizedDraftIdsRef.current.add(savedId);
+    closeForm(formId);
+    window.setTimeout(() => {
+      setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));
+    }, 0);
+  };
+"""
+          new_save_form = """  const handleSaveForm = (formId: string, override?: SavePayload) => {
+    const savedId = flushForm(formId, override, true);
+    if (savedId === null) return;
+    finalizedDraftIdsRef.current.add(savedId);
+    closeForm(formId);
+    window.setTimeout(() => {
+      setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));
+    }, 0);
+  };
+"""
+          if old_save_form in q:
+              q = q.replace(old_save_form, new_save_form)
+          elif 'if (savedId === null) return;' not in q:
+              raise SystemExit('handleSaveForm block not found')
+          quiz.write_text(q)
+
+          ctx = Path('src/contexts/NotesContext.tsx')
+          c = ctx.read_text()
+          c = c.replace('    persist({ quizSets: nextSets }, false);', '    persist({ quizSets: nextSets }, forceCloud);')
+          ctx.write_text(c)
+          PY
+      - name: Build
+        run: |
+          npm install
+          npm run build
+      - name: Commit patch
+        run: |
+          rm .github/workflows/apply-quiz-image-cloud-save-fix.yml
+          git config user.name "codex"
+          git config user.email "codex@openai.com"
+          git add src/components/notes/RichTextEditor.tsx src/components/notes/AppRichTextEditor.tsx src/components/quiz/QuizPage.tsx src/contexts/NotesContext.tsx .github/workflows/apply-quiz-image-cloud-save-fix.yml
+          git commit -m "Fix quiz image question cloud saves"
+          git push
