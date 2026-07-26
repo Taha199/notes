@@ -13,7 +13,7 @@ import {
   NOTE_YT_REMOVE,
 } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
   BULLET_PREFIX_RE,
   clipboardToNormalizedHtml,
@@ -508,10 +508,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const [previewZoom, setPreviewZoom] = useState(1);
   const naturalSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [hoveredImg, setHoveredImg] = useState<{ el: HTMLImageElement; frame: HTMLElement; host: HTMLElement; rect: DOMRect } | null>(null);
-  const [activeTableCtx, setActiveTableCtx] = useState<TableCellContext | null>(null);
   const activeTableCtxRef = useRef<TableCellContext | null>(null);
   const activeTableWrapRef = useRef<HTMLElement | null>(null);
   const tableToolbarClickRef = useRef(false);
+  /** All table wraps that should show the row/col toolbar while edit mode is open. */
+  const [tableWraps, setTableWraps] = useState<HTMLElement[]>([]);
+  const tableWrapsRef = useRef<HTMLElement[]>([]);
+  const tableCtxByWrapRef = useRef(new WeakMap<HTMLElement, TableCellContext>());
+  const tableWrapIdSeqRef = useRef(0);
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
@@ -555,31 +559,100 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     setImgResizeMode(false);
   };
 
-  const hideTableToolbar = () => {
+  const clearActiveTableHighlight = () => {
     if (activeTableWrapRef.current) {
       activeTableWrapRef.current.classList.remove('note-table-wrap--active');
       activeTableWrapRef.current = null;
     }
     activeTableCtxRef.current = null;
     setActiveTableWrap(null);
-    setActiveTableCtx(null);
+  };
+
+  const hideTableToolbar = () => {
+    clearActiveTableHighlight();
+    tableWrapsRef.current = [];
+    setTableWraps([]);
   };
 
   const showTableToolbar = (ctx: TableCellContext) => {
-    hideImageToolbar();
     if (activeTableWrapRef.current && activeTableWrapRef.current !== ctx.wrap) {
       activeTableWrapRef.current.classList.remove('note-table-wrap--active');
     }
     activeTableWrapRef.current = ctx.wrap;
     setActiveTableWrap(ctx.wrap);
     ensureTableWrapStructure(ctx.wrap);
+    if (!ctx.wrap.dataset.noteTableId) {
+      tableWrapIdSeqRef.current += 1;
+      ctx.wrap.dataset.noteTableId = `nt-${tableWrapIdSeqRef.current}`;
+    }
+    tableCtxByWrapRef.current.set(ctx.wrap, ctx);
     activeTableCtxRef.current = ctx;
-    setActiveTableCtx(ctx);
   };
 
-  const getWorkingTableContext = (): TableCellContext | null => {
+  const syncVisibleTableWraps = () => {
+    const ed = editorRef.current;
+    if (!ed || !editable) {
+      hideTableToolbar();
+      return;
+    }
+    const wraps = Array.from(ed.querySelectorAll(`.${NOTE_TABLE_WRAP}`)).filter(
+      (node): node is HTMLElement =>
+        node instanceof HTMLElement && !!node.querySelector(`table.${NOTE_TABLE_CLASS}`),
+    );
+    wraps.forEach((wrap) => {
+      ensureTableWrapStructure(wrap);
+      if (!wrap.dataset.noteTableId) {
+        tableWrapIdSeqRef.current += 1;
+        wrap.dataset.noteTableId = `nt-${tableWrapIdSeqRef.current}`;
+      }
+      const existing = tableCtxByWrapRef.current.get(wrap);
+      if (existing?.table.isConnected && wrap.contains(existing.table)) return;
+      const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
+      if (!(table instanceof HTMLTableElement)) return;
+      const ctx = resolveTableContextAt(table, 0, 0, ed);
+      if (ctx) tableCtxByWrapRef.current.set(wrap, ctx);
+    });
+    const same =
+      wraps.length === tableWrapsRef.current.length
+      && wraps.every((wrap, i) => wrap === tableWrapsRef.current[i]);
+    tableWrapsRef.current = wraps;
+    if (!same) setTableWraps(wraps);
+
+    if (wraps.length === 0) {
+      clearActiveTableHighlight();
+      return;
+    }
+
+    const sel = window.getSelection();
+    const fromSel = sel?.rangeCount ? resolveTableContext(sel.anchorNode, ed) : null;
+    if (fromSel) {
+      showTableToolbar(fromSel);
+      return;
+    }
+    const cached = activeTableCtxRef.current;
+    if (cached?.table.isConnected && wraps.includes(cached.wrap)) {
+      const resolved = resolveTableContextAt(cached.table, cached.rowIndex, cached.colIndex, ed);
+      if (resolved) {
+        showTableToolbar(resolved);
+        return;
+      }
+    }
+    const fallback = tableCtxByWrapRef.current.get(wraps[0]);
+    if (fallback) showTableToolbar(fallback);
+  };
+
+  const getWorkingTableContext = (wrap?: HTMLElement | null): TableCellContext | null => {
     const ed = editorRef.current;
     if (!ed) return null;
+    if (wrap) {
+      const cached = tableCtxByWrapRef.current.get(wrap);
+      if (cached?.table.isConnected && wrap.contains(cached.table)) {
+        return resolveTableContextAt(cached.table, cached.rowIndex, cached.colIndex, ed) ?? cached;
+      }
+      const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
+      if (table instanceof HTMLTableElement) return resolveTableContextAt(table, 0, 0, ed);
+      return null;
+    }
     const sel = window.getSelection();
     if (sel?.rangeCount) {
       const fromSel = resolveTableContext(sel.anchorNode, ed);
@@ -592,8 +665,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const refreshActiveTableToolbar = () => {
     const ed = editorRef.current;
-    if (!ed) {
-      hideTableToolbar();
+    if (!ed || !editable) return;
+    // Keep menus mounted for every table in edit mode; only refresh active cell context.
+    if (tableWrapsRef.current.length === 0) {
+      syncVisibleTableWraps();
       return;
     }
     const sel = window.getSelection();
@@ -603,36 +678,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         showTableToolbar(ctx);
         return;
       }
-      if (!(document.activeElement instanceof HTMLElement && document.activeElement.closest('[data-note-table-toolbar]'))) {
-        hideTableToolbar();
-      }
-      return;
     }
-    const cached = activeTableCtxRef.current;
-    if (cached?.table.isConnected) {
-      const resolved = resolveTableContextAt(cached.table, cached.rowIndex, cached.colIndex, ed);
-      if (resolved) {
-        showTableToolbar(resolved);
-        return;
-      }
-    }
-    hideTableToolbar();
+    // Selection left the table — keep toolbars visible; retain last active cell.
   };
 
   const runTableAction = (
     action: (ctx: TableCellContext) => TableEditPosition | false | 'deleted' | void,
+    wrap?: HTMLElement | null,
   ) => {
     tableToolbarClickRef.current = true;
     const ed = editorRef.current;
-    const ctx = getWorkingTableContext();
+    const ctx = getWorkingTableContext(wrap);
     if (!ctx || !ed) return;
     const result = action(ctx);
     if (result === false) return;
     if (result === 'deleted') {
-      hideTableToolbar();
       ed.focus({ preventScroll: true });
       saveSel();
       emitHtml();
+      syncVisibleTableWraps();
       return;
     }
     if (result && typeof result === 'object') {
@@ -645,10 +709,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     ed.focus({ preventScroll: true });
     saveSel();
     emitHtml();
+    syncVisibleTableWraps();
   };
 
   const showImageToolbar = (img: HTMLImageElement) => {
-    hideTableToolbar();
     const ed = editorRef.current;
     if (!ed) return;
     const frame = ensureImageFrame(img, ed);
@@ -2238,6 +2302,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!sel?.rangeCount) return;
 
     const ordered = mode === 'ordered';
+
+    // Lists inside table cells: wrap/toggle list content within the cell only.
+    const cell = closestTableCell(range.startContainer) ?? closestTableCell(range.endContainer);
+    if (cell && ed.contains(cell)) {
+      const existing = cell.querySelector(':scope > ul, :scope > ol');
+      if (existing instanceof HTMLUListElement || existing instanceof HTMLOListElement) {
+        const isOrdered = existing.tagName === 'OL';
+        if (isOrdered === ordered) {
+          unwrapList(existing);
+        } else {
+          const newList = document.createElement(ordered ? 'ol' : 'ul');
+          newList.setAttribute('dir', 'auto');
+          while (existing.firstChild) newList.appendChild(existing.firstChild);
+          existing.replaceWith(newList);
+        }
+      } else {
+        const list = document.createElement(ordered ? 'ol' : 'ul');
+        list.setAttribute('dir', 'auto');
+        const li = document.createElement('li');
+        li.setAttribute('dir', 'auto');
+        while (cell.firstChild) li.appendChild(cell.firstChild);
+        stripBulletPrefixFromLi(li);
+        if (!li.textContent?.replace(/\u200B/g, '').trim() && !li.querySelector('img')) {
+          li.innerHTML = '<br>';
+        }
+        list.appendChild(li);
+        cell.appendChild(list);
+        placeCaretInBlock(li, isLiEmpty(li));
+      }
+      saveSel();
+      readCommandState();
+      emitHtml();
+      setListPalOpen(false);
+      return;
+    }
+
     const caretList = getListContainer(sel.anchorNode, ed);
 
     if (caretList) {
@@ -2357,6 +2457,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const getAlignmentTargetBlock = (node: Node | null, ed: HTMLElement): HTMLElement | null => {
+    const cell = closestTableCell(node);
+    if (cell && ed.contains(cell)) return cell;
+
     let el: Node | null = node;
     if (el?.nodeType === Node.TEXT_NODE) el = el.parentElement;
     let innermost: HTMLElement | null = null;
@@ -2901,6 +3004,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     restoreSel();
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
+
+    const range = sel.getRangeAt(0);
+    const tableCells = collectTableCellsInRange(range, ed);
+    const caretCell = closestTableCell(sel.anchorNode) ?? closestTableCell(sel.focusNode);
+    if (tableCells.length > 0 || (caretCell && ed.contains(caretCell))) {
+      const cells = tableCells.length > 0 ? tableCells : (caretCell ? [caretCell] : []);
+      cells.forEach((cell) => {
+        cell.style.textAlign = align;
+        cell.removeAttribute('align');
+      });
+      saveSel();
+      readCommandState();
+      emitHtml();
+      ed.focus({ preventScroll: true });
+      return;
+    }
 
     let block = getLineBlock(sel.anchorNode, ed);
     if (!block) {
@@ -3738,6 +3857,53 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       ed.focus({ preventScroll: true });
       if (saved) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(saved); }
     }
+
+    // Table-safe path: apply per cell so we never format across td/th/tr structure,
+    // and expand a caret-in-cell to the cell contents (same as font size/color).
+    let tableRange: Range | null = null;
+    if (document.activeElement === ed) {
+      const s = window.getSelection();
+      if (s && s.rangeCount > 0 && !s.isCollapsed && ed.contains(s.anchorNode)) {
+        tableRange = s.getRangeAt(0);
+      }
+    }
+    if (!tableRange) {
+      tableRange =
+        savedFormattingRange.current?.cloneRange()
+        ?? savedRange.current?.cloneRange()
+        ?? liveRange()
+        ?? null;
+    }
+    if (tableRange?.collapsed) {
+      const cell = closestTableCell(tableRange.startContainer) ?? closestTableCell(tableRange.endContainer);
+      if (cell && ed.contains(cell) && cellHasVisibleText(cell)) {
+        const cellRange = document.createRange();
+        cellRange.selectNodeContents(cell);
+        tableRange = cellRange;
+      }
+    }
+    if (tableRange && !tableRange.collapsed && rangeCrossesTableStructure(tableRange)) {
+      const subs = collectTableCellsInRange(tableRange, ed)
+        .map((cell) => intersectRangeWithCellContents(tableRange!, cell))
+        .filter((sub): sub is Range => !!sub && !sub.collapsed);
+      if (subs.length > 0) {
+        const sel = window.getSelection();
+        document.execCommand('styleWithCSS', false, 'true');
+        subs.forEach((sub) => {
+          sel?.removeAllRanges();
+          sel?.addRange(sub);
+          document.execCommand(cmd, false, value);
+        });
+        const last = subs[subs.length - 1];
+        sel?.removeAllRanges();
+        try { sel?.addRange(last); } catch { /* ignore */ }
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return;
+      }
+    }
+
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand(cmd, false, value);
     saveSel();
@@ -4286,6 +4452,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const live = editorRef.current;
     if (live) normalizeTablesInEditor(live);
     emitHtml();
+    syncVisibleTableWraps();
   };
 
   const formatTodayHeaderLabel = () => new Date().toLocaleDateString(lang === 'sv' ? 'sv-SE' : 'en-GB', {
@@ -4397,6 +4564,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     window.addEventListener('scroll', closeAll, true);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', onKey); window.removeEventListener('resize', closeAll); window.removeEventListener('scroll', closeAll, true); };
   }, [listPalOpen]);
+
+  useEffect(() => {
+    if (!editable) {
+      hideTableToolbar();
+      return;
+    }
+    syncVisibleTableWraps();
+  }, [editable, html]);
 
   useEffect(() => {
     if (!editable) return;
@@ -4626,7 +4801,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             flushEmitHtml();
             return;
           }
-          hideTableToolbar();
+          // Keep table menus visible for as long as edit mode stays open.
           flushEmitHtml();
         }}
         onScroll={() => {
@@ -4709,6 +4884,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               readCommandState();
               emitHtml();
             }
+            if (tableChanged) syncVisibleTableWraps();
           });
         }}
         onPaste={(e) => {
@@ -4723,6 +4899,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             const live = editorRef.current;
             if (live) normalizeTablesInEditor(live);
             emitHtml();
+            syncVisibleTableWraps();
             return;
           }
           const tableFromPlain = plain ? plainTextToTableHtml(plain) : null;
@@ -4731,7 +4908,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             ensureFocus(true);
             document.execCommand('insertHTML', false, tableFromPlain);
             saveSel();
+            const live = editorRef.current;
+            if (live) normalizeTablesInEditor(live);
             emitHtml();
+            syncVisibleTableWraps();
             return;
           }
           const plainTrimmed = plain.trim();
@@ -4818,9 +4998,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             const tableCtx = resolveTableContext(event.target as Node, editorRef.current);
             if (tableCtx) {
               showTableToolbar(tableCtx);
-            } else if (!(event.target instanceof Node && activeTableWrapRef.current?.contains(event.target as Node))) {
-              hideTableToolbar();
             }
+            // Keep all table menus visible in edit mode even when clicking outside the table.
             const link = event.target instanceof HTMLElement ? event.target.closest('a[href]') : null;
             if (link instanceof HTMLAnchorElement && !link.closest('.note-yt-player')) {
               event.preventDefault();
@@ -4923,27 +5102,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         document.body,
       )}
 
-      {/* Table toolbar — control box inside the active table wrap */}
-      {editable && activeTableCtx && createPortal(
-        <div
-          data-note-table-toolbar
-          className="note-table-toolbar"
-          onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
-        >
-          <button type="button" title={t.titleInsertLineAboveBlock} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); const ed = editorRef.current; if (ed && activeTableCtx) insertEmptyLineAboveBlock(ed, activeTableCtx.wrap); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10 dark:text-primary-200">↵ {t.insertLineAboveBlock}</button>
-          <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
-          <button type="button" title={t.tableAddRowAbove} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableRow(ctx, 'above')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↑ {t.tableAddRowAbove}</button>
-          <button type="button" title={t.tableAddRowBelow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableRow(ctx, 'below')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↓ {t.tableAddRowBelow}</button>
-          <button type="button" title={t.tableRemoveRow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => removeTableRow(ctx)); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveRow}</button>
-          <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
-          <button type="button" title={t.tableAddColBefore} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableColumn(ctx, 'before')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">← {t.tableAddColBefore}</button>
-          <button type="button" title={t.tableAddColAfter} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => addTableColumn(ctx, 'after')); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">{t.tableAddColAfter} →</button>
-          <button type="button" title={t.tableRemoveCol} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => removeTableColumn(ctx)); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveCol}</button>
-          <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
-          <button type="button" title={t.tableDelete} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((ctx) => { deleteTable(ctx); return 'deleted'; }); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">✕ {t.tableDelete}</button>
-        </div>,
-        getTableToolbarHost(activeTableCtx.wrap),
-      )}
+      {/* Table toolbars — pinned above every table while edit mode is open */}
+      {editable && tableWraps.map((wrap) => {
+        if (!wrap.isConnected) return null;
+        const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
+        if (!(table instanceof HTMLTableElement)) return null;
+        const cached = tableCtxByWrapRef.current.get(wrap);
+        const ctx = (cached?.table.isConnected && wrap.contains(cached.table))
+          ? cached
+          : resolveTableContextAt(table, cached?.rowIndex ?? 0, cached?.colIndex ?? 0, editorRef.current);
+        if (!ctx) return null;
+        const wrapKey = wrap.dataset.noteTableId ?? `wrap-${tableWraps.indexOf(wrap)}`;
+        return (
+          <span key={wrapKey} style={{ display: 'contents' }}>
+            {createPortal(
+              <div
+                data-note-table-toolbar
+                className="note-table-toolbar"
+                onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
+              >
+                <button type="button" title={t.titleInsertLineAboveBlock} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, wrap); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10 dark:text-primary-200">↵ {t.insertLineAboveBlock}</button>
+                <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+                <button type="button" title={t.tableAddRowAbove} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => addTableRow(c, 'above'), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↑ {t.tableAddRowAbove}</button>
+                <button type="button" title={t.tableAddRowBelow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => addTableRow(c, 'below'), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↓ {t.tableAddRowBelow}</button>
+                <button type="button" title={t.tableRemoveRow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => removeTableRow(c), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveRow}</button>
+                <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+                <button type="button" title={t.tableAddColBefore} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => addTableColumn(c, 'before'), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">← {t.tableAddColBefore}</button>
+                <button type="button" title={t.tableAddColAfter} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => addTableColumn(c, 'after'), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">{t.tableAddColAfter} →</button>
+                <button type="button" title={t.tableRemoveCol} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => removeTableColumn(c), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveCol}</button>
+                <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+                <button type="button" title={t.tableDelete} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => { deleteTable(c); return 'deleted'; }, wrap); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">✕ {t.tableDelete}</button>
+              </div>,
+              getTableToolbarHost(wrap),
+            )}
+          </span>
+        );
+      })}
 
       {/* Image toolbar — portaled to <body> so overflow:hidden on the frame cannot
           clip controls; positioned from the selected frame's viewport rect so it
