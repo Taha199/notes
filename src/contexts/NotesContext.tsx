@@ -1453,8 +1453,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
         let quizzes = filterResurrectedTrash(mergeQuizzesForSync(local.quizzes, cloudQuizzes, tombstones), local.quizzes);
+        const cloudQuizIds = new Set(cloudQuizzes.map((q) => q.id));
+        const localOnlyQuizCount = local.quizzes.filter((q) => !cloudQuizIds.has(q.id)).length;
         let quizzesRepair = quizzes.length > cloudQuizzes.length
-          || (local.quizzes.length > 0 && cloudQuizzes.length === 0);
+          || (local.quizzes.length > 0 && cloudQuizzes.length === 0)
+          || localOnlyQuizCount > 0;
 
         const cloudChatsRaw = cloud ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>) : [];
         let chats = mergeChatsForSync(local.chats, cloudChatsRaw).map((c) => ({
@@ -1600,7 +1603,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         });
         markEverHadContent(notes, quizzes, normalizedSets);
         if (needsRepair) {
-          recoveryLog('repairing cloud from local/history');
+          recoveryLog('repairing cloud from local/history', {
+            localOnlyQuizzes: localOnlyQuizCount,
+            quizzes: quizzes.length,
+            cloudQuizzes: cloudQuizzes.length,
+          });
           const repairBody: Record<string, unknown> = { chats, quizFolders: normalizedFolders };
           if (notes.length > 0) repairBody.notes = notes;
           if (quizzes.length > 0) repairBody.quizzes = quizzes;
@@ -1609,7 +1616,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             method: 'PATCH',
             body: JSON.stringify(repairBody),
             headers: { 'Content-Type': 'application/json' },
-          });
+          }).then((res) => {
+            if (res.ok && quizzes.length > 0) {
+              const syncedAt = Date.now();
+              lastLocalSaveAt.current = syncedAt;
+              lastAppliedRemoteSyncAt.current = syncedAt;
+              setCloudSyncedAt(syncedAt);
+              localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+            }
+          }).catch(() => { /* repair best-effort */ });
+          // Dedicated quizzes PUT so mobile always gets the full list even if PATCH merges oddly.
+          if (quizzes.length > 0 && (quizzesRepair || localOnlyQuizCount > 0)) {
+            void rtdbFetch(`/users/${user.uid}/quizzes`, {
+              method: 'PUT',
+              body: JSON.stringify(quizzes),
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
           if (repairQuizStructure || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)) {
             void rtdbFetch(`/users/${user.uid}/quizSets`, {
               method: 'PUT',
@@ -1708,6 +1731,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
               setCloudStatus('error');
             } else {
               setCloudStatus('idle');
+            }
+            // Push any desktop-only quizzes/sets so other devices (mobile) receive them.
+            if (quizzesRef.current.length > 0 || countUserQuizSets(quizSetsRef.current) > 0) {
+              scheduleInstantDataCloudSave({
+                quizzes: quizzesRef.current,
+                quizSets: quizSetsRef.current,
+                quizFolders: quizFoldersRef.current,
+              });
             }
           }
           if (hasDraftContent(draftsRef.current)) {
