@@ -1447,9 +1447,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
         let notes = filterResurrectedTrash(mergeNotesForSync(local.notes, cloudNotes, tombstones), local.notes);
+        const cloudNoteIds = new Set(cloudNotes.map((n) => n.id));
+        const localOnlyNoteCount = local.notes.filter((n) => !cloudNoteIds.has(n.id)).length;
         let notesRepair = notes.length > cloudNotes.length
           || (local.notes.length > 0 && cloudNotes.length === 0)
-          || (local.notes.length > 0 && notes.length > cloudNotes.length);
+          || (local.notes.length > 0 && notes.length > cloudNotes.length)
+          || localOnlyNoteCount > 0;
 
         const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
         let quizzes = filterResurrectedTrash(mergeQuizzesForSync(local.quizzes, cloudQuizzes, tombstones), local.quizzes);
@@ -1617,7 +1620,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify(repairBody),
             headers: { 'Content-Type': 'application/json' },
           }).then((res) => {
-            if (res.ok && quizzes.length > 0) {
+            if (res.ok && (notes.length > 0 || quizzes.length > 0)) {
               const syncedAt = Date.now();
               lastLocalSaveAt.current = syncedAt;
               lastAppliedRemoteSyncAt.current = syncedAt;
@@ -1625,6 +1628,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
               localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
             }
           }).catch(() => { /* repair best-effort */ });
+          if (notes.length > 0 && (notesRepair || localOnlyNoteCount > 0)) {
+            void rtdbFetch(`/users/${user.uid}/notes`, {
+              method: 'PUT',
+              body: JSON.stringify(notes),
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
           // Dedicated quizzes PUT so mobile always gets the full list even if PATCH merges oddly.
           if (quizzes.length > 0 && (quizzesRepair || localOnlyQuizCount > 0)) {
             void rtdbFetch(`/users/${user.uid}/quizzes`, {
@@ -1732,9 +1742,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             } else {
               setCloudStatus('idle');
             }
-            // Push any desktop-only quizzes/sets so other devices (mobile) receive them.
-            if (quizzesRef.current.length > 0 || countUserQuizSets(quizSetsRef.current) > 0) {
+            // Push any desktop-only notes/quizzes/sets so other devices (and refresh) keep them.
+            if (
+              notesRef.current.length > 0
+              || quizzesRef.current.length > 0
+              || countUserQuizSets(quizSetsRef.current) > 0
+            ) {
               scheduleInstantDataCloudSave({
+                notes: notesRef.current,
                 quizzes: quizzesRef.current,
                 quizSets: quizSetsRef.current,
                 quizFolders: quizFoldersRef.current,
@@ -2943,10 +2958,32 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const mutateNotes = (fn: (prev: Note[]) => Note[], instantCloud = false) => {
     setNotes((prev) => {
       const next = fn(prev);
+      notesRef.current = next;
+      // Always flush notes to localStorage immediately — delayed cache lost edits on refresh.
+      localStorage.setItem('malacadhati', JSON.stringify(next));
       persist({ notes: next }, instantCloud);
       if (instantCloud) scheduleInstantDataCloudSave({ notes: next });
       return next;
     });
+  };
+
+  const noteMetaChanged = (patch: Partial<Note>) =>
+    'read' in patch || 'archived' in patch || 'fav' in patch || 'trashed' in patch;
+
+  const noteContentChanged = (patch: Partial<Note>) =>
+    'html' in patch || 'title' in patch || 'text' in patch || 'lastEdited' in patch || 'savedAt' in patch;
+
+  const updateNote = (id: number, patch: Partial<Note>) => {
+    // Content edits must hit cloud instantly (same as quiz) — otherwise refresh loses them.
+    const instant = noteMetaChanged(patch) || noteContentChanged(patch);
+    mutateNotes((prev) => prev.map((n) => {
+      if (n.id !== id) return n;
+      const next = { ...n, ...patch };
+      if (instant && !patch.savedAt) {
+        return { ...next, savedAt: new Date().toISOString() };
+      }
+      return next;
+    }), instant);
   };
 
   const addDraft = () => {
@@ -3023,21 +3060,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       });
       return nextNotes;
     });
-  };
-
-  const noteMetaChanged = (patch: Partial<Note>) =>
-    'read' in patch || 'archived' in patch || 'fav' in patch || 'trashed' in patch;
-
-  const updateNote = (id: number, patch: Partial<Note>) => {
-    const instant = noteMetaChanged(patch);
-    mutateNotes((prev) => prev.map((n) => {
-      if (n.id !== id) return n;
-      const next = { ...n, ...patch };
-      if (instant && !patch.savedAt) {
-        return { ...next, savedAt: new Date().toISOString() };
-      }
-      return next;
-    }), instant);
   };
 
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
