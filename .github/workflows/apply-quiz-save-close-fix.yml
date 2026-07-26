@@ -1,0 +1,78 @@
+name: Apply quiz save close fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-quiz-save-close-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch quiz form save close behavior
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('src/components/quiz/QuizPage.tsx')
+          s = path.read_text()
+
+          old = "  const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());\n"
+          new = old + "  const finalizedDraftIdsRef = useRef<Set<number>>(new Set());\n"
+          if new not in s:
+              if old not in s:
+                  raise SystemExit('autoSaveTimers anchor not found')
+              s = s.replace(old, new, 1)
+
+          old = "      items\n        .filter((item) => item.draft)\n"
+          new = "      items\n        .filter((item) => item.draft && !finalizedDraftIdsRef.current.has(item.id))\n"
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('initial draft filter anchor not found')
+
+          old = "      const additions = drafts\n        .filter((d) => !openIds.has(d.id))\n"
+          new = "      const additions = drafts\n        .filter((d) => !openIds.has(d.id) && !finalizedDraftIdsRef.current.has(d.id))\n"
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('draft additions filter anchor not found')
+
+          old = "  const flushForm = (formId: string, override?: SavePayload, finalize = false) => {\n    const timer = autoSaveTimers.current.get(formId);\n    if (timer) {\n      clearTimeout(timer);\n      autoSaveTimers.current.delete(formId);\n    }\n    persistForm(formId, override, finalize);\n  };\n"
+          new = "  const flushForm = (formId: string, override?: SavePayload, finalize = false) => {\n    const timer = autoSaveTimers.current.get(formId);\n    if (timer) {\n      clearTimeout(timer);\n      autoSaveTimers.current.delete(formId);\n    }\n    return persistForm(formId, override, finalize);\n  };\n"
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('flushForm anchor not found')
+
+          old = "  const handleSaveForm = (formId: string, override?: SavePayload) => {\n    flushForm(formId, override, true);\n    closeForm(formId);\n  };\n"
+          new = "  const handleSaveForm = (formId: string, override?: SavePayload) => {\n    const savedId = flushForm(formId, override, true);\n    if (savedId !== null) finalizedDraftIdsRef.current.add(savedId);\n    closeForm(formId);\n    window.setTimeout(() => {\n      setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));\n    }, 0);\n  };\n"
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('handleSaveForm anchor not found')
+
+          old = "          <button onClick={onCancel} className=\"rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40\">{t.setpassCancel}</button>\n          <button onClick={handleSave} className=\"rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark\">{t.mSave}</button>\n"
+          new = "          <button type=\"button\" onClick={onCancel} className=\"rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40\">{t.setpassCancel}</button>\n          <button\n            type=\"button\"\n            onClick={(event) => {\n              event.preventDefault();\n              event.stopPropagation();\n              handleSave();\n            }}\n            className=\"rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark\"\n          >\n            {t.mSave}\n          </button>\n"
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('save buttons anchor not found')
+
+          path.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          rm .github/workflows/apply-quiz-save-close-fix.yml
+          npm ci
+          npm run build
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/quiz/QuizPage.tsx .github/workflows/apply-quiz-save-close-fix.yml
+          git commit -m "Fix quiz save form closing" || exit 0
+          git push
