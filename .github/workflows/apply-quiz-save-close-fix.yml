@@ -69,7 +69,7 @@ jobs:
       - name: Commit patch
         run: |
           rm .github/workflows/apply-quiz-save-close-fix.yml
-          npm ci
+          npm install
           npm run build
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
