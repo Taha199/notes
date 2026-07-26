@@ -90,16 +90,6 @@ function dispatchEditorInput(root: HTMLElement) {
   root.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'formatSetBlockTextDirection' }));
 }
 
-function restoreRange(range: Range) {
-  const root = editableRoot(range.commonAncestorContainer);
-  if (!root) return false;
-  root.focus({ preventScroll: true });
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-  return true;
-}
-
 function applyCommand(range: Range, command: TableCommand, value?: string) {
   const root = editableRoot(range.commonAncestorContainer);
   if (!root) return false;
@@ -324,6 +314,4 @@ document.addEventListener('mousedown', (event) => {
     applyAlignment(range, align);
     return;
   }
-
-  restoreRange(range);
 }, true);
