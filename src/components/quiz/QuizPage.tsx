@@ -454,7 +454,10 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         </button>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 p-4 md:grid-cols-2 md:items-stretch">
-        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+        {/* Avoid overflow-hidden: it creates a sticky scrollport so the formatting
+            toolbar cannot stick while the quiz page scrolls. Round corners on
+            first/last children instead. */}
+        <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
             html={question}
             onChange={onChangeQ}
@@ -499,8 +502,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
                 </button>
               )}
             </div>
-            <div className="mt-3 overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-              <p className="border-b border-app-border px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:border-white/10">{t.quizExplanationOptional}</p>
+            <div className="mt-3 rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem]">
+              <p className="rounded-t-[0.75rem] border-b border-app-border px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:border-white/10">{t.quizExplanationOptional}</p>
               <AppRichTextEditor
                 html={explanation}
                 onChange={setExplanation}
@@ -511,7 +514,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             </div>
           </div>
         ) : (
-        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+        <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
             html={answer}
             onChange={onChangeA}

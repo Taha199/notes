@@ -4907,14 +4907,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const verticalScroll = resizable || !!maxHeight;
 
   // ── Render ────────────────────────────────────────────────────────────
+  // Sticky toolbar needs overflow:visible on ancestors between it and the
+  // page/modal scrollport. overflow-x:hidden computes to a scroll container
+  // and prevents sticking when the outer quiz/notes pane scrolls.
   return (
-    <div ref={editorWrapRef} className={'relative min-w-0 max-w-full w-full overflow-x-hidden ' + (flexToolbar ? 'flex min-h-0 flex-col ' : '') + (editable ? '' : '[&_.note-img-frame]:cursor-zoom-in [&_.note-img-frame]:max-w-full [&_.note-img-frame_img]:block [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:max-h-none [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:cursor-zoom-in [&_.note-img-frame_img]:object-contain')}>
+    <div ref={editorWrapRef} className={'relative min-w-0 max-w-full w-full ' + (flexToolbar ? 'flex min-h-0 flex-col ' : 'overflow-x-hidden ') + (editable ? '' : '[&_.note-img-frame]:cursor-zoom-in [&_.note-img-frame]:max-w-full [&_.note-img-frame_img]:block [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:max-h-none [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:cursor-zoom-in [&_.note-img-frame_img]:object-contain')}>
       {/* Toolbar */}
       <div
+        data-note-fmt-toolbar
         className={
-          'flex min-w-0 max-w-full flex-wrap items-center gap-0.5 overflow-x-hidden border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5 ' +
-          (flexToolbar ? 'z-30 flex-shrink-0 ' : '') +
-          (flexToolbar ? 'sticky top-0 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95' : '')
+          'flex min-w-0 max-w-full flex-wrap items-center gap-0.5 border-b border-app-border bg-app-bg px-3 py-1.5 dark:border-white/10 dark:bg-white/5 ' +
+          (flexToolbar ? 'z-40 flex-shrink-0 sticky top-0 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95 ' : 'overflow-x-hidden ')
         }
         style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
         onMouseDownCapture={(e) => {
