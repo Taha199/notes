@@ -4913,11 +4913,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         getTableToolbarHost(activeTableCtx.wrap),
       )}
 
-      {/* Image toolbar — portaled to <body> so overflow:hidden on the frame (and
-          justify-center + overflow-x-auto) cannot clip left/right controls. */}
+      {/* Image toolbar — portaled to <body> so overflow:hidden on the frame cannot
+          clip controls; positioned from the selected frame's viewport rect so it
+          stays attached to the image (not centered across the whole page). */}
       {editable && hoveredImg && createPortal((() => {
         const imgBtn = 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] text-app-text hover:bg-primary/10 dark:text-gray-100';
         const fr = hoveredImg.frame.getBoundingClientRect();
+        const top = Math.max(8, fr.bottom - NOTE_IMG_TOOLBAR_RESERVE_PX);
         const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
         const leave = (e: React.MouseEvent) => {
           if (isResizingImg.current || imgResizeModeRef.current) return;
@@ -4929,12 +4931,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           <div
             style={{
               position: 'fixed',
-              left: 8,
-              right: 8,
-              top: Math.max(8, fr.bottom - NOTE_IMG_TOOLBAR_RESERVE_PX),
+              left: fr.left,
+              width: Math.max(fr.width, 1),
+              top,
               zIndex: 100000,
               display: 'flex',
               justifyContent: 'center',
+              overflow: 'visible',
               pointerEvents: 'none',
             }}
           >
