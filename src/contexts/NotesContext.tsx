@@ -1292,6 +1292,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFolders?: QuizFolder[];
   } | null>(null);
   const instantDataSaveQueuedRef = useRef(false);
+  /** When remote apply blocks cloud writes, queue a full save and flush afterwards. */
+  const pendingCloudSaveAfterRemoteRef = useRef(false);
   const notesRef = useRef(notes);
   const quizzesRef = useRef(quizzes);
   const chatsRef = useRef(chats);
@@ -2173,6 +2175,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       isApplyingRemoteRef.current = false;
+      flushPendingCloudSavesAfterRemote();
     }
   };
 
@@ -2247,6 +2250,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /** Firebase RTDB `update()` rejects `undefined` values — strip them (JSON.stringify already does for REST). */
+  const sanitizeForRtdb = <T,>(value: T): T => {
+    try {
+      return JSON.parse(JSON.stringify(value)) as T;
+    } catch {
+      return value;
+    }
+  };
+
+  const flushPendingCloudSavesAfterRemote = () => {
+    if (isApplyingRemoteRef.current) return;
+    const pendingPatch = pendingInstantDataSaveRef.current;
+    if (pendingPatch) {
+      pendingInstantDataSaveRef.current = null;
+      void runInstantDataCloudSave(pendingPatch);
+    }
+    if (pendingCloudSaveAfterRemoteRef.current) {
+      pendingCloudSaveAfterRemoteRef.current = false;
+      runCloudSave(true);
+    }
+  };
+
   const runInstantDataCloudSave = async (patch: {
     notes?: Note[];
     quizzes?: QuizItem[];
@@ -2255,6 +2280,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }) => {
     const u = userRef.current;
     if (!u || !loadedRef.current) return;
+    if (isApplyingRemoteRef.current) {
+      pendingInstantDataSaveRef.current = { ...pendingInstantDataSaveRef.current, ...patch };
+      pendingCloudSaveAfterRemoteRef.current = true;
+      return;
+    }
     const safe: typeof patch = { ...patch };
     if (safe.notes && safe.notes.length === 0 && everHadNotesRef.current) {
       recoveryLog('skipped instant notes wipe');
@@ -2273,19 +2303,37 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (safe.quizzes?.length) everHadQuizzesRef.current = true;
     if (safe.quizSets && countUserQuizSets(safe.quizSets) > 0) everHadSetsRef.current = true;
     const syncedAt = Date.now();
+    const body = sanitizeForRtdb({
+      ...safe,
+      cloudSyncAt: syncedAt,
+    });
     try {
       await getRtdbAuthToken(true);
-      await update(dbRef(database, `users/${u.uid}`), {
-        ...safe,
-        cloudSyncAt: syncedAt,
-      });
+      try {
+        await update(dbRef(database, `users/${u.uid}`), body);
+      } catch (sdkErr) {
+        recoveryLog('instant SDK update failed, falling back to REST PATCH', {
+          message: sdkErr instanceof Error ? sdkErr.message : String(sdkErr),
+        });
+        const res = await rtdbFetch(`/users/${u.uid}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!res.ok) throw new Error(`instant-rest-save-failed:${res.status}`);
+      }
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
       localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData(safe, syncedAt);
-    } catch {
-      /* best-effort */
+      setCloudStatus('saved');
+    } catch (err) {
+      recoveryLog('instant cloud save failed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      pendingCloudSaveAfterRemoteRef.current = true;
+      setCloudStatus('error');
     }
   };
 
@@ -2295,8 +2343,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSets?: QuizSet[];
     quizFolders?: QuizFolder[];
   }) => {
-    if (!userRef.current || !loadedRef.current || isApplyingRemoteRef.current) return;
+    if (!userRef.current || !loadedRef.current) {
+      pendingInstantDataSaveRef.current = { ...pendingInstantDataSaveRef.current, ...patch };
+      pendingCloudSaveAfterRemoteRef.current = true;
+      return;
+    }
+    // Always keep the latest patch even while applying remote — flush afterwards.
     pendingInstantDataSaveRef.current = { ...pendingInstantDataSaveRef.current, ...patch };
+    if (isApplyingRemoteRef.current) {
+      pendingCloudSaveAfterRemoteRef.current = true;
+      return;
+    }
     if (instantDataSaveQueuedRef.current) return;
     instantDataSaveQueuedRef.current = true;
     queueMicrotask(() => {
@@ -2547,7 +2604,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       writeLocalCache();
     }, forceCloud ? 0 : 600);
     if (forceCloud) writeLocalCache();
-    if (!user || isApplyingRemoteRef.current) {
+    if (!user) return;
+    if (isApplyingRemoteRef.current) {
+      pendingCloudSaveAfterRemoteRef.current = true;
       if (overrides?.drafts) pendingDraftCloudSaveRef.current = true;
       return;
     }
@@ -2557,6 +2616,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!loadedRef.current) {
+      pendingCloudSaveAfterRemoteRef.current = true;
       if (overrides?.drafts) pendingDraftCloudSaveRef.current = true;
       return;
     }
@@ -2694,6 +2754,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       /* ignore pull errors */
     } finally {
       isApplyingRemoteRef.current = false;
+      flushPendingCloudSavesAfterRemote();
     }
   };
 
@@ -2786,6 +2847,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (changed) recoveryLog('applied remote permanently-deleted tombstones');
       } finally {
         isApplyingRemoteRef.current = false;
+        flushPendingCloudSavesAfterRemote();
       }
     });
     const bindRealtime = <T,>(path: string, key: 'notes' | 'quizzes' | 'quizSets' | 'quizFolders', map?: (val: unknown) => T) =>
@@ -2955,8 +3017,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizzes(next);
     localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
     everHadQuizzesRef.current = true;
-    // Field-level cloud write only (never force a full-user PATCH that could wipe notes).
-    persist({ quizzes: next }, false);
+    // Field-level cloud write + immediate push (sanitize undefined for Firebase SDK).
+    persist({ quizzes: next }, true);
     scheduleInstantDataCloudSave({ quizzes: next });
     return newId;
   };
