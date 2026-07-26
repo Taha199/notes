@@ -262,22 +262,17 @@ body {
   height: auto;
   margin: 0;
   border-radius: 0;
-  transform-origin: top center;
-  transition: transform 0.12s ease;
 }
 
-/* Shrink image toward the top while selected so the overlay toolbar fits in the
-   freed visual space without changing the frame's layout box (no text jump). */
-.note-content .note-img-frame--active:not(.note-img-frame--resizing) > img,
-[contenteditable] .note-img-frame--active:not(.note-img-frame--resizing) > img {
-  transform: scale(var(--note-img-select-scale, 0.9));
-}
-
-/* Host stays in the frame for structure/serialize stripping; the real toolbar is
-   portaled to document.body so frame overflow:hidden cannot clip controls. */
 .note-content .note-img-frame__toolbar-host,
 [contenteditable] .note-img-frame__toolbar-host {
   display: none;
+}
+
+.note-content .note-img-frame--active > .note-img-frame__toolbar-host,
+[contenteditable] .note-img-frame--active > .note-img-frame__toolbar-host {
+  display: flex;
+  width: 100%;
 }
 
 .note-yt-frame,
@@ -575,4 +570,3 @@ body {
   align-items: center;
   justify-content: center;
 }
-
