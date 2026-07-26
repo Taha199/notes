@@ -472,6 +472,27 @@ body {
   -webkit-user-select: none;
 }
 
+.note-content .note-table-toolbar .note-table-toolbar__btn,
+[contenteditable] .note-table-toolbar .note-table-toolbar__btn,
+.note-content .note-table-toolbar button,
+[contenteditable] .note-table-toolbar button {
+  outline: none;
+}
+
+.note-content .note-table-toolbar .note-table-toolbar__btn:focus,
+.note-content .note-table-toolbar .note-table-toolbar__btn:focus-visible,
+[contenteditable] .note-table-toolbar .note-table-toolbar__btn:focus,
+[contenteditable] .note-table-toolbar .note-table-toolbar__btn:focus-visible,
+.note-content .note-table-toolbar button:focus,
+.note-content .note-table-toolbar button:focus-visible,
+[contenteditable] .note-table-toolbar button:focus,
+[contenteditable] .note-table-toolbar button:focus-visible {
+  /* Never look "selected" — focus on these controls is a bug (caret jumped out of the cell). */
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+}
+
 .note-content .note-table-body,
 [contenteditable] .note-table-body {
   display: block;

@@ -159,15 +159,29 @@ export function deleteTable(ctx: TableCellContext) {
 }
 
 function suppressToolbarHostCaret(host: HTMLElement) {
+  // Never let nested controls become tab stops — Chrome will park focus on the first
+  // <button> inside contenteditable ("Line above") when the main toolbar runs ed.focus().
+  host.querySelectorAll('button, [href], input, select, textarea, [tabindex]').forEach((el) => {
+    if (el instanceof HTMLElement) el.tabIndex = -1;
+  });
   if (host.dataset.noteTableHostBound === '1') return;
   host.dataset.noteTableHostBound = '1';
   // Do NOT set contenteditable=false on the host: in Chrome/Safari that makes the
   // surrounding table wrap behave like a non-editable island, so clicks never land
   // in cells. Keep the strip non-editable via preventDefault + CSS user-select.
   host.addEventListener('mousedown', (e) => {
-    const target = e.target;
-    if (target instanceof Element && target.closest('button, [data-note-table-toolbar]')) return;
+    // Always preventDefault so nested controls never steal focus from the editor.
+    // Action handlers still run (React onMouseDown); they must not rely on focus.
     e.preventDefault();
+  });
+  host.addEventListener('focusin', (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    if (t === host) return;
+    // Kick focus off chrome controls back to the nearest contenteditable editor.
+    t.blur();
+    const ed = host.closest('[contenteditable="true"]');
+    if (ed instanceof HTMLElement) ed.focus({ preventScroll: true });
   });
 }
 

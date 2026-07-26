@@ -3164,13 +3164,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const applyBlockAlignment = (align: BlockAlign) => {
     const ed = editorRef.current;
     if (!ed) return;
-    restoreToolbarSelection();
+    const restored = restoreToolbarSelection();
     const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
+    const range = (restored && !isTableToolbarFocusTarget(restored.commonAncestorContainer))
+      ? restored
+      : (sel?.rangeCount ? sel.getRangeAt(0) : null);
+    if (!range || (range.commonAncestorContainer && !ed.contains(range.commonAncestorContainer))) return;
 
-    const range = sel.getRangeAt(0);
     const tableCells = collectTableCellsInRange(range, ed);
-    const caretCell = closestTableCell(sel.anchorNode) ?? closestTableCell(sel.focusNode);
+    const caretCell = closestTableCell(range.startContainer) ?? closestTableCell(range.endContainer);
     if (tableCells.length > 0 || (caretCell && ed.contains(caretCell))) {
       const cells = tableCells.length > 0 ? tableCells : (caretCell ? [caretCell] : []);
       cells.forEach((cell) => {
@@ -3178,18 +3180,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         cell.style.setProperty('text-align', align === 'left' ? 'start' : align, 'important');
         cell.removeAttribute('align');
       });
+      blurTableToolbarFocus(ed);
+      ed.focus({ preventScroll: true });
       saveSel();
       readCommandState();
       emitHtml();
-      ed.focus({ preventScroll: true });
       return;
     }
 
-    let block = getLineBlock(sel.anchorNode, ed);
+    // Ensure live selection matches restored range before block-level path.
+    if (sel) {
+      sel.removeAllRanges();
+      try { sel.addRange(range); } catch { /* ignore */ }
+    }
+
+    let block = getLineBlock(range.startContainer, ed);
     if (!block) {
       document.execCommand('styleWithCSS', false, 'true');
       document.execCommand('formatBlock', false, 'div');
-      block = getLineBlock(sel.anchorNode, ed);
+      block = getLineBlock(range.startContainer, ed);
     }
     if (!block) return;
 
@@ -4027,6 +4036,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return () => document.removeEventListener('keydown', onDocKeyDown, true);
   }, [editable]);
 
+  /** True when focus landed on the in-editor table chrome ("Line above", etc.). */
+  const isTableToolbarFocusTarget = (node: Node | null): boolean => {
+    if (!(node instanceof Element)) return false;
+    return !!node.closest(`.${NOTE_TABLE_TOOLBAR_HOST}, [data-note-table-toolbar]`);
+  };
+
+  /** Kick focus off table menu controls so formatting never targets "Line above". */
+  const blurTableToolbarFocus = (ed: HTMLElement) => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && ed.contains(active) && isTableToolbarFocusTarget(active)) {
+      active.blur();
+    }
+    ed.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST} button, [data-note-table-toolbar] button, [data-note-table-toolbar] [role="button"]`)
+      .forEach((el) => {
+        if (el instanceof HTMLElement && el.tabIndex >= 0) el.tabIndex = -1;
+        if (el === document.activeElement && el instanceof HTMLElement) el.blur();
+      });
+  };
+
   /** Restore the pre-toolbar selection into this editor before applying marks. */
   const restoreToolbarSelection = (): Range | null => {
     const ed = editorRef.current;
@@ -4036,13 +4064,44 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       ?? savedRange.current?.cloneRange()
       ?? liveRange()
       ?? null;
+
+    // Table chrome buttons inside contenteditable steal focus on ed.focus() in Chrome.
+    blurTableToolbarFocus(ed);
     ed.focus({ preventScroll: true });
-    if (preferred && ed.contains(preferred.commonAncestorContainer)) {
+    blurTableToolbarFocus(ed);
+
+    if (
+      preferred
+      && preferred.commonAncestorContainer.isConnected
+      && ed.contains(preferred.commonAncestorContainer)
+      && !isTableToolbarFocusTarget(preferred.commonAncestorContainer)
+    ) {
       const sel = window.getSelection();
       sel?.removeAllRanges();
       try { sel?.addRange(preferred); } catch { /* stale range */ }
     }
-    return liveRange();
+
+    blurTableToolbarFocus(ed);
+    if (document.activeElement !== ed && !ed.contains(document.activeElement)) {
+      ed.focus({ preventScroll: true });
+      blurTableToolbarFocus(ed);
+    }
+
+    const live = liveRange();
+    if (live && !live.collapsed && !isTableToolbarFocusTarget(live.commonAncestorContainer)) {
+      return live;
+    }
+    // Even if live selection was stolen by table chrome, keep formatting the saved cell range.
+    if (
+      preferred
+      && !preferred.collapsed
+      && preferred.commonAncestorContainer.isConnected
+      && ed.contains(preferred.commonAncestorContainer)
+      && !isTableToolbarFocusTarget(preferred.commonAncestorContainer)
+    ) {
+      return preferred;
+    }
+    return live;
   };
 
   /** Split a restored selection into table-safe sub-ranges (same as font-size). */
@@ -4086,6 +4145,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       sel?.removeAllRanges();
       try { sel?.addRange(snaps[snaps.length - 1]); } catch { /* ignore */ }
     }
+    blurTableToolbarFocus(ed);
+    if (document.activeElement !== ed) ed.focus({ preventScroll: true });
   };
 
   // ── exec: apply a formatting command ─────────────────────────────────
@@ -5311,7 +5372,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       )}
 
       {/* Table toolbars — pinned above every table while edit mode is open.
-          Hosted in the in-flow strip (not contenteditable=false) so cells stay editable. */}
+          Use non-focusable spans (not <button>) so Chrome cannot park caret/focus on
+          "Line above" when the main formatting toolbar calls ed.focus(). */}
       {editable && tableWraps.map((wrap) => {
         if (!wrap.isConnected) return null;
         const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
@@ -5327,6 +5389,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           host = getTableToolbarHost(wrap);
           tableToolbarHostsRef.current.set(wrap, host);
         }
+        const tableMenuBtn =
+          'note-table-toolbar__btn cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium select-none';
+        const onTableMenuDown = (e: React.MouseEvent, action: () => void) => {
+          e.preventDefault();
+          e.stopPropagation();
+          tableToolbarClickRef.current = true;
+          action();
+        };
         return (
           <span key={wrapKey} style={{ display: 'contents' }}>
             {createPortal(
@@ -5335,17 +5405,23 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                 className="note-table-toolbar"
                 onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
               >
-                <button type="button" title={t.titleInsertLineAboveBlock} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, wrap); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10 dark:text-primary-200">↵ {t.insertLineAboveBlock}</button>
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  title={t.titleInsertLineAboveBlock}
+                  onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, wrap); })}
+                  className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
+                >↵ {t.insertLineAboveBlock}</span>
                 <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
-                <button type="button" title={t.tableAddRowAbove} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => addTableRow(c, 'above'), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↑ {t.tableAddRowAbove}</button>
-                <button type="button" title={t.tableAddRowBelow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => addTableRow(c, 'below'), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">↓ {t.tableAddRowBelow}</button>
-                <button type="button" title={t.tableRemoveRow} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => removeTableRow(c), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveRow}</button>
+                <span role="button" tabIndex={-1} title={t.tableAddRowAbove} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'above'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↑ {t.tableAddRowAbove}</span>
+                <span role="button" tabIndex={-1} title={t.tableAddRowBelow} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'below'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↓ {t.tableAddRowBelow}</span>
+                <span role="button" tabIndex={-1} title={t.tableRemoveRow} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => removeTableRow(c), wrap))} className={`${tableMenuBtn} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>− {t.tableRemoveRow}</span>
                 <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
-                <button type="button" title={t.tableAddColBefore} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => addTableColumn(c, 'before'), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">← {t.tableAddColBefore}</button>
-                <button type="button" title={t.tableAddColAfter} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => addTableColumn(c, 'after'), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-app-text hover:bg-primary/10 dark:text-gray-100">{t.tableAddColAfter} →</button>
-                <button type="button" title={t.tableRemoveCol} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => removeTableColumn(c), wrap); }} className="rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">− {t.tableRemoveCol}</button>
+                <span role="button" tabIndex={-1} title={t.tableAddColBefore} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableColumn(c, 'before'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>← {t.tableAddColBefore}</span>
+                <span role="button" tabIndex={-1} title={t.tableAddColAfter} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableColumn(c, 'after'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>{t.tableAddColAfter} →</span>
+                <span role="button" tabIndex={-1} title={t.tableRemoveCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => removeTableColumn(c), wrap))} className={`${tableMenuBtn} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>− {t.tableRemoveCol}</span>
                 <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
-                <button type="button" title={t.tableDelete} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); runTableAction((c) => { deleteTable(c); return 'deleted'; }, wrap); }} className="rounded-md px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10">✕ {t.tableDelete}</button>
+                <span role="button" tabIndex={-1} title={t.tableDelete} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => { deleteTable(c); return 'deleted'; }, wrap))} className={`${tableMenuBtn} font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>✕ {t.tableDelete}</span>
               </div>,
               host,
             )}
