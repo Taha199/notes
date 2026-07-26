@@ -1,7 +1,12 @@
 name: Apply quiz image cloud save fix
 
-'on':
+on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-quiz-image-cloud-save-fix.yml
 
 permissions:
   contents: write
@@ -98,7 +103,12 @@ jobs:
           c = ctx.read_text()
           c = c.replace('persist({ quizSets: nextSets }, false);', 'persist({ quizSets: nextSets }, forceCloud);')
           c = c.replace('persist({ quizSets: next }, false);', 'persist({ quizSets: next }, true);')
-          c = c.replace('scheduleInstantDataCloudSave({ quizSets: next });\n      return next;', 'scheduleInstantDataCloudSave({ quizSets: next });\n      window.setTimeout(() => scheduleInstantDataCloudSave({ quizSets: next }), 700);\n      return next;')
+          delayed_from = """scheduleInstantDataCloudSave({ quizSets: next });
+      return next;"""
+          delayed_to = """scheduleInstantDataCloudSave({ quizSets: next });
+      window.setTimeout(() => scheduleInstantDataCloudSave({ quizSets: next }), 700);
+      return next;"""
+          c = c.replace(delayed_from, delayed_to)
           ctx.write_text(c)
           PY
       - name: Build
