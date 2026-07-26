@@ -13,7 +13,7 @@ import {
   NOTE_YT_REMOVE,
 } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
   closestTableCell,
   collectFormatTargetRanges as collectFormatTargetRangesFromLib,
@@ -5727,6 +5727,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                 <span role="button" tabIndex={-1} title={t.tableAddColBefore} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableColumn(c, 'before'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>← {t.tableAddColBefore}</span>
                 <span role="button" tabIndex={-1} title={t.tableAddColAfter} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableColumn(c, 'after'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>{t.tableAddColAfter} →</span>
                 <span role="button" tabIndex={-1} title={t.tableRemoveCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => removeTableColumn(c), wrap))} className={`${tableMenuBtn} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>− {t.tableRemoveCol}</span>
+                <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+                <span role="button" tabIndex={-1} title={t.tableWidenCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => adjustTableColumnWidth(c, TABLE_COLUMN_WIDTH_STEP), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>←→ {t.tableWidenCol}</span>
+                <span role="button" tabIndex={-1} title={t.tableNarrowCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => adjustTableColumnWidth(c, -TABLE_COLUMN_WIDTH_STEP), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>→← {t.tableNarrowCol}</span>
                 <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
                 <span role="button" tabIndex={-1} title={t.tableDelete} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => { deleteTable(c); return 'deleted'; }, wrap))} className={`${tableMenuBtn} font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>✕ {t.tableDelete}</span>
               </div>,

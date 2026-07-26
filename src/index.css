@@ -423,7 +423,8 @@ body {
 [contenteditable] table.note-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: auto;
+  /* fixed so <col style="width:%"> from narrow/widen survives layout */
+  table-layout: fixed;
   font-size: inherit;
 }
 

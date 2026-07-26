@@ -126,7 +126,196 @@ export function removeTableRow(ctx: TableCellContext): TableEditPosition | false
   return { rowIndex: Math.max(0, nextIndex), colIndex: nextCol };
 }
 
+/** Percent of table width per narrow/widen click. */
+export const TABLE_COLUMN_WIDTH_STEP = 5;
+/** Floor so a column cannot collapse to zero. */
+export const TABLE_COLUMN_WIDTH_MIN = 10;
+
+function tableColumnCount(table: HTMLTableElement): number {
+  const firstRow = tableRows(table)[0];
+  return firstRow ? rowCells(firstRow).length : 0;
+}
+
+function parsePercentWidth(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const match = raw.trim().match(/^([\d.]+)\s*%$/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function equalColumnWidths(count: number): number[] {
+  if (count <= 0) return [];
+  const base = Math.floor((10000 / count)) / 100;
+  const widths = Array.from({ length: count }, () => base);
+  const sum = widths.reduce((a, b) => a + b, 0);
+  widths[widths.length - 1] = Math.round((widths[widths.length - 1] + (100 - sum)) * 100) / 100;
+  return widths;
+}
+
+function normalizeColumnWidths(widths: number[], min = TABLE_COLUMN_WIDTH_MIN): number[] {
+  const count = widths.length;
+  if (count === 0) return [];
+  const cappedMin = Math.min(min, Math.floor(100 / count));
+  let next = widths.map((w) => (Number.isFinite(w) && w > 0 ? w : 100 / count));
+  // Lift anything below the floor first.
+  next = next.map((w) => Math.max(w, cappedMin));
+  let sum = next.reduce((a, b) => a + b, 0);
+  if (sum > 100) {
+    let excess = sum - 100;
+    // Shrink columns that are above the floor, proportionally.
+    for (let pass = 0; pass < 8 && excess > 0.01; pass += 1) {
+      const shrinkable = next
+        .map((w, i) => ({ i, room: w - cappedMin }))
+        .filter((x) => x.room > 0.01);
+      const roomSum = shrinkable.reduce((a, x) => a + x.room, 0);
+      if (roomSum <= 0) break;
+      shrinkable.forEach(({ i, room }) => {
+        const take = Math.min(room, (room / roomSum) * excess);
+        next[i] -= take;
+      });
+      sum = next.reduce((a, b) => a + b, 0);
+      excess = sum - 100;
+    }
+  } else if (sum < 100) {
+    const deficit = 100 - sum;
+    next = next.map((w) => w + deficit / count);
+  }
+  // Round to 1 decimal and fix leftover on the last column.
+  next = next.map((w) => Math.round(w * 10) / 10);
+  const roundedSum = next.reduce((a, b) => a + b, 0);
+  next[next.length - 1] = Math.round((next[next.length - 1] + (100 - roundedSum)) * 10) / 10;
+  return next;
+}
+
+function measureColumnWidths(table: HTMLTableElement, count: number): number[] {
+  if (count <= 0) return [];
+  const tableWidth = table.getBoundingClientRect().width;
+  if (tableWidth <= 0) return equalColumnWidths(count);
+  const firstRow = tableRows(table)[0];
+  if (!firstRow) return equalColumnWidths(count);
+  const cells = rowCells(firstRow);
+  const measured = cells.slice(0, count).map((cell) => {
+    const w = cell.getBoundingClientRect().width;
+    return w > 0 ? (w / tableWidth) * 100 : 100 / count;
+  });
+  while (measured.length < count) measured.push(100 / count);
+  return normalizeColumnWidths(measured);
+}
+
+function readStoredColumnWidths(table: HTMLTableElement, count: number): number[] | null {
+  if (count <= 0) return null;
+  const cols = [...table.querySelectorAll(':scope > colgroup > col')];
+  if (cols.length === count) {
+    const fromCols = cols.map((col) => {
+      if (!(col instanceof HTMLElement)) return null;
+      return parsePercentWidth(col.style.width) ?? parsePercentWidth(col.getAttribute('width'));
+    });
+    if (fromCols.every((w): w is number => w != null)) {
+      return normalizeColumnWidths(fromCols);
+    }
+  }
+  // Fallback: percentage width on the first-row cells (legacy).
+  const firstRow = tableRows(table)[0];
+  if (!firstRow) return null;
+  const cells = rowCells(firstRow);
+  if (cells.length !== count) return null;
+  const fromCells = cells.map((cell) => (
+    parsePercentWidth(cell.style.width) ?? parsePercentWidth(cell.getAttribute('width'))
+  ));
+  if (fromCells.every((w): w is number => w != null)) {
+    return normalizeColumnWidths(fromCells);
+  }
+  return null;
+}
+
+function ensureColgroup(table: HTMLTableElement, count: number, widths?: number[]): void {
+  let colgroup = table.querySelector(':scope > colgroup');
+  if (!(colgroup instanceof HTMLElement)) {
+    colgroup = document.createElement('colgroup');
+    table.insertBefore(colgroup, table.firstChild);
+  }
+  const resolved = normalizeColumnWidths(
+    widths ?? readStoredColumnWidths(table, count) ?? measureColumnWidths(table, count),
+  );
+  while (colgroup.childElementCount > count) colgroup.lastElementChild?.remove();
+  while (colgroup.childElementCount < count) {
+    colgroup.appendChild(document.createElement('col'));
+  }
+  [...colgroup.children].forEach((node, i) => {
+    if (!(node instanceof HTMLElement)) return;
+    const pct = resolved[i] ?? (100 / Math.max(count, 1));
+    node.style.width = `${pct}%`;
+    node.removeAttribute('width');
+  });
+  // Prefer colgroup as the single source of truth — clear cell width hints.
+  table.querySelectorAll('th, td').forEach((cell) => {
+    if (!(cell instanceof HTMLElement)) return;
+    cell.style.removeProperty('width');
+    cell.removeAttribute('width');
+  });
+  table.style.tableLayout = 'fixed';
+}
+
+export function adjustTableColumnWidth(
+  ctx: TableCellContext,
+  deltaPercent: number,
+): TableEditPosition {
+  const count = tableColumnCount(ctx.table);
+  if (count <= 0 || ctx.colIndex < 0 || ctx.colIndex >= count) {
+    return { rowIndex: ctx.rowIndex, colIndex: ctx.colIndex };
+  }
+  const min = Math.min(TABLE_COLUMN_WIDTH_MIN, Math.floor(100 / count));
+  const widths = readStoredColumnWidths(ctx.table, count) ?? measureColumnWidths(ctx.table, count);
+  const target = widths[ctx.colIndex];
+  const max = 100 - min * (count - 1);
+  const nextTarget = Math.min(max, Math.max(min, target + deltaPercent));
+  const actualDelta = nextTarget - target;
+  if (Math.abs(actualDelta) < 0.05) {
+    ensureColgroup(ctx.table, count, widths);
+    return { rowIndex: ctx.rowIndex, colIndex: ctx.colIndex };
+  }
+
+  widths[ctx.colIndex] = nextTarget;
+  const otherIndexes = widths.map((_, i) => i).filter((i) => i !== ctx.colIndex);
+  if (otherIndexes.length === 0) {
+    ensureColgroup(ctx.table, count, widths);
+    return { rowIndex: ctx.rowIndex, colIndex: ctx.colIndex };
+  }
+
+  if (actualDelta > 0) {
+    let need = actualDelta;
+    for (let pass = 0; pass < 8 && need > 0.01; pass += 1) {
+      const donors = otherIndexes.filter((i) => widths[i] - min > 0.01);
+      const roomSum = donors.reduce((a, i) => a + (widths[i] - min), 0);
+      if (roomSum <= 0) break;
+      let taken = 0;
+      donors.forEach((i) => {
+        const room = widths[i] - min;
+        const take = Math.min(room, (room / roomSum) * need);
+        widths[i] -= take;
+        taken += take;
+      });
+      need -= taken;
+    }
+    // If donors ran out of room, clamp the target back.
+    if (need > 0.01) widths[ctx.colIndex] -= need;
+  } else {
+    const share = (-actualDelta) / otherIndexes.length;
+    otherIndexes.forEach((i) => {
+      widths[i] += share;
+    });
+  }
+
+  ensureColgroup(ctx.table, count, normalizeColumnWidths(widths, min));
+  return { rowIndex: ctx.rowIndex, colIndex: ctx.colIndex };
+}
+
 export function addTableColumn(ctx: TableCellContext, position: 'before' | 'after'): TableEditPosition {
+  const prevCount = tableColumnCount(ctx.table);
+  const prevWidths = prevCount > 0
+    ? (readStoredColumnWidths(ctx.table, prevCount) ?? measureColumnWidths(ctx.table, prevCount))
+    : [];
   tableRows(ctx.table).forEach((row) => {
     const cells = rowCells(row);
     const refCell = cells[ctx.colIndex];
@@ -136,6 +325,14 @@ export function addTableColumn(ctx: TableCellContext, position: 'before' | 'afte
     if (position === 'before') refCell.before(newCell);
     else refCell.after(newCell);
   });
+  const insertAt = position === 'before' ? ctx.colIndex : ctx.colIndex + 1;
+  const nextCount = prevCount + 1;
+  const nextWidths = [...prevWidths];
+  if (nextWidths.length === prevCount && prevCount > 0) {
+    const seed = Math.max(TABLE_COLUMN_WIDTH_MIN, 100 / nextCount);
+    nextWidths.splice(insertAt, 0, seed);
+  }
+  ensureColgroup(ctx.table, nextCount, nextWidths.length === nextCount ? nextWidths : equalColumnWidths(nextCount));
   return {
     rowIndex: ctx.rowIndex,
     colIndex: position === 'before' ? ctx.colIndex + 1 : ctx.colIndex,
@@ -145,9 +342,13 @@ export function addTableColumn(ctx: TableCellContext, position: 'before' | 'afte
 export function removeTableColumn(ctx: TableCellContext): TableEditPosition | false {
   const firstRow = tableRows(ctx.table)[0];
   if (!firstRow || rowCells(firstRow).length <= 1) return false;
+  const prevCount = tableColumnCount(ctx.table);
+  const prevWidths = readStoredColumnWidths(ctx.table, prevCount) ?? measureColumnWidths(ctx.table, prevCount);
   tableRows(ctx.table).forEach((row) => {
     rowCells(row)[ctx.colIndex]?.remove();
   });
+  const nextWidths = prevWidths.filter((_, i) => i !== ctx.colIndex);
+  ensureColgroup(ctx.table, prevCount - 1, nextWidths);
   return {
     rowIndex: ctx.rowIndex,
     colIndex: Math.max(0, ctx.colIndex - 1),
@@ -293,6 +494,9 @@ export function sanitizeTableElement(source: HTMLTableElement): HTMLTableElement
       newCell.setAttribute('dir', 'auto');
       if (tableCell.colSpan > 1) newCell.colSpan = tableCell.colSpan;
       if (tableCell.rowSpan > 1) newCell.rowSpan = tableCell.rowSpan;
+      // Keep percentage column widths when present (migrated to colgroup below).
+      const pct = parsePercentWidth(tableCell.style.width) ?? parsePercentWidth(tableCell.getAttribute('width'));
+      if (pct != null) newCell.style.width = `${pct}%`;
       newCell.innerHTML = cleanCellHtml(cell);
       newRow.appendChild(newCell);
     });
@@ -311,6 +515,9 @@ export function sanitizeTableElement(source: HTMLTableElement): HTMLTableElement
       cells.forEach((cell) => {
         const newCell = document.createElement('td');
         newCell.setAttribute('dir', 'auto');
+        const tableCell = cell as HTMLTableCellElement;
+        const pct = parsePercentWidth(tableCell.style.width) ?? parsePercentWidth(tableCell.getAttribute('width'));
+        if (pct != null) newCell.style.width = `${pct}%`;
         newCell.innerHTML = cleanCellHtml(cell);
         newRow.appendChild(newCell);
       });
@@ -318,6 +525,24 @@ export function sanitizeTableElement(source: HTMLTableElement): HTMLTableElement
     });
     table.appendChild(fallbackBody);
   }
+
+  const colCount = tableColumnCount(table);
+  if (colCount > 0) {
+    const sourceCols = [...source.querySelectorAll(':scope > colgroup > col')];
+    const fromSource = sourceCols.length === colCount
+      ? sourceCols.map((col) => {
+        if (!(col instanceof HTMLElement)) return null;
+        return parsePercentWidth(col.style.width) ?? parsePercentWidth(col.getAttribute('width'));
+      })
+      : null;
+    if (fromSource && fromSource.every((w): w is number => w != null)) {
+      ensureColgroup(table, colCount, fromSource);
+    } else {
+      const stored = readStoredColumnWidths(table, colCount);
+      if (stored) ensureColgroup(table, colCount, stored);
+    }
+  }
+
   return table;
 }
 
@@ -397,9 +622,29 @@ export function normalizeTablesInEditor(root: HTMLElement): boolean {
       el.style.removeProperty('display');
       el.style.removeProperty('flex');
       el.style.removeProperty('flex-direction');
+      // Keep percentage widths — migrate onto colgroup below. Drop bare width attrs.
+      const pct = parsePercentWidth(el.style.width) ?? parsePercentWidth(el.getAttribute('width'));
       el.removeAttribute('width');
+      if (pct != null && (el.tagName === 'TD' || el.tagName === 'TH')) {
+        el.style.width = `${pct}%`;
+      } else {
+        el.style.removeProperty('width');
+      }
       if (!el.getAttribute('dir')) el.setAttribute('dir', 'auto');
     });
+
+    const colCount = tableColumnCount(table);
+    if (colCount > 0) {
+      const stored = readStoredColumnWidths(table, colCount);
+      if (stored) {
+        ensureColgroup(table, colCount, stored);
+        changed = true;
+      } else if (table.querySelector(':scope > colgroup > col')) {
+        // Repair mismatched colgroup length after edits.
+        ensureColgroup(table, colCount);
+        changed = true;
+      }
+    }
   });
   return changed;
 }

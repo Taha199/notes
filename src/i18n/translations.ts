@@ -161,6 +161,8 @@ export interface Translation {
   tableAddColBefore: string;
   tableAddColAfter: string;
   tableRemoveCol: string;
+  tableWidenCol: string;
+  tableNarrowCol: string;
   tableDelete: string;
   insertLineAboveBlock: string;
   titleInsertLineAboveBlock: string;
@@ -597,7 +599,8 @@ export const LANGS: Record<Lang, Translation> = {
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
     tableAddRowAbove: 'Row above', tableAddRowBelow: 'Row below', tableRemoveRow: 'Delete row',
-    tableAddColBefore: 'Column left', tableAddColAfter: 'Column right', tableRemoveCol: 'Delete column', tableDelete: 'Delete table',
+    tableAddColBefore: 'Column left', tableAddColAfter: 'Column right', tableRemoveCol: 'Delete column',
+    tableWidenCol: 'Widen column', tableNarrowCol: 'Narrow column', tableDelete: 'Delete table',
     insertLineAboveBlock: 'Line above', titleInsertLineAboveBlock: 'Add empty line above',
     titleRight: 'Align Right', titleLeft: 'Align Left', titleCenter: 'Align Center', titleMoveImageUp: 'Move image up', titleMoveImageDown: 'Move image down', titleClr: 'Clear Formatting', titleColor: 'Text Color', titleResizeImage: 'Drag to resize (keep ratio)', titleResizeWidth: 'Drag to change width', titleResizeHeight: 'Drag to change height',
     titleBulletList: 'Bullet list', titleNumberedList: 'Numbered list', titleRemoveList: 'Remove list', titleSubList: 'Sub-list', titleOutdentSubList: 'Back to parent list',
@@ -960,7 +963,8 @@ export const LANGS: Record<Lang, Translation> = {
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',
     tableAddRowAbove: 'Rad ovanför', tableAddRowBelow: 'Rad under', tableRemoveRow: 'Ta bort rad',
-    tableAddColBefore: 'Kolumn vänster', tableAddColAfter: 'Kolumn höger', tableRemoveCol: 'Ta bort kolumn', tableDelete: 'Ta bort tabell',
+    tableAddColBefore: 'Kolumn vänster', tableAddColAfter: 'Kolumn höger', tableRemoveCol: 'Ta bort kolumn',
+    tableWidenCol: 'Bredda kolumn', tableNarrowCol: 'Smalna kolumn', tableDelete: 'Ta bort tabell',
     insertLineAboveBlock: 'Tom rad ovanför', titleInsertLineAboveBlock: 'Lägg till tom rad ovanför',
     titleRight: 'Höger', titleLeft: 'Vänster', titleCenter: 'Centrera', titleMoveImageUp: 'Flytta bild uppåt', titleMoveImageDown: 'Flytta bild nedåt', titleClr: 'Ta bort formatering', titleColor: 'Textfärg', titleResizeImage: 'Dra för att ändra storlek (behåll proportioner)', titleResizeWidth: 'Dra för att ändra bredd', titleResizeHeight: 'Dra för att ändra höjd',
     titleBulletList: 'Punktlista', titleNumberedList: 'Numrerad lista', titleRemoveList: 'Ta bort lista', titleSubList: 'Underlista', titleOutdentSubList: 'Tillbaka till överliggande lista',
