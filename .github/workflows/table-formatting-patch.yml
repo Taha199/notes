@@ -1,0 +1,165 @@
+name: Apply table formatting patch
+
+on:
+  push:
+    paths:
+      - .github/workflows/table-formatting-patch.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Patch rich text table formatting
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('src/components/notes/RichTextEditor.tsx')
+          s = path.read_text()
+
+          old_exec = '''  // ── exec: apply a formatting command ─────────────────────────────────
+  const exec = (cmd: string, value?: string) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    pushUndoCheckpoint();
+    // Buttons use e.preventDefault so editor keeps focus & selection intact.
+    // Only restore savedRange when editor actually lost focus (e.g. after palette).
+    if (document.activeElement !== ed) {
+      const saved = savedRange.current?.cloneRange() ?? null;
+      ed.focus({ preventScroll: true });
+      if (saved) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(saved); }
+    }
+    document.execCommand('styleWithCSS', false, 'true');
+    document.execCommand(cmd, false, value);
+    saveSel();
+    readCommandState();
+    emitHtml();
+  };
+'''
+          new_exec = '''  const runNativeCommandOnRange = (range: Range, cmd: string, value?: string) => {
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    document.execCommand('styleWithCSS', false, 'true');
+    document.execCommand(cmd, false, value);
+  };
+
+  const applyNativeCommandTableSafe = (range: Range, cmd: string, value?: string): boolean => {
+    const ed = editorRef.current;
+    if (!ed || !rangeCrossesTableStructure(range)) return false;
+    const subs = collectTableCellsInRange(range, ed)
+      .map((cell) => intersectRangeWithCellContents(range, cell))
+      .filter((sub): sub is Range => !!sub && !sub.collapsed);
+    if (subs.length === 0) return false;
+    ed.focus({ preventScroll: true });
+    subs.forEach((sub) => runNativeCommandOnRange(sub, cmd, value));
+    const last = subs[subs.length - 1];
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    try { sel?.addRange(last); } catch { /* ignore */ }
+    return true;
+  };
+
+  // ── exec: apply a formatting command ─────────────────────────────────
+  const exec = (cmd: string, value?: string) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    captureFormattingSelection();
+    pushUndoCheckpoint();
+
+    const tableRange = resolveStyleTargetRange() ?? resolveFormatRange();
+    if (tableRange && applyNativeCommandTableSafe(tableRange, cmd, value)) {
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
+    // Buttons use e.preventDefault so editor keeps focus & selection intact.
+    // Only restore savedRange when editor actually lost focus (e.g. after palette).
+    if (document.activeElement !== ed) {
+      const saved = savedRange.current?.cloneRange() ?? null;
+      ed.focus({ preventScroll: true });
+      if (saved) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(saved); }
+    }
+    document.execCommand('styleWithCSS', false, 'true');
+    document.execCommand(cmd, false, value);
+    saveSel();
+    readCommandState();
+    emitHtml();
+  };
+'''
+          if old_exec not in s:
+            raise SystemExit('exec block not found')
+          s = s.replace(old_exec, new_exec)
+
+          old_align = '''  const applyBlockAlignment = (align: BlockAlign) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.focus({ preventScroll: true });
+    restoreSel();
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+
+    let block = getLineBlock(sel.anchorNode, ed);
+'''
+          new_align = '''  const applyBlockAlignment = (align: BlockAlign) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    captureFormattingSelection();
+    ed.focus({ preventScroll: true });
+    restoreSel();
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+
+    const range = sel.getRangeAt(0);
+    const tableRange = resolveStyleTargetRange() ?? range;
+    const tableCells = rangeCrossesTableStructure(tableRange)
+      ? collectTableCellsInRange(tableRange, ed)
+      : [];
+    const singleCell = closestTableCell(range.startContainer) ?? closestTableCell(range.endContainer);
+    const cells = tableCells.length > 0 ? tableCells : (singleCell && ed.contains(singleCell) ? [singleCell] : []);
+    if (cells.length > 0) {
+      cells.forEach((cell) => {
+        cell.style.textAlign = align;
+        cell.removeAttribute('align');
+      });
+      saveSel();
+      readCommandState();
+      emitHtml();
+      ed.focus({ preventScroll: true });
+      return;
+    }
+
+    let block = getLineBlock(sel.anchorNode, ed);
+'''
+          if old_align not in s:
+            raise SystemExit('alignment block not found')
+          s = s.replace(old_align, new_align)
+          path.write_text(s)
+          PY
+
+      - name: Validate build
+        run: |
+          npm install
+          npm run build
+
+      - name: Commit patch and remove workflow
+        run: |
+          rm .github/workflows/table-formatting-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/notes/RichTextEditor.tsx .github/workflows/table-formatting-patch.yml
+          git commit -m "Enable text formatting inside table cells"
+          git push
