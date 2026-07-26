@@ -183,6 +183,13 @@ const TOGGLE_STYLE_PROP: Record<string, { prop: string; on: string[]; off: strin
   strikeThrough: { prop: 'textDecoration', on: ['line-through'], off: 'none' },
 };
 
+const TOGGLE_WRAP_TAGS: Record<string, string> = {
+  bold: 'b',
+  italic: 'i',
+  underline: 'u',
+  strikeThrough: 's',
+};
+
 function styleHasToggleMark(style: CSSStyleDeclaration, cmd: string): boolean {
   const cfg = TOGGLE_STYLE_PROP[cmd];
   if (!cfg) return false;
@@ -197,22 +204,16 @@ function styleHasToggleMark(style: CSSStyleDeclaration, cmd: string): boolean {
 }
 
 function elementHasToggleMark(el: HTMLElement, cmd: string): boolean {
+  if (el.getAttribute('data-note-mark') === cmd) return true;
   const tags = TOGGLE_MARK_TAGS[cmd];
   if (tags?.includes(el.tagName)) return true;
   return styleHasToggleMark(el.style, cmd);
 }
 
-const TOGGLE_WRAP_TAGS: Record<string, string> = {
-  bold: 'b',
-  italic: 'i',
-  underline: 'u',
-  strikeThrough: 's',
-};
-
 function unwrapToggleMarkElement(el: HTMLElement, cmd: string) {
   const tags = TOGGLE_MARK_TAGS[cmd] ?? [];
   const cfg = TOGGLE_STYLE_PROP[cmd];
-  if (tags.includes(el.tagName)) {
+  if (el.getAttribute('data-note-mark') === cmd || tags.includes(el.tagName)) {
     const parent = el.parentNode;
     if (!parent) return;
     while (el.firstChild) parent.insertBefore(el.firstChild, el);
@@ -232,8 +233,9 @@ function unwrapToggleMarkElement(el: HTMLElement, cmd: string) {
   } else if (cfg.prop === 'fontStyle') {
     el.style.fontStyle = cfg.off;
   }
+  el.removeAttribute('data-note-mark');
   if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
-  if (el.tagName === 'SPAN' && !el.getAttribute('style') && !el.getAttribute('class')) {
+  if (el.tagName === 'SPAN' && !el.getAttribute('style') && !el.getAttribute('class') && !el.getAttribute('data-note-mark')) {
     const parent = el.parentNode;
     if (!parent) return;
     while (el.firstChild) parent.insertBefore(el.firstChild, el);
@@ -248,7 +250,6 @@ function stripToggleMarkInFragment(root: ParentNode, cmd: string) {
   root.querySelectorAll?.('*').forEach((node) => {
     if (node instanceof HTMLElement && elementHasToggleMark(node, cmd)) hit.add(node);
   });
-  // Unwrap deepest first so parents stay valid.
   [...hit].sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0)).forEach((el) => {
     unwrapToggleMarkElement(el, cmd);
   });
@@ -310,7 +311,7 @@ function collectTextNodesInRange(range: Range): Text[] {
   return nodes;
 }
 
-/** True when every visible text node in the range already carries the toggle mark. */
+/** True when every visible text node in the range already carries an explicit toggle mark (not UA <th> bold). */
 function rangeIsFullyToggleMarked(range: Range, cmd: string, boundary: Node): boolean {
   const texts = collectTextNodesInRange(range);
   if (texts.length === 0) return nodeHasToggleMarkAncestor(range.startContainer, cmd, boundary);
@@ -318,16 +319,21 @@ function rangeIsFullyToggleMarked(range: Range, cmd: string, boundary: Node): bo
 }
 
 /**
- * DOM wrap for B/I/U/S — same extractContents pattern as font-size.
- * execCommand is unreliable inside table cells (selection/state no-ops).
+ * DOM wrap for B/I/U/S — same extractContents + span style pattern as highlight.
+ * Prefer styled <span data-note-mark> over <b>/<i> so marks stay visible inside <th>
+ * (UA stylesheet already bolds headers) and are reliably detectable for toggle-off.
  */
 function wrapRangeWithToggleMark(range: Range, cmd: string): HTMLElement | null {
-  const tag = TOGGLE_WRAP_TAGS[cmd];
-  if (!tag) return null;
+  if (!TOGGLE_STYLE_PROP[cmd]) return null;
   try {
     const contents = range.extractContents();
     stripToggleMarkInFragment(contents, cmd);
-    const el = document.createElement(tag);
+    const el = document.createElement('span');
+    el.setAttribute('data-note-mark', cmd);
+    if (cmd === 'bold') el.style.fontWeight = '700';
+    else if (cmd === 'italic') el.style.fontStyle = 'italic';
+    else if (cmd === 'underline') el.style.textDecoration = 'underline';
+    else if (cmd === 'strikeThrough') el.style.textDecoration = 'line-through';
     el.appendChild(contents);
     range.insertNode(el);
     return el;
@@ -451,7 +457,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     root.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}`).forEach((el) => el.remove());
   };
 
-  /** Serialize without cloning — avoids duplicating large base64 images in memory. */
+  /** Serialize without cloning — avoids duplicating large base64 images in memory.
+   *  Mutates `ed` temporarily (detaches chrome / unwraps table bodies). Do NOT call
+   *  this before applying toolbar marks — it races selection restore. Prefer
+   *  `serializeEditorHtmlSafe` for undo checkpoints. */
   const serializeEditorHtml = (ed: HTMLElement): string => {
     const detached: { parent: HTMLElement; host: HTMLElement }[] = [];
     ed.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}, .${NOTE_TABLE_TOOLBAR_HOST}, .${NOTE_YT_REMOVE}`).forEach((node) => {
@@ -513,6 +522,28 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     clearedYt.forEach((frame) => frame.classList.add('note-yt-frame--active'));
     // Guarantee any pasted "• …" / "1. …" pseudo-lists persist as real ul/ol.
     return normalizePseudoListsInHtmlString(html);
+  };
+
+  /** Undo/redo snapshot HTML without touching the live editor (keeps selection alive). */
+  const serializeEditorHtmlSafe = (ed: HTMLElement): string => {
+    const clone = ed.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}, .${NOTE_TABLE_TOOLBAR_HOST}, .${NOTE_YT_REMOVE}`).forEach((n) => n.remove());
+    clone.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.classList.remove('note-img-frame--active', 'note-img-frame--resizing');
+      node.style.removeProperty('--note-img-select-scale');
+    });
+    clone.querySelectorAll(`.${NOTE_YT_FRAME}.note-yt-frame--active`).forEach((node) => {
+      if (node instanceof HTMLElement) node.classList.remove('note-yt-frame--active');
+    });
+    clone.querySelectorAll(`.${NOTE_TABLE_BODY}`).forEach((node) => {
+      if (!(node instanceof HTMLElement) || !(node.parentElement instanceof HTMLElement)) return;
+      const table = node.querySelector(`table.${NOTE_TABLE_CLASS}`);
+      if (!(table instanceof HTMLTableElement)) return;
+      node.parentElement.insertBefore(table, node);
+      node.remove();
+    });
+    return normalizePseudoListsInHtmlString(clone.innerHTML);
   };
 
   const youtubeRemoveLabel = lang === 'sv' ? 'Ta bort video' : 'Remove video';
@@ -1076,9 +1107,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const captureEditorSnapshot = (): EditorSnapshot => {
     const ed = editorRef.current;
     if (!ed) return { html: '', selection: null };
+    // Bookmark BEFORE any serialize work; use clone-based HTML so live selection stays valid.
+    const selection = bookmarkEditorSelection(ed);
     return {
-      html: serializeEditorHtml(ed),
-      selection: bookmarkEditorSelection(ed),
+      html: serializeEditorHtmlSafe(ed),
+      selection,
     };
   };
 
@@ -3915,13 +3948,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     );
     // queryCommandState is document-global — only trust it when the live selection
     // is inside THIS editor (quiz has Q+A editors side by side).
+    // Inside table cells it lies (UA <th> bold → queryCommandState('bold') stuck ON).
+    const inTableCell = !!(sel?.anchorNode && closestTableCell(sel.anchorNode));
     if (selInThisEditor) {
-      TOGGLE_COMMANDS.forEach((c) => {
-        try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
-      });
+      if (!inTableCell) {
+        TOGGLE_COMMANDS.forEach((c) => {
+          try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
+        });
+      }
       try { if (document.queryCommandState('insertUnorderedList')) active.add('insertUnorderedList'); } catch { /* noop */ }
       try { if (document.queryCommandState('insertOrderedList')) active.add('insertOrderedList'); } catch { /* noop */ }
-      // DOM fallback: queryCommandState often lies inside table cells; trust ancestors.
+      // DOM marks (including data-note-mark spans) — trustworthy in table cells.
       if (ed && sel?.anchorNode) {
         TOGGLE_COMMANDS.forEach((c) => {
           if (nodeHasToggleMarkAncestor(sel.anchorNode!, c, ed)) active.add(c);
@@ -4122,8 +4159,21 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   /**
-   * Apply B/I/U/S via DOM wrap/unwrap (font-size path). execCommand often no-ops or
-   * only flips typing-state inside table cells while leaving the selection unchanged.
+   * Same range resolution highlight uses: prefer the Range object returned by
+   * restoreToolbarSelection (saved cell selection), not a second live re-query
+   * that fails when focus briefly left the editor.
+   */
+  const resolveToolbarFormatRange = (): Range | null => {
+    const restored = restoreToolbarSelection();
+    if (restored && !restored.collapsed && !isTableToolbarFocusTarget(restored.commonAncestorContainer)) {
+      return restored;
+    }
+    return resolveStyleTargetRange() ?? resolveFormatRange();
+  };
+
+  /**
+   * Apply B/I/U/S via DOM wrap/unwrap (font-size / highlight path). execCommand often
+   * no-ops or only flips typing-state inside table cells while leaving the selection unchanged.
    */
   const applyToggleMarkToTargets = (cmd: string, targets: Range[], ed: HTMLElement) => {
     const turnOff = targets.length > 0
@@ -4153,16 +4203,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const exec = (cmd: string, value?: string) => {
     const ed = editorRef.current;
     if (!ed) return;
-    pushUndoCheckpoint();
 
-    // Always restore — some browsers still clear the selection when clicking the
-    // toolbar even with mousedown preventDefault (esp. with two side-by-side editors).
-    const range = restoreToolbarSelection();
+    // Same order as highlight: resolve selection FIRST, then checkpoint (clone-safe),
+    // then mutate. Never serialize the live DOM before restore.
+    const range = resolveToolbarFormatRange();
     const isToggle = (TOGGLE_COMMANDS as readonly string[]).includes(cmd);
 
     if (isToggle && range && !range.collapsed) {
       const targets = collectFormatTargetRanges(range, ed);
       if (targets.length > 0) {
+        pushUndoCheckpoint();
         applyToggleMarkToTargets(cmd, targets, ed);
         savedFormattingRange.current = null;
         saveSel();
@@ -4181,9 +4231,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
     }
 
+    pushUndoCheckpoint();
     // Collapsed caret (or non-toggle): execCommand for typing-state / legacy cmds.
+    // Re-apply restored caret if we have one.
+    if (range) {
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      try { sel?.addRange(range.cloneRange()); } catch { /* ignore */ }
+    }
     document.execCommand('styleWithCSS', false, isToggle ? 'false' : 'true');
     document.execCommand(cmd, false, value);
+    blurTableToolbarFocus(ed);
     saveSel();
     readCommandState();
     emitHtml();
@@ -4357,51 +4415,31 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return;
 
-    restoreToolbarSelection();
-    const range = resolveStyleTargetRange();
+    // Same as highlight: use restored Range object, not a second live re-query.
+    const range = resolveToolbarFormatRange();
     if (!range || range.collapsed) {
       setFutureFontSize(px);
       return;
     }
 
     savedFormattingRange.current = null;
+    pushUndoCheckpoint();
 
-    // Table-safe path: never extractContents across td/th/tr (rips cells out of the table).
-    if (rangeNeedsPerCellFormat(range, ed)) {
-      // Snapshot per-cell ranges before any DOM mutation invalidates the original range.
-      const subs = collectTableCellsInRange(range, ed)
-        .map((cell) => intersectRangeWithCellContents(range, cell))
-        .filter((sub): sub is Range => !!sub && !sub.collapsed);
-      const spans: HTMLSpanElement[] = [];
-      subs.forEach((sub) => {
-        const existing = getStylingSpanForRange(sub, ed);
-        if (existing) {
-          applyFontSizeStyle(existing, px);
-          spans.push(existing);
-          return;
-        }
-        const wrapped = wrapRangeWithFontSize(sub, px);
-        if (wrapped) spans.push(wrapped);
-      });
-      selectSpansAfterFormat(spans);
-      setFontSize(px);
-      saveSel();
-      emitHtml();
-      return;
-    }
-
-    const existingSpan = getStylingSpanForRange(range, ed);
-    if (existingSpan) {
-      applyFontSizeStyle(existingSpan, px);
-      selectSpansAfterFormat([existingSpan]);
-      setFontSize(px);
-      saveSel();
-      emitHtml();
-      return;
-    }
-
-    const span = wrapRangeWithFontSize(range, px);
-    if (span) selectSpansAfterFormat([span]);
+    const targets = collectFormatTargetRanges(range, ed);
+    const spans: HTMLSpanElement[] = [];
+    targets.forEach((sub) => {
+      const existing = getStylingSpanForRange(sub, ed);
+      if (existing) {
+        applyFontSizeStyle(existing, px);
+        spans.push(existing);
+        return;
+      }
+      const wrapped = wrapRangeWithFontSize(sub, px);
+      if (wrapped) spans.push(wrapped);
+    });
+    selectSpansAfterFormat(spans);
+    blurTableToolbarFocus(ed);
+    if (document.activeElement !== ed) ed.focus({ preventScroll: true });
     setFontSize(px);
     saveSel();
     emitHtml();
@@ -4415,8 +4453,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const changeSize = (d: number) => {
     const ed = editorRef.current;
     if (!ed) return;
-    restoreToolbarSelection();
-    const range = resolveStyleTargetRange();
+    const range = resolveToolbarFormatRange();
     if (range && !range.collapsed) {
       applyPx(nextSz(readFontSizeFromRange(range, ed), d));
     } else {
@@ -4463,11 +4500,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return;
     setBarColor(c);
 
-    restoreToolbarSelection();
-    const range = resolveStyleTargetRange();
+    // Same as highlight: use restored Range object directly.
+    const range = resolveToolbarFormatRange();
 
-    // Selected text: DOM-wrap like font-size (execCommand foreColor fails in table cells).
+    // Selected text: DOM-wrap like highlight (execCommand foreColor fails in table cells).
     if (range && !range.collapsed) {
+      pushUndoCheckpoint();
       const targets = collectFormatTargetRanges(range, ed);
       const spans: HTMLSpanElement[] = [];
       targets.forEach((sub) => {
@@ -4475,6 +4513,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         if (wrapped) spans.push(wrapped);
       });
       selectSpansAfterFormat(spans);
+      blurTableToolbarFocus(ed);
+      if (document.activeElement !== ed) ed.focus({ preventScroll: true });
       savedFormattingRange.current = null;
       saveSel();
       setPalOpen(false);
@@ -4550,12 +4590,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return;
     setHlColor(c);
-    const range = restoreToolbarSelection() ?? resolveStyleTargetRange() ?? resolveFormatRange();
+    const range = resolveToolbarFormatRange();
     if (!range) return;
 
     ed.focus({ preventScroll: true });
+    blurTableToolbarFocus(ed);
 
     if (!range.collapsed) {
+      pushUndoCheckpoint();
       const targets = collectFormatTargetRanges(range, ed);
       if (c === 'transparent') {
         targets.forEach((sub) => clearHighlightsInRange(ed, sub));
@@ -4567,6 +4609,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         });
         selectSpansAfterFormat(spans);
       }
+      blurTableToolbarFocus(ed);
+      if (document.activeElement !== ed) ed.focus({ preventScroll: true });
       savedFormattingRange.current = null;
       saveSel();
       setHlPalOpen(false);
