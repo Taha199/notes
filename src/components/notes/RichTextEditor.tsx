@@ -1774,27 +1774,151 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const div = document.createElement('div');
     div.setAttribute('dir', 'auto');
     while (li.firstChild) div.appendChild(li.firstChild);
-    div.querySelectorAll('ul, ol').forEach((nested) => unwrapList(nested as HTMLUListElement | HTMLOListElement));
+    stripNewParagraphIndent(div);
     const text = div.textContent?.replace(/\u200B/g, '').trim() ?? '';
     if (!text && !div.querySelector('img')) div.innerHTML = '<br>';
     return div;
   };
 
+  /**
+   * Fully unwrap a list into left-margin paragraphs.
+   * Nested lists become sibling paragraphs (never left stuck inside a parent <li>).
+   */
   const unwrapList = (list: HTMLUListElement | HTMLOListElement, caretAtStart = true) => {
     const parent = list.parentNode;
     if (!parent) return null;
-    const items = Array.from(list.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
-    const divs = items.map((li) => unwrapListItemToDiv(li));
-    divs.forEach((div) => parent.insertBefore(div, list));
+    const ed = editorRef.current;
+    const frag = document.createDocumentFragment();
+    const created: HTMLElement[] = [];
+
+    const flattenLi = (li: HTMLLIElement) => {
+      const nestedLists = [...li.children].filter(
+        (c): c is HTMLUListElement | HTMLOListElement =>
+          c instanceof HTMLElement && LIST_TAGS.has(c.tagName),
+      );
+      nestedLists.forEach((nested) => nested.remove());
+      const div = unwrapListItemToDiv(li);
+      if (div.textContent?.replace(/\u200B/g, '').trim() || div.querySelector('img')) {
+        frag.appendChild(div);
+        created.push(div);
+      }
+      nestedLists.forEach((nested) => {
+        Array.from(nested.children)
+          .filter((n): n is HTMLLIElement => n.tagName === 'LI')
+          .forEach(flattenLi);
+      });
+    };
+
+    Array.from(list.children)
+      .filter((n): n is HTMLLIElement => n.tagName === 'LI')
+      .forEach(flattenLi);
+
+    let insertParent: Node = parent;
+    let before: Node | null = list;
+
+    // Nested unwrap: parent is an LI — lift paragraphs out to after the outer list.
+    if (parent instanceof HTMLLIElement && ed) {
+      const outerList = parent.parentElement;
+      if (outerList && LIST_TAGS.has(outerList.tagName)) {
+        const { parent: liftParent, before: liftBefore } = getBlockLevelInsertAfterList(
+          outerList as HTMLUListElement | HTMLOListElement,
+          ed,
+        );
+        insertParent = liftParent;
+        before = liftBefore;
+        const afterItems = [...outerList.children].filter(
+          (child): child is HTMLLIElement =>
+            child instanceof HTMLLIElement
+            && !!(parent.compareDocumentPosition(child) & Node.DOCUMENT_POSITION_FOLLOWING),
+        );
+        list.remove();
+        if (!parent.textContent?.replace(/\u200B/g, '').trim() && !parent.querySelector('img, ul, ol')) {
+          parent.remove();
+        }
+        insertParent.insertBefore(frag, before);
+        if (afterItems.length > 0) {
+          const ordered = outerList.tagName === 'OL';
+          const afterList = document.createElement(ordered ? 'ol' : 'ul');
+          afterList.setAttribute('dir', 'auto');
+          afterItems.forEach((item) => afterList.appendChild(item));
+          insertParent.insertBefore(afterList, before);
+        }
+        if (outerList.isConnected && outerList.children.length === 0) outerList.remove();
+        const target = created[0] ?? null;
+        if (target) placeCaretInBlock(target, caretAtStart);
+        return target;
+      }
+    }
+
+    insertParent.insertBefore(frag, before);
     list.remove();
-    const target = divs[0] ?? null;
+    const target = created[0] ?? null;
     if (target) placeCaretInBlock(target, caretAtStart);
     return target;
   };
 
+  /** Outdent nested items fully, then turn the line into a left-margin paragraph. */
+  const exitListItemToMargin = (
+    li: HTMLLIElement,
+    ed: HTMLElement,
+    caretAtStart = true,
+  ): HTMLDivElement | null => {
+    let current = li;
+    let guard = 0;
+    while (isNestedListItem(current) && current.isConnected && guard++ < 20) {
+      if (!outdentListItem(current)) break;
+    }
+    if (!current.isConnected) return null;
+    const div = convertListItemToParagraph(current, (listEl) => cleanupEmptyListShell(listEl, ed));
+    if (!div) return null;
+    stripNewParagraphIndent(div);
+    liftBlockToEditorMargin(div, ed);
+    stripNewParagraphIndent(div);
+    placeCaretInBlock(div, caretAtStart);
+    return div;
+  };
+
+  const liftBlockToEditorMargin = (block: HTMLElement, ed: HTMLElement) => {
+    let guard = 0;
+    while (block.isConnected && guard++ < 20) {
+      const wrapper = block.parentElement;
+      if (!wrapper || wrapper === ed) break;
+      if (wrapper.tagName === 'LI') {
+        // Exit the enclosing item (moves this block out with it).
+        const moved = exitListItemToMargin(wrapper as HTMLLIElement, ed, true);
+        if (moved && block.isConnected) placeCaretInBlock(block, true);
+        return;
+      }
+      if (LIST_TAGS.has(wrapper.tagName)) {
+        const { parent, before } = getBlockLevelInsertAfterList(
+          wrapper as HTMLUListElement | HTMLOListElement,
+          ed,
+        );
+        parent.insertBefore(block, before);
+        if (wrapper.children.length === 0) wrapper.remove();
+        continue;
+      }
+      const hasIndent =
+        LIST_EXIT_INDENT_PROPS.some((prop) => wrapper.style.getPropertyValue(prop))
+        || [...wrapper.classList].some((cls) => /mso/i.test(cls));
+      if (hasIndent && wrapper.parentNode) {
+        wrapper.parentNode.insertBefore(block, wrapper.nextSibling);
+        const wrapperStillHasContent = [...wrapper.childNodes].some((n) => {
+          if (n.nodeType === Node.TEXT_NODE) return !!(n.textContent?.trim());
+          if (n instanceof HTMLElement) {
+            return !!(n.textContent?.replace(/\u200B/g, '').trim() || n.querySelector('img'));
+          }
+          return false;
+        });
+        if (!wrapperStillHasContent) wrapper.remove();
+        continue;
+      }
+      break;
+    }
+  };
+
   const exitListItem = (li: HTMLLIElement, ed: HTMLElement, caretAtStart: boolean) => {
-    const div = convertListItemToParagraph(li, (listEl) => cleanupEmptyListShell(listEl, ed));
-    if (div) placeCaretInBlock(div, caretAtStart);
+    exitListItemToMargin(li, ed, caretAtStart);
     saveSel();
   };
 
@@ -1911,8 +2035,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
-    // Enter always continues the list with a new bullet. Exit to margin is Backspace-only.
-    insertNewListItemAfter(li);
+    // Empty Enter exits to a left-margin paragraph (Word/Docs). Non-empty Enter still adds a bullet.
+    const ed = editorRef.current;
+    if (!ed) return false;
+    exitListItemToMargin(li, ed, true);
     saveSel();
     readCommandState();
     emitHtml();
@@ -1993,11 +2119,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (isNestedListItem(li)) {
       returnToParentListItem(li);
     } else {
-      const div = convertListItemToParagraph(li, (listEl) => cleanupEmptyListShell(listEl, ed));
-      if (div) {
-        stripNewParagraphIndent(div);
-        placeCaretInBlock(div, true);
-      }
+      exitListItemToMargin(li, ed, true);
     }
     saveSel();
     readCommandState();
@@ -2022,7 +2144,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return !!list && LIST_TAGS.has(list.tagName) && list.parentElement?.closest('li') instanceof HTMLLIElement;
   };
 
-  const canOutdentListItem = (li: HTMLLIElement) => isNestedListItem(li);
+  /** Nested items can outdent one level; top-level items can exit to a margin paragraph. */
+  const canOutdentListItem = (li: HTMLLIElement) => !!li.parentElement && LIST_TAGS.has(li.parentElement.tagName);
 
   const canIndentListItem = (li: HTMLLIElement) => li.previousElementSibling instanceof HTMLLIElement;
 
@@ -2030,6 +2153,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const returnToParentListItem = (li: HTMLLIElement): boolean => {
     if (!isNestedListItem(li)) return false;
     return outdentListItem(li);
+  };
+
+  /** One Shift+Tab / outdent step: nested → parent list; top-level → left-margin paragraph. */
+  const outdentOrExitListItem = (li: HTMLLIElement, ed: HTMLElement): boolean => {
+    if (isNestedListItem(li)) return outdentListItem(li);
+    return !!exitListItemToMargin(li, ed, true);
   };
 
   const indentListItem = (li: HTMLLIElement): boolean => {
@@ -2155,7 +2284,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     listMenuBlockRef.current = null;
 
     const li = resolveListItemForAction(range, ed);
-    if (!li || !returnToParentListItem(li)) return;
+    if (!li || !outdentOrExitListItem(li, ed)) return;
     saveSel();
     readCommandState();
     emitHtml();
@@ -2581,17 +2710,61 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!sel?.rangeCount) return;
     const range = sel.getRangeAt(0);
 
+    // Prefer exiting only the caret / selected items so sibling bullets stay intact.
+    const startLi = resolveListItemAtSelection(range, ed);
+    const endLi = getListItem(range.endContainer, ed) ?? startLi;
+    if (startLi && endLi) {
+      const items = collectListItemsBetween(startLi, endLi);
+      // Exit last→first so earlier indices stay valid while splitting lists.
+      for (let i = items.length - 1; i >= 0; i--) {
+        const item = items[i];
+        if (item.isConnected) exitListItemToMargin(item, ed, i === 0);
+      }
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
+    // Caret in a stuck block inside a list shell (div inside li / indented wrapper).
+    const stuckBlock = getLineBlock(range.startContainer, ed);
+    if (stuckBlock && stuckBlock.tagName !== 'LI') {
+      const parentLi = stuckBlock.closest('li');
+      if (parentLi instanceof HTMLLIElement && ed.contains(parentLi)) {
+        exitListItemToMargin(parentLi, ed, true);
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return;
+      }
+      stripNewParagraphIndent(stuckBlock);
+      liftBlockToEditorMargin(stuckBlock, ed);
+      stripNewParagraphIndent(stuckBlock);
+      placeCaretInBlock(stuckBlock, true);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
     const lists = new Set<HTMLUListElement | HTMLOListElement>();
     ed.querySelectorAll('ul, ol').forEach((node) => {
-      if (range.intersectsNode(node)) lists.add(node as HTMLUListElement | HTMLOListElement);
+      try {
+        if (range.intersectsNode(node)) lists.add(node as HTMLUListElement | HTMLOListElement);
+      } catch { /* detached */ }
     });
     const caretList = getListContainer(sel.anchorNode, ed);
     if (caretList) lists.add(caretList);
 
     if (lists.size > 0) {
-      [...lists].forEach((list) => unwrapList(list));
+      [...lists].forEach((list) => {
+        if (list.isConnected) unwrapList(list);
+      });
     } else {
-      collectBlocksInRange(ed, range).forEach(stripBulletPrefixFromBlock);
+      collectBlocksInRange(ed, range).forEach((block) => {
+        stripBulletPrefixFromBlock(block);
+        stripNewParagraphIndent(block);
+      });
     }
 
     saveSel();
@@ -3259,6 +3432,31 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     block.style.marginLeft = '0';
     block.style.marginRight = '0';
     block.removeAttribute('align');
+
+    if (align === 'left') {
+      // Clear leftover list/paste indent so Align Left can recover stuck lines.
+      for (const prop of LIST_EXIT_INDENT_PROPS) block.style.removeProperty(prop);
+      stripLeadingIndentChars(block);
+      if (block.tagName === 'LI') {
+        exitListItemToMargin(block as HTMLLIElement, ed, true);
+        saveSel();
+        readCommandState();
+        emitHtml();
+        ed.focus({ preventScroll: true });
+        return;
+      }
+      const parentLi = block.closest('li');
+      if (parentLi instanceof HTMLLIElement) {
+        exitListItemToMargin(parentLi, ed, true);
+        saveSel();
+        readCommandState();
+        emitHtml();
+        ed.focus({ preventScroll: true });
+        return;
+      }
+      liftBlockToEditorMargin(block, ed);
+      stripNewParagraphIndent(block);
+    }
 
     block.querySelectorAll('img').forEach((img) => applyImageMargins(img, align));
 
@@ -4050,17 +4248,33 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (!ed || !inEditor) return;
       const sel = window.getSelection();
       if (sel?.rangeCount) {
-        const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);
+        const range = sel.getRangeAt(0);
+        const li = resolveListItemAtSelection(range, ed);
         if (li) {
           e.preventDefault();
           e.stopImmediatePropagation();
-          if (e.shiftKey) {
-            if (isNestedListItem(li)) returnToParentListItem(li);
-            else outdentListItem(li);
-          } else indentListItem(li);
+          if (e.shiftKey) outdentOrExitListItem(li, ed);
+          else indentListItem(li);
           saveSel();
           readCommandState();
           emitHtml();
+          return;
+        }
+        // Shift+Tab on an indented non-list block: clear leftover margin/padding/spaces.
+        if (e.shiftKey) {
+          const block = getLineBlock(range.startContainer, ed);
+          if (block && block.tagName !== 'LI' && !block.closest('li')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            stripNewParagraphIndent(block);
+            liftBlockToEditorMargin(block, ed);
+            stripNewParagraphIndent(block);
+            placeCaretInBlock(block, true);
+            saveSel();
+            readCommandState();
+            emitHtml();
+            return;
+          }
           return;
         }
       }
@@ -5021,23 +5235,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                   <rect x="14" y="17" width="8" height="2" rx="1" />
                 </svg>
               </button>
-              {activeCmds.has('canOutdentList') && (
-                <button
-                  type="button"
-                  onMouseDown={(e) => { e.preventDefault(); saveSel(); applyOutdentSubList(); }}
-                  title={t.titleOutdentSubList}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <circle cx="4" cy="6" r="1.4" />
-                    <circle cx="4" cy="12" r="1.4" />
-                    <rect x="8" y="5" width="12" height="2" rx="1" />
-                    <rect x="8" y="11" width="12" height="2" rx="1" />
-                    <circle cx="4" cy="18" r="1.4" />
-                    <rect x="8" y="17" width="12" height="2" rx="1" />
-                  </svg>
-                </button>
-              )}
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); saveSel(); applyOutdentSubList(); }}
+                title={t.titleOutdentSubList}
+                className={
+                  'flex h-7 w-7 items-center justify-center rounded-md ' +
+                  (activeCmds.has('canOutdentList')
+                    ? 'text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10'
+                    : 'text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10')
+                }
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <circle cx="4" cy="6" r="1.4" />
+                  <circle cx="4" cy="12" r="1.4" />
+                  <rect x="8" y="5" width="12" height="2" rx="1" />
+                  <rect x="8" y="11" width="12" height="2" rx="1" />
+                  <circle cx="4" cy="18" r="1.4" />
+                  <rect x="8" y="17" width="12" height="2" rx="1" />
+                </svg>
+              </button>
             </>
           )}
         </div>
