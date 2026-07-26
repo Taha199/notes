@@ -225,15 +225,112 @@ function intersectRangeWithCellContents(range: Range, cell: HTMLTableCellElement
   return out;
 }
 
-function rangeCrossesTableStructure(range: Range): boolean {
+/**
+ * True only when formatting must be applied per-cell (multi-cell selection, or the
+ * range sits on table structure nodes). A normal text selection inside ONE cell is
+ * safe for execCommand / extractContents — do NOT treat it as "crosses structure".
+ */
+function rangeNeedsPerCellFormat(range: Range, ed: HTMLElement): boolean {
+  if (range.collapsed) return false;
+  const startCell = closestTableCell(range.startContainer);
+  const endCell = closestTableCell(range.endContainer);
+  if (startCell && endCell && startCell !== endCell) return true;
   const ancestor = range.commonAncestorContainer;
-  const el = ancestor.nodeType === Node.TEXT_NODE
-    ? ancestor.parentElement
-    : (ancestor instanceof Element ? ancestor : null);
-  if (el?.closest?.('table')) return true;
-  // Selection whose boundaries sit on TR/TABLE (cell-unit selection).
-  if (ancestor instanceof Element && TABLE_STRUCTURE_TAGS.has(ancestor.tagName)) return true;
-  return false;
+  if (ancestor instanceof Element && TABLE_STRUCTURE_TAGS.has(ancestor.tagName)) {
+    // Whole cell / row / table selected as a node — never extractContents across it.
+    return true;
+  }
+  // intersectsNode can over-report in WebKit; require real content intersections.
+  const subs = collectTableCellsInRange(range, ed)
+    .map((cell) => intersectRangeWithCellContents(range, cell))
+    .filter((sub): sub is Range => !!sub && !sub.collapsed);
+  return subs.length > 1;
+}
+
+const TOGGLE_MARK_TAGS: Record<string, string[]> = {
+  bold: ['B', 'STRONG'],
+  italic: ['I', 'EM'],
+  underline: ['U'],
+  strikeThrough: ['S', 'STRIKE', 'DEL'],
+};
+
+const TOGGLE_STYLE_PROP: Record<string, { prop: string; on: string[]; off: string }> = {
+  bold: { prop: 'fontWeight', on: ['bold', 'bolder', '600', '700', '800', '900'], off: 'normal' },
+  italic: { prop: 'fontStyle', on: ['italic', 'oblique'], off: 'normal' },
+  underline: { prop: 'textDecoration', on: ['underline'], off: 'none' },
+  strikeThrough: { prop: 'textDecoration', on: ['line-through'], off: 'none' },
+};
+
+function styleHasToggleMark(style: CSSStyleDeclaration, cmd: string): boolean {
+  const cfg = TOGGLE_STYLE_PROP[cmd];
+  if (!cfg) return false;
+  const raw = (style as unknown as Record<string, string>)[cfg.prop] || '';
+  const val = raw.toLowerCase();
+  if (cmd === 'underline' || cmd === 'strikeThrough') {
+    return cfg.on.some((token) => val.includes(token));
+  }
+  if (cfg.on.includes(val)) return true;
+  const n = parseInt(val, 10);
+  return cmd === 'bold' && !Number.isNaN(n) && n >= 600;
+}
+
+function elementHasToggleMark(el: HTMLElement, cmd: string): boolean {
+  const tags = TOGGLE_MARK_TAGS[cmd];
+  if (tags?.includes(el.tagName)) return true;
+  return styleHasToggleMark(el.style, cmd);
+}
+
+/** Strip B/I/U/S markup inside a range when execCommand toggle-off no-ops (common with mixed <b> + CSS). */
+function stripToggleMarkInRange(range: Range, cmd: string) {
+  const root = range.commonAncestorContainer;
+  const rootEl = root.nodeType === Node.TEXT_NODE ? root.parentElement : (root instanceof Element ? root : null);
+  if (!rootEl) return;
+
+  const tags = TOGGLE_MARK_TAGS[cmd] ?? [];
+  const cfg = TOGGLE_STYLE_PROP[cmd];
+  const candidates = new Set<HTMLElement>();
+
+  if (rootEl instanceof HTMLElement && elementHasToggleMark(rootEl, cmd)) candidates.add(rootEl);
+  rootEl.querySelectorAll('*').forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    try {
+      if (!range.intersectsNode(node)) return;
+    } catch {
+      return;
+    }
+    if (elementHasToggleMark(node, cmd)) candidates.add(node);
+  });
+
+  [...candidates].forEach((el) => {
+    if (tags.includes(el.tagName)) {
+      const parent = el.parentNode;
+      if (!parent) return;
+      while (el.firstChild) parent.insertBefore(el.firstChild, el);
+      parent.removeChild(el);
+      return;
+    }
+    if (!cfg) return;
+    if (cmd === 'underline' || cmd === 'strikeThrough') {
+      const next = (el.style.textDecoration || '')
+        .split(/\s+/)
+        .filter((part) => part && !cfg.on.includes(part.toLowerCase()))
+        .join(' ');
+      el.style.textDecoration = next;
+      if (!next) el.style.removeProperty('text-decoration');
+    } else if (cfg.prop === 'fontWeight') {
+      el.style.fontWeight = cfg.off;
+    } else if (cfg.prop === 'fontStyle') {
+      el.style.fontStyle = cfg.off;
+    }
+    if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+    // Unwrap empty style-only spans left behind.
+    if (el.tagName === 'SPAN' && !el.getAttribute('style') && !el.getAttribute('class')) {
+      const parent = el.parentNode;
+      if (!parent) return;
+      while (el.firstChild) parent.insertBefore(el.firstChild, el);
+      parent.removeChild(el);
+    }
+  });
 }
 
 function stripInlineFontSize(root: ParentNode) {
@@ -3034,8 +3131,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const applyBlockAlignment = (align: BlockAlign) => {
     const ed = editorRef.current;
     if (!ed) return;
-    ed.focus({ preventScroll: true });
-    restoreSel();
+    restoreToolbarSelection();
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
 
@@ -3766,14 +3862,24 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   // ── Command state ─────────────────────────────────────────────────────
   const readCommandState = () => {
     const active = new Set<string>();
-    TOGGLE_COMMANDS.forEach((c) => {
-      try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
-    });
-    try { if (document.queryCommandState('insertUnorderedList')) active.add('insertUnorderedList'); } catch { /* noop */ }
-    try { if (document.queryCommandState('insertOrderedList')) active.add('insertOrderedList'); } catch { /* noop */ }
     const ed = editorRef.current;
     const sel = window.getSelection();
-    if (ed && sel?.rangeCount) {
+    const selInThisEditor = !!(
+      ed
+      && sel?.rangeCount
+      && sel.anchorNode
+      && ed.contains(sel.anchorNode)
+    );
+    // queryCommandState is document-global — only trust it when the live selection
+    // is inside THIS editor (quiz has Q+A editors side by side).
+    if (selInThisEditor) {
+      TOGGLE_COMMANDS.forEach((c) => {
+        try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
+      });
+      try { if (document.queryCommandState('insertUnorderedList')) active.add('insertUnorderedList'); } catch { /* noop */ }
+      try { if (document.queryCommandState('insertOrderedList')) active.add('insertOrderedList'); } catch { /* noop */ }
+    }
+    if (ed && selInThisEditor && sel?.rangeCount) {
       const list = getListContainer(sel.anchorNode, ed);
       if (list?.tagName === 'UL') {
         active.delete('insertOrderedList');
@@ -3881,57 +3987,68 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return () => document.removeEventListener('keydown', onDocKeyDown, true);
   }, [editable]);
 
+  /** Restore the pre-toolbar selection into this editor before applying marks. */
+  const restoreToolbarSelection = (): Range | null => {
+    const ed = editorRef.current;
+    if (!ed) return null;
+    const preferred =
+      savedFormattingRange.current?.cloneRange()
+      ?? savedRange.current?.cloneRange()
+      ?? liveRange()
+      ?? null;
+    ed.focus({ preventScroll: true });
+    if (preferred && ed.contains(preferred.commonAncestorContainer)) {
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      try { sel?.addRange(preferred); } catch { /* stale range */ }
+    }
+    return liveRange();
+  };
+
+  const runExecOnRange = (cmd: string, range: Range, value?: string) => {
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    try { sel?.addRange(range); } catch { return; }
+
+    const isToggle = (TOGGLE_COMMANDS as readonly string[]).includes(cmd);
+    // styleWithCSS=true stores bold as font-weight spans; toggling OFF then fails on
+    // pasted <b>/<strong> (and mixed markup). Prefer semantic tags for toggles.
+    document.execCommand('styleWithCSS', false, isToggle ? 'false' : 'true');
+    let wasActive = false;
+    if (isToggle) {
+      try { wasActive = document.queryCommandState(cmd); } catch { wasActive = false; }
+    }
+    document.execCommand(cmd, false, value);
+    if (isToggle && wasActive) {
+      let stillActive = false;
+      try { stillActive = document.queryCommandState(cmd); } catch { /* noop */ }
+      if (stillActive) {
+        const live = sel?.rangeCount ? sel.getRangeAt(0) : range;
+        stripToggleMarkInRange(live, cmd);
+      }
+    }
+  };
+
   // ── exec: apply a formatting command ─────────────────────────────────
   const exec = (cmd: string, value?: string) => {
     const ed = editorRef.current;
     if (!ed) return;
     pushUndoCheckpoint();
-    // Buttons use e.preventDefault so editor keeps focus & selection intact.
-    // Only restore savedRange when editor actually lost focus (e.g. after palette).
-    if (document.activeElement !== ed) {
-      const saved = savedRange.current?.cloneRange() ?? null;
-      ed.focus({ preventScroll: true });
-      if (saved) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(saved); }
-    }
 
-    // Table-safe path: apply per cell so we never format across td/th/tr structure,
-    // and expand a caret-in-cell to the cell contents (same as font size/color).
-    let tableRange: Range | null = null;
-    const active = document.activeElement;
-    if (active === ed || (active instanceof Node && ed.contains(active))) {
-      const s = window.getSelection();
-      if (s && s.rangeCount > 0 && !s.isCollapsed && ed.contains(s.anchorNode)) {
-        tableRange = s.getRangeAt(0);
-      }
-    }
-    if (!tableRange) {
-      tableRange =
-        savedFormattingRange.current?.cloneRange()
-        ?? savedRange.current?.cloneRange()
-        ?? liveRange()
-        ?? null;
-    }
-    if (tableRange?.collapsed) {
-      const cell = closestTableCell(tableRange.startContainer) ?? closestTableCell(tableRange.endContainer);
-      if (cell && ed.contains(cell) && cellHasVisibleText(cell)) {
-        const cellRange = document.createRange();
-        cellRange.selectNodeContents(cell);
-        tableRange = cellRange;
-      }
-    }
-    if (tableRange && !tableRange.collapsed && rangeCrossesTableStructure(tableRange)) {
-      const subs = collectTableCellsInRange(tableRange, ed)
-        .map((cell) => intersectRangeWithCellContents(tableRange!, cell))
+    // Always restore — some browsers still clear the selection when clicking the
+    // toolbar even with mousedown preventDefault (esp. with two side-by-side editors).
+    const range = restoreToolbarSelection();
+
+    // Multi-cell only: never expand a collapsed caret to the whole cell (that made
+    // Bold look "on" and then no-op / re-bold mixed cell text).
+    if (range && !range.collapsed && rangeNeedsPerCellFormat(range, ed)) {
+      const subs = collectTableCellsInRange(range, ed)
+        .map((cell) => intersectRangeWithCellContents(range, cell))
         .filter((sub): sub is Range => !!sub && !sub.collapsed);
       if (subs.length > 0) {
-        const sel = window.getSelection();
-        document.execCommand('styleWithCSS', false, 'true');
-        subs.forEach((sub) => {
-          sel?.removeAllRanges();
-          sel?.addRange(sub);
-          document.execCommand(cmd, false, value);
-        });
+        subs.forEach((sub) => runExecOnRange(cmd, sub, value));
         const last = subs[subs.length - 1];
+        const sel = window.getSelection();
         sel?.removeAllRanges();
         try { sel?.addRange(last); } catch { /* ignore */ }
         saveSel();
@@ -3941,8 +4058,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
     }
 
-    document.execCommand('styleWithCSS', false, 'true');
-    document.execCommand(cmd, false, value);
+    if (range && !range.collapsed) {
+      runExecOnRange(cmd, range, value);
+    } else {
+      // Collapsed caret: toggle typing state / apply at caret (same as outside tables).
+      const isToggle = (TOGGLE_COMMANDS as readonly string[]).includes(cmd);
+      document.execCommand('styleWithCSS', false, isToggle ? 'false' : 'true');
+      document.execCommand(cmd, false, value);
+    }
     saveSel();
     readCommandState();
     emitHtml();
@@ -4072,7 +4195,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return px || fontSizeRef.current;
   };
 
-  /** Resolve a non-collapsed range to format, expanding caret-in-cell to cell contents. */
+  /** Resolve a non-collapsed range to format. Collapsed caret → null (caller sets future style). */
   const resolveStyleTargetRange = (): Range | null => {
     const ed = editorRef.current;
     if (!ed) return null;
@@ -4080,19 +4203,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const selected = resolveFormatRange();
     if (selected && !selected.collapsed) return selected;
 
-    const caret = selected
-      ?? liveRange()
-      ?? savedRange.current?.cloneRange()
-      ?? null;
-    if (!caret) return null;
-
-    const cell = closestTableCell(caret.startContainer) ?? closestTableCell(caret.endContainer);
-    if (cell && ed.contains(cell) && cellHasVisibleText(cell)) {
-      const cellRange = document.createRange();
-      cellRange.selectNodeContents(cell);
-      return cellRange;
-    }
-    return selected && !selected.collapsed ? selected : null;
+    // Do NOT expand caret-in-cell to the whole cell — that made size/color/highlight
+    // clobber the entire cell when the user only wanted the next typed characters.
+    return null;
   };
 
   const wrapRangeWithFontSize = (range: Range, px: number): HTMLSpanElement | null => {
@@ -4126,6 +4239,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return;
 
+    restoreToolbarSelection();
     const range = resolveStyleTargetRange();
     if (!range || range.collapsed) {
       setFutureFontSize(px);
@@ -4135,7 +4249,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     savedFormattingRange.current = null;
 
     // Table-safe path: never extractContents across td/th/tr (rips cells out of the table).
-    if (rangeCrossesTableStructure(range)) {
+    if (rangeNeedsPerCellFormat(range, ed)) {
       // Snapshot per-cell ranges before any DOM mutation invalidates the original range.
       const subs = collectTableCellsInRange(range, ed)
         .map((cell) => intersectRangeWithCellContents(range, cell))
@@ -4230,8 +4344,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return;
     setBarColor(c);
 
+    restoreToolbarSelection();
     const range = resolveStyleTargetRange();
-    if (range && !range.collapsed && rangeCrossesTableStructure(range)) {
+    if (range && !range.collapsed && rangeNeedsPerCellFormat(range, ed)) {
       ed.focus({ preventScroll: true });
       const subs = collectTableCellsInRange(range, ed)
         .map((cell) => intersectRangeWithCellContents(range, cell))
@@ -4324,13 +4439,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return;
     setHlColor(c);
-    captureFormattingSelection();
-    const range = resolveStyleTargetRange() ?? resolveFormatRange();
+    const range = restoreToolbarSelection() ?? resolveStyleTargetRange() ?? resolveFormatRange();
     if (!range) return;
 
     ed.focus({ preventScroll: true });
 
-    if (!range.collapsed && rangeCrossesTableStructure(range)) {
+    if (!range.collapsed && rangeNeedsPerCellFormat(range, ed)) {
       const subs = collectTableCellsInRange(range, ed)
         .map((cell) => intersectRangeWithCellContents(range, cell))
         .filter((sub): sub is Range => !!sub && !sub.collapsed);
@@ -4649,8 +4763,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           (flexToolbar ? 'sticky top-0 bg-app-bg/95 shadow-sm backdrop-blur-sm dark:bg-gray-900/95' : '')
         }
         style={{ pointerEvents: editable ? 'auto' : 'none', opacity: editable ? 1 : 0.4 }}
-        onMouseDownCapture={() => {
-          saveSel();
+        onMouseDownCapture={(e) => {
+          // Capture selection before any toolbar control steals focus.
+          captureFormattingSelection();
+          // preventDefault on the chrome (not inputs) keeps the caret in the editor.
+          const t = e.target;
+          if (t instanceof HTMLElement && t.closest('input, textarea, select')) return;
+          if (t instanceof HTMLElement && t.closest('button, [data-note-toolbar-btn]')) {
+            e.preventDefault();
+          }
         }}
       >
         {/* Font size */}
@@ -4691,10 +4812,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
         {/* B I U S */}
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('bold'); }} title={t.titleBold} className={btnCls(activeCmds.has('bold'))}><b>B</b></button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('italic'); }} title={t.titleItalic} className={btnCls(activeCmds.has('italic'))}><i>I</i></button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('underline'); }} title={t.titleUnline} className={btnCls(activeCmds.has('underline'))}><u>U</u></button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); exec('strikeThrough'); }} title={t.titleStrike} className={btnCls(activeCmds.has('strikeThrough'))}><s>S</s></button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); exec('bold'); }} title={t.titleBold} className={btnCls(activeCmds.has('bold'))}><b>B</b></button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); exec('italic'); }} title={t.titleItalic} className={btnCls(activeCmds.has('italic'))}><i>I</i></button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); exec('underline'); }} title={t.titleUnline} className={btnCls(activeCmds.has('underline'))}><u>U</u></button>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); exec('strikeThrough'); }} title={t.titleStrike} className={btnCls(activeCmds.has('strikeThrough'))}><s>S</s></button>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 

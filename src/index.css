@@ -495,7 +495,8 @@ body {
 .note-content table.note-table th,
 [contenteditable] table.note-table th {
   background: rgba(108, 99, 255, 0.08);
-  font-weight: 600;
+  /* Do NOT set font-weight here — it makes queryCommandState('bold') stuck ON
+     and execCommand cannot toggle bold off inside header cells. */
 }
 
 .dark .note-content table.note-table th,
