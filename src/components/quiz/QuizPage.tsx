@@ -873,12 +873,37 @@ export function QuizPage({
       }
     }
 
-    const scrollTimer = window.setTimeout(() => {
-      document.getElementById(`quiz-item-${focusItemId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      onFocusHandled?.();
-    }, 120);
+    let cancelled = false;
+    let attempts = 0;
+    let retryTimer = 0;
 
-    return () => window.clearTimeout(scrollTimer);
+    const tryScroll = () => {
+      if (cancelled) return;
+      const el = document.getElementById(`quiz-item-${focusItemId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2', 'ring-primary/50');
+        window.setTimeout(() => {
+          el.classList.remove('ring-2', 'ring-primary/50');
+        }, 1600);
+        onFocusHandled?.();
+        return;
+      }
+      attempts += 1;
+      if (attempts < 24) {
+        retryTimer = window.setTimeout(tryScroll, 50);
+      } else {
+        onFocusHandled?.();
+      }
+    };
+
+    const scrollTimer = window.setTimeout(tryScroll, 80);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(retryTimer);
+    };
   }, [focusItemId, loaded, allQuizSets, quizzes, onFocusHandled]);
 
   useEffect(() => {
@@ -1198,7 +1223,11 @@ export function QuizPage({
       : undefined;
     const showNumber = questionNumber ?? (selectedSetId && form.itemId === null ? orderedItems.length + formIndex + 1 : null);
     return (
-      <div key={form.formId} className={showNumber ? 'flex items-start gap-2' : undefined}>
+      <div
+        key={form.formId}
+        id={form.itemId != null ? `quiz-item-${form.itemId}` : undefined}
+        className={showNumber ? 'flex items-start gap-2' : undefined}
+      >
         {showNumber != null && (
           <span className="mt-4 flex h-7 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
             {showNumber}

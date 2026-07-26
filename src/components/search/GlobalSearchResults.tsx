@@ -5,19 +5,40 @@ import { NoteCard } from '../notes/NoteCard';
 import { QuizItemQaDisplay } from '../quiz/QuizItemQaDisplay';
 import type { GlobalSearchResult } from '../../lib/globalSearch';
 
-function CategoryBadge({ label, favorite }: { label: string; favorite?: boolean }) {
-  return (
-    <span
-      className={
-        'inline-flex flex-shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ' +
-        (favorite
-          ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300'
-          : 'bg-app-bg text-app-text-secondary dark:bg-white/10 dark:text-gray-400')
-      }
-    >
-      {label}
-    </span>
-  );
+function CategoryBadge({
+  label,
+  favorite,
+  onClick,
+}: {
+  label: string;
+  favorite?: boolean;
+  onClick?: () => void;
+}) {
+  const className =
+    'inline-flex flex-shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ' +
+    (favorite
+      ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300'
+      : 'bg-app-bg text-app-text-secondary dark:bg-white/10 dark:text-gray-400') +
+    (onClick
+      ? ' cursor-pointer transition-colors hover:bg-primary/10 hover:text-primary dark:hover:bg-primary/15 dark:hover:text-primary'
+      : '');
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+        className={className}
+      >
+        {label}
+      </button>
+    );
+  }
+
+  return <span className={className}>{label}</span>;
 }
 
 function EmptyState({ text }: { text: string }) {
@@ -100,7 +121,11 @@ export function GlobalSearchResults({
             }
           >
             <div className="flex flex-wrap items-center gap-2">
-              <CategoryBadge label={result.categoryLabel} favorite={result.isFavorite} />
+              <CategoryBadge
+                label={result.categoryLabel}
+                favorite={result.isFavorite}
+                onClick={openQuiz}
+              />
               <span className="text-[10px] text-app-text-secondary/60 dark:text-gray-500">🧠 {t.searchResultQuiz}</span>
             </div>
             {(result.quizFolderName || result.quizSetName) && (

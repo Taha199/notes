@@ -270,12 +270,18 @@ export function Dashboard() {
   }, [setPage]);
 
   const handleOpenQuizFromSearch = useCallback((itemId: number, setId?: string | null, folderId?: string | null) => {
-    if (setId) {
-      localStorage.setItem(QUIZ_SELECTION_KEY, JSON.stringify({ folderId: folderId ?? null, setId }));
-    }
-    setPage('quiz');
+    localStorage.setItem(
+      QUIZ_SELECTION_KEY,
+      JSON.stringify({ folderId: setId ? (folderId ?? null) : null, setId: setId ?? null }),
+    );
+    // Leave global search so QuizPage mounts and can scroll to the question.
+    setSearch('');
+    setActiveSearchHit(0);
     setQuizFocusItemId(itemId);
+    setPage('quiz');
   }, [setPage]);
+
+  const handleQuizFocusHandled = useCallback(() => setQuizFocusItemId(null), []);
 
   const trashedQuizQuestions = trashedQuizzes;
   const trashedQuizSets = useMemo(() => quizSets.filter((set) => set.trashed), [quizSets]);
@@ -403,7 +409,7 @@ export function Dashboard() {
           {!showGlobalSearch && page === 'quiz' && (
             <QuizPage
               focusItemId={quizFocusItemId}
-              onFocusHandled={() => setQuizFocusItemId(null)}
+              onFocusHandled={handleQuizFocusHandled}
             />
           )}
           {!showGlobalSearch && page === 'download' && <DownloadPage />}
