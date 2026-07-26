@@ -472,7 +472,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       wrap.insertBefore(nextBody, table);
       nextBody.appendChild(table);
     });
-    detached.forEach(({ parent, host }) => parent.appendChild(host));
+    // Reattach chrome without moving table menus under the table.
+    // Image/YouTube hosts belong at the end of their frame; table toolbar hosts must
+    // stay pinned as the first child of the wrap (above `.note-table-body`).
+    detached.forEach(({ parent, host }) => {
+      if (host.classList.contains(NOTE_TABLE_TOOLBAR_HOST) && parent.classList.contains(NOTE_TABLE_WRAP)) {
+        parent.insertBefore(host, parent.firstChild);
+        ensureTableWrapStructure(parent);
+        return;
+      }
+      parent.appendChild(host);
+    });
     clearedFrames.forEach(({ frame, scale, active, resizing }) => {
       if (active) frame.classList.add('note-img-frame--active');
       if (resizing) frame.classList.add('note-img-frame--resizing');

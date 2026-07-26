@@ -197,8 +197,10 @@ export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTML
     }
     body.removeAttribute('contenteditable');
     if (table.parentElement !== body) body.appendChild(table);
-    if (toolbarHost.nextElementSibling !== body) wrap.insertBefore(body, toolbarHost.nextSibling);
+    // Always pin: [toolbarHost, note-table-body, …]. Never leave the host under the table
+    // after serialize/selection refresh paths reattach chrome.
     if (wrap.firstElementChild !== toolbarHost) wrap.insertBefore(toolbarHost, wrap.firstChild);
+    if (toolbarHost.nextElementSibling !== body) wrap.insertBefore(body, toolbarHost.nextSibling);
   }
 
   return { toolbarHost, table: table instanceof HTMLTableElement ? table : null };
