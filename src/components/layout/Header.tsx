@@ -64,6 +64,13 @@ export function Header({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                if (searchHitTotal === 0) return;
+                e.preventDefault();
+                if (e.shiftKey) onSearchHitPrev?.();
+                else onSearchHitNext?.();
+              }}
               placeholder={t.searchPh}
               className={'w-full rounded-xl border border-app-border bg-app-bg py-2 pl-3 text-[13.5px] text-app-text outline-none transition-all placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:bg-white focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:border-primary/50 dark:focus:bg-gray-800 dark:focus:ring-primary/20 ' + (search ? 'pr-16' : 'pr-9')}
             />
