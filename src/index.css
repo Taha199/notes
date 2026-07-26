@@ -486,6 +486,7 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.12);
   min-width: 80px;
   padding: 8px 10px;
+  /* Default only — toolbar alignment sets inline text-align (with !important) to override. */
   text-align: start;
   vertical-align: top;
   user-select: text;

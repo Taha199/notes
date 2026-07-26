@@ -280,16 +280,65 @@ function elementHasToggleMark(el: HTMLElement, cmd: string): boolean {
   return styleHasToggleMark(el.style, cmd);
 }
 
-/** Strip B/I/U/S markup inside a range when execCommand toggle-off no-ops (common with mixed <b> + CSS). */
+const TOGGLE_WRAP_TAGS: Record<string, string> = {
+  bold: 'b',
+  italic: 'i',
+  underline: 'u',
+  strikeThrough: 's',
+};
+
+function unwrapToggleMarkElement(el: HTMLElement, cmd: string) {
+  const tags = TOGGLE_MARK_TAGS[cmd] ?? [];
+  const cfg = TOGGLE_STYLE_PROP[cmd];
+  if (tags.includes(el.tagName)) {
+    const parent = el.parentNode;
+    if (!parent) return;
+    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    parent.removeChild(el);
+    return;
+  }
+  if (!cfg) return;
+  if (cmd === 'underline' || cmd === 'strikeThrough') {
+    const next = (el.style.textDecoration || '')
+      .split(/\s+/)
+      .filter((part) => part && !cfg.on.includes(part.toLowerCase()))
+      .join(' ');
+    el.style.textDecoration = next;
+    if (!next) el.style.removeProperty('text-decoration');
+  } else if (cfg.prop === 'fontWeight') {
+    el.style.fontWeight = cfg.off;
+  } else if (cfg.prop === 'fontStyle') {
+    el.style.fontStyle = cfg.off;
+  }
+  if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+  if (el.tagName === 'SPAN' && !el.getAttribute('style') && !el.getAttribute('class')) {
+    const parent = el.parentNode;
+    if (!parent) return;
+    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    parent.removeChild(el);
+  }
+}
+
+/** Strip B/I/U/S markup inside a DocumentFragment before re-wrapping. */
+function stripToggleMarkInFragment(root: ParentNode, cmd: string) {
+  const hit = new Set<HTMLElement>();
+  if (root instanceof HTMLElement && elementHasToggleMark(root, cmd)) hit.add(root);
+  root.querySelectorAll?.('*').forEach((node) => {
+    if (node instanceof HTMLElement && elementHasToggleMark(node, cmd)) hit.add(node);
+  });
+  // Unwrap deepest first so parents stay valid.
+  [...hit].sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0)).forEach((el) => {
+    unwrapToggleMarkElement(el, cmd);
+  });
+}
+
+/** Strip B/I/U/S markup inside a range when toggle-off is requested. */
 function stripToggleMarkInRange(range: Range, cmd: string) {
   const root = range.commonAncestorContainer;
   const rootEl = root.nodeType === Node.TEXT_NODE ? root.parentElement : (root instanceof Element ? root : null);
   if (!rootEl) return;
 
-  const tags = TOGGLE_MARK_TAGS[cmd] ?? [];
-  const cfg = TOGGLE_STYLE_PROP[cmd];
   const candidates = new Set<HTMLElement>();
-
   if (rootEl instanceof HTMLElement && elementHasToggleMark(rootEl, cmd)) candidates.add(rootEl);
   rootEl.querySelectorAll('*').forEach((node) => {
     if (!(node instanceof HTMLElement)) return;
@@ -301,36 +350,87 @@ function stripToggleMarkInRange(range: Range, cmd: string) {
     if (elementHasToggleMark(node, cmd)) candidates.add(node);
   });
 
-  [...candidates].forEach((el) => {
-    if (tags.includes(el.tagName)) {
-      const parent = el.parentNode;
-      if (!parent) return;
-      while (el.firstChild) parent.insertBefore(el.firstChild, el);
-      parent.removeChild(el);
-      return;
+  [...candidates]
+    .sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0))
+    .forEach((el) => unwrapToggleMarkElement(el, cmd));
+}
+
+function nodeHasToggleMarkAncestor(node: Node, cmd: string, boundary: Node): boolean {
+  let el: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (el && el !== boundary) {
+    if (el instanceof HTMLElement && elementHasToggleMark(el, cmd)) return true;
+    el = el.parentNode;
+  }
+  return false;
+}
+
+function collectTextNodesInRange(range: Range): Text[] {
+  if (range.collapsed) return [];
+  const nodes: Text[] = [];
+  if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
+    const text = (range.startContainer.textContent || '').slice(range.startOffset, range.endOffset);
+    if (text.replace(/[\u200B\u00A0]/g, '').trim()) nodes.push(range.startContainer as Text);
+    return nodes;
+  }
+  const root = range.commonAncestorContainer;
+  const walkRoot = root.nodeType === Node.TEXT_NODE ? root.parentNode : root;
+  if (!walkRoot) return nodes;
+  const walker = document.createTreeWalker(walkRoot, NodeFilter.SHOW_TEXT);
+  let n: Node | null = walker.nextNode();
+  while (n) {
+    if ((n.textContent || '').replace(/[\u200B\u00A0]/g, '').trim()) {
+      try {
+        if (range.intersectsNode(n)) nodes.push(n as Text);
+      } catch { /* detached */ }
     }
-    if (!cfg) return;
-    if (cmd === 'underline' || cmd === 'strikeThrough') {
-      const next = (el.style.textDecoration || '')
-        .split(/\s+/)
-        .filter((part) => part && !cfg.on.includes(part.toLowerCase()))
-        .join(' ');
-      el.style.textDecoration = next;
-      if (!next) el.style.removeProperty('text-decoration');
-    } else if (cfg.prop === 'fontWeight') {
-      el.style.fontWeight = cfg.off;
-    } else if (cfg.prop === 'fontStyle') {
-      el.style.fontStyle = cfg.off;
-    }
-    if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
-    // Unwrap empty style-only spans left behind.
-    if (el.tagName === 'SPAN' && !el.getAttribute('style') && !el.getAttribute('class')) {
-      const parent = el.parentNode;
-      if (!parent) return;
-      while (el.firstChild) parent.insertBefore(el.firstChild, el);
-      parent.removeChild(el);
-    }
-  });
+    n = walker.nextNode();
+  }
+  return nodes;
+}
+
+/** True when every visible text node in the range already carries the toggle mark. */
+function rangeIsFullyToggleMarked(range: Range, cmd: string, boundary: Node): boolean {
+  const texts = collectTextNodesInRange(range);
+  if (texts.length === 0) return nodeHasToggleMarkAncestor(range.startContainer, cmd, boundary);
+  return texts.every((t) => nodeHasToggleMarkAncestor(t, cmd, boundary));
+}
+
+/**
+ * DOM wrap for B/I/U/S — same extractContents pattern as font-size.
+ * execCommand is unreliable inside table cells (selection/state no-ops).
+ */
+function wrapRangeWithToggleMark(range: Range, cmd: string): HTMLElement | null {
+  const tag = TOGGLE_WRAP_TAGS[cmd];
+  if (!tag) return null;
+  try {
+    const contents = range.extractContents();
+    stripToggleMarkInFragment(contents, cmd);
+    const el = document.createElement(tag);
+    el.appendChild(contents);
+    range.insertNode(el);
+    return el;
+  } catch {
+    return null;
+  }
+}
+
+function wrapRangeWithHighlight(range: Range, color: string): HTMLSpanElement | null {
+  try {
+    const contents = range.extractContents();
+    contents.querySelectorAll?.('[style]').forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.style.removeProperty('background-color');
+      node.style.removeProperty('background');
+      if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
+    });
+    const span = document.createElement('span');
+    span.style.backgroundColor = color;
+    span.appendChild(contents);
+    range.insertNode(span);
+    return span;
+  } catch {
+    return null;
+  }
 }
 
 function stripInlineFontSize(root: ParentNode) {
@@ -2637,9 +2737,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const readBlockAlignment = (block: HTMLElement): BlockAlign => {
     if (block.tagName === 'CENTER') return 'center';
-    const inline = block.style.textAlign || block.getAttribute('align') || '';
+    const inline = (block.style.textAlign || block.getAttribute('align') || '').toLowerCase();
     if (inline === 'center') return 'center';
     if (inline === 'right' || inline === 'end') return 'right';
+    if (inline === 'left' || inline === 'start') return 'left';
     if (block.style.marginLeft === 'auto' && block.style.marginRight === 'auto') return 'center';
     const computed = getComputedStyle(block);
     if (computed.textAlign === 'center') return 'center';
@@ -3151,7 +3252,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (tableCells.length > 0 || (caretCell && ed.contains(caretCell))) {
       const cells = tableCells.length > 0 ? tableCells : (caretCell ? [caretCell] : []);
       cells.forEach((cell) => {
-        cell.style.textAlign = align;
+        // Inline !important so stylesheet `text-align: start` cannot win visually.
+        cell.style.setProperty('text-align', align === 'left' ? 'start' : align, 'important');
         cell.removeAttribute('align');
       });
       saveSel();
@@ -3189,7 +3291,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     block.style.display = 'block';
     block.style.width = '100%';
-    block.style.textAlign = align;
+    block.style.setProperty('text-align', align === 'left' ? 'start' : align);
     block.style.marginLeft = '0';
     block.style.marginRight = '0';
     block.removeAttribute('align');
@@ -3888,6 +3990,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       });
       try { if (document.queryCommandState('insertUnorderedList')) active.add('insertUnorderedList'); } catch { /* noop */ }
       try { if (document.queryCommandState('insertOrderedList')) active.add('insertOrderedList'); } catch { /* noop */ }
+      // DOM fallback: queryCommandState often lies inside table cells; trust ancestors.
+      if (ed && sel?.anchorNode) {
+        TOGGLE_COMMANDS.forEach((c) => {
+          if (nodeHasToggleMarkAncestor(sel.anchorNode!, c, ed)) active.add(c);
+        });
+      }
     }
     if (ed && selInThisEditor && sel?.rangeCount) {
       const list = getListContainer(sel.anchorNode, ed);
@@ -4015,27 +4123,53 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return liveRange();
   };
 
-  const runExecOnRange = (cmd: string, range: Range, value?: string) => {
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    try { sel?.addRange(range); } catch { return; }
-
-    const isToggle = (TOGGLE_COMMANDS as readonly string[]).includes(cmd);
-    // styleWithCSS=true stores bold as font-weight spans; toggling OFF then fails on
-    // pasted <b>/<strong> (and mixed markup). Prefer semantic tags for toggles.
-    document.execCommand('styleWithCSS', false, isToggle ? 'false' : 'true');
-    let wasActive = false;
-    if (isToggle) {
-      try { wasActive = document.queryCommandState(cmd); } catch { wasActive = false; }
+  /** Split a restored selection into table-safe sub-ranges (same as font-size). */
+  const collectFormatTargetRanges = (range: Range, ed: HTMLElement): Range[] => {
+    if (range.collapsed) return [];
+    if (rangeNeedsPerCellFormat(range, ed)) {
+      return collectTableCellsInRange(range, ed)
+        .map((cell) => intersectRangeWithCellContents(range, cell))
+        .filter((sub): sub is Range => !!sub && !sub.collapsed);
     }
-    document.execCommand(cmd, false, value);
-    if (isToggle && wasActive) {
-      let stillActive = false;
-      try { stillActive = document.queryCommandState(cmd); } catch { /* noop */ }
-      if (stillActive) {
-        const live = sel?.rangeCount ? sel.getRangeAt(0) : range;
-        stripToggleMarkInRange(live, cmd);
+    return [range.cloneRange()];
+  };
+
+  const selectElementsAfterFormat = (els: HTMLElement[]) => {
+    if (els.length === 0) return;
+    const nextRange = document.createRange();
+    if (els.length === 1) nextRange.selectNodeContents(els[0]);
+    else {
+      nextRange.setStartBefore(els[0]);
+      nextRange.setEndAfter(els[els.length - 1]);
+    }
+    const finalSel = window.getSelection();
+    finalSel?.removeAllRanges();
+    try { finalSel?.addRange(nextRange); } catch { /* ignore */ }
+  };
+
+  /**
+   * Apply B/I/U/S via DOM wrap/unwrap (font-size path). execCommand often no-ops or
+   * only flips typing-state inside table cells while leaving the selection unchanged.
+   */
+  const applyToggleMarkToTargets = (cmd: string, targets: Range[], ed: HTMLElement) => {
+    const turnOff = targets.length > 0
+      && targets.every((sub) => rangeIsFullyToggleMarked(sub, cmd, ed));
+    const wrapped: HTMLElement[] = [];
+    // Snapshot clones before mutation invalidates later ranges.
+    const snaps = targets.map((t) => t.cloneRange());
+    snaps.forEach((sub) => {
+      if (turnOff) {
+        stripToggleMarkInRange(sub, cmd);
+      } else {
+        const el = wrapRangeWithToggleMark(sub, cmd);
+        if (el) wrapped.push(el);
       }
+    });
+    if (wrapped.length > 0) selectElementsAfterFormat(wrapped);
+    else if (snaps.length > 0) {
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      try { sel?.addRange(snaps[snaps.length - 1]); } catch { /* ignore */ }
     }
   };
 
@@ -4048,19 +4182,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     // Always restore — some browsers still clear the selection when clicking the
     // toolbar even with mousedown preventDefault (esp. with two side-by-side editors).
     const range = restoreToolbarSelection();
+    const isToggle = (TOGGLE_COMMANDS as readonly string[]).includes(cmd);
 
-    // Multi-cell only: never expand a collapsed caret to the whole cell (that made
-    // Bold look "on" and then no-op / re-bold mixed cell text).
-    if (range && !range.collapsed && rangeNeedsPerCellFormat(range, ed)) {
-      const subs = collectTableCellsInRange(range, ed)
-        .map((cell) => intersectRangeWithCellContents(range, cell))
-        .filter((sub): sub is Range => !!sub && !sub.collapsed);
-      if (subs.length > 0) {
-        subs.forEach((sub) => runExecOnRange(cmd, sub, value));
-        const last = subs[subs.length - 1];
-        const sel = window.getSelection();
-        sel?.removeAllRanges();
-        try { sel?.addRange(last); } catch { /* ignore */ }
+    if (isToggle && range && !range.collapsed) {
+      const targets = collectFormatTargetRanges(range, ed);
+      if (targets.length > 0) {
+        applyToggleMarkToTargets(cmd, targets, ed);
+        savedFormattingRange.current = null;
         saveSel();
         readCommandState();
         emitHtml();
@@ -4068,14 +4196,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
     }
 
-    if (range && !range.collapsed) {
-      runExecOnRange(cmd, range, value);
-    } else {
-      // Collapsed caret: toggle typing state / apply at caret (same as outside tables).
-      const isToggle = (TOGGLE_COMMANDS as readonly string[]).includes(cmd);
-      document.execCommand('styleWithCSS', false, isToggle ? 'false' : 'true');
-      document.execCommand(cmd, false, value);
-    }
+    // Collapsed caret (or non-toggle): execCommand for typing-state / legacy cmds.
+    document.execCommand('styleWithCSS', false, isToggle ? 'false' : 'true');
+    document.execCommand(cmd, false, value);
     saveSel();
     readCommandState();
     emitHtml();
@@ -4307,6 +4430,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const changeSize = (d: number) => {
     const ed = editorRef.current;
     if (!ed) return;
+    restoreToolbarSelection();
     const range = resolveStyleTargetRange();
     if (range && !range.collapsed) {
       applyPx(nextSz(readFontSizeFromRange(range, ed), d));
@@ -4356,32 +4480,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     restoreToolbarSelection();
     const range = resolveStyleTargetRange();
-    if (range && !range.collapsed && rangeNeedsPerCellFormat(range, ed)) {
-      ed.focus({ preventScroll: true });
-      const subs = collectTableCellsInRange(range, ed)
-        .map((cell) => intersectRangeWithCellContents(range, cell))
-        .filter((sub): sub is Range => !!sub && !sub.collapsed);
+
+    // Selected text: DOM-wrap like font-size (execCommand foreColor fails in table cells).
+    if (range && !range.collapsed) {
+      const targets = collectFormatTargetRanges(range, ed);
       const spans: HTMLSpanElement[] = [];
-      subs.forEach((sub) => {
+      targets.forEach((sub) => {
         const wrapped = wrapRangeWithTextColor(sub, c);
         if (wrapped) spans.push(wrapped);
       });
       selectSpansAfterFormat(spans);
+      savedFormattingRange.current = null;
       saveSel();
       setPalOpen(false);
       emitHtml();
       return;
     }
 
-    // Prefer the live/saved non-collapsed selection so colouring reliably hits the text.
-    if (range && !range.collapsed) {
-      ed.focus({ preventScroll: true });
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range.cloneRange());
-    } else {
-      resolveFormatRange();
-    }
+    // Collapsed caret: set typing color for the next characters.
+    ed.focus({ preventScroll: true });
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('foreColor', false, c);
     saveSel();
@@ -4393,8 +4510,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const clearTextColor = () => {
     const ed = editorRef.current;
     if (!ed) return;
-    resolveFormatRange();
-    const range = window.getSelection()?.rangeCount ? window.getSelection()!.getRangeAt(0) : null;
+    const range = restoreToolbarSelection() ?? resolveFormatRange();
     // Strip inline color from spans the selection touches; leave background-color intact.
     ed.querySelectorAll<HTMLElement>('[style*="color"]').forEach((el) => {
       if (!range || range.intersectsNode(el)) {
@@ -4454,30 +4570,29 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     ed.focus({ preventScroll: true });
 
-    if (!range.collapsed && rangeNeedsPerCellFormat(range, ed)) {
-      const subs = collectTableCellsInRange(range, ed)
-        .map((cell) => intersectRangeWithCellContents(range, cell))
-        .filter((sub): sub is Range => !!sub && !sub.collapsed);
+    if (!range.collapsed) {
+      const targets = collectFormatTargetRanges(range, ed);
       if (c === 'transparent') {
-        subs.forEach((sub) => clearHighlightsInRange(ed, sub));
+        targets.forEach((sub) => clearHighlightsInRange(ed, sub));
       } else {
-        subs.forEach((sub) => {
-          const cellSel = window.getSelection();
-          cellSel?.removeAllRanges();
-          cellSel?.addRange(sub);
-          document.execCommand('styleWithCSS', false, 'true');
-          document.execCommand('backColor', false, c);
+        const spans: HTMLSpanElement[] = [];
+        targets.forEach((sub) => {
+          const wrapped = wrapRangeWithHighlight(sub, c);
+          if (wrapped) spans.push(wrapped);
         });
+        selectSpansAfterFormat(spans);
       }
+      savedFormattingRange.current = null;
       saveSel();
       setHlPalOpen(false);
       emitHtml();
       return;
     }
 
+    // Collapsed caret: backColor for next typed characters / clear at caret.
     const sel = window.getSelection();
     sel?.removeAllRanges();
-    sel?.addRange(range.cloneRange());
+    try { sel?.addRange(range.cloneRange()); } catch { /* ignore */ }
 
     if (c === 'transparent') {
       clearHighlightsInRange(ed, range);
@@ -4830,13 +4945,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
         {/* Alignment */}
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('left'); }} title={t.titleLeft} className={btnCls(activeCmds.has('justifyLeft'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); applyBlockAlignment('left'); }} title={t.titleLeft} className={btnCls(activeCmds.has('justifyLeft'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="3" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="3" y="20" width="12" height="2" rx="1"/></svg>
         </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('center'); }} title={t.titleCenter} className={btnCls(activeCmds.has('justifyCenter'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); applyBlockAlignment('center'); }} title={t.titleCenter} className={btnCls(activeCmds.has('justifyCenter'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="6" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="6" y="20" width="12" height="2" rx="1"/></svg>
         </button>
-        <button type="button" onMouseDown={(e) => { e.preventDefault(); saveSel(); applyBlockAlignment('right'); }} title={t.titleRight} className={btnCls(activeCmds.has('justifyRight'))}>
+        <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); applyBlockAlignment('right'); }} title={t.titleRight} className={btnCls(activeCmds.has('justifyRight'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2" rx="1"/><rect x="9" y="10" width="12" height="2" rx="1"/><rect x="3" y="15" width="18" height="2" rx="1"/><rect x="9" y="20" width="12" height="2" rx="1"/></svg>
         </button>
 
