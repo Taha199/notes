@@ -162,6 +162,99 @@ function clearHighlightsInRange(ed: HTMLElement, range: Range) {
   }
 }
 
+/** Table structure tags that must never be pulled out via extractContents/wrap. */
+const TABLE_STRUCTURE_TAGS = new Set(['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TD', 'TH', 'COLGROUP', 'COL']);
+
+function closestTableCell(node: Node | null): HTMLTableCellElement | null {
+  if (!node) return null;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element | null);
+  const cell = el?.closest?.('td, th');
+  return cell instanceof HTMLTableCellElement ? cell : null;
+}
+
+function cellHasVisibleText(cell: HTMLElement): boolean {
+  return (cell.textContent?.replace(/[\u200B\u00A0]/g, ' ').trim() ?? '').length > 0;
+}
+
+function collectTableCellsInRange(range: Range, ed: HTMLElement): HTMLTableCellElement[] {
+  const cells: HTMLTableCellElement[] = [];
+  ed.querySelectorAll('td, th').forEach((node) => {
+    if (!(node instanceof HTMLTableCellElement) || !ed.contains(node)) return;
+    try {
+      if (range.intersectsNode(node)) cells.push(node);
+    } catch {
+      /* detached */
+    }
+  });
+  if (cells.length > 0) return cells;
+  // Fallback when intersectsNode is unreliable (some engines / edge selections).
+  const fallback = closestTableCell(range.commonAncestorContainer)
+    ?? closestTableCell(range.startContainer)
+    ?? closestTableCell(range.endContainer);
+  return fallback && ed.contains(fallback) ? [fallback] : [];
+}
+
+/** Intersect `range` with a cell's contents so formatting never wraps/extracts the cell itself. */
+function intersectRangeWithCellContents(range: Range, cell: HTMLTableCellElement): Range | null {
+  const cellRange = document.createRange();
+  cellRange.selectNodeContents(cell);
+  try {
+    if (range.compareBoundaryPoints(Range.END_TO_START, cellRange) <= 0) return null;
+    if (range.compareBoundaryPoints(Range.START_TO_END, cellRange) >= 0) return null;
+  } catch {
+    return cellHasVisibleText(cell) ? cellRange : null;
+  }
+
+  const out = cellRange.cloneRange();
+  try {
+    if (range.compareBoundaryPoints(Range.START_TO_START, cellRange) > 0) {
+      out.setStart(range.startContainer, range.startOffset);
+    }
+    if (range.compareBoundaryPoints(Range.END_TO_END, cellRange) < 0) {
+      out.setEnd(range.endContainer, range.endOffset);
+    }
+  } catch {
+    return cellHasVisibleText(cell) ? cellRange : null;
+  }
+
+  if (out.collapsed) return null;
+  const ancestor = out.commonAncestorContainer;
+  if (ancestor !== cell && !cell.contains(ancestor)) {
+    return cellHasVisibleText(cell) ? cellRange : null;
+  }
+  return out;
+}
+
+function rangeCrossesTableStructure(range: Range): boolean {
+  const ancestor = range.commonAncestorContainer;
+  const el = ancestor.nodeType === Node.TEXT_NODE
+    ? ancestor.parentElement
+    : (ancestor instanceof Element ? ancestor : null);
+  if (el?.closest?.('table')) return true;
+  // Selection whose boundaries sit on TR/TABLE (cell-unit selection).
+  if (ancestor instanceof Element && TABLE_STRUCTURE_TAGS.has(ancestor.tagName)) return true;
+  return false;
+}
+
+function stripInlineFontSize(root: ParentNode) {
+  root.querySelectorAll?.('[style]').forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    node.style.removeProperty('font-size');
+    node.style.removeProperty('line-height');
+    if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
+  });
+  root.querySelectorAll?.('font[size]').forEach((node) => node.removeAttribute('size'));
+}
+
+function stripInlineTextColor(root: ParentNode) {
+  root.querySelectorAll?.('[style]').forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    node.style.removeProperty('color');
+    if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
+  });
+  root.querySelectorAll?.('font[color]').forEach((node) => node.removeAttribute('color'));
+}
+
 interface Props {
   html: string;
   onChange: (html: string) => void;
@@ -3752,11 +3845,61 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return px || fontSizeRef.current;
   };
 
+  /** Resolve a non-collapsed range to format, expanding caret-in-cell to cell contents. */
+  const resolveStyleTargetRange = (): Range | null => {
+    const ed = editorRef.current;
+    if (!ed) return null;
+
+    const selected = resolveFormatRange();
+    if (selected && !selected.collapsed) return selected;
+
+    const caret = selected
+      ?? liveRange()
+      ?? savedRange.current?.cloneRange()
+      ?? null;
+    if (!caret) return null;
+
+    const cell = closestTableCell(caret.startContainer) ?? closestTableCell(caret.endContainer);
+    if (cell && ed.contains(cell) && cellHasVisibleText(cell)) {
+      const cellRange = document.createRange();
+      cellRange.selectNodeContents(cell);
+      return cellRange;
+    }
+    return selected && !selected.collapsed ? selected : null;
+  };
+
+  const wrapRangeWithFontSize = (range: Range, px: number): HTMLSpanElement | null => {
+    try {
+      const contents = range.extractContents();
+      stripInlineFontSize(contents);
+      const span = document.createElement('span');
+      applyFontSizeStyle(span, px);
+      span.appendChild(contents);
+      range.insertNode(span);
+      return span;
+    } catch {
+      return null;
+    }
+  };
+
+  const selectSpansAfterFormat = (spans: HTMLSpanElement[]) => {
+    if (spans.length === 0) return;
+    const nextRange = document.createRange();
+    if (spans.length === 1) nextRange.selectNodeContents(spans[0]);
+    else {
+      nextRange.setStartBefore(spans[0]);
+      nextRange.setEndAfter(spans[spans.length - 1]);
+    }
+    const finalSel = window.getSelection();
+    finalSel?.removeAllRanges();
+    try { finalSel?.addRange(nextRange); } catch { /* ignore */ }
+  };
+
   const applyPx = (px: number) => {
     const ed = editorRef.current;
     if (!ed) return;
 
-    const range = resolveFormatRange();
+    const range = resolveStyleTargetRange();
     if (!range || range.collapsed) {
       setFutureFontSize(px);
       return;
@@ -3764,36 +3907,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
     savedFormattingRange.current = null;
 
-    const existingSpan = getStylingSpanForRange(range, ed);
-    if (existingSpan) {
-      applyFontSizeStyle(existingSpan, px);
-      const nextRange = document.createRange();
-      nextRange.selectNodeContents(existingSpan);
-      const finalSel = window.getSelection();
-      finalSel?.removeAllRanges();
-      finalSel?.addRange(nextRange);
+    // Table-safe path: never extractContents across td/th/tr (rips cells out of the table).
+    if (rangeCrossesTableStructure(range)) {
+      // Snapshot per-cell ranges before any DOM mutation invalidates the original range.
+      const subs = collectTableCellsInRange(range, ed)
+        .map((cell) => intersectRangeWithCellContents(range, cell))
+        .filter((sub): sub is Range => !!sub && !sub.collapsed);
+      const spans: HTMLSpanElement[] = [];
+      subs.forEach((sub) => {
+        const existing = getStylingSpanForRange(sub, ed);
+        if (existing) {
+          applyFontSizeStyle(existing, px);
+          spans.push(existing);
+          return;
+        }
+        const wrapped = wrapRangeWithFontSize(sub, px);
+        if (wrapped) spans.push(wrapped);
+      });
+      selectSpansAfterFormat(spans);
       setFontSize(px);
       saveSel();
       emitHtml();
       return;
     }
 
-    const contents = range.extractContents();
-    contents.querySelectorAll?.('[style]').forEach((node) => {
-      if (!(node instanceof HTMLElement)) return;
-      node.style.removeProperty('font-size');
-      if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
-    });
-    contents.querySelectorAll?.('font[size]').forEach((node) => node.removeAttribute('size'));
-    const span = document.createElement('span');
-    applyFontSizeStyle(span, px);
-    span.appendChild(contents);
-    range.insertNode(span);
-    const nextRange = document.createRange();
-    nextRange.selectNodeContents(span);
-    const finalSel = window.getSelection();
-    finalSel?.removeAllRanges();
-    finalSel?.addRange(nextRange);
+    const existingSpan = getStylingSpanForRange(range, ed);
+    if (existingSpan) {
+      applyFontSizeStyle(existingSpan, px);
+      selectSpansAfterFormat([existingSpan]);
+      setFontSize(px);
+      saveSel();
+      emitHtml();
+      return;
+    }
+
+    const span = wrapRangeWithFontSize(range, px);
+    if (span) selectSpansAfterFormat([span]);
     setFontSize(px);
     saveSel();
     emitHtml();
@@ -3807,7 +3956,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const changeSize = (d: number) => {
     const ed = editorRef.current;
     if (!ed) return;
-    const range = resolveFormatRange();
+    const range = resolveStyleTargetRange();
     if (range && !range.collapsed) {
       applyPx(nextSz(readFontSizeFromRange(range, ed), d));
     } else {
@@ -3835,12 +3984,52 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     setPalOpen(opening);
   };
 
+  const wrapRangeWithTextColor = (range: Range, color: string): HTMLSpanElement | null => {
+    try {
+      const contents = range.extractContents();
+      stripInlineTextColor(contents);
+      const span = document.createElement('span');
+      span.style.color = color;
+      span.appendChild(contents);
+      range.insertNode(span);
+      return span;
+    } catch {
+      return null;
+    }
+  };
+
   const applyColor = (c: string) => {
     const ed = editorRef.current;
     if (!ed) return;
     setBarColor(c);
+
+    const range = resolveStyleTargetRange();
+    if (range && !range.collapsed && rangeCrossesTableStructure(range)) {
+      ed.focus({ preventScroll: true });
+      const subs = collectTableCellsInRange(range, ed)
+        .map((cell) => intersectRangeWithCellContents(range, cell))
+        .filter((sub): sub is Range => !!sub && !sub.collapsed);
+      const spans: HTMLSpanElement[] = [];
+      subs.forEach((sub) => {
+        const wrapped = wrapRangeWithTextColor(sub, c);
+        if (wrapped) spans.push(wrapped);
+      });
+      selectSpansAfterFormat(spans);
+      saveSel();
+      setPalOpen(false);
+      emitHtml();
+      return;
+    }
+
     // Prefer the live/saved non-collapsed selection so colouring reliably hits the text.
-    resolveFormatRange();
+    if (range && !range.collapsed) {
+      ed.focus({ preventScroll: true });
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range.cloneRange());
+    } else {
+      resolveFormatRange();
+    }
     document.execCommand('styleWithCSS', false, 'true');
     document.execCommand('foreColor', false, c);
     saveSel();
@@ -3909,10 +4098,32 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return;
     setHlColor(c);
     captureFormattingSelection();
-    const range = resolveFormatRange();
+    const range = resolveStyleTargetRange() ?? resolveFormatRange();
     if (!range) return;
 
     ed.focus({ preventScroll: true });
+
+    if (!range.collapsed && rangeCrossesTableStructure(range)) {
+      const subs = collectTableCellsInRange(range, ed)
+        .map((cell) => intersectRangeWithCellContents(range, cell))
+        .filter((sub): sub is Range => !!sub && !sub.collapsed);
+      if (c === 'transparent') {
+        subs.forEach((sub) => clearHighlightsInRange(ed, sub));
+      } else {
+        subs.forEach((sub) => {
+          const cellSel = window.getSelection();
+          cellSel?.removeAllRanges();
+          cellSel?.addRange(sub);
+          document.execCommand('styleWithCSS', false, 'true');
+          document.execCommand('backColor', false, c);
+        });
+      }
+      saveSel();
+      setHlPalOpen(false);
+      emitHtml();
+      return;
+    }
+
     const sel = window.getSelection();
     sel?.removeAllRanges();
     sel?.addRange(range.cloneRange());
