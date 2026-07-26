@@ -1,29 +1,26 @@
 name: Apply quiz image cloud save fix
 
-on:
-  workflow_dispatch: {}
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/apply-quiz-image-cloud-save-fix.yml'
+'on':
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    name: Patch and build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
+          node-version: '20'
       - name: Patch quiz image saving
+        shell: bash
         run: |
-          python - <<'PY'
+          python <<'PY'
           from pathlib import Path
 
           rt = Path('src/components/notes/RichTextEditor.tsx')
@@ -101,7 +98,7 @@ jobs:
           c = ctx.read_text()
           c = c.replace('persist({ quizSets: nextSets }, false);', 'persist({ quizSets: nextSets }, forceCloud);')
           c = c.replace('persist({ quizSets: next }, false);', 'persist({ quizSets: next }, true);')
-          c = c.replace('scheduleInstantDataCloudSave({ quizSets: next });\n      return next;', 'scheduleInstantDataCloudSave({ quizSets: next });\n      if (typeof window !== \'undefined\') window.setTimeout(() => scheduleInstantDataCloudSave({ quizSets: next }), 700);\n      return next;')
+          c = c.replace('scheduleInstantDataCloudSave({ quizSets: next });\n      return next;', 'scheduleInstantDataCloudSave({ quizSets: next });\n      window.setTimeout(() => scheduleInstantDataCloudSave({ quizSets: next }), 700);\n      return next;')
           ctx.write_text(c)
           PY
       - name: Build
@@ -111,8 +108,8 @@ jobs:
       - name: Commit patch
         run: |
           rm .github/workflows/apply-quiz-image-cloud-save-fix.yml
-          git config user.name "codex"
-          git config user.email "codex@openai.com"
+          git config user.name codex
+          git config user.email codex@openai.com
           git add src/components/notes/RichTextEditor.tsx src/contexts/NotesContext.tsx .github/workflows/apply-quiz-image-cloud-save-fix.yml
           git diff --cached --quiet && exit 0
           git commit -m "Fix quiz questions with images cloud save"
