@@ -1,4 +1,10 @@
-type TableCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough';
+type TableCommand =
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'strikeThrough'
+  | 'insertUnorderedList'
+  | 'insertOrderedList';
 type TableAlign = 'left' | 'center' | 'right';
 
 let savedTableRange: Range | null = null;
@@ -53,7 +59,7 @@ function cellsInRange(range: Range, root: HTMLElement): HTMLTableCellElement[] {
     try {
       if (range.intersectsNode(node)) cells.push(node);
     } catch {
-      // Ignore detached nodes.
+      // Detached nodes can briefly exist while contenteditable mutates.
     }
   });
   if (cells.length > 0) return cells;
@@ -84,7 +90,17 @@ function dispatchEditorInput(root: HTMLElement) {
   root.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'formatSetBlockTextDirection' }));
 }
 
-function applyCommand(range: Range, command: TableCommand) {
+function restoreRange(range: Range) {
+  const root = editableRoot(range.commonAncestorContainer);
+  if (!root) return false;
+  root.focus({ preventScroll: true });
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
+}
+
+function applyCommand(range: Range, command: TableCommand, value?: string) {
   const root = editableRoot(range.commonAncestorContainer);
   if (!root) return false;
   const parts = cellsInRange(range, root)
@@ -98,7 +114,7 @@ function applyCommand(range: Range, command: TableCommand) {
     selection?.removeAllRanges();
     selection?.addRange(part);
     document.execCommand('styleWithCSS', false, 'true');
-    document.execCommand(command, false);
+    document.execCommand(command, false, value);
   });
   savedTableRange = parts[parts.length - 1].cloneRange();
   dispatchEditorInput(root);
@@ -118,6 +134,90 @@ function applyAlignment(range: Range, align: TableAlign) {
   return true;
 }
 
+function wrapRange(range: Range, style: Partial<CSSStyleDeclaration>) {
+  try {
+    const span = document.createElement('span');
+    Object.assign(span.style, style);
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    return span;
+  } catch {
+    return null;
+  }
+}
+
+function applyInlineStyle(range: Range, style: Partial<CSSStyleDeclaration>) {
+  const root = editableRoot(range.commonAncestorContainer);
+  if (!root) return false;
+  const parts = cellsInRange(range, root)
+    .map((cell) => intersectCell(range, cell))
+    .filter((part): part is Range => !!part && !part.collapsed);
+  if (parts.length === 0) return false;
+
+  const spans = parts.map((part) => wrapRange(part, style)).filter((span): span is HTMLSpanElement => !!span);
+  if (spans.length > 0) {
+    const next = document.createRange();
+    if (spans.length === 1) next.selectNodeContents(spans[0]);
+    else {
+      next.setStartBefore(spans[0]);
+      next.setEndAfter(spans[spans.length - 1]);
+    }
+    savedTableRange = next.cloneRange();
+  }
+  dispatchEditorInput(root);
+  return spans.length > 0;
+}
+
+function applyFontSize(range: Range, px: number) {
+  return applyInlineStyle(range, { fontSize: `${px}px`, lineHeight: '1.45' });
+}
+
+function applyTextColor(range: Range, color: string) {
+  return applyInlineStyle(range, { color });
+}
+
+function applyHighlight(range: Range, color: string) {
+  return applyInlineStyle(range, { backgroundColor: color });
+}
+
+function nearestToolbar(button: HTMLButtonElement): HTMLElement | null {
+  return button.closest('.flex.min-w-0.max-w-full.flex-wrap, [data-rich-text-toolbar]');
+}
+
+function fontSizeFromToolbarButton(button: HTMLButtonElement, range: Range): number | null {
+  const label = (button.textContent ?? '').trim();
+  if (label !== '+' && label !== '-' && label !== '−') return null;
+  const group = button.parentElement;
+  const input = group?.querySelector('input');
+  if (!(input instanceof HTMLInputElement)) return null;
+  const root = editableRoot(range.startContainer);
+  const cell = closestCell(range.startContainer) ?? closestCell(range.commonAncestorContainer);
+  const current = Number.parseInt(input.value, 10) || Number.parseInt(window.getComputedStyle(cell ?? root!).fontSize, 10) || 15;
+  const sizes = [10, 11, 12, 13, 14, 15, 16, 18, 20, 24, 28, 32, 36, 48];
+  if (label === '+') return sizes.find((size) => size > current) ?? sizes[sizes.length - 1];
+  return [...sizes].reverse().find((size) => size < current) ?? sizes[0];
+}
+
+function colorFromSwatch(target: Element): string | null {
+  const el = target instanceof HTMLElement ? target : target.closest('div, button');
+  if (!(el instanceof HTMLElement)) return null;
+  const bg = el.style.background || el.style.backgroundColor;
+  if (!bg || bg === 'transparent') return null;
+  const rect = el.getBoundingClientRect();
+  if (rect.width > 40 || rect.height > 40) return null;
+  return bg;
+}
+
+function isTextColorPalette(target: Element): boolean {
+  const palette = target.closest('.fixed.z-\\[9999\\].grid');
+  return palette instanceof HTMLElement && palette.className.includes('w-[184px]');
+}
+
+function isHighlightPalette(target: Element): boolean {
+  const palette = target.closest('.fixed.z-\\[9999\\].grid');
+  return palette instanceof HTMLElement && palette.className.includes('w-[164px]');
+}
+
 function buttonCommand(button: HTMLButtonElement): TableCommand | null {
   const label = (button.textContent ?? '').trim().toUpperCase();
   const title = (button.getAttribute('title') ?? '').toLowerCase();
@@ -125,6 +225,8 @@ function buttonCommand(button: HTMLButtonElement): TableCommand | null {
   if (label === 'I' || label === '/' || /italic|kursiv|مائل/.test(title)) return 'italic';
   if (label === 'U' || /underline|understr|تحته|تسطير/.test(title)) return 'underline';
   if (label === 'S' || /strike|genomstr|شطب/.test(title)) return 'strikeThrough';
+  if (/bullet|punktlista|قائمة نقط/.test(title)) return 'insertUnorderedList';
+  if (/numbered|numrerad|قائمة رقم/.test(title)) return 'insertOrderedList';
   return null;
 }
 
@@ -138,15 +240,72 @@ function buttonAlignment(button: HTMLButtonElement): TableAlign | null {
 
 document.addEventListener('selectionchange', rememberTableSelection);
 
+document.addEventListener('focusin', (event) => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement && target.closest('.flex.items-center.overflow-hidden')) {
+    rememberTableSelection();
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || event.key !== 'Enter') return;
+  const range = selectedRange();
+  if (!range || !target.closest('.flex.items-center.overflow-hidden')) return;
+  const px = Number.parseInt(target.value, 10);
+  if (!px) return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  applyFontSize(range, Math.max(8, Math.min(96, px)));
+  target.blur();
+}, true);
+
+document.addEventListener('blur', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const range = selectedRange();
+  if (!range || !target.closest('.flex.items-center.overflow-hidden')) return;
+  const px = Number.parseInt(target.value, 10);
+  if (px) applyFontSize(range, Math.max(8, Math.min(96, px)));
+}, true);
+
 document.addEventListener('mousedown', (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
-  const button = target.closest('button');
-  if (!(button instanceof HTMLButtonElement)) return;
-  if (button.closest('[data-note-table-toolbar], .note-table-toolbar')) return;
 
   const range = selectedRange();
   if (!range) return;
+
+  const paletteColor = colorFromSwatch(target);
+  if (paletteColor && isTextColorPalette(target)) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    applyTextColor(range, paletteColor);
+    return;
+  }
+  if (paletteColor && isHighlightPalette(target)) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    applyHighlight(range, paletteColor);
+    return;
+  }
+
+  const button = target.closest('button');
+  if (!(button instanceof HTMLButtonElement)) return;
+  if (button.closest('[data-note-table-toolbar], .note-table-toolbar')) return;
+  if (!nearestToolbar(button) && !button.closest('.fixed.z-\\[9999\\]')) return;
+
+  const nextFontSize = fontSizeFromToolbarButton(button, range);
+  if (nextFontSize) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    applyFontSize(range, nextFontSize);
+    return;
+  }
 
   const command = buttonCommand(button);
   if (command) {
@@ -163,5 +322,8 @@ document.addEventListener('mousedown', (event) => {
     event.stopPropagation();
     event.stopImmediatePropagation();
     applyAlignment(range, align);
+    return;
   }
+
+  restoreRange(range);
 }, true);
