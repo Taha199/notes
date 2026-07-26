@@ -547,18 +547,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         </div>
         )}
         <div className="flex justify-end gap-2 md:col-span-2">
-          <button type="button" onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              handleSave();
-            }}
-            className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
-          >
-            {t.mSave}
-          </button>
+          <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
+          <button onClick={handleSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{t.mSave}</button>
         </div>
       </div>
     </div>
@@ -636,7 +626,6 @@ export function QuizPage({
   const allQuizSetsRef = useRef(allQuizSets);
   allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const finalizedDraftIdsRef = useRef<Set<number>>(new Set());
 
   const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
@@ -750,7 +739,7 @@ export function QuizPage({
       clearTimeout(timer);
       autoSaveTimers.current.delete(formId);
     }
-    return persistForm(formId, override, finalize);
+    persistForm(formId, override, finalize);
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
@@ -806,12 +795,8 @@ export function QuizPage({
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
-    const savedId = flushForm(formId, override, true);
-    if (savedId !== null) finalizedDraftIdsRef.current.add(savedId);
+    flushForm(formId, override, true);
     closeForm(formId);
-    window.setTimeout(() => {
-      setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));
-    }, 0);
   };
 
   const handleCancelForm = (formId: string) => {
@@ -936,7 +921,7 @@ export function QuizPage({
 
     setOpenForms(
       items
-        .filter((item) => item.draft && !finalizedDraftIdsRef.current.has(item.id))
+        .filter((item) => item.draft)
         .map((item) => ({
           formId: `item-${item.id}`,
           itemId: item.id,
@@ -957,7 +942,7 @@ export function QuizPage({
     setOpenForms((prev) => {
       const openIds = new Set(prev.map((f) => f.itemId));
       const additions = drafts
-        .filter((d) => !openIds.has(d.id) && !finalizedDraftIdsRef.current.has(d.id))
+        .filter((d) => !openIds.has(d.id))
         .map((item) => ({
           formId: `item-${item.id}`,
           itemId: item.id,

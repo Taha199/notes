@@ -4913,9 +4913,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         getTableToolbarHost(activeTableCtx.wrap),
       )}
 
-      {/* Image toolbar — lives inside the selected image frame, directly below the image. */}
+      {/* Image toolbar — portaled to <body> so overflow:hidden on the frame (and
+          justify-center + overflow-x-auto) cannot clip left/right controls. */}
       {editable && hoveredImg && createPortal((() => {
         const imgBtn = 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] text-app-text hover:bg-primary/10 dark:text-gray-100';
+        const fr = hoveredImg.frame.getBoundingClientRect();
         const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
         const leave = (e: React.MouseEvent) => {
           if (isResizingImg.current || imgResizeModeRef.current) return;
@@ -4925,14 +4927,23 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         };
         return (
           <div
-            className="flex w-full justify-center border-t border-app-border/45 bg-white/92 px-1.5 py-1 dark:border-white/10 dark:bg-gray-900/92"
-            style={{ pointerEvents: 'auto' }}
-            onMouseDown={(e) => e.preventDefault()}
-            onMouseEnter={keep}
-            onMouseLeave={leave}
+            style={{
+              position: 'fixed',
+              left: 8,
+              right: 8,
+              top: Math.max(8, fr.bottom - NOTE_IMG_TOOLBAR_RESERVE_PX),
+              zIndex: 100000,
+              display: 'flex',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            }}
           >
             <div
-              className={`${NOTE_IMG_TOOLBAR} flex max-w-full flex-nowrap items-center justify-center gap-0.5 overflow-x-auto rounded-lg px-0.5`}
+              className={`${NOTE_IMG_TOOLBAR} flex w-max max-w-full flex-nowrap items-center justify-center gap-0.5 overflow-x-auto rounded-lg border border-app-border/60 bg-white/96 px-1.5 py-1 shadow-[0_4px_16px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-gray-900/96 dark:shadow-[0_4px_16px_rgba(0,0,0,0.45)]`}
+              style={{ pointerEvents: 'auto' }}
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={keep}
+              onMouseLeave={leave}
             >
               <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
               <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
@@ -4952,7 +4963,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             </div>
           </div>
         );
-      })(), hoveredImg.host)}
+      })(), document.body)}
 
       {/* Image resize handles — only after tapping ↔ (avoids accidental resize when viewing).
           Portaled to <body> so position:fixed is viewport-relative even inside
