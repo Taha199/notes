@@ -680,6 +680,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
+  const [imgOverflowOpen, setImgOverflowOpen] = useState(false);
+  const imgOverflowOpenRef = useRef(false);
+  imgOverflowOpenRef.current = imgOverflowOpen;
+  const [imgOverflowPos, setImgOverflowPos] = useState({ left: 0, bottom: 0 });
+  const imgOverflowBtnRef = useRef<HTMLButtonElement>(null);
+  const imgOverflowMenuRef = useRef<HTMLDivElement>(null);
   const isResizingImg = useRef(false);
   const activeFrameRef = useRef<HTMLElement | null>(null);
   const selectedYtFrameRef = useRef<HTMLElement | null>(null);
@@ -695,6 +701,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   /** Toolbar is ~38px tall; scale image so that space opens at the bottom for the overlay. */
   const NOTE_IMG_TOOLBAR_RESERVE_PX = 38;
+  /** Full bar: 9×28px buttons + 2 dividers + gaps + padding. Below this, collapse into overflow. */
+  const NOTE_IMG_TOOLBAR_FULL_MIN_PX = 292;
 
   const clearImageSelectionChrome = (frame: HTMLElement | null) => {
     if (!frame) return;
@@ -712,12 +720,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const hideImageToolbar = () => {
+    setImgOverflowOpen(false);
     if (isResizingImg.current || imgResizeModeRef.current) return;
     clearImageSelectionChrome(activeFrameRef.current);
     activeFrameRef.current = null;
     hoveredImgElRef.current = null;
     setHoveredImg(null);
     setImgResizeMode(false);
+  };
+
+  const isNoteImgToolbarUi = (node: EventTarget | null): boolean => {
+    if (!(node instanceof Element)) return false;
+    return !!node.closest(`.${NOTE_IMG_TOOLBAR}`);
   };
 
   const clearActiveTableHighlight = () => {
@@ -880,6 +894,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return;
     const frame = ensureImageFrame(img, ed);
     if (hoveredImgElRef.current === img && activeFrameRef.current === frame) return;
+    setImgOverflowOpen(false);
     if (activeFrameRef.current && activeFrameRef.current !== frame) {
       clearImageSelectionChrome(activeFrameRef.current);
     }
@@ -902,10 +917,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         showImageToolbar(img);
         return;
       }
-      if (imgResizeModeRef.current) return;
+      if (imgResizeModeRef.current || imgOverflowOpenRef.current) return;
       if (hoveredImgElRef.current) {
         if (target instanceof Node && activeFrameRef.current?.contains(target)) return;
-        if (target instanceof Element && target.closest(`.${NOTE_IMG_TOOLBAR}`)) return;
+        if (isNoteImgToolbarUi(target)) return;
         hideImageToolbar();
       }
     });
@@ -5086,6 +5101,33 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   }, [listPalOpen]);
 
   useEffect(() => {
+    if (!imgOverflowOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setImgOverflowOpen(false);
+    };
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (imgOverflowBtnRef.current?.contains(t) || imgOverflowMenuRef.current?.contains(t)) return;
+      setImgOverflowOpen(false);
+    };
+    const closeAll = () => setImgOverflowOpen(false);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', closeAll);
+    window.addEventListener('scroll', closeAll, true);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', closeAll);
+      window.removeEventListener('scroll', closeAll, true);
+    };
+  }, [imgOverflowOpen]);
+
+  useEffect(() => {
+    if (!hoveredImg) setImgOverflowOpen(false);
+  }, [hoveredImg]);
+
+  useEffect(() => {
     if (!editable) {
       hideTableToolbar();
       return;
@@ -5512,8 +5554,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           if (isResizingImg.current || imgResizeMode) return;
           const rt = e.relatedTarget;
           if (rt instanceof Node && editorRef.current?.contains(rt)) return;
-          // Toolbar is portaled to <body> — leaving the editor onto it must not dismiss.
-          if (rt instanceof Element && rt.closest(`.${NOTE_IMG_TOOLBAR}`)) return;
+          // Toolbar (and its overflow menu) are portaled to <body> — leaving the editor onto them must not dismiss.
+          if (isNoteImgToolbarUi(rt)) return;
+          if (imgOverflowOpenRef.current) return;
           hideImageToolbar();
         }}
         onClick={(event) => {
@@ -5695,56 +5738,120 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
       {/* Image toolbar — portaled to <body> so overflow:hidden on the frame cannot
           clip controls; positioned from the selected frame's viewport rect so it
-          stays attached to the image (not centered across the whole page). */}
+          stays attached to the image (not centered across the whole page).
+          When the frame is too narrow for every control, keep zoom/resize visible
+          and fold the rest into a ⋯ dropdown. */}
       {editable && hoveredImg && createPortal((() => {
         const imgBtn = 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] text-app-text hover:bg-primary/10 dark:text-gray-100';
+        const imgMenuBtn = 'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-app-text hover:bg-app-bg dark:text-gray-100 dark:hover:bg-white/5';
         const fr = hoveredImg.frame.getBoundingClientRect();
         const top = Math.max(8, fr.bottom - NOTE_IMG_TOOLBAR_RESERVE_PX);
+        const compact = fr.width < NOTE_IMG_TOOLBAR_FULL_MIN_PX;
         const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
         const leave = (e: React.MouseEvent) => {
-          if (isResizingImg.current || imgResizeModeRef.current) return;
+          if (isResizingImg.current || imgResizeModeRef.current || imgOverflowOpenRef.current) return;
           const rt = e.relatedTarget;
           if (rt instanceof Node && activeFrameRef.current?.contains(rt)) return;
+          if (isNoteImgToolbarUi(rt)) return;
           hideImageToolbar();
         };
+        const openOverflow = (e: React.MouseEvent<HTMLButtonElement>) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          const menuW = 200;
+          setImgOverflowPos({
+            left: Math.min(Math.max(8, r.left), window.innerWidth - menuW - 8),
+            bottom: Math.max(8, window.innerHeight - r.top + 4),
+          });
+          setImgOverflowOpen((v) => !v);
+        };
+        const runOverflowAction = (fn: () => void) => {
+          fn();
+          setImgOverflowOpen(false);
+        };
+        const overflowItems = (
+          <>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => applyImageAlignment(hoveredImg.el, 'left')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleLeft}>{compact ? <><span className="w-4 text-center">⬅</span><span>{t.titleLeft}</span></> : '⬅'}</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => applyImageAlignment(hoveredImg.el, 'center')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleCenter}>{compact ? <><span className="w-4 text-center">⊞</span><span>{t.titleCenter}</span></> : '⊞'}</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => applyImageAlignment(hoveredImg.el, 'right')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleRight}>{compact ? <><span className="w-4 text-center">➡</span><span>{t.titleRight}</span></> : '➡'}</button>
+            {compact ? <div className="my-1 border-t border-app-border/60 dark:border-white/12" /> : <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />}
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => { const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, hoveredImg.frame); }); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleInsertLineAboveBlock}>{compact ? <><span className="w-4 text-center">↵</span><span>{t.titleInsertLineAboveBlock}</span></> : '↵'}</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => moveImageVertically(hoveredImg.el, 'up')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleMoveImageUp}>{compact ? <><span className="w-4 text-center">↑</span><span>{t.titleMoveImageUp}</span></> : '↑'}</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => moveImageVertically(hoveredImg.el, 'down')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleMoveImageDown}>{compact ? <><span className="w-4 text-center">↓</span><span>{t.titleMoveImageDown}</span></> : '↓'}</button>
+            {compact ? <div className="my-1 border-t border-app-border/60 dark:border-white/12" /> : <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />}
+            {!compact && (
+              <>
+                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; activeFrameRef.current?.classList.remove('note-img-frame--resizing'); setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
+                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => {
+                  const next = !v;
+                  activeFrameRef.current?.classList.toggle('note-img-frame--resizing', next);
+                  return next;
+                }); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
+              </>
+            )}
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => { removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(); }); }} className={compact ? 'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15' : 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15'} title={t.titleDel}>{compact ? <><span className="w-4 text-center">✕</span><span>{t.titleDel}</span></> : '✕'}</button>
+          </>
+        );
         return (
-          <div
-            style={{
-              position: 'fixed',
-              left: fr.left,
-              width: Math.max(fr.width, 1),
-              top,
-              zIndex: 100000,
-              display: 'flex',
-              justifyContent: 'center',
-              overflow: 'visible',
-              pointerEvents: 'none',
-            }}
-          >
+          <>
             <div
-              className={`${NOTE_IMG_TOOLBAR} flex w-max max-w-full flex-nowrap items-center justify-center gap-0.5 overflow-x-auto rounded-lg border border-app-border/60 bg-white/96 px-1.5 py-1 shadow-[0_4px_16px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-gray-900/96 dark:shadow-[0_4px_16px_rgba(0,0,0,0.45)]`}
-              style={{ pointerEvents: 'auto' }}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={keep}
-              onMouseLeave={leave}
+              style={{
+                position: 'fixed',
+                left: fr.left,
+                width: Math.max(fr.width, 1),
+                top,
+                zIndex: 100000,
+                display: 'flex',
+                justifyContent: 'center',
+                overflow: 'visible',
+                pointerEvents: 'none',
+              }}
             >
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'left'); }} className={imgBtn} title={t.titleLeft}>⬅</button>
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'center'); }} className={imgBtn} title={t.titleCenter}>⊞</button>
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyImageAlignment(hoveredImg.el, 'right'); }} className={imgBtn} title={t.titleRight}>➡</button>
-              <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, hoveredImg.frame); }} className={imgBtn} title={t.titleInsertLineAboveBlock}>↵</button>
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'up'); }} className={imgBtn} title={t.titleMoveImageUp}>↑</button>
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveImageVertically(hoveredImg.el, 'down'); }} className={imgBtn} title={t.titleMoveImageDown}>↓</button>
-              <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; activeFrameRef.current?.classList.remove('note-img-frame--resizing'); setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgResizeMode((v) => {
-                const next = !v;
-                activeFrameRef.current?.classList.toggle('note-img-frame--resizing', next);
-                return next;
-              }); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(); }} className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15" title="Delete">✕</button>
+              <div
+                className={`${NOTE_IMG_TOOLBAR} flex w-max max-w-full flex-nowrap items-center justify-center gap-0.5 rounded-lg border border-app-border/60 bg-white/96 px-1.5 py-1 shadow-[0_4px_16px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-gray-900/96 dark:shadow-[0_4px_16px_rgba(0,0,0,0.45)]`}
+                style={{ pointerEvents: 'auto' }}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={keep}
+                onMouseLeave={leave}
+              >
+                {compact ? (
+                  <>
+                    <button
+                      ref={imgOverflowBtnRef}
+                      type="button"
+                      onClick={openOverflow}
+                      className={imgBtn + (imgOverflowOpen ? ' bg-primary/15 text-primary' : '')}
+                      title="More"
+                      aria-haspopup="menu"
+                      aria-expanded={imgOverflowOpen}
+                    >
+                      ⋯
+                    </button>
+                    <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />
+                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgOverflowOpen(false); setPreviewImage(hoveredImg.el.currentSrc || hoveredImg.el.src); setPreviewZoom(1); naturalSizeRef.current = null; activeFrameRef.current?.classList.remove('note-img-frame--resizing'); setImgResizeMode(false); }} className={imgBtn} title="Zoom">🔍</button>
+                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setImgOverflowOpen(false); setImgResizeMode((v) => {
+                      const next = !v;
+                      activeFrameRef.current?.classList.toggle('note-img-frame--resizing', next);
+                      return next;
+                    }); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
+                  </>
+                ) : overflowItems}
+              </div>
             </div>
-          </div>
+            {compact && imgOverflowOpen && (
+              <div
+                ref={imgOverflowMenuRef}
+                role="menu"
+                className={`${NOTE_IMG_TOOLBAR} fixed z-[100002] min-w-[184px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800`}
+                style={{ left: imgOverflowPos.left, bottom: imgOverflowPos.bottom }}
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onMouseEnter={keep}
+              >
+                {overflowItems}
+              </div>
+            )}
+          </>
         );
       })(), document.body)}
 
@@ -5754,7 +5861,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       {editable && hoveredImg && imgResizeMode && createPortal((() => {
         const r = hoveredImg.rect;
         const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
-        const leave = () => { if (!isResizingImg.current) hideImageToolbar(); };
+        const leave = () => { if (!isResizingImg.current && !imgOverflowOpenRef.current) hideImageToolbar(); };
         const base = 'flex items-center justify-center rounded-full border-2 border-white bg-primary text-white shadow-lg';
         const H = 26; // handle size (px) — larger = easier to grab on touch
         const half = H / 2;
