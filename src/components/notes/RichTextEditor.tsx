@@ -15,6 +15,13 @@ import {
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
 import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
 import {
+  closestTableCell,
+  collectFormatTargetRanges as collectFormatTargetRangesFromLib,
+  collectTableCellsInRange,
+  intersectRangeWithCellContents,
+  rangeNeedsPerCellFormat,
+} from '../../lib/tableCellFormat';
+import {
   BULLET_PREFIX_RE,
   clipboardToNormalizedHtml,
   convertListItemToParagraph,
@@ -160,91 +167,6 @@ function clearHighlightsInRange(ed: HTMLElement, range: Range) {
   } catch {
     /* range may be invalid after DOM changes */
   }
-}
-
-/** Table structure tags that must never be pulled out via extractContents/wrap. */
-const TABLE_STRUCTURE_TAGS = new Set(['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TD', 'TH', 'COLGROUP', 'COL']);
-
-function closestTableCell(node: Node | null): HTMLTableCellElement | null {
-  if (!node) return null;
-  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element | null);
-  const cell = el?.closest?.('td, th');
-  return cell instanceof HTMLTableCellElement ? cell : null;
-}
-
-function cellHasVisibleText(cell: HTMLElement): boolean {
-  return (cell.textContent?.replace(/[\u200B\u00A0]/g, ' ').trim() ?? '').length > 0;
-}
-
-function collectTableCellsInRange(range: Range, ed: HTMLElement): HTMLTableCellElement[] {
-  const cells: HTMLTableCellElement[] = [];
-  ed.querySelectorAll('td, th').forEach((node) => {
-    if (!(node instanceof HTMLTableCellElement) || !ed.contains(node)) return;
-    try {
-      if (range.intersectsNode(node)) cells.push(node);
-    } catch {
-      /* detached */
-    }
-  });
-  if (cells.length > 0) return cells;
-  // Fallback when intersectsNode is unreliable (some engines / edge selections).
-  const fallback = closestTableCell(range.commonAncestorContainer)
-    ?? closestTableCell(range.startContainer)
-    ?? closestTableCell(range.endContainer);
-  return fallback && ed.contains(fallback) ? [fallback] : [];
-}
-
-/** Intersect `range` with a cell's contents so formatting never wraps/extracts the cell itself. */
-function intersectRangeWithCellContents(range: Range, cell: HTMLTableCellElement): Range | null {
-  const cellRange = document.createRange();
-  cellRange.selectNodeContents(cell);
-  try {
-    if (range.compareBoundaryPoints(Range.END_TO_START, cellRange) <= 0) return null;
-    if (range.compareBoundaryPoints(Range.START_TO_END, cellRange) >= 0) return null;
-  } catch {
-    return cellHasVisibleText(cell) ? cellRange : null;
-  }
-
-  const out = cellRange.cloneRange();
-  try {
-    if (range.compareBoundaryPoints(Range.START_TO_START, cellRange) > 0) {
-      out.setStart(range.startContainer, range.startOffset);
-    }
-    if (range.compareBoundaryPoints(Range.END_TO_END, cellRange) < 0) {
-      out.setEnd(range.endContainer, range.endOffset);
-    }
-  } catch {
-    return cellHasVisibleText(cell) ? cellRange : null;
-  }
-
-  if (out.collapsed) return null;
-  const ancestor = out.commonAncestorContainer;
-  if (ancestor !== cell && !cell.contains(ancestor)) {
-    return cellHasVisibleText(cell) ? cellRange : null;
-  }
-  return out;
-}
-
-/**
- * True only when formatting must be applied per-cell (multi-cell selection, or the
- * range sits on table structure nodes). A normal text selection inside ONE cell is
- * safe for execCommand / extractContents — do NOT treat it as "crosses structure".
- */
-function rangeNeedsPerCellFormat(range: Range, ed: HTMLElement): boolean {
-  if (range.collapsed) return false;
-  const startCell = closestTableCell(range.startContainer);
-  const endCell = closestTableCell(range.endContainer);
-  if (startCell && endCell && startCell !== endCell) return true;
-  const ancestor = range.commonAncestorContainer;
-  if (ancestor instanceof Element && TABLE_STRUCTURE_TAGS.has(ancestor.tagName)) {
-    // Whole cell / row / table selected as a node — never extractContents across it.
-    return true;
-  }
-  // intersectsNode can over-report in WebKit; require real content intersections.
-  const subs = collectTableCellsInRange(range, ed)
-    .map((cell) => intersectRangeWithCellContents(range, cell))
-    .filter((sub): sub is Range => !!sub && !sub.collapsed);
-  return subs.length > 1;
 }
 
 const TOGGLE_MARK_TAGS: Record<string, string[]> = {
@@ -4124,15 +4046,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   /** Split a restored selection into table-safe sub-ranges (same as font-size). */
-  const collectFormatTargetRanges = (range: Range, ed: HTMLElement): Range[] => {
-    if (range.collapsed) return [];
-    if (rangeNeedsPerCellFormat(range, ed)) {
-      return collectTableCellsInRange(range, ed)
-        .map((cell) => intersectRangeWithCellContents(range, cell))
-        .filter((sub): sub is Range => !!sub && !sub.collapsed);
-    }
-    return [range.cloneRange()];
-  };
+  const collectFormatTargetRanges = (range: Range, ed: HTMLElement): Range[] =>
+    collectFormatTargetRangesFromLib(range, ed);
 
   const selectElementsAfterFormat = (els: HTMLElement[]) => {
     if (els.length === 0) return;
@@ -4192,6 +4107,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         saveSel();
         readCommandState();
         emitHtml();
+        return;
+      }
+      // In-table non-collapsed selection with no targets: do NOT fall through to
+      // execCommand — it flips toolbar state without changing the DOM inside cells.
+      if (closestTableCell(range.commonAncestorContainer)
+        || closestTableCell(range.startContainer)
+        || collectTableCellsInRange(range, ed).length > 0) {
+        saveSel();
+        readCommandState();
         return;
       }
     }
