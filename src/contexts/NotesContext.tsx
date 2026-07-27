@@ -1746,10 +1746,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (countUserQuizSets(nextSets) > 0) everHadSetsRef.current = true;
+      savesInFlight.current += 1;
       void rtdbFetch(`/users/${user.uid}/quizSets`, {
         method: 'PUT',
         body: JSON.stringify(nextSets),
         headers: { 'Content-Type': 'application/json' },
+      }).finally(() => {
+        savesInFlight.current = Math.max(0, savesInFlight.current - 1);
       });
     }
   };
@@ -2289,8 +2292,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (safe.quizzes?.length) everHadQuizzesRef.current = true;
     if (safe.quizSets && countUserQuizSets(safe.quizSets) > 0) everHadSetsRef.current = true;
     const syncedAt = Date.now();
+    // Track this write in savesInFlight so a hasty refresh right after clicking
+    // Save (e.g. adding a quiz question) is caught by the beforeunload guard —
+    // this is the hot path for every quiz/note instant save.
+    savesInFlight.current += 1;
     try {
-      await getRtdbAuthToken(true);
+      // Skip forceRefresh: the SDK's cached token is normally valid and this call
+      // is on the critical path between a user's click and a page refresh. Forcing
+      // a network round-trip here just to fetch a token widens the window during
+      // which a quick reload can cancel the write before it reaches Firebase.
+      await getRtdbAuthToken(false);
       await update(dbRef(database, `users/${u.uid}`), {
         ...safe,
         cloudSyncAt: syncedAt,
@@ -2302,6 +2313,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       markPushedData(safe, syncedAt);
     } catch {
       /* best-effort */
+    } finally {
+      savesInFlight.current = Math.max(0, savesInFlight.current - 1);
     }
   };
 
@@ -2821,10 +2834,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const onHide = () => {
       if (document.visibilityState === 'hidden') flushPersist();
     };
+    // A user who clicks Save and immediately hits refresh (Cmd+R) can cancel the
+    // in-flight cloud write before it reaches Firebase — the item was already
+    // applied to local React state so it looked saved, but nothing durable ever
+    // received it. Warn on unload while a save is still pending so the browser's
+    // native confirmation gives the write a chance to finish (and lets the user
+    // simply not leave).
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (savesInFlight.current <= 0) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
     document.addEventListener('visibilitychange', onVisible);
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('focus', onVisible);
     window.addEventListener('pagehide', flushPersist);
+    window.addEventListener('beforeunload', onBeforeUnload);
     pullTimer.current = window.setInterval(() => {
       if (document.visibilityState === 'visible') void pullFromCloud(true);
     }, 60_000);
@@ -2838,6 +2863,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
       window.removeEventListener('pagehide', flushPersist);
+      window.removeEventListener('beforeunload', onBeforeUnload);
       if (pullTimer.current) clearInterval(pullTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
