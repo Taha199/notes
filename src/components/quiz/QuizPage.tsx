@@ -550,8 +550,18 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         </div>
         )}
         <div className="flex justify-end gap-2 md:col-span-2">
-          <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
-          <button onClick={handleSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{t.mSave}</button>
+          <button type="button" onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleSave();
+            }}
+            className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+          >
+            {t.mSave}
+          </button>
         </div>
       </div>
     </div>
@@ -629,13 +639,18 @@ export function QuizPage({
   const allQuizSetsRef = useRef(allQuizSets);
   allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  /** Just-finalized ids — keep draft-sync from reopening an editor right after Save. */
+  const finalizedDraftIdsRef = useRef<Set<number>>(new Set());
 
   const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
+    // Keep the ref in sync immediately so a double Save click cannot create a second item
+    // before React re-renders with the new itemId.
+    openFormsRef.current = openFormsRef.current.map((f) => (f.formId === formId ? { ...f, ...patch } : f));
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
   };
 
   const updateFormContent = (formId: string, patch: Pick<OpenQuestionForm, 'question'> | Pick<OpenQuestionForm, 'answer'> | Pick<OpenQuestionForm, 'question' | 'answer'>) => {
-    setOpenForms((prev) =>
+    const apply = (prev: OpenQuestionForm[]) =>
       prev.map((f) => {
         if (f.formId !== formId) return f;
         const next = { ...f, ...patch };
@@ -643,14 +658,16 @@ export function QuizPage({
         const complete = hasContent(next.question) && hasContent(next.answer);
         if (!complete) return { ...next, saveStatus: 'empty' as const };
         return next;
-      }),
-    );
+      });
+    openFormsRef.current = apply(openFormsRef.current);
+    setOpenForms((prev) => apply(prev));
   };
 
   const closeForm = (formId: string) => {
     const timer = autoSaveTimers.current.get(formId);
     if (timer) clearTimeout(timer);
     autoSaveTimers.current.delete(formId);
+    openFormsRef.current = openFormsRef.current.filter((f) => f.formId !== formId);
     setOpenForms((prev) => prev.filter((f) => f.formId !== formId));
   };
 
@@ -659,23 +676,25 @@ export function QuizPage({
     if (!form) return null;
     const q = override?.question ?? form.question;
     const a = override?.answer ?? form.answer;
-    const patch = {
+    // Omit undefined optional fields so autosave cannot wipe MCQ options / explanation.
+    const patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>> = {
       question: q,
       answer: a,
-      options: override?.options,
-      correctIndex: override?.correctIndexes?.[0],
-      correctIndexes: override?.correctIndexes,
-      explanation: override?.explanation,
       // Never demote an already-saved question back to a draft on autosave.
       draft: finalize ? false : (form.finalized ? false : true),
     };
+    if (override?.options !== undefined) patch.options = override.options;
+    if (override?.correctIndexes !== undefined) {
+      patch.correctIndexes = override.correctIndexes;
+      patch.correctIndex = override.correctIndexes[0];
+    }
+    if (override?.explanation !== undefined) patch.explanation = override.explanation;
 
     const setId = selectedSetIdRef.current;
 
     if (form.itemId === null) {
       if (!hasContent(q) && !hasContent(a)) return null;
       if (setId) {
-        if (!finalize) return null;
         const id = addItemToSet(setId, {
           noteId: 0,
           noteTitle: '',
@@ -683,13 +702,22 @@ export function QuizPage({
           answer: a,
           date: new Date().toLocaleDateString(),
           createdAt: new Date().toISOString(),
-          draft: false,
+          draft: !finalize,
           options: patch.options,
           correctIndex: patch.correctIndex,
           correctIndexes: patch.correctIndexes,
           explanation: patch.explanation,
         });
-        updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved', finalized: true });
+        updateForm(formId, {
+          itemId: id,
+          question: q,
+          answer: a,
+          saveStatus: 'saved',
+          finalized: finalize || undefined,
+        });
+        if (finalize) {
+          updateItemInSet(setId, id, { ...patch, draft: false }, true);
+        }
         return id;
       }
       const id = addQuiz({
@@ -730,35 +758,35 @@ export function QuizPage({
 
   const flushAllOpenForms = () => {
     for (const form of openFormsRef.current) {
-      if (form.itemId === null) continue;
       const complete = hasContent(form.question) && hasContent(form.answer);
+      // Persist drafts with any content (including set drafts that still lack an id).
+      if (form.itemId === null && !hasContent(form.question) && !hasContent(form.answer)) continue;
       flushForm(form.formId, undefined, !!form.finalized || complete);
     }
   };
 
-  const flushForm = (formId: string, override?: SavePayload, finalize = false) => {
+  const flushForm = (formId: string, override?: SavePayload, finalize = false): number | null => {
     const timer = autoSaveTimers.current.get(formId);
     if (timer) {
       clearTimeout(timer);
       autoSaveTimers.current.delete(formId);
     }
-    persistForm(formId, override, finalize);
+    return persistForm(formId, override, finalize);
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
     if (initial?.itemId) {
       if (openFormsRef.current.some((f) => f.itemId === initial.itemId)) return;
-      setOpenForms((prev) => [
-        ...prev,
-        {
-          formId: `item-${initial.itemId}`,
-          itemId: initial.itemId!,
-          question: initial.question ?? '',
-          answer: initial.answer ?? '',
-          saveStatus: 'saved',
-          finalized: true,
-        },
-      ]);
+      const nextForm: OpenQuestionForm = {
+        formId: `item-${initial.itemId}`,
+        itemId: initial.itemId!,
+        question: initial.question ?? '',
+        answer: initial.answer ?? '',
+        saveStatus: 'saved',
+        finalized: true,
+      };
+      openFormsRef.current = [...openFormsRef.current, nextForm];
+      setOpenForms((prev) => [...prev, nextForm]);
       return;
     }
 
@@ -771,35 +799,29 @@ export function QuizPage({
       createdAt: new Date().toISOString(),
       draft: true,
     };
-    if (selectedSetIdRef.current) {
-      setOpenForms((prev) => [
-        ...prev,
-        {
-          formId: `new-${Date.now()}`,
-          itemId: null,
-          question: '',
-          answer: '',
-          saveStatus: 'empty',
-        },
-      ]);
-      return;
-    }
-    const id = addQuiz(item);
-    setOpenForms((prev) => [
-      ...prev,
-      {
-        formId: `item-${id}`,
-        itemId: id,
-        question: '',
-        answer: '',
-        saveStatus: 'saved',
-      },
-    ]);
+    // Persist set drafts immediately (same as notes-view) so refresh / other devices keep them.
+    const setId = selectedSetIdRef.current;
+    const id = setId ? addItemToSet(setId, item) : addQuiz(item);
+    const nextForm: OpenQuestionForm = {
+      formId: `item-${id}`,
+      itemId: id,
+      question: '',
+      answer: '',
+      saveStatus: 'saved',
+    };
+    openFormsRef.current = [...openFormsRef.current, nextForm];
+    setOpenForms((prev) => [...prev, nextForm]);
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
-    flushForm(formId, override, true);
+    const savedId = flushForm(formId, override, true);
+    if (savedId !== null) finalizedDraftIdsRef.current.add(savedId);
     closeForm(formId);
+    // Drop any race where draft-sync re-adds an editor for the just-saved id.
+    window.setTimeout(() => {
+      openFormsRef.current = openFormsRef.current.filter((f) => f.formId !== formId && f.itemId !== savedId);
+      setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));
+    }, 0);
   };
 
   const handleCancelForm = (formId: string) => {
@@ -827,7 +849,8 @@ export function QuizPage({
 
   useEffect(() => {
     openForms.forEach((form) => {
-      if (form.itemId === null) return;
+      // New set drafts now get an id immediately; still allow autosave once content exists.
+      if (form.itemId === null && !hasContent(form.question) && !hasContent(form.answer)) return;
       const existing = autoSaveTimers.current.get(form.formId);
       if (existing) clearTimeout(existing);
       autoSaveTimers.current.set(
@@ -947,17 +970,17 @@ export function QuizPage({
       ? (allQuizSets.find((s) => s.id === selectedSetId)?.items ?? [])
       : quizzes.filter((q) => !q.trashed);
 
-    setOpenForms(
-      items
-        .filter((item) => item.draft)
-        .map((item) => ({
-          formId: `item-${item.id}`,
-          itemId: item.id,
-          question: item.question,
-          answer: item.answer,
-          saveStatus: 'saved' as const,
-        })),
-    );
+    const draftForms = items
+      .filter((item) => item.draft && !finalizedDraftIdsRef.current.has(item.id))
+      .map((item) => ({
+        formId: `item-${item.id}`,
+        itemId: item.id,
+        question: item.question,
+        answer: item.answer,
+        saveStatus: 'saved' as const,
+      }));
+    openFormsRef.current = draftForms;
+    setOpenForms(draftForms);
   }, [selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -970,7 +993,7 @@ export function QuizPage({
     setOpenForms((prev) => {
       const openIds = new Set(prev.map((f) => f.itemId));
       const additions = drafts
-        .filter((d) => !openIds.has(d.id))
+        .filter((d) => !openIds.has(d.id) && !finalizedDraftIdsRef.current.has(d.id))
         .map((item) => ({
           formId: `item-${item.id}`,
           itemId: item.id,
@@ -978,7 +1001,10 @@ export function QuizPage({
           answer: item.answer,
           saveStatus: 'saved' as const,
         }));
-      return additions.length ? [...prev, ...additions] : prev;
+      if (!additions.length) return prev;
+      const next = [...prev, ...additions];
+      openFormsRef.current = next;
+      return next;
     });
   }, [allQuizSets, quizzes, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1142,7 +1168,7 @@ export function QuizPage({
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet
     ? visibleQuizItems(selectedSet.items)
-    : isNotesView ? quizzes : [];
+    : isNotesView ? visibleQuizItems(quizzes) : [];
 
   const orderedItems = useMemo(() => {
     if (itemSort === 'manual') return displayItems;

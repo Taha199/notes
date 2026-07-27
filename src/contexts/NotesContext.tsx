@@ -6,7 +6,7 @@ import { buildFullBackupPayload, shouldRunHourlyFolderBackup, writeBackupToFolde
 import { setTokenSink } from '../lib/gemini';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
-import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
+import { compactQuizPatch, quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 
 export interface Draft {
@@ -1292,6 +1292,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFolders?: QuizFolder[];
   } | null>(null);
   const instantDataSaveQueuedRef = useRef(false);
+  /** When remote apply blocks cloud writes, queue a full save and flush afterwards. */
+  const pendingCloudSaveAfterRemoteRef = useRef(false);
   const notesRef = useRef(notes);
   const quizzesRef = useRef(quizzes);
   const chatsRef = useRef(chats);
@@ -1451,8 +1453,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
         let quizzes = filterResurrectedTrash(mergeQuizzesForSync(local.quizzes, cloudQuizzes, tombstones), local.quizzes);
+        const cloudQuizIds = new Set(cloudQuizzes.map((q) => q.id));
+        const localOnlyQuizCount = local.quizzes.filter((q) => !cloudQuizIds.has(q.id)).length;
         let quizzesRepair = quizzes.length > cloudQuizzes.length
-          || (local.quizzes.length > 0 && cloudQuizzes.length === 0);
+          || (local.quizzes.length > 0 && cloudQuizzes.length === 0)
+          || localOnlyQuizCount > 0;
 
         const cloudChatsRaw = cloud ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>) : [];
         let chats = mergeChatsForSync(local.chats, cloudChatsRaw).map((c) => ({
@@ -1598,7 +1603,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         });
         markEverHadContent(notes, quizzes, normalizedSets);
         if (needsRepair) {
-          recoveryLog('repairing cloud from local/history');
+          recoveryLog('repairing cloud from local/history', {
+            localOnlyQuizzes: localOnlyQuizCount,
+            quizzes: quizzes.length,
+            cloudQuizzes: cloudQuizzes.length,
+          });
           const repairBody: Record<string, unknown> = { chats, quizFolders: normalizedFolders };
           if (notes.length > 0) repairBody.notes = notes;
           if (quizzes.length > 0) repairBody.quizzes = quizzes;
@@ -1607,7 +1616,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             method: 'PATCH',
             body: JSON.stringify(repairBody),
             headers: { 'Content-Type': 'application/json' },
-          });
+          }).then((res) => {
+            if (res.ok && quizzes.length > 0) {
+              const syncedAt = Date.now();
+              lastLocalSaveAt.current = syncedAt;
+              lastAppliedRemoteSyncAt.current = syncedAt;
+              setCloudSyncedAt(syncedAt);
+              localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+            }
+          }).catch(() => { /* repair best-effort */ });
+          // Dedicated quizzes PUT so mobile always gets the full list even if PATCH merges oddly.
+          if (quizzes.length > 0 && (quizzesRepair || localOnlyQuizCount > 0)) {
+            void rtdbFetch(`/users/${user.uid}/quizzes`, {
+              method: 'PUT',
+              body: JSON.stringify(quizzes),
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
           if (repairQuizStructure || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)) {
             void rtdbFetch(`/users/${user.uid}/quizSets`, {
               method: 'PUT',
@@ -1706,6 +1731,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
               setCloudStatus('error');
             } else {
               setCloudStatus('idle');
+            }
+            // Push any desktop-only quizzes/sets so other devices (mobile) receive them.
+            if (quizzesRef.current.length > 0 || countUserQuizSets(quizSetsRef.current) > 0) {
+              scheduleInstantDataCloudSave({
+                quizzes: quizzesRef.current,
+                quizSets: quizSetsRef.current,
+                quizFolders: quizFoldersRef.current,
+              });
             }
           }
           if (hasDraftContent(draftsRef.current)) {
@@ -2173,6 +2206,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       isApplyingRemoteRef.current = false;
+      flushPendingCloudSavesAfterRemote();
     }
   };
 
@@ -2247,6 +2281,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /** Firebase RTDB `update()` rejects `undefined` values — strip them (JSON.stringify already does for REST). */
+  const sanitizeForRtdb = <T,>(value: T): T => {
+    try {
+      return JSON.parse(JSON.stringify(value)) as T;
+    } catch {
+      return value;
+    }
+  };
+
+  const flushPendingCloudSavesAfterRemote = () => {
+    if (isApplyingRemoteRef.current) return;
+    const pendingPatch = pendingInstantDataSaveRef.current;
+    if (pendingPatch) {
+      pendingInstantDataSaveRef.current = null;
+      void runInstantDataCloudSave(pendingPatch);
+    }
+    if (pendingCloudSaveAfterRemoteRef.current) {
+      pendingCloudSaveAfterRemoteRef.current = false;
+      runCloudSave(true);
+    }
+  };
+
   const runInstantDataCloudSave = async (patch: {
     notes?: Note[];
     quizzes?: QuizItem[];
@@ -2255,6 +2311,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }) => {
     const u = userRef.current;
     if (!u || !loadedRef.current) return;
+    if (isApplyingRemoteRef.current) {
+      pendingInstantDataSaveRef.current = { ...pendingInstantDataSaveRef.current, ...patch };
+      pendingCloudSaveAfterRemoteRef.current = true;
+      return;
+    }
     const safe: typeof patch = { ...patch };
     if (safe.notes && safe.notes.length === 0 && everHadNotesRef.current) {
       recoveryLog('skipped instant notes wipe');
@@ -2273,19 +2334,37 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (safe.quizzes?.length) everHadQuizzesRef.current = true;
     if (safe.quizSets && countUserQuizSets(safe.quizSets) > 0) everHadSetsRef.current = true;
     const syncedAt = Date.now();
+    const body = sanitizeForRtdb({
+      ...safe,
+      cloudSyncAt: syncedAt,
+    });
     try {
       await getRtdbAuthToken(true);
-      await update(dbRef(database, `users/${u.uid}`), {
-        ...safe,
-        cloudSyncAt: syncedAt,
-      });
+      try {
+        await update(dbRef(database, `users/${u.uid}`), body);
+      } catch (sdkErr) {
+        recoveryLog('instant SDK update failed, falling back to REST PATCH', {
+          message: sdkErr instanceof Error ? sdkErr.message : String(sdkErr),
+        });
+        const res = await rtdbFetch(`/users/${u.uid}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!res.ok) throw new Error(`instant-rest-save-failed:${res.status}`);
+      }
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
       localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData(safe, syncedAt);
-    } catch {
-      /* best-effort */
+      setCloudStatus('saved');
+    } catch (err) {
+      recoveryLog('instant cloud save failed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      pendingCloudSaveAfterRemoteRef.current = true;
+      setCloudStatus('error');
     }
   };
 
@@ -2295,8 +2374,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSets?: QuizSet[];
     quizFolders?: QuizFolder[];
   }) => {
-    if (!userRef.current || !loadedRef.current || isApplyingRemoteRef.current) return;
+    if (!userRef.current || !loadedRef.current) {
+      pendingInstantDataSaveRef.current = { ...pendingInstantDataSaveRef.current, ...patch };
+      pendingCloudSaveAfterRemoteRef.current = true;
+      return;
+    }
+    // Always keep the latest patch even while applying remote — flush afterwards.
     pendingInstantDataSaveRef.current = { ...pendingInstantDataSaveRef.current, ...patch };
+    if (isApplyingRemoteRef.current) {
+      pendingCloudSaveAfterRemoteRef.current = true;
+      return;
+    }
     if (instantDataSaveQueuedRef.current) return;
     instantDataSaveQueuedRef.current = true;
     queueMicrotask(() => {
@@ -2547,7 +2635,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       writeLocalCache();
     }, forceCloud ? 0 : 600);
     if (forceCloud) writeLocalCache();
-    if (!user || isApplyingRemoteRef.current) {
+    if (!user) return;
+    if (isApplyingRemoteRef.current) {
+      pendingCloudSaveAfterRemoteRef.current = true;
       if (overrides?.drafts) pendingDraftCloudSaveRef.current = true;
       return;
     }
@@ -2557,6 +2647,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!loadedRef.current) {
+      pendingCloudSaveAfterRemoteRef.current = true;
       if (overrides?.drafts) pendingDraftCloudSaveRef.current = true;
       return;
     }
@@ -2663,6 +2754,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       /* ignore draft pull errors */
     } finally {
       isApplyingRemoteRef.current = false;
+      flushPendingCloudSavesAfterRemote();
     }
   };
 
@@ -2694,6 +2786,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       /* ignore pull errors */
     } finally {
       isApplyingRemoteRef.current = false;
+      flushPendingCloudSavesAfterRemote();
     }
   };
 
@@ -2726,6 +2819,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         applySingleRemoteDraft(id, snap.val() as { title?: string; html?: string; updatedAt?: number } | null);
       } finally {
         isApplyingRemoteRef.current = false;
+        flushPendingCloudSavesAfterRemote();
       }
     };
     const unsubChanged = onChildChanged(contentsRef, handleRemote);
@@ -2738,6 +2832,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         applySingleRemoteDraft(id, null);
       } finally {
         isApplyingRemoteRef.current = false;
+        flushPendingCloudSavesAfterRemote();
       }
     });
     const unsubDrafts = onValue(dbRef(database, `users/${uid}/drafts`), (snap) => {
@@ -2747,6 +2842,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         applyDraftListFromCloud(ids);
       } finally {
         isApplyingRemoteRef.current = false;
+        flushPendingCloudSavesAfterRemote();
       }
     });
     const unsubDeleted = onValue(dbRef(database, `users/${uid}/deletedDraftIds`), (snap) => {
@@ -2786,6 +2882,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (changed) recoveryLog('applied remote permanently-deleted tombstones');
       } finally {
         isApplyingRemoteRef.current = false;
+        flushPendingCloudSavesAfterRemote();
       }
     });
     const bindRealtime = <T,>(path: string, key: 'notes' | 'quizzes' | 'quizSets' | 'quizFolders', map?: (val: unknown) => T) =>
@@ -2955,8 +3052,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizzes(next);
     localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
     everHadQuizzesRef.current = true;
-    // Field-level cloud write only (never force a full-user PATCH that could wipe notes).
-    persist({ quizzes: next }, false);
+    // Field-level cloud write + immediate push (sanitize undefined for Firebase SDK).
+    persist({ quizzes: next }, true);
     scheduleInstantDataCloudSave({ quizzes: next });
     return newId;
   };
@@ -3067,7 +3164,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
     const existing = quizzesRef.current.find((q) => q.id === id);
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
-    const next = quizzesRef.current.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
+    const clean = compactQuizPatch(patch);
+    const next = quizzesRef.current.map((q) => (q.id === id ? { ...q, ...clean, updatedAt: new Date().toISOString() } : q));
     quizzesRef.current = next;
     setQuizzes(next);
     localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
@@ -3654,9 +3752,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const set = quizSetsRef.current.find((s) => s.id === setId);
     const existing = set?.items.find((i) => i.id === itemId);
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
+    const clean = compactQuizPatch(patch);
     const next = quizSetsRef.current.map((s) => (
       s.id === setId
-        ? { ...s, items: s.items.map((i) => (i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i)) }
+        ? { ...s, items: s.items.map((i) => (i.id === itemId ? { ...i, ...clean, updatedAt: new Date().toISOString() } : i)) }
         : s
     ));
     quizSetsRef.current = next;

@@ -34,6 +34,15 @@ export function quizPatchChangesContent(
   });
 }
 
+/** Drop undefined keys so spreads cannot wipe existing MCQ options / explanation. */
+export function compactQuizPatch<T extends Record<string, unknown>>(patch: T): Partial<T> {
+  const out: Partial<T> = {};
+  (Object.keys(patch) as (keyof T)[]).forEach((key) => {
+    if (patch[key] !== undefined) out[key] = patch[key];
+  });
+  return out;
+}
+
 export function quizzesEqualForUI(a: QuizItem[], b: QuizItem[]): boolean {
   if (a.length !== b.length) return false;
   const bById = new Map(b.map((item) => [item.id, item]));
