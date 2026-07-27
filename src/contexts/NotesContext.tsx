@@ -8,6 +8,7 @@ import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
+import { extractPlainText, hasRichContent } from '../lib/richContent';
 
 /**
  * localStorage can throw (QuotaExceededError) when quiz answers embed large
@@ -580,7 +581,7 @@ function isEmptyUserPayload(
 }
 
 function hasDraftContent(drafts: Draft[]) {
-  return drafts.some((d) => d.title.trim().length > 0 || d.html.replace(/<[^>]*>/g, '').trim().length > 0);
+  return drafts.some((d) => d.title.trim().length > 0 || hasRichContent(d.html));
 }
 
 function maxDraftCounter(drafts: Draft[]) {
@@ -2293,8 +2294,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setCloudSyncedAt(syncedAt);
       safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData(payload ?? {}, syncedAt);
-    } catch {
-      /* best-effort — full cloud save will retry */
+    } catch (err) {
+      // Full cloud save will retry the data, but surface the failure instead
+      // of silently pretending the delete was synced.
+      console.error('[cloud-save] perm-delete push failed', err);
+      saveFailedRef.current = true;
+      setCloudStatus('error');
     }
   };
 
@@ -2343,8 +2348,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setCloudSyncedAt(syncedAt);
       safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData(safe, syncedAt);
-    } catch {
-      /* best-effort */
+      saveFailedRef.current = false;
+    } catch (err) {
+      // This is the hot path for every quiz/note instant save. Swallowing the
+      // failure used to leave the UI claiming "saved" while Firebase never got
+      // the write (oversized payload, expired auth, offline) — the item then
+      // vanished on the next reload with no hint why.
+      console.error('[cloud-save] instant data save failed', err);
+      saveFailedRef.current = true;
+      setCloudStatus('error');
     } finally {
       savesInFlight.current = Math.max(0, savesInFlight.current - 1);
     }
@@ -2976,8 +2988,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const submitDraft = (id: string) => {
     const draft = draftsRef.current.find((d) => d.id === id);
     if (!draft) return;
-    const text = draft.html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-    if (!text) return;
+    // An image-only (or title-only) draft is real content; the old text-only
+    // check silently refused to turn it into a note.
+    if (!hasRichContent(draft.html) && !draft.title.trim()) return;
+    const text = extractPlainText(draft.html);
     const newNote: Note = {
       id: nextId(),
       title: draft.title.trim(),

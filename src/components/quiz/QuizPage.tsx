@@ -16,6 +16,7 @@ import { countVisibleQuizItems, quizItemCreatedAtMs, visibleQuizItems } from '..
 import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { quizPatchChangesContent } from '../../lib/quizContent';
+import { hasRichContent } from '../../lib/richContent';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
@@ -67,11 +68,8 @@ function normalizeQuizName(value: string) {
 }
 
 // Content is valid if it has visible text OR an embedded image.
-function hasContent(html: string): boolean {
-  if (/<img\b/i.test(html)) return true;
-  if (/note-yt-frame/i.test(html)) return true;
-  return html.replace(/<[^>]*>/g, '').trim().length > 0;
-}
+// Shared with notes/drafts so image-only content counts everywhere.
+const hasContent = hasRichContent;
 
 function mdToHtml(content: string): string {
   if (/<[a-z][\s\S]*>/i.test(content)) return content;

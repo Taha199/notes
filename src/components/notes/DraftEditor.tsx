@@ -4,6 +4,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { AppRichTextEditor } from './AppRichTextEditor';
 import { CloudSavedAtLabel } from '../common/CloudSavedAtLabel';
+import { hasRichContent } from '../../lib/richContent';
 
 export function DraftEditor({ draft, index, total }: { draft: Draft; index: number; total: number }) {
   const { t } = useLanguage();
@@ -17,7 +18,9 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
     titleRef.current = draft.title;
   }, [draft.html, draft.title]);
 
-  const plainText = draft.html.replace(/<[^>]*>/g, '').trim();
+  // Image-only drafts count as content — a text-only check kept the save
+  // button disabled and deleted them on close.
+  const canSave = hasRichContent(draft.html) || !!draft.title.trim();
 
   const onHtmlChange = (html: string) => {
     htmlRef.current = html;
@@ -27,9 +30,7 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
   const handleClose = () => {
     (document.activeElement as HTMLElement | null)?.blur?.();
     queueMicrotask(() => {
-      const text = htmlRef.current.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-      const hasContent = !!text || !!titleRef.current.trim();
-      if (hasContent) submitDraft(draft.id);
+      if (hasRichContent(htmlRef.current) || titleRef.current.trim()) submitDraft(draft.id);
       else removeDraft(draft.id);
     });
   };
@@ -66,7 +67,7 @@ export function DraftEditor({ draft, index, total }: { draft: Draft; index: numb
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border px-3 py-2.5 dark:border-white/10 sm:px-4">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
-            disabled={!plainText}
+            disabled={!canSave}
             onClick={() => submitDraft(draft.id)}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-primary/30 transition-all hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-35 sm:px-4"
           >

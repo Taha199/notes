@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useToast } from '../../contexts/ToastContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
-import { compressImageForInline } from '../../lib/imageCompress';
+import { canInlineImage, compressImageForInline } from '../../lib/imageCompress';
+import { uploadEditorImage } from '../../lib/imageUpload';
 import {
   extractYouTubeVideoId,
   ensureYouTubeEmbedCaretSiblingsIn,
@@ -422,6 +424,7 @@ const EDITOR_UNDO_LIMIT = 80;
 
 export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true, flushRef }: Props) {
   const { t, lang } = useLanguage();
+  const { show: showToast } = useToast();
   const editorRef = useRef<HTMLDivElement>(null);
 
   const ensureImageFrame = (img: HTMLImageElement, _ed: HTMLElement): HTMLElement => {
@@ -5136,14 +5139,59 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
+  /** Replace an inserted image's src (base64 → Storage URL) if it's still in the editor. */
+  const swapImageSrc = (fromUrl: string, toUrl: string) => {
+    const liveEd = editorRef.current;
+    if (!liveEd) return;
+    let swapped = false;
+    liveEd.querySelectorAll('img').forEach((img) => {
+      if (img.getAttribute('src') === fromUrl) {
+        img.setAttribute('src', toUrl);
+        swapped = true;
+      }
+    });
+    if (swapped) emitHtml();
+  };
+
+  /**
+   * Insert an image: compress, show it right away when small enough to embed
+   * inline, then upload to Firebase Storage in the background and swap the
+   * base64 src for the short download URL. Base64 stays only as the fallback
+   * (signed out / upload failed) — multi-MB inline images are what used to
+   * blow past localStorage quota and RTDB's write size and silently drop saves.
+   * Images too large to inline are Storage-only: no upload, no insert.
+   */
+  const insertImageFile = async (file: File) => {
+    let dataUrl: string;
+    try {
+      dataUrl = await compressImageForInline(file);
+    } catch {
+      showToast(t.filesUploadFailed);
+      return;
+    }
+    if (canInlineImage(dataUrl)) {
+      insertImageDataUrl(dataUrl);
+      try {
+        const remoteUrl = await uploadEditorImage(dataUrl);
+        if (remoteUrl) swapImageSrc(dataUrl, remoteUrl);
+      } catch {
+        // Keep the inline base64 fallback — already inserted and persistable.
+      }
+    } else {
+      try {
+        const remoteUrl = await uploadEditorImage(dataUrl);
+        if (remoteUrl) insertImageDataUrl(remoteUrl);
+        else showToast(t.filesUploadFailed);
+      } catch {
+        showToast(t.filesUploadFailed);
+      }
+    }
+  };
+
   const insertImage = (file: File) => {
     const ed = editorRef.current;
     if (!ed || !file.type.startsWith('image/')) return;
-    // Downscale/re-encode before embedding as base64 — uncompressed phone photos and
-    // document scans (several MB each) blow past localStorage quota and RTDB's
-    // practical write size once they pile up, which silently drops the save (it
-    // "works" in the current tab but the item never survives a reload).
-    void compressImageForInline(file).then(insertImageDataUrl);
+    void insertImageFile(file);
   };
 
   // ── Image resize: drag a handle to grow/shrink (corner keeps ratio) ────
@@ -5748,7 +5796,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           if (pastedFiles.length > 0) {
             e.preventDefault();
             pastedFiles.forEach((file) => {
-              void compressImageForInline(file).then(insertImageDataUrl);
+              void insertImageFile(file);
             });
             return;
           }

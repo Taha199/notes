@@ -5,9 +5,12 @@ import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { AppRichTextEditor } from './AppRichTextEditor';
 import { generateQuiz, generateOneQa, answerQuestion, type QuizResult } from '../../lib/gemini';
+import { extractPlainText, hasRichContent } from '../../lib/richContent';
 import type { Page } from '../../types';
 
-const hasContent = (h: string) => !!h.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+// Images and embeds count as content — text-only checks silently blocked
+// saving image-only notes/questions.
+const hasContent = hasRichContent;
 
 const NOTE_QUIZ_PANEL_MIN = 400;
 const NOTE_QUIZ_PANEL_MAX = 960;
@@ -345,8 +348,9 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
 
   const save = () => {
     const liveHtml = htmlLiveRef.current;
-    const text = liveHtml.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-    if (!text) return;
+    // An image-only note is valid content; only skip when truly empty.
+    if (!hasRichContent(liveHtml) && !title.trim()) return;
+    const text = extractPlainText(liveHtml);
     const ts = nowStr();
     updateNote(note.id, { title: title.trim(), html: liveHtml, text, lastEdited: ts, savedAt: new Date().toISOString() });
     setLastSavedAt(ts);

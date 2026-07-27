@@ -1,8 +1,20 @@
 /** Longest side (px) inline note/quiz images are downscaled to before embedding. */
 const MAX_DIMENSION = 1800;
-/** Soft byte budget for the resulting base64 data URL. */
-const TARGET_MAX_BYTES = 1.5 * 1024 * 1024;
+/** Soft byte budget the JPEG quality ladder aims for. */
+const TARGET_MAX_BYTES = 900 * 1024;
 const MIN_JPEG_QUALITY = 0.5;
+
+/**
+ * Hard cap for embedding an image as inline base64 in note/quiz HTML.
+ * Above this the caller must use the Storage-upload path (or refuse the
+ * insert) — inline base64 this large is what used to blow past localStorage
+ * quota and the Realtime Database's practical write size, silently dropping
+ * saves.
+ */
+export const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** GIF/SVG passthrough limit — bigger ones go through canvas / Storage-only. */
+const PASSTHROUGH_MAX_BYTES = 1024 * 1024;
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -30,27 +42,34 @@ function loadImageFromFile(file: File): Promise<HTMLImageElement> {
 }
 
 /** Approximate decoded byte size of a base64 data URL. */
-function dataUrlByteLength(dataUrl: string): number {
+export function dataUrlByteLength(dataUrl: string): number {
   const commaIdx = dataUrl.indexOf(',');
   const base64 = commaIdx === -1 ? dataUrl : dataUrl.slice(commaIdx + 1);
   return Math.floor((base64.length * 3) / 4);
 }
 
+/** True when a data URL is small enough to embed inline as a fallback. */
+export function canInlineImage(dataUrl: string): boolean {
+  return dataUrlByteLength(dataUrl) <= INLINE_IMAGE_MAX_BYTES;
+}
+
 /**
- * Downscale + re-encode images before they're embedded as base64 in note/quiz HTML.
- * Uncompressed phone photos and document scans can be several MB each, which — once
- * inlined directly into `<img src="data:...">` — blows past the browser's localStorage
- * quota and Firebase Realtime Database's practical write size as they pile up across
- * many notes/questions. That silently drops the save (it succeeds in memory for the
- * current tab but never survives a reload) with no visible error.
+ * Downscale + re-encode an editor image and return it as a data URL.
  *
- * Falls back to the original file's raw data URL if anything goes wrong (unsupported
- * type, decode failure, canvas unavailable, or the "compressed" output isn't actually
- * smaller), so behavior never regresses for edge cases.
+ * The primary persistence path uploads this result to Firebase Storage and
+ * embeds only the download URL; the data URL form doubles as the inline
+ * fallback for signed-out users. Callers must check `canInlineImage` before
+ * embedding the base64 form — oversized results must never be inlined (that is
+ * what used to silently break saving image-heavy notes/questions).
+ *
+ * SVG passes through only when small. Large GIFs lose animation: their first
+ * frame is re-encoded like any raster image rather than passing multi-MB
+ * originals through.
  */
 export async function compressImageForInline(file: File): Promise<string> {
-  // Vector/animated formats don't benefit from canvas re-encoding — keep as-is.
-  if (file.type === 'image/svg+xml' || file.type === 'image/gif') {
+  // Vector images don't benefit from canvas re-encoding; small GIFs keep
+  // their animation. Large ones fall through to the canvas path below.
+  if (file.type === 'image/svg+xml' || (file.type === 'image/gif' && file.size <= PASSTHROUGH_MAX_BYTES)) {
     return readFileAsDataUrl(file);
   }
   try {
