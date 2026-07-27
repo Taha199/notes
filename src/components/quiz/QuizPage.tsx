@@ -657,8 +657,9 @@ export function QuizPage({
   };
   // Multiple open question forms (new drafts + in-progress edits)
   const [openForms, setOpenForms] = useState<OpenQuestionForm[]>([]);
-  const openFormsRef = useRef(openForms);
-  openFormsRef.current = openForms;
+  const openFormsRef = useRef<OpenQuestionForm[]>([]);
+  // formIds that the user already saved/cancelled — never resurrect via late editor flushes
+  const closedFormIdsRef = useRef<Set<string>>(new Set());
   const quizzesRef = useRef(quizzes);
   quizzesRef.current = quizzes;
   const allQuizSetsRef = useRef(allQuizSets);
@@ -667,6 +668,7 @@ export function QuizPage({
   const finalizedDraftIdsRef = useRef<Set<number>>(new Set());
 
   const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
+    if (closedFormIdsRef.current.has(formId)) return;
     setOpenForms((prev) => {
       const next = prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f));
       openFormsRef.current = next;
@@ -675,8 +677,8 @@ export function QuizPage({
   };
 
   const updateFormContent = (formId: string, patch: Pick<OpenQuestionForm, 'question'> | Pick<OpenQuestionForm, 'answer'> | Pick<OpenQuestionForm, 'question' | 'answer'>) => {
+    if (closedFormIdsRef.current.has(formId)) return;
     setOpenForms((prev) => {
-      // If this form was already closed (Save), ignore late editor flushes.
       if (!prev.some((f) => f.formId === formId)) return prev;
       const next = prev.map((f) => {
         if (f.formId !== formId) return f;
@@ -692,6 +694,7 @@ export function QuizPage({
   };
 
   const closeForm = (formId: string) => {
+    closedFormIdsRef.current.add(formId);
     const timer = autoSaveTimers.current.get(formId);
     if (timer) clearTimeout(timer);
     autoSaveTimers.current.delete(formId);
@@ -805,17 +808,21 @@ export function QuizPage({
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
     if (initial?.itemId) {
       if (openFormsRef.current.some((f) => f.itemId === initial.itemId)) return;
-      setOpenForms((prev) => [
-        ...prev,
-        {
-          formId: `item-${initial.itemId}`,
-          itemId: initial.itemId!,
-          question: initial.question ?? '',
-          answer: initial.answer ?? '',
-          saveStatus: 'saved',
-          finalized: true,
-        },
-      ]);
+      setOpenForms((prev) => {
+        const next = [
+          ...prev,
+          {
+            formId: `item-${initial.itemId}`,
+            itemId: initial.itemId!,
+            question: initial.question ?? '',
+            answer: initial.answer ?? '',
+            saveStatus: 'saved' as const,
+            finalized: true as const,
+          },
+        ];
+        openFormsRef.current = next;
+        return next;
+      });
       return;
     }
 
@@ -829,49 +836,120 @@ export function QuizPage({
       draft: true,
     };
     if (selectedSetIdRef.current) {
-      setOpenForms((prev) => [
-        ...prev,
-        {
-          formId: `new-${Date.now()}`,
-          itemId: null,
-          question: '',
-          answer: '',
-          saveStatus: 'empty',
-        },
-      ]);
+      setOpenForms((prev) => {
+        const next = [
+          ...prev,
+          {
+            formId: `new-${Date.now()}`,
+            itemId: null as number | null,
+            question: '',
+            answer: '',
+            saveStatus: 'empty' as const,
+          },
+        ];
+        openFormsRef.current = next;
+        return next;
+      });
       return;
     }
     const id = addQuiz(item);
-    setOpenForms((prev) => [
-      ...prev,
-      {
-        formId: `item-${id}`,
-        itemId: id,
-        question: '',
-        answer: '',
-        saveStatus: 'saved',
-      },
-    ]);
+    setOpenForms((prev) => {
+      const next = [
+        ...prev,
+        {
+          formId: `item-${id}`,
+          itemId: id,
+          question: '',
+          answer: '',
+          saveStatus: 'saved' as const,
+        },
+      ];
+      openFormsRef.current = next;
+      return next;
+    });
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
-    // Jul 13 pattern: persist while the form still exists in openFormsRef, then close.
-    const savedId = flushForm(formId, override, true);
+    const form = openFormsRef.current.find((f) => f.formId === formId);
+    if (!form) return;
+
+    const q = override?.question ?? form.question;
+    const a = override?.answer ?? form.answer;
+    if (!hasContent(q) && !hasContent(a)) {
+      show(t.quizSaveNeedContent);
+      return;
+    }
+
+    // 1) Close the editor FIRST so it cannot stay on screen (Jul-13 UX).
+    closedFormIdsRef.current.add(formId);
+    const timer = autoSaveTimers.current.get(formId);
+    if (timer) clearTimeout(timer);
+    autoSaveTimers.current.delete(formId);
+    setOpenForms((prev) => {
+      const next = prev.filter((f) => f.formId !== formId);
+      openFormsRef.current = next;
+      return next;
+    });
+
+    // 2) Persist using the captured payload (form may already be gone from state).
+    const setId = selectedSetIdRef.current;
+    const date = new Date().toLocaleDateString();
+    const createdAt = new Date().toISOString();
+    const options = override?.options;
+    const correctIndex = override?.correctIndexes?.[0];
+    const correctIndexes = override?.correctIndexes;
+    const explanation = override?.explanation;
+
+    let savedId = form.itemId;
+    if (savedId == null) {
+      if (setId) {
+        savedId = addItemToSet(setId, {
+          noteId: 0,
+          noteTitle: '',
+          question: q,
+          answer: a,
+          date,
+          createdAt,
+          draft: false,
+          options,
+          correctIndex,
+          correctIndexes,
+          explanation,
+        });
+      } else {
+        savedId = addQuiz({
+          noteId: 0,
+          noteTitle: '',
+          question: q,
+          answer: a,
+          date,
+          createdAt,
+          draft: false,
+          options,
+          correctIndex,
+          correctIndexes,
+          explanation,
+        });
+      }
+    } else {
+      const patch = {
+        question: q,
+        answer: a,
+        options,
+        correctIndex,
+        correctIndexes,
+        explanation,
+        draft: false as const,
+      };
+      if (setId) updateItemInSet(setId, savedId, patch, true);
+      else updateQuiz(savedId, patch, true);
+    }
+
     if (savedId == null || savedId < 0) {
       show(t.quizSaveFailed);
       return;
     }
     finalizedDraftIdsRef.current.add(savedId);
-
-    // Force-close immediately and sync the ref so delayed onChange/timers cannot resurrect it.
-    const timer = autoSaveTimers.current.get(formId);
-    if (timer) clearTimeout(timer);
-    autoSaveTimers.current.delete(formId);
-    setOpenForms((prev) => {
-      const next = prev.filter((f) => f.formId !== formId && f.itemId !== savedId);
-      openFormsRef.current = next;
-      return next;
-    });
     show(t.noteSavedQuiz);
   };
 
@@ -1008,10 +1086,12 @@ export function QuizPage({
     if (!loaded) return;
     autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
     autoSaveTimers.current.clear();
+    closedFormIdsRef.current.clear();
 
     const notesView = !selectedFolderId && !selectedSetId;
     isNotesViewRef.current = notesView;
     if (!selectedSetId && !notesView) {
+      openFormsRef.current = [];
       setOpenForms([]);
       return;
     }
@@ -1020,17 +1100,17 @@ export function QuizPage({
       ? (allQuizSets.find((s) => s.id === selectedSetId)?.items ?? [])
       : quizzes.filter((q) => !q.trashed);
 
-    setOpenForms(
-      items
-        .filter((item) => item.draft && !finalizedDraftIdsRef.current.has(item.id))
-        .map((item) => ({
-          formId: `item-${item.id}`,
-          itemId: item.id,
-          question: item.question,
-          answer: item.answer,
-          saveStatus: 'saved' as const,
-        })),
-    );
+    const next = items
+      .filter((item) => item.draft && !finalizedDraftIdsRef.current.has(item.id))
+      .map((item) => ({
+        formId: `item-${item.id}`,
+        itemId: item.id,
+        question: item.question,
+        answer: item.answer,
+        saveStatus: 'saved' as const,
+      }));
+    openFormsRef.current = next;
+    setOpenForms(next);
   }, [selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1051,7 +1131,10 @@ export function QuizPage({
           answer: item.answer,
           saveStatus: 'saved' as const,
         }));
-      return additions.length ? [...prev, ...additions] : prev;
+      if (!additions.length) return prev;
+      const next = [...prev, ...additions];
+      openFormsRef.current = next;
+      return next;
     });
   }, [allQuizSets, quizzes, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
