@@ -45,10 +45,10 @@ export function compactQuizPatch<T extends Record<string, unknown>>(patch: T): P
 
 export function quizzesEqualForUI(a: QuizItem[], b: QuizItem[]): boolean {
   if (a.length !== b.length) return false;
-  const bById = new Map(b.map((item) => [item.id, item]));
-  return a.every((item) => {
-    const other = bById.get(item.id);
-    return other != null && quizItemContentEquals(item, other);
+  // Compare by position so order-only sync updates re-render the list.
+  return a.every((item, index) => {
+    const other = b[index];
+    return other != null && other.id === item.id && quizItemContentEquals(item, other);
   });
 }
 

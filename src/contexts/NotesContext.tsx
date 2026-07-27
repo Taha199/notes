@@ -130,7 +130,10 @@ function stripPermDeletedQuizSets(sets: QuizSet[], tombstones: PermanentlyDelete
   const deadQuizzes = new Set(tombstones.quizzes);
   return sets
     .filter((set) => !deadSets.has(set.id))
-    .map((set) => ({ ...set, items: (set.items ?? []).filter((item) => !deadQuizzes.has(item.id)) }));
+    .map((set) => {
+      const normalized = normalizeQuizSet(set);
+      return { ...normalized, items: normalized.items.filter((item) => !deadQuizzes.has(item.id)) };
+    });
 }
 
 function entitySyncTime(item: { updatedAt?: string; createdAt?: string; savedAt?: string }) {
@@ -265,7 +268,12 @@ function mergeNotesForSync(local: Note[], remote: Note[], tombstones: Permanentl
   return [...map.values()];
 }
 
-function mergeQuizzesForSync(local: QuizItem[], remote: QuizItem[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
+function mergeQuizzesForSync(
+  local: QuizItem[],
+  remote: QuizItem[],
+  tombstones: PermanentlyDeletedIds = emptyPermDeleted(),
+  preferOrder: 'local' | 'remote' = 'local',
+) {
   const dead = new Set(tombstones.quizzes);
   const remoteIds = new Set(remote.map((item) => item.id));
   const map = new Map<number, QuizItem>();
@@ -279,7 +287,20 @@ function mergeQuizzesForSync(local: QuizItem[], remote: QuizItem[], tombstones: 
     const existing = map.get(item.id);
     map.set(item.id, existing ? pickNewerQuizItem(existing, item) : item);
   }
-  return [...map.values()];
+  // Keep the newer side's item order so reordering syncs across devices.
+  const orderSource = preferOrder === 'remote' ? remote : local;
+  const ordered: QuizItem[] = [];
+  const used = new Set<number>();
+  for (const item of orderSource) {
+    const merged = map.get(item.id);
+    if (!merged || used.has(merged.id)) continue;
+    ordered.push(merged);
+    used.add(merged.id);
+  }
+  for (const item of map.values()) {
+    if (!used.has(item.id)) ordered.push(item);
+  }
+  return ordered;
 }
 
 function filterResurrectedTrash<T extends { id: string | number; trashed?: boolean; updatedAt?: string; createdAt?: string; savedAt?: string }>(merged: T[], local: T[]): T[] {
@@ -295,8 +316,17 @@ function filterResurrectedTrash<T extends { id: string | number; trashed?: boole
 
 function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: PermanentlyDeletedIds = emptyPermDeleted()): QuizSet {
   if (!!local.trashed !== !!remote.trashed) return remote.trashed ? remote : local;
-  const base = entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
-  return { ...base, items: mergeQuizzesForSync(local.items ?? [], remote.items ?? [], tombstones) };
+  const preferRemote = entitySyncTime(remote) >= entitySyncTime(local);
+  const base = preferRemote ? remote : local;
+  return {
+    ...base,
+    items: mergeQuizzesForSync(
+      local.items ?? [],
+      remote.items ?? [],
+      tombstones,
+      preferRemote ? 'remote' : 'local',
+    ),
+  };
 }
 
 function pickBetterQuizFolder(local: QuizFolder, remote: QuizFolder): QuizFolder {
@@ -454,6 +484,13 @@ function firebaseToArray<T>(data: T[] | Record<string, T> | null | undefined): T
   return [];
 }
 
+function normalizeQuizSet(set: QuizSet): QuizSet {
+  return {
+    ...set,
+    items: firebaseToArray<QuizItem>(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined),
+  };
+}
+
 function mergeById<T extends { id: string }>(...lists: T[][]): T[] {
   const map = new Map<string, T>();
   for (const list of lists) {
@@ -507,10 +544,7 @@ function readLocalNotesData() {
       messages: c.messages ?? [],
     })),
     folders: firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []),
-    sets: firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({
-      ...set,
-      items: set.items ?? [],
-    })),
+    sets: firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map(normalizeQuizSet),
   };
 }
 
@@ -779,7 +813,7 @@ async function fetchDataHistorySnapshot(uid: string, key: string): Promise<DataH
       notes: firebaseToArray<Note>(snap.notes),
       quizzes: firebaseToArray<QuizItem>(snap.quizzes),
       chats: firebaseToArray<ChatConversation>(snap.chats).map((chat) => ({ ...chat, messages: chat.messages ?? [] })),
-      quizSets: firebaseToArray<QuizSet>(snap.quizSets).map((set) => ({ ...set, items: set.items ?? [] })),
+      quizSets: firebaseToArray<QuizSet>(snap.quizSets).map(normalizeQuizSet),
       quizFolders: firebaseToArray<QuizFolder>(snap.quizFolders),
       savedAt: typeof snap.savedAt === 'string' ? snap.savedAt : undefined,
     };
@@ -911,7 +945,7 @@ async function readDedicatedQuizData(uid: string) {
   } catch { /* ignore */ }
   try {
     const r = await rtdbFetch(`/users/${uid}/quizSets`);
-    sets = firebaseToArray<QuizSet>(await r.json()).map((set) => ({ ...set, items: set.items ?? [] }));
+    sets = firebaseToArray<QuizSet>(await r.json()).map(normalizeQuizSet);
   } catch { /* ignore */ }
   return { folders, sets };
 }
@@ -1057,7 +1091,7 @@ async function buildRecoverySnapshot(uid: string, cloud: Record<string, unknown>
     ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>).map((chat) => ({ ...chat, messages: chat.messages ?? [] }))
     : [];
   const cloudSets = cloud
-    ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
+    ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map(normalizeQuizSet)
     : [];
   const cloudFolders = cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [];
   const draftNotes = cloud?.draftContents && typeof cloud.draftContents === 'object'
@@ -1521,13 +1555,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         try {
           const setRes = await rtdbFetch(`/users/${user.uid}/quizSets`);
           if (setRes.ok) {
-            dedicatedSets = firebaseToArray<QuizSet>(await setRes.json()).map((set) => ({ ...set, items: set.items ?? [] }));
+            dedicatedSets = firebaseToArray<QuizSet>(await setRes.json()).map(normalizeQuizSet);
           }
         } catch { /* ignore */ }
 
         const cloudFolders = cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [];
         const cloudSets = cloud
-          ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
+          ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map(normalizeQuizSet)
           : [];
         const cloudFoldersEmpty = cloud && 'quizFolders' in cloud && cloudFolders.length === 0;
         const cloudSetsEmpty = cloud && 'quizSets' in cloud && cloudSets.length === 0;
@@ -2149,7 +2183,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     if (patch.quizSets !== undefined) {
       const remoteSets = firebaseToArray<QuizSet>(patch.quizSets as QuizSet[] | Record<string, QuizSet>)
-        .map((set) => ({ ...set, items: set.items ?? [] }));
+        .map(normalizeQuizSet);
       const merged = filterResurrectedTrash(
         mergeQuizSetsForSync(quizSetsRef.current, remoteSets, tombstones),
         quizSetsRef.current,
@@ -2671,7 +2705,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const remoteChats = firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>)
       .map((c) => ({ ...c, messages: c.messages ?? [] }));
     const remoteSets = firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>)
-      .map((set) => ({ ...set, items: set.items ?? [] }));
+      .map(normalizeQuizSet);
     const remoteFolders = firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>);
     const remoteDrafts = parseCloudDrafts(cloud).filter((draft) => !pendingDeletedDraftIdsRef.current.has(draft.id));
     lastCloudDraftIdsRef.current = new Set(parseCloudDrafts(cloud).map((d) => d.id));
@@ -2894,7 +2928,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const unsubNotes = bindRealtime('notes', 'notes');
     const unsubQuizzes = bindRealtime('quizzes', 'quizzes');
     const unsubSets = bindRealtime('quizSets', 'quizSets', (val) =>
-      firebaseToArray<QuizSet>(val as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] })));
+      firebaseToArray<QuizSet>(val as QuizSet[] | Record<string, QuizSet>).map(normalizeQuizSet));
     const unsubFolders = bindRealtime('quizFolders', 'quizFolders');
     const onVisible = () => {
       if (document.visibilityState === 'visible') void pullFromCloud(true);
@@ -3377,13 +3411,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     try {
       const cloud = await fetch(`${FB_DB_URL}/users/${user.uid}.json`).then((r) => r.json());
       cloudFolders = firebaseToArray<QuizFolder>(cloud?.quizFolders);
-      cloudSets = firebaseToArray<QuizSet>(cloud?.quizSets).map((set) => ({ ...set, items: set.items ?? [] }));
+      cloudSets = firebaseToArray<QuizSet>(cloud?.quizSets).map(normalizeQuizSet);
     } catch { /* ignore */ }
     try {
       dedicatedFolders = firebaseToArray<QuizFolder>(await fetch(`${FB_DB_URL}/users/${user.uid}/quizFolders.json`).then((r) => r.json()));
     } catch { /* ignore */ }
     try {
-      dedicatedSets = firebaseToArray<QuizSet>(await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`).then((r) => r.json())).map((set) => ({ ...set, items: set.items ?? [] }));
+      dedicatedSets = firebaseToArray<QuizSet>(await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`).then((r) => r.json())).map(normalizeQuizSet);
     } catch { /* ignore */ }
 
     const rawFolders = mergeById(
@@ -3396,7 +3430,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       cloudSets,
       dedicatedSets,
       quizSets,
-      firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({ ...set, items: set.items ?? [] })),
+      firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map(normalizeQuizSet),
     );
     const nextFolders = ensureFavoritesFolder(finalizeQuizFolders(rawFolders, rawSets));
     const nextSets = ensureFavoritesSet(initializeQuizColors(rawSets, nextFolders.map((folder) => folder.color).filter((color): color is string => !!color)));
@@ -3599,7 +3633,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       : [];
     const recovery = await buildRecoverySnapshot(user.uid, cloud);
     const cloudSets = cloud
-      ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
+      ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map(normalizeQuizSet)
       : [];
     const cloudFolders = cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [];
     const folderNames = recovery.quizFolders
@@ -3766,69 +3800,75 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const moveItemInSet = (setId: string, itemId: number, direction: 'up' | 'down') => {
-    setQuizSets((prev) => {
-      let changed = false;
-      const next = prev.map((s) => {
-        if (s.id !== setId) return s;
-        const items = [...s.items];
-        const idx = items.findIndex((i) => i.id === itemId);
-        if (idx < 0) return s;
-        const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-        if (swapIdx < 0 || swapIdx >= items.length) return s;
-        [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
-        changed = true;
-        return { ...s, items };
-      });
-      if (!changed) return prev;
-      persistSets(next);
-      return next;
+    const now = new Date().toISOString();
+    let changed = false;
+    const next = quizSetsRef.current.map((s) => {
+      if (s.id !== setId) return s;
+      const items = [...s.items];
+      const idx = items.findIndex((i) => i.id === itemId);
+      if (idx < 0) return s;
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= items.length) return s;
+      [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
+      changed = true;
+      return { ...s, items, updatedAt: now };
     });
+    if (!changed) return;
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    persistSets(next, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const moveQuiz = (itemId: number, direction: 'up' | 'down') => {
-    setQuizzes((prev) => {
-      const next = [...prev];
-      const idx = next.findIndex((q) => q.id === itemId);
-      if (idx < 0) return prev;
-      const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-      if (swapIdx < 0 || swapIdx >= next.length) return prev;
-      [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
-      persist({ quizzes: next });
-      return next;
-    });
+    const next = [...quizzesRef.current];
+    const idx = next.findIndex((q) => q.id === itemId);
+    if (idx < 0) return;
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= next.length) return;
+    [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+    quizzesRef.current = next;
+    setQuizzes(next);
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
+    persist({ quizzes: next }, true);
+    scheduleInstantDataCloudSave({ quizzes: next });
   };
 
   const reorderItemInSet = (setId: string, dragId: number, targetId: number) => {
-    setQuizSets((prev) => {
-      let changed = false;
-      const next = prev.map((s) => {
-        if (s.id !== setId) return s;
-        const items = [...s.items];
-        const from = items.findIndex((i) => i.id === dragId);
-        const to = items.findIndex((i) => i.id === targetId);
-        if (from < 0 || to < 0 || from === to) return s;
-        const [item] = items.splice(from, 1);
-        items.splice(to, 0, item);
-        changed = true;
-        return { ...s, items };
-      });
-      if (!changed) return prev;
-      persistSets(next);
-      return next;
+    const now = new Date().toISOString();
+    let changed = false;
+    const next = quizSetsRef.current.map((s) => {
+      if (s.id !== setId) return s;
+      const items = [...s.items];
+      const from = items.findIndex((i) => i.id === dragId);
+      const to = items.findIndex((i) => i.id === targetId);
+      if (from < 0 || to < 0 || from === to) return s;
+      const [item] = items.splice(from, 1);
+      items.splice(to, 0, item);
+      changed = true;
+      return { ...s, items, updatedAt: now };
     });
+    if (!changed) return;
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    persistSets(next, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const reorderQuiz = (dragId: number, targetId: number) => {
-    setQuizzes((prev) => {
-      const next = [...prev];
-      const from = next.findIndex((q) => q.id === dragId);
-      const to = next.findIndex((q) => q.id === targetId);
-      if (from < 0 || to < 0 || from === to) return prev;
-      const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      persist({ quizzes: next });
-      return next;
-    });
+    const next = [...quizzesRef.current];
+    const from = next.findIndex((q) => q.id === dragId);
+    const to = next.findIndex((q) => q.id === targetId);
+    if (from < 0 || to < 0 || from === to) return;
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    quizzesRef.current = next;
+    setQuizzes(next);
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
+    persist({ quizzes: next }, true);
+    scheduleInstantDataCloudSave({ quizzes: next });
   };
 
   const orderItemsByIds = (items: QuizItem[], itemIds: number[]) => {
@@ -3839,22 +3879,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const setItemsOrderInSet = (setId: string, itemIds: number[]) => {
-    setQuizSets((prev) => {
-      const next = prev.map((s) => {
-        if (s.id !== setId) return s;
-        return { ...s, items: orderItemsByIds(s.items, itemIds) };
-      });
-      persistSets(next);
-      return next;
+    const now = new Date().toISOString();
+    const next = quizSetsRef.current.map((s) => {
+      if (s.id !== setId) return s;
+      return { ...s, items: orderItemsByIds(s.items, itemIds), updatedAt: now };
     });
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    persistSets(next, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const setQuizzesOrder = (itemIds: number[]) => {
-    setQuizzes((prev) => {
-      const next = orderItemsByIds(prev, itemIds);
-      persist({ quizzes: next });
-      return next;
-    });
+    const next = orderItemsByIds(quizzesRef.current, itemIds);
+    quizzesRef.current = next;
+    setQuizzes(next);
+    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
+    persist({ quizzes: next }, true);
+    scheduleInstantDataCloudSave({ quizzes: next });
   };
 
   const toggleRead = (id: number) => updateNote(id, { read: true });

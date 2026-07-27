@@ -1023,7 +1023,19 @@ export function QuizPage({
 
   // Show/hide the sets sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem('malacadhati_quiz_sidebar') !== 'closed');
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
   const toggleSidebar = () => setSidebarOpen((v) => { const n = !v; localStorage.setItem('malacadhati_quiz_sidebar', n ? 'open' : 'closed'); return n; });
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = () => setIsNarrow(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  // Phone/tablet: opening a set must free the full width — three columns crush question text.
+  useEffect(() => {
+    if (isNarrow && selectedSetId) setSidebarOpen(false);
+  }, [isNarrow, selectedSetId]);
   // Resizable width of the folders column
   const [folderColW, setFolderColW] = useState<number>(() => Number(localStorage.getItem('malacadhati_quiz_foldercol')) || 84);
   const startFolderResize = (e: React.MouseEvent) => {
@@ -1364,7 +1376,15 @@ export function QuizPage({
             <span className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm" style={{ backgroundColor: s.color || '#9ca3af' }} />
             <div className="flex w-full items-center">
               <span className="flex-shrink-0 select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100">{s.system === 'favorites' ? '⭐' : '⠿'}</span>
-              <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
+              <button
+                onClick={() => {
+                  setSelectedSetId(s.id);
+                  if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+                    setSidebarOpen(false);
+                  }
+                }}
+                className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0"
+              >
                 <AutoFitText
                   text={s.name}
                   maxSize={13}
@@ -1412,7 +1432,10 @@ export function QuizPage({
 
       {/* Sidebar — two-column: Folders | Sets */}
       {sidebarOpen && (
-      <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: isNotesView ? folderColW : folderColW + 184 }}>
+      <div
+        className={'flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950 ' + (isNarrow && !selectedSetId && !isNotesView ? 'w-full min-w-0 flex-1' : '')}
+        style={isNarrow && !selectedSetId && !isNotesView ? undefined : { width: isNotesView ? folderColW : folderColW + 184 }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">{t.quizTitle}</p>
@@ -1628,11 +1651,22 @@ export function QuizPage({
       </div>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Main content — min-w-0 prevents crushed vertical text beside a wide sidebar */}
+      {!(isNarrow && sidebarOpen && !selectedSetId && !isNotesView) && (
+      <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
+            {isNarrow && selectedSetId && (
+              <button
+                type="button"
+                onClick={() => { setSidebarOpen(true); setSelectedSetId(null); }}
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-app-border text-app-text-secondary hover:bg-app-bg dark:border-white/10"
+                title={t.quizShowSidebar}
+              >
+                ←
+              </button>
+            )}
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
               {selectedSet
                 ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`
@@ -1774,6 +1808,7 @@ export function QuizPage({
           )}
         </div>
       </div>
+      )}
 
       {/* Study mode overlay */}
       {studyMode && (studyDeck ?? studyItems).length > 0 && (
