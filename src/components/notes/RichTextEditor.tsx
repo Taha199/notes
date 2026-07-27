@@ -618,6 +618,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         img.style.maxHeight = 'none';
       }
     });
+    // Never leave image/youtube frames inside the same text block — Enter through
+    // contenteditable=false embeds can blank the whole React tree.
+    separateEmbedsFromTextBlocks(ed);
     normalizeYouTubeEmbeds(ed);
     syncYouTubeRemoveChrome(ed);
     normalizeAutoLinks(ed);
@@ -1030,7 +1033,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return () => {
       flushRef.current = null;
     };
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [flushRef, html]);
 
   // ── Helpers ──────────────────────────────────────────────────────────
   // Get the live selection inside the editor right now (returns null if focus is elsewhere).
@@ -2932,14 +2935,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const cell = closestTableCell(el);
     let nestedBlock: HTMLElement | null = null;
     while (el instanceof HTMLElement && el !== ed) {
-      // Table chrome (.note-table-body / wrap) is a DIV but must never be treated as a
-      // text line — that was pulling the caret out of cells onto the blank line above.
+      // Table / media chrome is a DIV but must never be treated as a text line —
+      // Enter/Backspace through a contenteditable=false image frame white-screens.
       if (
         el.classList.contains(NOTE_TABLE_WRAP)
         || el.classList.contains(NOTE_TABLE_BODY)
         || el.classList.contains(NOTE_TABLE_TOOLBAR_HOST)
+        || el.classList.contains(NOTE_IMG_FRAME)
+        || el.classList.contains(NOTE_YT_FRAME)
       ) {
-        break;
+        nestedBlock = null;
+        el = el.parentElement;
+        continue;
       }
       if (el.tagName === 'CENTER') return el;
       // Prefer the list item over ChatGPT's nested <p>/<div> inside <li>.
@@ -3260,26 +3267,73 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
   };
 
-  const ensureStandaloneImageBlock = (img: HTMLImageElement, ed: HTMLElement): HTMLElement => {
-    let block = getLineBlock(img, ed);
-    if (!block || block === ed) {
-      const wrapper = document.createElement('div');
-      wrapper.setAttribute('dir', 'auto');
-      img.parentNode?.insertBefore(wrapper, img);
-      wrapper.appendChild(img);
-      if (img.nextSibling?.nodeName === 'BR') wrapper.appendChild(img.nextSibling);
-      return wrapper;
+  /** True when a node is meaningful content besides an image/youtube frame. */
+  const nodeIsNonEmbedContent = (node: Node, embed: HTMLElement): boolean => {
+    if (node === embed) return false;
+    if (node.nodeType === Node.TEXT_NODE) {
+      return !!(node.textContent ?? '').replace(/[\u200B\uFEFF\s\u00a0]/g, '').trim();
     }
-    const clone = block.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('img').forEach((node) => node.remove());
-    const otherText = clone.textContent?.replace(/\u200B/g, '').trim() ?? '';
-    if (!otherText) return block;
-    const wrapper = document.createElement('div');
-    wrapper.setAttribute('dir', 'auto');
-    block.parentNode?.insertBefore(wrapper, block.nextSibling);
-    wrapper.appendChild(img);
-    if (wrapper.previousSibling === block && img.nextSibling?.nodeName === 'BR') wrapper.appendChild(img.nextSibling);
-    return wrapper;
+    if (!(node instanceof HTMLElement)) return false;
+    if (node.tagName === 'BR') return false;
+    if (
+      node.classList.contains(NOTE_IMG_TOOLBAR_HOST)
+      || node.classList.contains(NOTE_YT_REMOVE)
+      || node.classList.contains(NOTE_IMG_FRAME)
+      || node.classList.contains(NOTE_YT_FRAME)
+    ) {
+      return false;
+    }
+    return true;
+  };
+
+  /**
+   * Pull an embed frame out of a text block so Enter never splits through
+   * contenteditable=false media (that path crashes Chromium / blanks React).
+   */
+  const extractEmbedFromTextBlock = (frame: HTMLElement, ed: HTMLElement): HTMLElement => {
+    const parent = frame.parentElement;
+    if (!parent || parent === ed || !ed.contains(frame)) return frame;
+    if (parent.classList.contains(NOTE_IMG_FRAME) || parent.classList.contains(NOTE_YT_FRAME)) return frame;
+
+    const hasOther = [...parent.childNodes].some((n) => nodeIsNonEmbedContent(n, frame));
+    if (!hasOther) return frame;
+
+    const grand = parent.parentNode;
+    if (!grand) return frame;
+
+    let sawFrame = false;
+    let contentBefore = false;
+    for (const n of parent.childNodes) {
+      if (n === frame) { sawFrame = true; continue; }
+      if (!nodeIsNonEmbedContent(n, frame)) continue;
+      if (!sawFrame) contentBefore = true;
+    }
+
+    if (contentBefore) {
+      // text … frame → keep text in parent, place frame after parent
+      grand.insertBefore(frame, parent.nextSibling);
+    } else {
+      // frame … text → place frame before parent, leave text behind
+      grand.insertBefore(frame, parent);
+    }
+    // Drop a leftover empty wrapper.
+    const leftover = (parent.textContent ?? '').replace(/[\u200B\uFEFF\s\u00a0]/g, '').trim();
+    if (!leftover && !parent.querySelector('img, iframe, table, .note-img-frame, .note-yt-frame, .note-table-wrap')) {
+      while (parent.firstChild) grand.insertBefore(parent.firstChild, parent);
+      parent.remove();
+    }
+    return frame;
+  };
+
+  const separateEmbedsFromTextBlocks = (ed: HTMLElement) => {
+    ed.querySelectorAll(`.${NOTE_IMG_FRAME}, .${NOTE_YT_FRAME}`).forEach((node) => {
+      if (node instanceof HTMLElement) extractEmbedFromTextBlock(node, ed);
+    });
+  };
+
+  const ensureStandaloneImageBlock = (img: HTMLImageElement, ed: HTMLElement): HTMLElement => {
+    const frame = ensureImageFrame(img, ed);
+    return extractEmbedFromTextBlock(frame, ed);
   };
 
   const applyImageAlignment = (img: HTMLImageElement, align: BlockAlign) => {
@@ -3842,96 +3896,149 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return;
 
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
-    let range = sel.getRangeAt(0);
+    try {
+      // Pull embeds out of text blocks first — insertParagraph through a
+      // contenteditable=false image frame blanks the whole page in Chromium.
+      separateEmbedsFromTextBlocks(ed);
 
-    const lineBlock = getLineBlock(sel.anchorNode, ed);
-    if (lineBlock && lineBlock.tagName !== 'LI' && !lineBlock.closest('li')) {
-      const prefix = getBlockPrefixMatch(lineBlock);
-      if (prefix && isNumberedPrefix(prefix)) {
-        convertBlocksToList([lineBlock], true, lineBlock);
-        if (sel.rangeCount) range = sel.getRangeAt(0);
+      const sel = window.getSelection();
+      if (!sel?.rangeCount) return;
+      let range = sel.getRangeAt(0);
+
+      const lineBlock = getLineBlock(sel.anchorNode, ed);
+      if (lineBlock && lineBlock.tagName !== 'LI' && !lineBlock.closest('li')) {
+        const prefix = getBlockPrefixMatch(lineBlock);
+        if (prefix && isNumberedPrefix(prefix)) {
+          convertBlocksToList([lineBlock], true, lineBlock);
+          if (sel.rangeCount) range = sel.getRangeAt(0);
+        }
       }
-    }
 
-    const li = resolveListItemAtSelection(range, ed);
-    if (li) {
-      e.preventDefault();
-      if (isLiEffectivelyEmpty(li)) {
-        handleEmptyListItemEnter(li);
+      const li = resolveListItemAtSelection(range, ed);
+      if (li) {
+        e.preventDefault();
+        if (isLiEffectivelyEmpty(li)) {
+          handleEmptyListItemEnter(li);
+          finishNewLineEditing(ed);
+        } else if (isCaretAtEffectiveEndOfLi(li, range)) {
+          const next = li.nextElementSibling;
+          if (isLastListItem(li) && next instanceof HTMLLIElement && shouldExitListAfterEmptyItem(next)) {
+            exitListAfterLastItem(next);
+            finishNewLineEditing(ed);
+          } else {
+            insertNewListItemAfter(li);
+            finishNewLineEditing(ed, { inList: true });
+          }
+        } else if (isCaretAtStartOfLi(li, range)) {
+          const list = li.parentElement;
+          if (list && LIST_TAGS.has(list.tagName) && li === list.firstElementChild) {
+            insertEmptyLineAboveBlock(ed, list);
+            finishNewLineEditing(ed);
+          } else {
+            splitListItemAtStart(li);
+            finishNewLineEditing(ed, { inList: true });
+          }
+        } else {
+          splitListItemAtCaret(li, range);
+          finishNewLineEditing(ed, { inList: true });
+        }
+        return;
+      }
+
+      const block = getLineBlock(sel.anchorNode, ed);
+      if (block && continuePseudoListOnEnter(block, sel.getRangeAt(0))) {
+        e.preventDefault();
         finishNewLineEditing(ed);
-      } else if (isCaretAtEffectiveEndOfLi(li, range)) {
-        const next = li.nextElementSibling;
-        if (isLastListItem(li) && next instanceof HTMLLIElement && shouldExitListAfterEmptyItem(next)) {
-          exitListAfterLastItem(next);
-          finishNewLineEditing(ed);
-        } else {
-          insertNewListItemAfter(li);
-          finishNewLineEditing(ed, { inList: true });
-        }
-      } else if (isCaretAtStartOfLi(li, range)) {
-        const list = li.parentElement;
-        if (list && LIST_TAGS.has(list.tagName) && li === list.firstElementChild) {
-          insertEmptyLineAboveBlock(ed, list);
-          finishNewLineEditing(ed);
-        } else {
-          splitListItemAtStart(li);
-          finishNewLineEditing(ed, { inList: true });
-        }
-      } else {
-        splitListItemAtCaret(li, range);
-        finishNewLineEditing(ed, { inList: true });
+        return;
       }
-      return;
-    }
 
-    const block = getLineBlock(sel.anchorNode, ed);
-    if (block && continuePseudoListOnEnter(block, sel.getRangeAt(0))) {
-      e.preventDefault();
-      finishNewLineEditing(ed);
-      return;
-    }
-
-    const orphanList = getListContainer(sel.anchorNode, ed);
-    if (orphanList) {
-      e.preventDefault();
-      const items = Array.from(orphanList.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
-      const target = items[items.length - 1];
-      if (target) {
-        if (isLiEffectivelyEmpty(target)) {
-          handleEmptyListItemEnter(target);
-          finishNewLineEditing(ed);
-        } else {
-          insertNewListItemAfter(target);
-          finishNewLineEditing(ed, { inList: true });
+      const orphanList = getListContainer(sel.anchorNode, ed);
+      if (orphanList) {
+        e.preventDefault();
+        const items = Array.from(orphanList.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
+        const target = items[items.length - 1];
+        if (target) {
+          if (isLiEffectivelyEmpty(target)) {
+            handleEmptyListItemEnter(target);
+            finishNewLineEditing(ed);
+          } else {
+            insertNewListItemAfter(target);
+            finishNewLineEditing(ed, { inList: true });
+          }
         }
+        return;
       }
-      return;
+
+      e.preventDefault();
+
+      clearPendingFontMarker();
+
+      // Still has an embed (or is an embed sibling caret) — never split through it.
+      const liveBlock = getLineBlock(sel.anchorNode, ed) ?? block;
+      if (
+        liveBlock
+        && (
+          liveBlock.classList.contains(NOTE_IMG_FRAME)
+          || liveBlock.classList.contains(NOTE_YT_FRAME)
+          || liveBlock.querySelector(`.${NOTE_IMG_FRAME}, .${NOTE_YT_FRAME}, .${NOTE_TABLE_WRAP}`)
+        )
+      ) {
+        const newBlock = document.createElement('div');
+        newBlock.setAttribute('dir', 'auto');
+        newBlock.innerHTML = '<br>';
+        const insertAfter =
+          liveBlock.classList.contains(NOTE_IMG_FRAME) || liveBlock.classList.contains(NOTE_YT_FRAME)
+            ? liveBlock
+            : liveBlock;
+        insertAfter.parentNode?.insertBefore(newBlock, insertAfter.nextSibling);
+        placeCaretInBlock(newBlock, true);
+        finishNewLineEditing(ed);
+        return;
+      }
+
+      if (liveBlock && ensureLeftMarginAfterList(liveBlock)) {
+        placeCaretInBlock(liveBlock, true);
+        finishNewLineEditing(ed);
+        return;
+      }
+
+      if (liveBlock && readBlockAlignment(liveBlock) !== 'left') {
+        createLeftLineFromCaret(liveBlock, range);
+        finishNewLineEditing(ed);
+        return;
+      }
+
+      document.execCommand('insertParagraph');
+
+      requestAnimationFrame(() => {
+        try {
+          ensureCaretOnOwnLeftLine(ed);
+          finishNewLineEditing(ed);
+        } catch {
+          emitHtml();
+        }
+      });
+    } catch {
+      // Last resort: keep the app alive if Chromium throws on embed split.
+      e.preventDefault();
+      try {
+        const sel = window.getSelection();
+        const anchor = sel?.anchorNode;
+        const fallbackBlock = anchor ? getLineBlock(anchor, ed) : null;
+        const newBlock = document.createElement('div');
+        newBlock.setAttribute('dir', 'auto');
+        newBlock.innerHTML = '<br>';
+        if (fallbackBlock?.parentNode) {
+          fallbackBlock.parentNode.insertBefore(newBlock, fallbackBlock.nextSibling);
+        } else {
+          ed.appendChild(newBlock);
+        }
+        placeCaretInBlock(newBlock, true);
+        finishNewLineEditing(ed);
+      } catch {
+        emitHtml();
+      }
     }
-
-    e.preventDefault();
-
-    clearPendingFontMarker();
-
-    if (block && ensureLeftMarginAfterList(block)) {
-      placeCaretInBlock(block, true);
-      finishNewLineEditing(ed);
-      return;
-    }
-
-    if (block && readBlockAlignment(block) !== 'left') {
-      createLeftLineFromCaret(block, range);
-      finishNewLineEditing(ed);
-      return;
-    }
-
-    document.execCommand('insertParagraph');
-
-    requestAnimationFrame(() => {
-      ensureCaretOnOwnLeftLine(ed);
-      finishNewLineEditing(ed);
-    });
   };
 
   const handleEditorShiftEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -5024,8 +5131,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     reader.onload = () => {
       const url = reader.result as string;
       ensureFocus(true);
-      document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto" style="width:160px;max-width:100%"><img src="${url}" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;max-height:none;cursor:zoom-in;" /></div><br>`);
+      document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto" style="width:160px;max-width:100%"><img src="${url}" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;max-height:none;cursor:zoom-in;" /></div><div dir="auto"><br></div>`);
       normalizeEditorImages(ed);
+      separateEmbedsFromTextBlocks(ed);
       saveSel();
       emitHtml();
     };
