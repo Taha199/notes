@@ -13,7 +13,7 @@ import {
   NOTE_YT_REMOVE,
 } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, type TableCellContext, type TableEditPosition } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, getTableColumnWidths, hitTableColumnResize, resizeAdjacentTableColumns, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, NOTE_TABLE_COL_RESIZE_HOVER, NOTE_TABLE_COL_RESIZING, type TableCellContext, type TableColumnResizeHit, type TableEditPosition } from '../../lib/noteTable';
 import {
   closestTableCell,
   collectFormatTargetRanges as collectFormatTargetRangesFromLib,
@@ -27,6 +27,9 @@ import {
   convertListItemToParagraph,
   convertPseudoBulletBlocksToNativeLists,
   deleteSelectionRangeContents,
+  extractInnerBlockFromListToRoot,
+  extractListItemToRootParagraph,
+  forceParagraphToContentMargin,
   insertParagraphAboveList,
   isCaretInBulletPrefixZone,
   mergeAdjacentLists,
@@ -687,6 +690,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const imgOverflowBtnRef = useRef<HTMLButtonElement>(null);
   const imgOverflowMenuRef = useRef<HTMLDivElement>(null);
   const isResizingImg = useRef(false);
+  const isResizingTableCol = useRef(false);
+  const tableColResizeHoverRef = useRef<HTMLTableElement | null>(null);
   const activeFrameRef = useRef<HTMLElement | null>(null);
   const selectedYtFrameRef = useRef<HTMLElement | null>(null);
   const hoveredImgElRef = useRef<HTMLImageElement | null>(null);
@@ -906,8 +911,28 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     setHoveredImg(syncHoveredImg(img, frame));
   };
 
+  const clearTableColResizeHover = () => {
+    const prev = tableColResizeHoverRef.current;
+    if (!prev) return;
+    prev.classList.remove(NOTE_TABLE_COL_RESIZE_HOVER);
+    tableColResizeHoverRef.current = null;
+  };
+
+  const setTableColResizeHover = (table: HTMLTableElement | null) => {
+    if (tableColResizeHoverRef.current === table) return;
+    clearTableColResizeHover();
+    if (!table) return;
+    table.classList.add(NOTE_TABLE_COL_RESIZE_HOVER);
+    tableColResizeHoverRef.current = table;
+  };
+
   const handleEditorMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!editable || isResizingImg.current) return;
+    if (!editable || isResizingImg.current || isResizingTableCol.current) return;
+    const ed = editorRef.current;
+    if (ed) {
+      const colHit = hitTableColumnResize(ed, event.clientX, event.clientY);
+      setTableColResizeHover(colHit?.table ?? null);
+    }
     if (hoverMoveRafRef.current !== null) return;
     const target = event.target;
     hoverMoveRafRef.current = requestAnimationFrame(() => {
@@ -1144,6 +1169,53 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     stack.push(snap);
     if (stack.length > EDITOR_UNDO_LIMIT) stack.shift();
     redoStackRef.current = [];
+  };
+
+  const startTableColumnResize = (
+    e: React.MouseEvent,
+    hit: TableColumnResizeHit,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ed = editorRef.current;
+    if (!ed || !editable) return;
+    isResizingTableCol.current = true;
+    clearTableColResizeHover();
+    hit.table.classList.add(NOTE_TABLE_COL_RESIZING);
+    const startX = e.clientX;
+    const tableWidth = Math.max(1, hit.table.getBoundingClientRect().width);
+    const startWidths = getTableColumnWidths(hit.table);
+    let moved = false;
+
+    const onMove = (ev: MouseEvent) => {
+      const deltaPct = ((ev.clientX - startX) / tableWidth) * 100;
+      if (!moved) {
+        if (Math.abs(ev.clientX - startX) < 2) return;
+        // Checkpoint pre-drag HTML so Cmd+Z restores column widths.
+        pushUndoCheckpoint();
+        moved = true;
+      }
+      ev.preventDefault();
+      resizeAdjacentTableColumns(
+        hit.table,
+        hit.leftColIndex,
+        hit.rightColIndex,
+        deltaPct,
+        startWidths,
+      );
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      hit.table.classList.remove(NOTE_TABLE_COL_RESIZING);
+      isResizingTableCol.current = false;
+      if (moved) {
+        emitHtml();
+        syncVisibleTableWraps();
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   };
 
   /** Toolbar image delete: checkpoint (with image) first, then remove; keep focus for Cmd+Z. */
@@ -1885,64 +1957,45 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return target;
   };
 
-  /** Outdent nested items fully, then turn the line into a left-margin paragraph. */
+  /** Exit the current line fully out of every ancestor list → same margin as headings. */
   const exitListItemToMargin = (
     li: HTMLLIElement,
     ed: HTMLElement,
     caretAtStart = true,
   ): HTMLDivElement | null => {
-    let current = li;
-    let guard = 0;
-    while (isNestedListItem(current) && current.isConnected && guard++ < 20) {
-      if (!outdentListItem(current)) break;
+    // Prefer innermost block inside the li when the caret sits in a stuck nested div/p
+    // (no bullet of its own, still list-indented).
+    const sel = window.getSelection();
+    const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
+    if (range && li.contains(range.startContainer)) {
+      let el: Node | null = range.startContainer;
+      if (el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+      let inner: HTMLElement | null = null;
+      while (el instanceof HTMLElement && el !== li) {
+        if ((el.tagName === 'DIV' || el.tagName === 'P') && el !== ed) inner = el;
+        el = el.parentElement;
+      }
+      if (inner && inner !== li) {
+        const div = extractInnerBlockFromListToRoot(inner, ed);
+        if (div) {
+          placeCaretInBlock(div, caretAtStart);
+          return div;
+        }
+      }
     }
-    if (!current.isConnected) return null;
-    const div = convertListItemToParagraph(current, (listEl) => cleanupEmptyListShell(listEl, ed));
+
+    const div = extractListItemToRootParagraph(li, ed);
     if (!div) return null;
-    stripNewParagraphIndent(div);
-    liftBlockToEditorMargin(div, ed);
-    stripNewParagraphIndent(div);
     placeCaretInBlock(div, caretAtStart);
     return div;
   };
 
   const liftBlockToEditorMargin = (block: HTMLElement, ed: HTMLElement) => {
-    let guard = 0;
-    while (block.isConnected && guard++ < 20) {
-      const wrapper = block.parentElement;
-      if (!wrapper || wrapper === ed) break;
-      if (wrapper.tagName === 'LI') {
-        // Exit the enclosing item (moves this block out with it).
-        const moved = exitListItemToMargin(wrapper as HTMLLIElement, ed, true);
-        if (moved && block.isConnected) placeCaretInBlock(block, true);
-        return;
-      }
-      if (LIST_TAGS.has(wrapper.tagName)) {
-        const { parent, before } = getBlockLevelInsertAfterList(
-          wrapper as HTMLUListElement | HTMLOListElement,
-          ed,
-        );
-        parent.insertBefore(block, before);
-        if (wrapper.children.length === 0) wrapper.remove();
-        continue;
-      }
-      const hasIndent =
-        LIST_EXIT_INDENT_PROPS.some((prop) => wrapper.style.getPropertyValue(prop))
-        || [...wrapper.classList].some((cls) => /mso/i.test(cls));
-      if (hasIndent && wrapper.parentNode) {
-        wrapper.parentNode.insertBefore(block, wrapper.nextSibling);
-        const wrapperStillHasContent = [...wrapper.childNodes].some((n) => {
-          if (n.nodeType === Node.TEXT_NODE) return !!(n.textContent?.trim());
-          if (n instanceof HTMLElement) {
-            return !!(n.textContent?.replace(/\u200B/g, '').trim() || n.querySelector('img'));
-          }
-          return false;
-        });
-        if (!wrapperStillHasContent) wrapper.remove();
-        continue;
-      }
-      break;
+    if (block.closest('li, ul, ol')) {
+      extractInnerBlockFromListToRoot(block, ed);
+      return;
     }
+    forceParagraphToContentMargin(block, ed);
   };
 
   const exitListItem = (li: HTMLLIElement, ed: HTMLElement, caretAtStart: boolean) => {
@@ -2183,9 +2236,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return outdentListItem(li);
   };
 
-  /** One Shift+Tab / outdent step: nested → parent list; top-level → left-margin paragraph. */
+  /** Shift+Tab / Remove list: always fully exit to heading margin (not one nest level). */
   const outdentOrExitListItem = (li: HTMLLIElement, ed: HTMLElement): boolean => {
-    if (isNestedListItem(li)) return outdentListItem(li);
     return !!exitListItemToMargin(li, ed, true);
   };
 
@@ -2312,7 +2364,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     listMenuBlockRef.current = null;
 
     const li = resolveListItemForAction(range, ed);
-    if (!li || !outdentOrExitListItem(li, ed)) return;
+    if (!li) return;
+    // Dedicated outdent control: one nest level when nested; otherwise full exit.
+    if (isNestedListItem(li)) {
+      if (!outdentListItem(li)) return;
+    } else if (!exitListItemToMargin(li, ed, true)) {
+      return;
+    }
     saveSel();
     readCommandState();
     emitHtml();
@@ -5404,6 +5462,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         onMouseDown={(e) => {
           const ed = editorRef.current;
           if (!ed) return;
+          if (editable && e.button === 0) {
+            const colHit = hitTableColumnResize(ed, e.clientX, e.clientY);
+            if (colHit) {
+              startTableColumnResize(e, colHit);
+              return;
+            }
+          }
           handleYouTubeEmbedMouseDown(e);
           handleCenteredLineClick(e);
           clearPendingFontMarker();
@@ -5608,6 +5673,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         }}
         onMouseMove={handleEditorMouseMove}
         onMouseLeave={(e) => {
+          if (!isResizingTableCol.current) clearTableColResizeHover();
           if (isResizingImg.current || imgResizeMode) return;
           const rt = e.relatedTarget;
           if (rt instanceof Node && editorRef.current?.contains(rt)) return;
