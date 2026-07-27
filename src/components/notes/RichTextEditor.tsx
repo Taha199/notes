@@ -4,7 +4,8 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { canInlineImage, compressImageForInline } from '../../lib/imageCompress';
-import { emitEditorImageSwap, uploadEditorImage } from '../../lib/imageUpload';
+import { uploadEditorImage } from '../../lib/imageUpload';
+import { auth } from '../../lib/firebase';
 import {
   extractYouTubeVideoId,
   ensureYouTubeEmbedCaretSiblingsIn,
@@ -5139,27 +5140,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
-  /** Replace an inserted image's src (base64 → Storage URL) if it's still in the editor. */
-  const swapImageSrc = (fromUrl: string, toUrl: string) => {
-    const liveEd = editorRef.current;
-    if (!liveEd) return;
-    let swapped = false;
-    liveEd.querySelectorAll('img').forEach((img) => {
-      if (img.getAttribute('src') === fromUrl) {
-        img.setAttribute('src', toUrl);
-        swapped = true;
-      }
-    });
-    if (swapped) emitHtml();
-  };
-
   /**
-   * Insert an image: compress, show it right away when small enough to embed
-   * inline, then upload to Firebase Storage in the background and swap the
-   * base64 src for the short download URL. Base64 stays only as the fallback
-   * (signed out / upload failed) — multi-MB inline images are what used to
-   * blow past localStorage quota and RTDB's write size and silently drop saves.
-   * Images too large to inline are Storage-only: no upload, no insert.
+   * Insert an image. When signed in: upload to Firebase Storage FIRST, then
+   * insert only the short download URL — never persist megabytes of base64 into
+   * note/quiz HTML. That base64 path is what overflowed localStorage, stalled
+   * every cloud save, and made image notes vanish on refresh.
+   *
+   * Signed-out / upload-failed: fall back to inline base64 only when small
+   * enough (canInlineImage). Oversized images that cannot upload are refused.
    */
   const insertImageFile = async (file: File) => {
     let dataUrl: string;
@@ -5169,28 +5157,29 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       showToast(t.filesUploadFailed);
       return;
     }
-    if (canInlineImage(dataUrl)) {
-      insertImageDataUrl(dataUrl);
+
+    if (auth.currentUser) {
       try {
         const remoteUrl = await uploadEditorImage(dataUrl);
         if (remoteUrl) {
-          swapImageSrc(dataUrl, remoteUrl);
-          // Also rewrite any already-persisted copy: if the user saved and
-          // closed the editor before this upload finished, the note/quiz item
-          // was stored with the base64 form and the DOM swap above missed it.
-          emitEditorImageSwap(dataUrl, remoteUrl);
+          insertImageDataUrl(remoteUrl);
+          return;
         }
       } catch {
-        // Keep the inline base64 fallback — already inserted and persistable.
+        /* fall through to tiny inline fallback if possible */
       }
-    } else {
-      try {
-        const remoteUrl = await uploadEditorImage(dataUrl);
-        if (remoteUrl) insertImageDataUrl(remoteUrl);
-        else showToast(t.filesUploadFailed);
-      } catch {
+      if (!canInlineImage(dataUrl)) {
         showToast(t.filesUploadFailed);
+        return;
       }
+      insertImageDataUrl(dataUrl);
+      return;
+    }
+
+    if (canInlineImage(dataUrl)) {
+      insertImageDataUrl(dataUrl);
+    } else {
+      showToast(t.filesUploadFailed);
     }
   };
 

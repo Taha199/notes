@@ -9,6 +9,11 @@ import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import { onEditorImageSwap, pendingEditorUploads, uploadEditorImage } from '../lib/imageUpload';
+import {
+  applyRecentEditsToData,
+  loadRecentEdits,
+  recordRecentEdit,
+} from '../lib/recentEdits';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
 
 /**
@@ -70,7 +75,11 @@ function pickNewerQuizItem(a: QuizItem, b: QuizItem) {
 }
 
 function noteContentLength(note: Note) {
-  return (note.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length + (note.title || '').trim().length;
+  // Count images — stripping tags alone treats image-only notes as empty and
+  // lets a shorter/empty remote copy win the merge after a failed cloud write.
+  const text = (note.html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length;
+  const images = ((note.html || '').match(/<img\b/gi) || []).length * 50_000;
+  return text + images + (note.title || '').trim().length;
 }
 
 const TRASH_EMPTIED_AT_KEY = 'malacadhati_trash_emptied_at';
@@ -515,84 +524,8 @@ function syncAccountLocalStorage(uid: string) {
   safeSetItem(LAST_UID_KEY, uid);
 }
 
-// ── Recent-edit journal (write-ahead log) ────────────────────────────────
-// A tiny separate localStorage key holding the last few edited notes / quiz
-// items. The big arrays ('malacadhati', 'malacadhati_quiz_sets', …) can fail
-// to write when legacy base64 images keep the quota nearly full, and an
-// in-flight cloud write can be cancelled by a quick refresh — the combination
-// that made a just-saved item vanish on reload. Each edit is also recorded
-// here (one item per entry, so it fits even under a tight quota), and
-// readLocalNotesData folds entries back in on load; the sync-time union merge
-// then sees the fresh copy and keeps it.
-const RECENT_EDITS_KEY = 'malacadhati_recent_edits';
-const RECENT_EDITS_MAX = 12;
-const RECENT_EDITS_TTL_MS = 48 * 60 * 60 * 1000;
-
-type RecentEdit =
-  | { kind: 'note'; at: number; note: Note }
-  | { kind: 'quiz'; at: number; quiz: QuizItem }
-  | { kind: 'setItem'; at: number; setId: string; item: QuizItem };
-
-function readRecentEdits(): RecentEdit[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(RECENT_EDITS_KEY) ?? '[]') as RecentEdit[];
-    const cutoff = Date.now() - RECENT_EDITS_TTL_MS;
-    return Array.isArray(raw) ? raw.filter((e) => e && typeof e.at === 'number' && e.at > cutoff) : [];
-  } catch {
-    return [];
-  }
-}
-
-function sameEditTarget(a: RecentEdit, b: RecentEdit): boolean {
-  if (a.kind !== b.kind) return false;
-  if (a.kind === 'note' && b.kind === 'note') return a.note.id === b.note.id;
-  if (a.kind === 'quiz' && b.kind === 'quiz') return a.quiz.id === b.quiz.id;
-  if (a.kind === 'setItem' && b.kind === 'setItem') return a.setId === b.setId && a.item.id === b.item.id;
-  return false;
-}
-
-function recordRecentEdit(entry: RecentEdit) {
-  // Replace any older entry for the same item so repeated autosaves of one
-  // note don't crowd out (or bloat) the journal.
-  const rest = readRecentEdits().filter((e) => !sameEditTarget(e, entry));
-  safeSetItem(RECENT_EDITS_KEY, JSON.stringify([entry, ...rest].slice(0, RECENT_EDITS_MAX)));
-}
-
-/** Fold journaled edits into locally-loaded data; newer copies always win. */
-function applyRecentEdits<T extends { notes: Note[]; quizzes: QuizItem[]; sets: QuizSet[] }>(data: T): T {
-  const edits = readRecentEdits();
-  if (edits.length === 0) return data;
-  let { notes, quizzes, sets } = data;
-  for (const edit of [...edits].reverse()) {
-    if (edit.kind === 'note') {
-      const existing = notes.find((n) => n.id === edit.note.id);
-      if (existing?.trashed) continue;
-      if (existing && entitySyncTime(existing) >= entitySyncTime(edit.note)) continue;
-      notes = existing ? notes.map((n) => (n.id === edit.note.id ? edit.note : n)) : [edit.note, ...notes];
-    } else if (edit.kind === 'quiz') {
-      const existing = quizzes.find((q) => q.id === edit.quiz.id);
-      if (existing?.trashed) continue;
-      if (existing && entitySyncTime(existing) >= entitySyncTime(edit.quiz)) continue;
-      quizzes = existing ? quizzes.map((q) => (q.id === edit.quiz.id ? edit.quiz : q)) : [...quizzes, edit.quiz];
-    } else {
-      sets = sets.map((set) => {
-        if (set.id !== edit.setId) return set;
-        const existing = set.items.find((i) => i.id === edit.item.id);
-        if (existing?.trashed) return set;
-        if (existing && entitySyncTime(existing) >= entitySyncTime(edit.item)) return set;
-        const items = existing
-          ? set.items.map((i) => (i.id === edit.item.id ? edit.item : i))
-          : [...set.items, edit.item];
-        const editAtIso = new Date(edit.at).toISOString();
-        return { ...set, items, updatedAt: !set.updatedAt || set.updatedAt < editAtIso ? editAtIso : set.updatedAt };
-      });
-    }
-  }
-  return { ...data, notes, quizzes, sets };
-}
-
-function readLocalNotesData() {
-  return applyRecentEdits({
+function readLocalNotesDataRaw() {
+  return {
     notes: firebaseToArray<Note>(readLocalJson<Note[]>('malacadhati') ?? []),
     drafts: firebaseToArray<Draft>(readLocalJson<Draft[]>('malacadhati_drafts') ?? []),
     quizzes: firebaseToArray<QuizItem>(readLocalJson<QuizItem[]>('malacadhati_quiz') ?? []),
@@ -605,7 +538,12 @@ function readLocalNotesData() {
       ...set,
       items: set.items ?? [],
     })),
-  });
+  };
+}
+
+/** Sync read used by recovery helpers; journal is applied separately on boot. */
+function readLocalNotesData() {
+  return applyRecentEditsToData(readLocalNotesDataRaw());
 }
 
 function readDeletedDraftIds(): Set<string> {
@@ -1430,7 +1368,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
     syncAccountLocalStorage(user.uid);
-    const local = readLocalNotesData();
+    // IndexedDB journal is the durable write-ahead log for image notes (localStorage
+    // quota can't hold them). Load it in parallel with the first paint from the
+    // raw localStorage snapshot, then fold journal entries in before cloud merge.
+    let local = readLocalNotesDataRaw();
+    const journalReady = loadRecentEdits().then((edits) => {
+      if (cancelled || edits.length === 0) return edits;
+      local = applyRecentEditsToData(local, edits);
+      notesRef.current = local.notes;
+      quizzesRef.current = local.quizzes;
+      quizSetsRef.current = local.sets;
+      setNotes(local.notes);
+      setQuizzes(local.quizzes);
+      setQuizSets(local.sets);
+      return edits;
+    });
     const storedCloudSyncAt = Number(localStorage.getItem(CLOUD_SYNCED_AT_KEY));
     if (storedCloudSyncAt > 0) setCloudSyncedAt(storedCloudSyncAt);
 
@@ -1517,6 +1469,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
+        // Ensure journaled image notes are in live refs before merging cloud.
+        await journalReady;
+        if (cancelled) return;
         const r = await rtdbFetch(`/users/${user.uid}`);
         if (!r.ok) throw new Error('cloud-fetch-failed');
         cloudLoadSucceededRef.current = true;
@@ -3088,6 +3043,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     recordRecentEdit({ kind: 'note', at: Date.now(), note: newNote });
     setNotes((prevNotes) => {
       const nextNotes = [newNote, ...prevNotes];
+      notesRef.current = nextNotes;
       setDrafts((prevDrafts) => {
         pendingLocalDraftIdsRef.current.delete(id);
         pendingDeletedDraftIdsRef.current.add(id);
@@ -3096,6 +3052,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         draftsRef.current = nextDrafts;
         safeSetItem('malacadhati_drafts', JSON.stringify(nextDrafts));
         persist({ notes: nextNotes, drafts: nextDrafts }, true);
+        scheduleInstantDataCloudSave({ notes: nextNotes });
         void runDraftDeleteCloudSave(id);
         return nextDrafts;
       });
@@ -3107,7 +3064,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     'read' in patch || 'archived' in patch || 'fav' in patch || 'trashed' in patch;
 
   const updateNote = (id: number, patch: Partial<Note>) => {
-    const instant = noteMetaChanged(patch);
+    const instant = noteMetaChanged(patch)
+      || 'html' in patch
+      || 'title' in patch
+      || 'text' in patch
+      || 'savedAt' in patch;
     const base = notesRef.current.find((n) => n.id === id);
     if (base) {
       const merged = { ...base, ...patch };
