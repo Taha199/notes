@@ -4,7 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { canInlineImage, compressImageForInline } from '../../lib/imageCompress';
-import { uploadEditorImage } from '../../lib/imageUpload';
+import { emitEditorImageSwap, uploadEditorImage } from '../../lib/imageUpload';
 import {
   extractYouTubeVideoId,
   ensureYouTubeEmbedCaretSiblingsIn,
@@ -5173,7 +5173,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       insertImageDataUrl(dataUrl);
       try {
         const remoteUrl = await uploadEditorImage(dataUrl);
-        if (remoteUrl) swapImageSrc(dataUrl, remoteUrl);
+        if (remoteUrl) {
+          swapImageSrc(dataUrl, remoteUrl);
+          // Also rewrite any already-persisted copy: if the user saved and
+          // closed the editor before this upload finished, the note/quiz item
+          // was stored with the base64 form and the DOM swap above missed it.
+          emitEditorImageSwap(dataUrl, remoteUrl);
+        }
       } catch {
         // Keep the inline base64 fallback — already inserted and persistable.
       }

@@ -8,6 +8,7 @@ import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
+import { onEditorImageSwap, uploadEditorImage } from '../lib/imageUpload';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
 
 /**
@@ -3760,6 +3761,133 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persistSets(next, forceCloud, forceCloud);
     if (forceCloud) scheduleInstantDataCloudSave({ quizSets: next });
   };
+
+  // ── Editor image → Storage URL swap ──────────────────────────────────────
+  // The editor uploads pasted/inserted images to Firebase Storage in the
+  // background and swaps its own DOM src when done — but if the user saves and
+  // closes before the upload finishes, the persisted note/quiz item keeps the
+  // multi-hundred-KB base64 copy. That payload size is what overflows the
+  // (likely already image-crowded) localStorage quota and turns the cloud
+  // write slow enough for a refresh to cancel it — i.e. the "saved then gone
+  // after reload" failures. This rewrites every persisted copy of the base64
+  // form to the short URL, whenever the upload lands.
+  const replaceEditorImageUrl = (fromUrl: string, toUrl: string) => {
+    if (!fromUrl || !toUrl || fromUrl === toUrl) return;
+    const swap = (s: string) => (s.includes(fromUrl) ? s.split(fromUrl).join(toUrl) : s);
+    const now = new Date().toISOString();
+
+    if (notesRef.current.some((n) => n.html.includes(fromUrl))) {
+      const next = notesRef.current.map((n) => (
+        n.html.includes(fromUrl) ? { ...n, html: swap(n.html), savedAt: now } : n
+      ));
+      notesRef.current = next;
+      setNotes(next);
+      safeSetItem('malacadhati', JSON.stringify(next));
+      persist({ notes: next }, true);
+      scheduleInstantDataCloudSave({ notes: next });
+    }
+
+    const quizItemHasUrl = (q: QuizItem) =>
+      q.question.includes(fromUrl)
+      || q.answer.includes(fromUrl)
+      || (q.explanation ?? '').includes(fromUrl)
+      || (q.options ?? []).some((o) => o.includes(fromUrl));
+    const swapQuizItem = (q: QuizItem): QuizItem => (
+      quizItemHasUrl(q)
+        ? {
+            ...q,
+            question: swap(q.question),
+            answer: swap(q.answer),
+            explanation: q.explanation ? swap(q.explanation) : q.explanation,
+            options: q.options ? q.options.map(swap) : q.options,
+            updatedAt: now,
+          }
+        : q
+    );
+
+    if (quizzesRef.current.some(quizItemHasUrl)) {
+      const next = quizzesRef.current.map(swapQuizItem);
+      quizzesRef.current = next;
+      setQuizzes(next);
+      safeSetItem('malacadhati_quiz', JSON.stringify(next));
+      persist({ quizzes: next }, true);
+      scheduleInstantDataCloudSave({ quizzes: next });
+    }
+
+    if (quizSetsRef.current.some((s) => s.items.some(quizItemHasUrl))) {
+      const next = quizSetsRef.current.map((s) => (
+        s.items.some(quizItemHasUrl)
+          ? { ...s, updatedAt: now, items: s.items.map(swapQuizItem) }
+          : s
+      ));
+      quizSetsRef.current = next;
+      setQuizSets(next);
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+      persistSets(next, true, true);
+      scheduleInstantDataCloudSave({ quizSets: next });
+    }
+  };
+
+  useEffect(() => onEditorImageSwap(replaceEditorImageUrl), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Legacy inline-image migration ─────────────────────────────────────────
+  // Old notes/questions still embed images as base64, which keeps localStorage
+  // near its quota permanently — the reason fresh saves' local writes can fail
+  // silently. Once per session, quietly upload those to Storage and swap the
+  // content to short URLs, a few images at a time.
+  const INLINE_IMAGE_MIGRATE_MIN_CHARS = 65_000;
+  const INLINE_IMAGE_MIGRATE_MAX_PER_SESSION = 20;
+
+  const collectInlineImageUrls = (): string[] => {
+    const found = new Set<string>();
+    const scan = (html?: string) => {
+      if (!html) return;
+      let idx = 0;
+      for (;;) {
+        const start = html.indexOf('src="data:image/', idx);
+        if (start === -1) break;
+        const urlStart = start + 5;
+        const end = html.indexOf('"', urlStart);
+        if (end === -1) break;
+        const url = html.slice(urlStart, end);
+        if (url.length > INLINE_IMAGE_MIGRATE_MIN_CHARS) found.add(url);
+        idx = end + 1;
+      }
+    };
+    const scanQuizItem = (q: QuizItem) => {
+      scan(q.question);
+      scan(q.answer);
+      scan(q.explanation);
+      (q.options ?? []).forEach((o) => scan(o));
+    };
+    notesRef.current.forEach((n) => scan(n.html));
+    quizzesRef.current.forEach(scanQuizItem);
+    quizSetsRef.current.forEach((s) => s.items.forEach(scanQuizItem));
+    return [...found];
+  };
+
+  const migrateInlineImagesToStorage = async () => {
+    const urls = collectInlineImageUrls().slice(0, INLINE_IMAGE_MIGRATE_MAX_PER_SESSION);
+    for (const dataUrl of urls) {
+      if (!userRef.current) return;
+      try {
+        const remoteUrl = await uploadEditorImage(dataUrl);
+        if (remoteUrl) replaceEditorImageUrl(dataUrl, remoteUrl);
+      } catch {
+        /* keep the base64 copy — retried next session */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  };
+
+  const inlineImageMigrationRanRef = useRef(false);
+  useEffect(() => {
+    if (!user || !loaded || inlineImageMigrationRanRef.current) return;
+    inlineImageMigrationRanRef.current = true;
+    // Wait for the initial load/sync to settle before generating extra writes.
+    const timer = setTimeout(() => { void migrateInlineImagesToStorage(); }, 15_000);
+    return () => clearTimeout(timer);
+  }, [user?.uid, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const moveItemInSet = (setId: string, itemId: number, direction: 'up' | 'down') => {
     setQuizSets((prev) => {

@@ -6,6 +6,28 @@ import { withTimeout } from './files/fileTypes';
 const UPLOAD_TIMEOUT_MS = 60_000;
 const DOWNLOAD_URL_TIMEOUT_MS = 20_000;
 
+/**
+ * Broadcast for "base64 image finished uploading, use this URL instead".
+ *
+ * The editor swaps the src in its own DOM, but if the user saves and closes
+ * the editor before the background upload finishes, the persisted note/quiz
+ * item still holds the multi-hundred-KB base64 copy — exactly the payload
+ * size that used to overflow localStorage and stall cloud writes. The data
+ * layer (NotesContext) subscribes here and rewrites any persisted content
+ * containing the base64 form, so the swap lands even after the editor is gone.
+ */
+type ImageSwapListener = (fromUrl: string, toUrl: string) => void;
+const swapListeners = new Set<ImageSwapListener>();
+
+export function onEditorImageSwap(listener: ImageSwapListener): () => void {
+  swapListeners.add(listener);
+  return () => swapListeners.delete(listener);
+}
+
+export function emitEditorImageSwap(fromUrl: string, toUrl: string): void {
+  swapListeners.forEach((listener) => listener(fromUrl, toUrl));
+}
+
 function extForMime(mime: string): string {
   if (mime === 'image/png') return 'png';
   if (mime === 'image/gif') return 'gif';
