@@ -8,7 +8,7 @@ import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
-import { onEditorImageSwap, uploadEditorImage } from '../lib/imageUpload';
+import { onEditorImageSwap, pendingEditorUploads, uploadEditorImage } from '../lib/imageUpload';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
 
 /**
@@ -2002,7 +2002,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const syncedAt = Date.now();
 
     try {
-      await getRtdbAuthToken(true);
+      // No manual token fetch here: the SDK's update() authenticates over its
+      // own realtime connection, and the REST fallback below fetches its own
+      // token. getIdToken can hang up to 8s on Chrome (stuck IndexedDB auth),
+      // which stalled every save long enough for a refresh to cancel it.
       try {
         await update(dbRef(database, `users/${u.uid}`), {
           [`draftContents/${draftId}`]: { title: draft.title, html: draft.html, updatedAt },
@@ -2242,7 +2245,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setCloudStatus('saving');
     savingStartedAt.current = syncedAt;
     try {
-      await getRtdbAuthToken(true);
       await update(dbRef(database, `users/${u.uid}`), {
         notes: nextNotes,
         quizzes: nextQuizzes,
@@ -2335,11 +2337,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // this is the hot path for every quiz/note instant save.
     savesInFlight.current += 1;
     try {
-      // Skip forceRefresh: the SDK's cached token is normally valid and this call
-      // is on the critical path between a user's click and a page refresh. Forcing
-      // a network round-trip here just to fetch a token widens the window during
-      // which a quick reload can cancel the write before it reaches Firebase.
-      await getRtdbAuthToken(false);
+      // No manual token fetch: update() authenticates over the SDK's own
+      // realtime connection and never uses this REST token. getIdToken can hang
+      // for up to 8 seconds on Chrome (stuck IndexedDB auth refresh — see
+      // rtdb.ts), which held every instant save hostage on the critical path
+      // between the user's click and a potential page refresh.
       await update(dbRef(database, `users/${u.uid}`), {
         ...safe,
         cloudSyncAt: syncedAt,
@@ -2886,7 +2888,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // native confirmation gives the write a chance to finish (and lets the user
     // simply not leave).
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (savesInFlight.current <= 0) return;
+      // Also block while an editor image is still uploading to Storage: the
+      // persisted content still holds the base64 form at that point, and
+      // leaving now can strand it before the URL swap + cloud write land.
+      if (savesInFlight.current <= 0 && pendingEditorUploads() <= 0) return;
       e.preventDefault();
       e.returnValue = '';
     };

@@ -47,6 +47,13 @@ function extForMime(mime: string): string {
  * Uploads live under the files feature's `users/{uid}/files/...` prefix so the
  * existing Storage security rules apply unchanged.
  */
+let pendingUploadCount = 0;
+
+/** Uploads still in flight — the beforeunload guard warns while this is > 0. */
+export function pendingEditorUploads(): number {
+  return pendingUploadCount;
+}
+
 export async function uploadEditorImage(dataUrl: string): Promise<string | null> {
   const uid = auth.currentUser?.uid;
   if (!uid) return null;
@@ -54,10 +61,15 @@ export async function uploadEditorImage(dataUrl: string): Promise<string | null>
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const path = `users/${uid}/files/${id}/editor-image.${extForMime(blob.type)}`;
   const storageRef = ref(storage, path);
-  await withTimeout(
-    uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg' }),
-    UPLOAD_TIMEOUT_MS,
-    'upload-timeout',
-  );
-  return withTimeout(getDownloadURL(storageRef), DOWNLOAD_URL_TIMEOUT_MS, 'download-url-timeout');
+  pendingUploadCount += 1;
+  try {
+    await withTimeout(
+      uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg' }),
+      UPLOAD_TIMEOUT_MS,
+      'upload-timeout',
+    );
+    return await withTimeout(getDownloadURL(storageRef), DOWNLOAD_URL_TIMEOUT_MS, 'download-url-timeout');
+  } finally {
+    pendingUploadCount = Math.max(0, pendingUploadCount - 1);
+  }
 }
