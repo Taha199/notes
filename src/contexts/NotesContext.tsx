@@ -9,6 +9,22 @@ import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 
+/**
+ * localStorage can throw (QuotaExceededError) when quiz answers embed large
+ * base64 images. If that exception escapes an unwrapped setItem call, it can
+ * abort the rest of the caller (e.g. addItemToSet) — including the Firebase
+ * cloud write — so a newly-saved question would show in the UI but vanish on
+ * refresh because it was never persisted anywhere durable. Always go through
+ * this helper so a storage failure never blocks cloud sync.
+ */
+function safeSetItem(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    console.error('[localStorage] setItem failed for', key, err);
+  }
+}
+
 export interface Draft {
   id: string;
   title: string;
@@ -86,7 +102,7 @@ function readPermDeleted(): PermanentlyDeletedIds {
 }
 
 function writePermDeleted(ids: PermanentlyDeletedIds) {
-  localStorage.setItem(PERM_DELETED_KEY, JSON.stringify(ids));
+  safeSetItem(PERM_DELETED_KEY, JSON.stringify(ids));
 }
 
 function parseCloudPermDeleted(cloud: Record<string, unknown> | null | undefined): PermanentlyDeletedIds {
@@ -494,7 +510,7 @@ function clearLocalNotesData() {
 function syncAccountLocalStorage(uid: string) {
   const prev = localStorage.getItem(LAST_UID_KEY);
   if (prev && prev !== uid) clearLocalNotesData();
-  localStorage.setItem(LAST_UID_KEY, uid);
+  safeSetItem(LAST_UID_KEY, uid);
 }
 
 function readLocalNotesData() {
@@ -525,7 +541,7 @@ function readDeletedDraftIds(): Set<string> {
 }
 
 function writeDeletedDraftIds(ids: Set<string>) {
-  localStorage.setItem(DELETED_DRAFT_IDS_KEY, JSON.stringify([...ids]));
+  safeSetItem(DELETED_DRAFT_IDS_KEY, JSON.stringify([...ids]));
 }
 
 /**
@@ -703,7 +719,7 @@ function getLastDataHistoryAt(uid: string) {
 function setLastDataHistoryAt(uid: string, ts: number) {
   lastDataHistoryAtByUid.set(uid, ts);
   try {
-    localStorage.setItem(lastDataHistoryKey(uid), String(ts));
+    safeSetItem(lastDataHistoryKey(uid), String(ts));
   } catch { /* ignore */ }
 }
 
@@ -1374,7 +1390,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setDrafts(seed);
       draftsRef.current = seed;
       draftCounter.current = 1;
-      localStorage.setItem('malacadhati_drafts', JSON.stringify(seed));
+      safeSetItem('malacadhati_drafts', JSON.stringify(seed));
     };
     ensureSeedDraft();
     draftsReadyRef.current = true;
@@ -1388,7 +1404,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         pendingDeletedDraftIdsRef.current = mergeDeletedDraftIds(pendingDeletedDraftIdsRef.current, bundle);
         if (typeof bundle.cloudSyncAt === 'number' && bundle.cloudSyncAt > 0) {
           setCloudSyncedAt(bundle.cloudSyncAt);
-          localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(bundle.cloudSyncAt));
+          safeSetItem(CLOUD_SYNCED_AT_KEY, String(bundle.cloudSyncAt));
           lastAppliedRemoteSyncAt.current = bundle.cloudSyncAt;
         }
         const cloudDrafts = parseCloudDrafts(bundle);
@@ -1411,7 +1427,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             merged,
             pendingDeletedDraftIdsRef.current,
           );
-          localStorage.setItem('malacadhati_drafts', JSON.stringify(merged));
+          safeSetItem('malacadhati_drafts', JSON.stringify(merged));
         }
       } catch {
         /* fast draft bootstrap is best-effort */
@@ -1435,7 +1451,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         if (typeof cloud?.cloudSyncAt === 'number' && cloud.cloudSyncAt > 0) {
           setCloudSyncedAt(cloud.cloudSyncAt);
-          localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(cloud.cloudSyncAt));
+          safeSetItem(CLOUD_SYNCED_AT_KEY, String(cloud.cloudSyncAt));
           lastAppliedRemoteSyncAt.current = cloud.cloudSyncAt;
         }
 
@@ -1499,13 +1515,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
 
         setNotes(notes);
-        localStorage.setItem('malacadhati', JSON.stringify(notes));
+        safeSetItem('malacadhati', JSON.stringify(notes));
 
         setQuizzes(quizzes);
-        localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzes));
+        safeSetItem('malacadhati_quiz', JSON.stringify(quizzes));
 
         setChats(chats);
-        localStorage.setItem('malacadhati_chats', JSON.stringify(chats));
+        safeSetItem('malacadhati_chats', JSON.stringify(chats));
 
         let dedicatedFolders: QuizFolder[] = [];
         let dedicatedSets: QuizSet[] = [];
@@ -1554,7 +1570,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             historyRepair = true;
             recoveryLog('recovered quizzes from quiz set items', { count: fromSets.length });
             setQuizzes(quizzes);
-            localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzes));
+            safeSetItem('malacadhati_quiz', JSON.stringify(quizzes));
           }
         }
 
@@ -1576,9 +1592,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
         );
         setQuizSets(normalizedSets);
-        localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+        safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
         setQuizFolders(normalizedFolders);
-        localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+        safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
 
         const needsRepair = notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
           || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)
@@ -1657,7 +1673,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           finalDrafts,
           pendingDeletedDraftIdsRef.current,
         );
-        localStorage.setItem('malacadhati_drafts', JSON.stringify(finalDrafts));
+        safeSetItem('malacadhati_drafts', JSON.stringify(finalDrafts));
         if (draftsRepair) {
           recoveryLog('repairing cloud drafts from local');
           const draftContents: Record<string, { title: string; html: string; updatedAt?: number }> = {};
@@ -1720,7 +1736,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const persistSets = (nextSets: QuizSet[], forceCloud = false) => {
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     quizSetsRef.current = nextSets;
     // Never force a full-user PATCH here — that raced with empty notes and wiped the cloud.
     persist({ quizSets: nextSets }, false);
@@ -1739,7 +1755,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const persistFolders = (nextFolders: QuizFolder[], forceCloud = false) => {
-    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     persist({ quizFolders: nextFolders }, forceCloud);
     if (user && loadedRef.current && (forceCloud || countUserQuizFolders(nextFolders) > 0 || countUserQuizSets(quizSets) > 0)) {
       void rtdbFetch(`/users/${user.uid}/quizFolders`, {
@@ -1766,14 +1782,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizFolders((prev) => {
       const next = ensureFavoritesFolder(ensureRestoredFolder(prev));
       if (JSON.stringify(next) !== JSON.stringify(prev)) {
-        localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(next));
+        safeSetItem('malacadhati_quiz_folders', JSON.stringify(next));
       }
       return next;
     });
     setQuizSets((prev) => {
       const next = ensureFavoritesSet(prev);
       if (JSON.stringify(next) !== JSON.stringify(prev)) {
-        localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+        safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
       }
       return next;
     });
@@ -1783,7 +1799,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const saveChats = (nextChats: ChatConversation[]) => {
     setChats(nextChats);
-    localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
+    safeSetItem('malacadhati_chats', JSON.stringify(nextChats));
     persist({ chats: nextChats });
   };
 
@@ -1828,9 +1844,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [user, loaded]);
 
   const writeLocalCache = () => {
-    localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
-    localStorage.setItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
+    safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+    safeSetItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
+    safeSetItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
   };
 
   const buildDraftCloudPayload = (dList: Draft[]) => {
@@ -1855,7 +1871,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (typeof bundle.cloudSyncAt === 'number' && bundle.cloudSyncAt > 0) {
       lastAppliedRemoteSyncAt.current = bundle.cloudSyncAt;
       setCloudSyncedAt(bundle.cloudSyncAt);
-      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(bundle.cloudSyncAt));
+      safeSetItem(CLOUD_SYNCED_AT_KEY, String(bundle.cloudSyncAt));
     }
     const cloudDrafts = parseCloudDrafts(bundle);
     lastCloudDraftIdsRef.current = new Set(cloudDrafts.map((d) => d.id));
@@ -1877,7 +1893,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         merged,
         pendingDeletedDraftIdsRef.current,
       );
-      localStorage.setItem('malacadhati_drafts', JSON.stringify(merged));
+      safeSetItem('malacadhati_drafts', JSON.stringify(merged));
     }
   };
 
@@ -1891,7 +1907,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (next.length === draftsRef.current.length) return;
       draftsRef.current = next;
       setDrafts(next);
-      localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+      safeSetItem('malacadhati_drafts', JSON.stringify(next));
       return;
     }
     if (pendingDeletedDraftIdsRef.current.has(id)) return;
@@ -1926,7 +1942,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     draftsRef.current = next;
     setDrafts(next);
-    localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+    safeSetItem('malacadhati_drafts', JSON.stringify(next));
   };
 
   const runSingleDraftCloudSave = async (draftId: string) => {
@@ -1976,7 +1992,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
-      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
     } catch {
       saveFailedRef.current = true;
       setCloudStatus('error');
@@ -2036,25 +2052,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
       notesRef.current = nextNotes;
       setNotes(nextNotes);
-      localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+      safeSetItem('malacadhati', JSON.stringify(nextNotes));
       changed = true;
     }
     if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
       quizzesRef.current = nextQuizzes;
       setQuizzes(nextQuizzes);
-      localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+      safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
       changed = true;
     }
     if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
       quizSetsRef.current = normalizedSets;
       setQuizSets(normalizedSets);
-      localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
       changed = true;
     }
     if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
       quizFoldersRef.current = normalizedFolders;
       setQuizFolders(normalizedFolders);
-      localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+      safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
       changed = true;
     }
     return changed;
@@ -2152,24 +2168,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
         notesRef.current = nextNotes;
         setNotes(nextNotes);
-        localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+        safeSetItem('malacadhati', JSON.stringify(nextNotes));
       }
       if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
         const prevQuizzes = quizzesRef.current;
         quizzesRef.current = nextQuizzes;
-        localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+        safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
         if (!quizzesEqualForUI(nextQuizzes, prevQuizzes)) setQuizzes(nextQuizzes);
       }
       if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
         const prevSets = quizSetsRef.current;
         quizSetsRef.current = normalizedSets;
-        localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+        safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
         if (!quizSetsEqualForUI(normalizedSets, prevSets)) setQuizSets(normalizedSets);
       }
       if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
         quizFoldersRef.current = normalizedFolders;
         setQuizFolders(normalizedFolders);
-        localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+        safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
       }
     } finally {
       isApplyingRemoteRef.current = false;
@@ -2202,7 +2218,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
-      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData({ notes: nextNotes, quizzes: nextQuizzes, quizSets: nextSets, quizFolders: nextFolders }, syncedAt);
     } catch {
       saveFailedRef.current = true;
@@ -2240,7 +2256,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
-      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData(payload ?? {}, syncedAt);
     } catch {
       /* best-effort — full cloud save will retry */
@@ -2282,7 +2298,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
-      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData(safe, syncedAt);
     } catch {
       /* best-effort */
@@ -2327,7 +2343,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
-      localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
     } catch {
       saveFailedRef.current = true;
       setCloudStatus('error');
@@ -2358,7 +2374,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (JSON.stringify(next) === JSON.stringify(draftsRef.current)) return;
     draftsRef.current = next;
     setDrafts(next);
-    localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+    safeSetItem('malacadhati_drafts', JSON.stringify(next));
   };
 
   const runDraftCloudSave = (keepalive = false) => {
@@ -2386,7 +2402,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         lastLocalSaveAt.current = syncedAt;
         lastAppliedRemoteSyncAt.current = syncedAt;
         setCloudSyncedAt(syncedAt);
-        localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+        safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       })
       .catch(() => {
         saveFailedRef.current = true;
@@ -2462,7 +2478,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           lastLocalSaveAt.current = syncedAt;
           lastAppliedRemoteSyncAt.current = syncedAt;
           setCloudSyncedAt(syncedAt);
-          localStorage.setItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+          safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
         })
       .catch(() => {
         saveFailedRef.current = true;
@@ -2616,33 +2632,33 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     let changed = false;
     if (JSON.stringify(mergedNotes) !== JSON.stringify(notesRef.current)) {
       setNotes(mergedNotes);
-      localStorage.setItem('malacadhati', JSON.stringify(mergedNotes));
+      safeSetItem('malacadhati', JSON.stringify(mergedNotes));
       changed = true;
     }
     if (JSON.stringify(mergedQuizzes) !== JSON.stringify(quizzesRef.current)) {
       setQuizzes(mergedQuizzes);
-      localStorage.setItem('malacadhati_quiz', JSON.stringify(mergedQuizzes));
+      safeSetItem('malacadhati_quiz', JSON.stringify(mergedQuizzes));
       changed = true;
     }
     if (JSON.stringify(mergedChats) !== JSON.stringify(chatsRef.current)) {
       setChats(mergedChats);
-      localStorage.setItem('malacadhati_chats', JSON.stringify(mergedChats));
+      safeSetItem('malacadhati_chats', JSON.stringify(mergedChats));
       changed = true;
     }
     if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
       setQuizSets(normalizedSets);
-      localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
       changed = true;
     }
     if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
       setQuizFolders(normalizedFolders);
-      localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+      safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
       changed = true;
     }
     if (JSON.stringify(mergedDrafts) !== JSON.stringify(draftsRef.current)) {
       setDrafts(mergedDrafts);
       draftsRef.current = mergedDrafts;
-      localStorage.setItem('malacadhati_drafts', JSON.stringify(mergedDrafts));
+      safeSetItem('malacadhati_drafts', JSON.stringify(mergedDrafts));
       changed = true;
     }
     if (changed) recoveryLog('applied remote cloud snapshot');
@@ -2757,7 +2773,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (JSON.stringify(next) !== JSON.stringify(draftsRef.current)) {
         draftsRef.current = next;
         setDrafts(next);
-        localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+        safeSetItem('malacadhati_drafts', JSON.stringify(next));
       }
     });
     return () => {
@@ -2866,7 +2882,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = [...draftsRef.current, { id, title: '', html: '', updatedAt: now }];
     draftsRef.current = next;
     setDrafts(next);
-    localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+    safeSetItem('malacadhati_drafts', JSON.stringify(next));
     persist({ drafts: next });
     scheduleSingleDraftCloudSave(id);
   };
@@ -2878,7 +2894,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = draftsRef.current.filter((d) => d.id !== id);
     draftsRef.current = next;
     setDrafts(next);
-    localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+    safeSetItem('malacadhati_drafts', JSON.stringify(next));
     if (draftCloudTimer.current) {
       clearTimeout(draftCloudTimer.current);
       draftCloudTimer.current = null;
@@ -2894,7 +2910,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = draftsRef.current.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: now } : d));
     draftsRef.current = next;
     setDrafts(next);
-    localStorage.setItem('malacadhati_drafts', JSON.stringify(next));
+    safeSetItem('malacadhati_drafts', JSON.stringify(next));
     persist({ drafts: next }, false, true);
     scheduleSingleDraftCloudSave(id);
   };
@@ -2923,7 +2939,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
         const nextDrafts = prevDrafts.filter((d) => d.id !== id);
         draftsRef.current = nextDrafts;
-        localStorage.setItem('malacadhati_drafts', JSON.stringify(nextDrafts));
+        safeSetItem('malacadhati_drafts', JSON.stringify(nextDrafts));
         persist({ notes: nextNotes, drafts: nextDrafts }, true);
         void runDraftDeleteCloudSave(id);
         return nextDrafts;
@@ -2953,7 +2969,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = [...quizzesRef.current, { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now }];
     quizzesRef.current = next;
     setQuizzes(next);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
+    safeSetItem('malacadhati_quiz', JSON.stringify(next));
     everHadQuizzesRef.current = true;
     // Field-level cloud write only (never force a full-user PATCH that could wipe notes).
     persist({ quizzes: next }, false);
@@ -3007,8 +3023,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = nextSets;
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
     persistSets(nextSets, true);
     scheduleInstantDataCloudSave({ quizzes: nextQuizzes, quizSets: nextSets });
@@ -3033,11 +3049,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
     quizzesRef.current = nextQuizzes;
     setQuizzes(nextQuizzes);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     if (setsChanged) {
       quizSetsRef.current = nextSets;
       setQuizSets(nextSets);
-      localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
       persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
       persistSets(nextSets, true);
       scheduleInstantDataCloudSave({ quizzes: nextQuizzes, quizSets: nextSets });
@@ -3058,8 +3074,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = nextSets;
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
     void pushPermDeletedCloud({ quizzes: nextQuizzes, quizSets: nextSets });
   };
@@ -3070,7 +3086,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = quizzesRef.current.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
     quizzesRef.current = next;
     setQuizzes(next);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
+    safeSetItem('malacadhati_quiz', JSON.stringify(next));
     persist({ quizzes: next }, forceCloud);
     if (forceCloud) scheduleInstantDataCloudSave({ quizzes: next });
   };
@@ -3124,7 +3140,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const nextSets = quizSetsRef.current.filter((s) => s.id !== id);
     quizSetsRef.current = nextSets;
     setQuizSets(nextSets);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persistSets(nextSets, true);
     void pushPermDeletedCloud({ quizSets: nextSets });
   };
@@ -3234,8 +3250,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = nextSets;
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ quizFolders: nextFolders, quizSets: nextSets }, true);
     scheduleInstantDataCloudSave({ quizFolders: nextFolders, quizSets: nextSets });
   };
@@ -3263,8 +3279,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFoldersRef.current = nextFolders;
     setQuizSets(nextSets);
     setQuizFolders(nextFolders);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     persist({ quizSets: nextSets, quizFolders: nextFolders }, true);
     void pushPermDeletedCloud({ quizSets: nextSets, quizFolders: nextFolders });
   };
@@ -3398,11 +3414,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setChats(nextChats);
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
-    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    safeSetItem('malacadhati_chats', JSON.stringify(nextChats));
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     markEverHadContent(nextNotes, nextQuizzes, nextSets);
     persist({ notes: nextNotes, quizzes: nextQuizzes, chats: nextChats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await rtdbFetch(`/users/${user.uid}/quizSets`, {
@@ -3442,11 +3458,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setChats(snapshot.chats);
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    localStorage.setItem('malacadhati', JSON.stringify(snapshot.notes));
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(snapshot.quizzes));
-    localStorage.setItem('malacadhati_chats', JSON.stringify(snapshot.chats));
-    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati', JSON.stringify(snapshot.notes));
+    safeSetItem('malacadhati_quiz', JSON.stringify(snapshot.quizzes));
+    safeSetItem('malacadhati_chats', JSON.stringify(snapshot.chats));
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     markEverHadContent(snapshot.notes, snapshot.quizzes, nextSets);
     persist({ notes: snapshot.notes, quizzes: snapshot.quizzes, chats: snapshot.chats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await rtdbFetch(`/users/${user!.uid}/quizSets`, {
@@ -3593,11 +3609,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setChats(nextChats);
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    localStorage.setItem('malacadhati_chats', JSON.stringify(nextChats));
-    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    safeSetItem('malacadhati_chats', JSON.stringify(nextChats));
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ notes: nextNotes, quizzes: nextQuizzes, chats: nextChats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
       method: 'PUT',
@@ -3639,7 +3655,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
     everHadSetsRef.current = true;
     persistSets(next, true);
     scheduleInstantDataCloudSave({ quizSets: next });
@@ -3652,7 +3668,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
     persistSets(next, true);
     scheduleInstantDataCloudSave({ quizSets: next });
   };
@@ -3668,7 +3684,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
     persistSets(next, forceCloud);
     if (forceCloud) scheduleInstantDataCloudSave({ quizSets: next });
   };
@@ -3796,7 +3812,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const nextNotes = notesRef.current.filter((n) => n.id !== id);
     notesRef.current = nextNotes;
     setNotes(nextNotes);
-    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+    safeSetItem('malacadhati', JSON.stringify(nextNotes));
     persist({ notes: nextNotes }, true);
     void pushPermDeletedCloud({ notes: nextNotes });
   };
@@ -3835,11 +3851,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets(nextSets);
     setQuizFolders(nextFolders);
 
-    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    localStorage.setItem(TRASH_EMPTIED_AT_KEY, String(Date.now()));
+    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    safeSetItem(TRASH_EMPTIED_AT_KEY, String(Date.now()));
 
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -3859,7 +3875,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const nextNotes = notesRef.current.filter((n) => !idSet.has(n.id));
     notesRef.current = nextNotes;
     setNotes(nextNotes);
-    localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+    safeSetItem('malacadhati', JSON.stringify(nextNotes));
     persist({ notes: nextNotes }, true);
     void pushPermDeletedCloud({ notes: nextNotes });
   };
