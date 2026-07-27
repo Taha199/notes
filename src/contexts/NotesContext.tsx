@@ -306,7 +306,12 @@ function mergeNotesForSync(local: Note[], remote: Note[], tombstones: Permanentl
   return [...map.values()];
 }
 
-function mergeQuizzesForSync(local: QuizItem[], remote: QuizItem[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
+function mergeQuizzesForSync(
+  local: QuizItem[],
+  remote: QuizItem[],
+  tombstones: PermanentlyDeletedIds = emptyPermDeleted(),
+  orderFrom?: 'local' | 'remote',
+) {
   const dead = new Set(tombstones.quizzes);
   const remoteIds = new Set(remote.map((item) => item.id));
   const map = new Map<number, QuizItem>();
@@ -320,7 +325,26 @@ function mergeQuizzesForSync(local: QuizItem[], remote: QuizItem[], tombstones: 
     const existing = map.get(item.id);
     map.set(item.id, existing ? pickNewerQuizItem(existing, item) : item);
   }
-  return [...map.values()];
+  // Preserve the authority device's manual order (Map insertion order alone
+  // always kept local-first, so mobile/desktop Manual order never matched).
+  const localMax = Math.max(0, ...local.map((item) => quizSyncTime(item)));
+  const remoteMax = Math.max(0, ...remote.map((item) => quizSyncTime(item)));
+  const resolvedOrder = orderFrom ?? (remoteMax >= localMax ? 'remote' : 'local');
+  const orderSource = resolvedOrder === 'remote' ? remote : local;
+  const ordered: QuizItem[] = [];
+  const seen = new Set<number>();
+  for (const item of orderSource) {
+    const merged = map.get(item.id);
+    if (!merged || seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  for (const merged of map.values()) {
+    if (seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  return ordered;
 }
 
 function filterResurrectedTrash<T extends { id: string | number; trashed?: boolean; updatedAt?: string; createdAt?: string; savedAt?: string }>(merged: T[], local: T[]): T[] {
@@ -338,7 +362,12 @@ function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: Permanen
   if (!!local.trashed !== !!remote.trashed) return remote.trashed ? remote : local;
   const remoteNewer = entitySyncTime(remote) >= entitySyncTime(local);
   const base = remoteNewer ? remote : local;
-  let items = mergeQuizzesForSync(local.items ?? [], remote.items ?? [], tombstones);
+  let items = mergeQuizzesForSync(
+    local.items ?? [],
+    remote.items ?? [],
+    tombstones,
+    remoteNewer ? 'remote' : 'local',
+  );
   // When the remote set is the newer authority, drop local-only live items that
   // are older than the remote set — those were deleted (hard-removed) on another
   // device. Without this, union-merge resurrects every deleted question.
@@ -391,7 +420,24 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: P
     const existing = map.get(set.id);
     map.set(set.id, existing ? pickBetterQuizSet(existing, set, tombstones) : set);
   }
-  return stripPermDeletedQuizSets([...map.values()], tombstones);
+  // Prefer remote Manual set-list order when remote collection is at least as new.
+  const localMax = Math.max(0, ...local.map((set) => entitySyncTime(set)));
+  const remoteMax = Math.max(0, ...remote.map((set) => entitySyncTime(set)));
+  const orderSource = remoteMax >= localMax ? remote : local;
+  const ordered: QuizSet[] = [];
+  const seen = new Set<string>();
+  for (const set of orderSource) {
+    const merged = map.get(set.id);
+    if (!merged || seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  for (const merged of map.values()) {
+    if (seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  return stripPermDeletedQuizSets(ordered, tombstones);
 }
 
 function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
@@ -408,7 +454,23 @@ function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[], tombston
     const existing = map.get(folder.id);
     map.set(folder.id, existing ? pickBetterQuizFolder(existing, folder) : folder);
   }
-  return [...map.values()];
+  const localMax = Math.max(0, ...local.map((folder) => entitySyncTime(folder)));
+  const remoteMax = Math.max(0, ...remote.map((folder) => entitySyncTime(folder)));
+  const orderSource = remoteMax >= localMax ? remote : local;
+  const ordered: QuizFolder[] = [];
+  const seen = new Set<string>();
+  for (const folder of orderSource) {
+    const merged = map.get(folder.id);
+    if (!merged || seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  for (const merged of map.values()) {
+    if (seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  return ordered;
 }
 
 export interface RecoverableCloudSummary {
@@ -3522,9 +3584,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const to = next.findIndex((s) => s.id === targetId);
       if (from < 0 || to < 0 || from === to) return prev;
       if (next[from].system || next[to].system) return prev;
+      const stamp = nowStr();
       const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      persistSets(next);
+      next.splice(to, 0, { ...item, updatedAt: stamp });
+      persistSets(next, true, true);
+      scheduleInstantDataCloudSave({ quizSets: next });
       return next;
     });
   };
@@ -3599,10 +3663,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const from = normalFolders.findIndex((f) => f.id === dragId);
       const to = normalFolders.findIndex((f) => f.id === targetId);
       if (from < 0 || to < 0) return prev;
+      const stamp = nowStr();
       const [item] = normalFolders.splice(from, 1);
-      normalFolders.splice(to, 0, item);
+      normalFolders.splice(to, 0, { ...item, updatedAt: stamp });
       const next = [...systemFolders, ...normalFolders];
-      persistFolders(next);
+      persistFolders(next, true);
+      scheduleInstantDataCloudSave({ quizFolders: next });
       return next;
     });
   };
@@ -4242,6 +4308,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const moveItemInSet = (setId: string, itemId: number, direction: 'up' | 'down') => {
     setQuizSets((prev) => {
       let changed = false;
+      const stamp = nowStr();
       const next = prev.map((s) => {
         if (s.id !== setId) return s;
         const items = [...s.items];
@@ -4251,10 +4318,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (swapIdx < 0 || swapIdx >= items.length) return s;
         [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
         changed = true;
-        return { ...s, items };
+        return { ...s, items, updatedAt: stamp };
       });
       if (!changed) return prev;
-      persistSets(next);
+      persistSets(next, true, true);
+      scheduleInstantDataCloudSave({ quizSets: next });
       return next;
     });
   };
@@ -4266,8 +4334,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (idx < 0) return prev;
       const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
       if (swapIdx < 0 || swapIdx >= next.length) return prev;
+      const stamp = nowStr();
       [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
-      persist({ quizzes: next });
+      next[idx] = { ...next[idx], updatedAt: stamp };
+      next[swapIdx] = { ...next[swapIdx], updatedAt: stamp };
+      persist({ quizzes: next }, true);
+      scheduleInstantDataCloudSave({ quizzes: next });
       return next;
     });
   };
@@ -4275,6 +4347,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const reorderItemInSet = (setId: string, dragId: number, targetId: number) => {
     setQuizSets((prev) => {
       let changed = false;
+      const stamp = nowStr();
       const next = prev.map((s) => {
         if (s.id !== setId) return s;
         const items = [...s.items];
@@ -4284,10 +4357,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const [item] = items.splice(from, 1);
         items.splice(to, 0, item);
         changed = true;
-        return { ...s, items };
+        return { ...s, items, updatedAt: stamp };
       });
       if (!changed) return prev;
-      persistSets(next);
+      persistSets(next, true, true);
+      scheduleInstantDataCloudSave({ quizSets: next });
       return next;
     });
   };
@@ -4298,9 +4372,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const from = next.findIndex((q) => q.id === dragId);
       const to = next.findIndex((q) => q.id === targetId);
       if (from < 0 || to < 0 || from === to) return prev;
+      const stamp = nowStr();
       const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      persist({ quizzes: next });
+      next.splice(to, 0, { ...item, updatedAt: stamp });
+      persist({ quizzes: next }, true);
+      scheduleInstantDataCloudSave({ quizzes: next });
       return next;
     });
   };
@@ -4314,11 +4390,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const setItemsOrderInSet = (setId: string, itemIds: number[]) => {
     setQuizSets((prev) => {
+      const stamp = nowStr();
+      let changed = false;
       const next = prev.map((s) => {
         if (s.id !== setId) return s;
-        return { ...s, items: orderItemsByIds(s.items, itemIds) };
+        const items = orderItemsByIds(s.items, itemIds);
+        if (items.map((i) => i.id).join() === s.items.map((i) => i.id).join()) return s;
+        changed = true;
+        return { ...s, items, updatedAt: stamp };
       });
-      persistSets(next);
+      if (!changed) return prev;
+      persistSets(next, true, true);
+      scheduleInstantDataCloudSave({ quizSets: next });
       return next;
     });
   };
@@ -4326,8 +4409,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const setQuizzesOrder = (itemIds: number[]) => {
     setQuizzes((prev) => {
       const next = orderItemsByIds(prev, itemIds);
-      persist({ quizzes: next });
-      return next;
+      if (next.map((q) => q.id).join() === prev.map((q) => q.id).join()) return prev;
+      const stamp = nowStr();
+      // Stamp the head so mergeQuizzesForSync treats this device as order authority.
+      const stamped = next.length ? [{ ...next[0], updatedAt: stamp }, ...next.slice(1)] : next;
+      persist({ quizzes: stamped }, true);
+      scheduleInstantDataCloudSave({ quizzes: stamped });
+      return stamped;
     });
   };
 
