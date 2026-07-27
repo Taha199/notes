@@ -8,6 +8,16 @@ import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
+import {
+  applyDurableQuizItems,
+  fetchNotesByIdCloud,
+  fetchQuizItemsByIdCloud,
+  getAllNotesLocal,
+  getAllQuizItemsLocal,
+  mergeByIdNewer,
+  persistNoteDurable,
+  persistQuizItemDurable,
+} from '../lib/itemsStore';
 import { onEditorImageSwap, pendingEditorUploads, uploadEditorImage } from '../lib/imageUpload';
 import {
   applyRecentEditsToData,
@@ -1383,6 +1393,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setQuizSets(local.sets);
       return edits;
     });
+
+    // Radical durability: IndexedDB + notesById are the source of truth for
+    // recently-saved items. Fold them in before first paint settles / cloud merge.
+    const durableReady = (async () => {
+      const [idbNotes, idbQuizzes] = await Promise.all([getAllNotesLocal(), getAllQuizItemsLocal()]);
+      if (cancelled) return;
+      if (idbNotes.length) {
+        local = { ...local, notes: mergeByIdNewer(local.notes, idbNotes) };
+        notesRef.current = local.notes;
+        setNotes(local.notes);
+      }
+      if (idbQuizzes.length) {
+        const applied = applyDurableQuizItems(local.quizzes, local.sets, idbQuizzes);
+        local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
+        quizzesRef.current = local.quizzes;
+        quizSetsRef.current = local.sets;
+        setQuizzes(local.quizzes);
+        setQuizSets(local.sets);
+      }
+    })();
     const storedCloudSyncAt = Number(localStorage.getItem(CLOUD_SYNCED_AT_KEY));
     if (storedCloudSyncAt > 0) setCloudSyncedAt(storedCloudSyncAt);
 
@@ -1469,9 +1499,32 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        // Ensure journaled image notes are in live refs before merging cloud.
-        await journalReady;
+        // Ensure journaled + IndexedDB notes are in live refs before merging cloud.
+        await Promise.all([journalReady, durableReady]);
         if (cancelled) return;
+
+        // Single-item cloud mirror — survives even when the giant notes[] write
+        // was cancelled mid-flight by a refresh.
+        const [cloudNotesById, cloudQuizItemsById] = await Promise.all([
+          fetchNotesByIdCloud(user.uid),
+          fetchQuizItemsByIdCloud(user.uid),
+        ]);
+        if (cancelled) return;
+        if (cloudNotesById.length) {
+          const mergedNotes = mergeByIdNewer(notesRef.current, cloudNotesById);
+          notesRef.current = mergedNotes;
+          setNotes(mergedNotes);
+          local = { ...local, notes: mergedNotes };
+        }
+        if (cloudQuizItemsById.length) {
+          const applied = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, cloudQuizItemsById);
+          quizzesRef.current = applied.quizzes;
+          quizSetsRef.current = applied.sets;
+          setQuizzes(applied.quizzes);
+          setQuizSets(applied.sets);
+          local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
+        }
+
         const r = await rtdbFetch(`/users/${user.uid}`);
         if (!r.ok) throw new Error('cloud-fetch-failed');
         cloudLoadSucceededRef.current = true;
@@ -1559,10 +1612,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           if (quizzes.length > quizzesBefore) quizzesRepair = true;
         }
 
+        // Re-apply durable single-item mirrors AFTER the giant-array merge so a
+        // stale/incomplete notes[] can never wipe a note that notesById / IndexedDB
+        // already holds (the exact failure mode for image notes on refresh).
+        const idbNotesAgain = await getAllNotesLocal();
+        const durableNotes = mergeByIdNewer(cloudNotesById, idbNotesAgain);
+        if (durableNotes.length) {
+          const before = notes.length;
+          notes = mergeByIdNewer(notes, durableNotes);
+          if (notes.length > before) notesRepair = true;
+        }
+        {
+          const idbQuizzesAgain = await getAllQuizItemsLocal();
+          const appliedQ = applyDurableQuizItems(quizzes, [], [...cloudQuizItemsById, ...idbQuizzesAgain]);
+          quizzes = appliedQ.quizzes;
+        }
+
         setNotes(notes);
+        notesRef.current = notes;
         safeSetItem('malacadhati', JSON.stringify(notes));
 
         setQuizzes(quizzes);
+        quizzesRef.current = quizzes;
         safeSetItem('malacadhati_quiz', JSON.stringify(quizzes));
 
         setChats(chats);
@@ -1641,11 +1712,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
 
         const normalizedFolders = finalizeQuizFolders(rawFolders, rawSets);
-        const normalizedSets = initializeQuizColors(
+        let normalizedSets = initializeQuizColors(
           rawSets,
           normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
         );
+        {
+          const idbQuizzesFinal = await getAllQuizItemsLocal();
+          const applied = applyDurableQuizItems(quizzes, normalizedSets, [...cloudQuizItemsById, ...idbQuizzesFinal]);
+          quizzes = applied.quizzes;
+          normalizedSets = applied.sets;
+          quizzesRef.current = quizzes;
+          setQuizzes(quizzes);
+        }
         setQuizSets(normalizedSets);
+        quizSetsRef.current = normalizedSets;
         safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
         setQuizFolders(normalizedFolders);
         safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
@@ -3041,6 +3121,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       savedAt: new Date().toISOString(),
     };
     recordRecentEdit({ kind: 'note', at: Date.now(), note: newNote });
+    // Radical path: one note → IndexedDB + notesById. This is what survives
+    // refresh; the big-array sync below is only for compatibility.
+    savesInFlight.current += 1;
+    setCloudStatus('saving');
+    void persistNoteDurable(userRef.current?.uid, newNote).then((ok) => {
+      savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+      if (ok) {
+        saveFailedRef.current = false;
+        if (savesInFlight.current === 0) setCloudStatus('saved');
+      } else {
+        saveFailedRef.current = true;
+        setCloudStatus('error');
+      }
+    });
     setNotes((prevNotes) => {
       const nextNotes = [newNote, ...prevNotes];
       notesRef.current = nextNotes;
@@ -3070,22 +3164,29 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       || 'text' in patch
       || 'savedAt' in patch;
     const base = notesRef.current.find((n) => n.id === id);
-    if (base) {
-      const merged = { ...base, ...patch };
-      recordRecentEdit({
-        kind: 'note',
-        at: Date.now(),
-        note: instant && !patch.savedAt ? { ...merged, savedAt: new Date().toISOString() } : merged,
+    if (!base) return;
+    const merged: Note = instant && !patch.savedAt
+      ? { ...base, ...patch, savedAt: new Date().toISOString() }
+      : { ...base, ...patch };
+    recordRecentEdit({ kind: 'note', at: Date.now(), note: merged });
+    if (instant) {
+      savesInFlight.current += 1;
+      setCloudStatus('saving');
+      void persistNoteDurable(userRef.current?.uid, merged).then((ok) => {
+        savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+        if (ok) {
+          saveFailedRef.current = false;
+          const syncedAt = Date.now();
+          lastLocalSaveAt.current = syncedAt;
+          setCloudSyncedAt(syncedAt);
+          if (savesInFlight.current === 0) setCloudStatus('saved');
+        } else {
+          saveFailedRef.current = true;
+          setCloudStatus('error');
+        }
       });
     }
-    mutateNotes((prev) => prev.map((n) => {
-      if (n.id !== id) return n;
-      const next = { ...n, ...patch };
-      if (instant && !patch.savedAt) {
-        return { ...next, savedAt: new Date().toISOString() };
-      }
-      return next;
-    }), instant);
+    mutateNotes((prev) => prev.map((n) => (n.id === id ? merged : n)), instant);
   };
 
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
@@ -3093,6 +3194,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const newItem: QuizItem = { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now };
     recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: newItem });
+    void persistQuizItemDurable(userRef.current?.uid, newItem, null);
     const next = [...quizzesRef.current, newItem];
     quizzesRef.current = next;
     setQuizzes(next);
@@ -3210,8 +3312,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
     const existing = quizzesRef.current.find((q) => q.id === id);
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
-    recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: { ...existing, ...patch, updatedAt: new Date().toISOString() } });
-    const next = quizzesRef.current.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
+    const updated: QuizItem = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: updated });
+    void persistQuizItemDurable(userRef.current?.uid, updated, null);
+    const next = quizzesRef.current.map((q) => (q.id === id ? updated : q));
     quizzesRef.current = next;
     setQuizzes(next);
     safeSetItem('malacadhati_quiz', JSON.stringify(next));
@@ -3772,6 +3876,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const newId = Date.now();
     const newItem: QuizItem = { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now };
     recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: newItem });
+    void persistQuizItemDurable(userRef.current?.uid, newItem, setId);
     let found = false;
     const next = quizSetsRef.current.map((s) => {
       if (s.id !== setId) return s;
@@ -3806,10 +3911,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const set = quizSetsRef.current.find((s) => s.id === setId);
     const existing = set?.items.find((i) => i.id === itemId);
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
-    recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: { ...existing, ...patch, updatedAt: new Date().toISOString() } });
+    const updated: QuizItem = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: updated });
+    void persistQuizItemDurable(userRef.current?.uid, updated, setId);
     const next = quizSetsRef.current.map((s) => (
       s.id === setId
-        ? { ...s, items: s.items.map((i) => (i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i)) }
+        ? { ...s, items: s.items.map((i) => (i.id === itemId ? updated : i)) }
         : s
     ));
     quizSetsRef.current = next;
