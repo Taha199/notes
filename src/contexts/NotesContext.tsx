@@ -1459,24 +1459,36 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         permDeletedRef.current = mergePermDeleted(permDeletedRef.current, cloud);
         const tombstones = permDeletedRef.current;
 
+        // This whole initial-load chain makes several sequential network round
+        // trips (main fetch, folders, sets, history snapshots) and can take many
+        // seconds on a slow connection. `local` was captured once at effect start;
+        // if the user adds/edits a note or quiz question while this chain is still
+        // in flight, merging against that stale snapshot here would silently wipe
+        // the fresh edit the moment this chain finally resolves and calls setState.
+        // Re-read the live refs right before each merge so any concurrent edit is
+        // folded in instead of overwritten.
+        const liveNotes = notesRef.current;
+        const liveQuizzes = quizzesRef.current;
+        const liveChats = chatsRef.current;
+
         const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
-        let notes = filterResurrectedTrash(mergeNotesForSync(local.notes, cloudNotes, tombstones), local.notes);
+        let notes = filterResurrectedTrash(mergeNotesForSync(liveNotes, cloudNotes, tombstones), liveNotes);
         let notesRepair = notes.length > cloudNotes.length
-          || (local.notes.length > 0 && cloudNotes.length === 0)
-          || (local.notes.length > 0 && notes.length > cloudNotes.length);
+          || (liveNotes.length > 0 && cloudNotes.length === 0)
+          || (liveNotes.length > 0 && notes.length > cloudNotes.length);
 
         const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
-        let quizzes = filterResurrectedTrash(mergeQuizzesForSync(local.quizzes, cloudQuizzes, tombstones), local.quizzes);
+        let quizzes = filterResurrectedTrash(mergeQuizzesForSync(liveQuizzes, cloudQuizzes, tombstones), liveQuizzes);
         let quizzesRepair = quizzes.length > cloudQuizzes.length
-          || (local.quizzes.length > 0 && cloudQuizzes.length === 0);
+          || (liveQuizzes.length > 0 && cloudQuizzes.length === 0);
 
         const cloudChatsRaw = cloud ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>) : [];
-        let chats = mergeChatsForSync(local.chats, cloudChatsRaw).map((c) => ({
+        let chats = mergeChatsForSync(liveChats, cloudChatsRaw).map((c) => ({
           ...c,
           messages: c.messages ?? [],
         }));
         let chatsRepair = chats.length > cloudChatsRaw.length
-          || (local.chats.length > 0 && cloudChatsRaw.length === 0);
+          || (liveChats.length > 0 && cloudChatsRaw.length === 0);
 
         let historyRepair = false;
 
@@ -1545,21 +1557,30 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const dedicatedFoldersEmpty = dedicatedFolders.length === 0;
         const dedicatedSetsEmpty = dedicatedSets.length === 0;
 
+        // Re-read live refs again here (not the stale `local` from effect start —
+        // see comment above): two more awaited network calls (folders + sets)
+        // happened since the last snapshot, widening the window for a concurrent
+        // quiz save to have landed. Merging against a live ref instead of the
+        // original snapshot is what stops a just-saved question from being wiped
+        // out when this load finally resolves and calls setQuizSets/setQuizFolders.
+        const liveFolders = quizFoldersRef.current;
+        const liveSets = quizSetsRef.current;
+
         let rawFolders = filterResurrectedTrash(
-          mergeFoldersForSync(local.folders, mergeById(cloudFolders, dedicatedFolders), tombstones),
-          local.folders,
+          mergeFoldersForSync(liveFolders, mergeById(cloudFolders, dedicatedFolders), tombstones),
+          liveFolders,
         );
         let rawSets: QuizSet[] = filterResurrectedTrash(
-          mergeQuizSetsForSync(local.sets, mergeQuizSetsForSync(cloudSets, dedicatedSets, tombstones), tombstones),
-          local.sets,
+          mergeQuizSetsForSync(liveSets, mergeQuizSetsForSync(cloudSets, dedicatedSets, tombstones), tombstones),
+          liveSets,
         );
         let repairQuizStructure = false;
-        if (countUserQuizFolders(rawFolders) === 0 && local.folders.some((folder) => !folder.system)) {
-          rawFolders = mergeById(rawFolders, local.folders);
+        if (countUserQuizFolders(rawFolders) === 0 && liveFolders.some((folder) => !folder.system)) {
+          rawFolders = mergeById(rawFolders, liveFolders);
           repairQuizStructure = true;
         }
-        if (countUserQuizSets(rawSets) === 0 && local.sets.some((set) => !set.system)) {
-          rawSets = mergeById(rawSets, local.sets);
+        if (countUserQuizSets(rawSets) === 0 && liveSets.some((set) => !set.system)) {
+          rawSets = mergeById(rawSets, liveSets);
           repairQuizStructure = true;
         }
         if (quizzes.length === 0) {
@@ -1597,8 +1618,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
 
         const needsRepair = notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
-          || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)
-          || (cloudFoldersEmpty && dedicatedFoldersEmpty && local.folders.length > 0);
+          || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0)
+          || (cloudFoldersEmpty && dedicatedFoldersEmpty && liveFolders.length > 0);
         recoveryLog('load complete', {
           notes: notes.length,
           quizzes: quizzes.length,
@@ -1624,14 +1645,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify(repairBody),
             headers: { 'Content-Type': 'application/json' },
           });
-          if (repairQuizStructure || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)) {
+          if (repairQuizStructure || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0)) {
             void rtdbFetch(`/users/${user.uid}/quizSets`, {
               method: 'PUT',
               body: JSON.stringify(normalizedSets),
               headers: { 'Content-Type': 'application/json' },
             });
           }
-          if (repairQuizStructure || (cloudFoldersEmpty && dedicatedFoldersEmpty && local.folders.length > 0)) {
+          if (repairQuizStructure || (cloudFoldersEmpty && dedicatedFoldersEmpty && liveFolders.length > 0)) {
             void rtdbFetch(`/users/${user.uid}/quizFolders`, {
               method: 'PUT',
               body: JSON.stringify(normalizedFolders),
