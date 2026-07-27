@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import {
   BULLET_PREFIX_RE,
+  blockHasLeftoverIndent,
   collectListItemsBetween,
   convertEmptyListItemToParagraph,
   convertListItemToParagraph,
@@ -10,8 +11,10 @@ import {
   convertSymbolPrefixedRunsToLists,
   extractInnerBlockFromListToRoot,
   extractListItemToRootParagraph,
+  getStuckInnerBlockInListItem,
   inferPlainListType,
   plainTextToMixedHtml,
+  isCaretAtStartOfBlock,
   isCaretInBulletPrefixZone,
   wrapLooseInlineChildren,
   createEmptyParagraph,
@@ -135,6 +138,30 @@ describe('listEditorBehavior', () => {
     expect(div?.parentElement).toBe(ed);
     expect(ed.textContent).toContain('Kortiko');
     expect(ed.querySelectorAll('li').length).toBe(2);
+    ed.remove();
+  });
+
+  it('getStuckInnerBlockInListItem finds caret in indented body line without own bullet', () => {
+    const ed = editorHtml(
+      '<div><b>Behandling</b></div>'
+      + '<ul><li>Antivirala</li><li>Kortiko<div>Vad är skillnad</div></li></ul>',
+    );
+    const li = ed.querySelectorAll('li')[1] as HTMLLIElement;
+    const stuck = li.querySelector('div') as HTMLElement;
+    const text = stuck.firstChild as Text;
+    const range = caretIn(text, 0);
+    expect(isCaretAtStartOfLi(li, range)).toBe(false);
+    expect(getStuckInnerBlockInListItem(li, range, ed)).toBe(stuck);
+    expect(isCaretAtStartOfBlock(stuck, range)).toBe(true);
+    ed.remove();
+  });
+
+  it('blockHasLeftoverIndent detects margin/padding left over after list exit', () => {
+    const ed = editorHtml('<div><b>Behandling</b></div><div>Vad</div>');
+    const block = ed.children[1] as HTMLElement;
+    expect(blockHasLeftoverIndent(block, ed)).toBe(false);
+    block.style.marginLeft = '40px';
+    expect(blockHasLeftoverIndent(block, ed)).toBe(true);
     ed.remove();
   });
 

@@ -840,6 +840,50 @@ export function isCaretAtStartOfBlock(block: HTMLElement, range: Range): boolean
   return probe.toString().replace(/\u200B/g, '').length === 0;
 }
 
+/**
+ * Innermost DIV/P under `li` that contains the caret — e.g. pasted
+ * `<li>Antivirala<div>Vad är skillnad</div></li>` where the inner line has
+ * no bullet of its own but still sits at list-body indent.
+ */
+export function getStuckInnerBlockInListItem(
+  li: HTMLLIElement,
+  range: Range,
+  root?: HTMLElement | null,
+): HTMLElement | null {
+  if (!li.contains(range.startContainer)) return null;
+  let el: Node | null = range.startContainer;
+  if (el.nodeType === Node.TEXT_NODE) el = el.parentElement;
+  let inner: HTMLElement | null = null;
+  while (el instanceof HTMLElement && el !== li) {
+    if ((el.tagName === 'DIV' || el.tagName === 'P') && el !== root) inner = el;
+    el = el.parentElement;
+  }
+  return inner;
+}
+
+/** True when a non-list block still has leftover margin/padding/MSO indent. */
+export function blockHasLeftoverIndent(block: HTMLElement, root?: HTMLElement | null): boolean {
+  if (LIST_EXIT_INDENT_PROPS.some((prop) => block.style.getPropertyValue(prop))) return true;
+  if ([...block.classList].some((cls) => /mso/i.test(cls))) return true;
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  const first = walker.nextNode();
+  if (first?.nodeType === Node.TEXT_NODE) {
+    const text = first.textContent ?? '';
+    if (/^[\s\u00a0\u2002\u2003]+/.test(text)) return true;
+  }
+  const parent = block.parentElement;
+  if (
+    parent
+    && parent !== root
+    && !LIST_TAG_NAMES.has(parent.tagName)
+    && parent.tagName !== 'LI'
+  ) {
+    if (LIST_EXIT_INDENT_PROPS.some((prop) => parent.style.getPropertyValue(prop))) return true;
+    if ([...parent.classList].some((cls) => /mso/i.test(cls))) return true;
+  }
+  return false;
+}
+
 export function isEmptyTextLine(el: HTMLElement): boolean {
   const text = el.textContent?.replace(/\u200B/g, '').trim() ?? '';
   return !text && !el.querySelector('img, table, iframe, .note-table-wrap, .note-img-frame, .note-yt-frame');

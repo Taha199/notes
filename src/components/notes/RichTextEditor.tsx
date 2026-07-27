@@ -23,6 +23,7 @@ import {
 } from '../../lib/tableCellFormat';
 import {
   BULLET_PREFIX_RE,
+  blockHasLeftoverIndent,
   clipboardToNormalizedHtml,
   convertListItemToParagraph,
   convertPseudoBulletBlocksToNativeLists,
@@ -30,6 +31,7 @@ import {
   extractInnerBlockFromListToRoot,
   extractListItemToRootParagraph,
   forceParagraphToContentMargin,
+  getStuckInnerBlockInListItem,
   insertParagraphAboveList,
   isCaretInBulletPrefixZone,
   mergeAdjacentLists,
@@ -1968,13 +1970,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const sel = window.getSelection();
     const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
     if (range && li.contains(range.startContainer)) {
-      let el: Node | null = range.startContainer;
-      if (el.nodeType === Node.TEXT_NODE) el = el.parentElement;
-      let inner: HTMLElement | null = null;
-      while (el instanceof HTMLElement && el !== li) {
-        if ((el.tagName === 'DIV' || el.tagName === 'P') && el !== ed) inner = el;
-        el = el.parentElement;
-      }
+      const inner = getStuckInnerBlockInListItem(li, range, ed);
       if (inner && inner !== li) {
         const div = extractInnerBlockFromListToRoot(inner, ed);
         if (div) {
@@ -2239,6 +2235,47 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   /** Shift+Tab / Remove list: always fully exit to heading margin (not one nest level). */
   const outdentOrExitListItem = (li: HTMLLIElement, ed: HTMLElement): boolean => {
     return !!exitListItemToMargin(li, ed, true);
+  };
+
+  /**
+   * Word/Docs-style Backspace at start of a list line:
+   * nested → outdent one level; top-level / stuck inner block → full exit to heading margin.
+   */
+  const backspaceOutdentOrExitListItem = (
+    li: HTMLLIElement,
+    ed: HTMLElement,
+    range: Range,
+  ): boolean => {
+    if (isLiEffectivelyEmpty(li)) {
+      backspaceEmptyListItem(li, ed);
+      return true;
+    }
+
+    if (isCaretAtStartOfLi(li, range)) {
+      pendingListMarginExitRef.current = null;
+      if (isNestedListItem(li)) {
+        if (!returnToParentListItem(li)) exitListItemToMargin(li, ed, true);
+      } else {
+        exitListItemToMargin(li, ed, true);
+      }
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return true;
+    }
+
+    // Stuck indented body line inside an li (no bullet of its own).
+    const stuckInner = getStuckInnerBlockInListItem(li, range, ed);
+    if (stuckInner && isCaretAtStartOfBlock(stuckInner, range)) {
+      pendingListMarginExitRef.current = null;
+      exitListItemToMargin(li, ed, true);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return true;
+    }
+
+    return false;
   };
 
   const indentListItem = (li: HTMLLIElement): boolean => {
@@ -4033,8 +4070,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         emitHtml();
         return handled();
       }
-      if (ensureLeftMarginAfterList(block)) {
+      // Leftover paste/list indent (or after-list margin): clear to heading margin.
+      if (blockHasLeftoverIndent(block, ed) || ensureLeftMarginAfterList(block)) {
         e.preventDefault();
+        stripNewParagraphIndent(block);
+        liftBlockToEditorMargin(block, ed);
+        stripNewParagraphIndent(block);
         placeCaretInBlock(block, true);
         saveSel();
         readCommandState();
@@ -4056,25 +4097,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         return handled();
       }
 
-      if (isLiEffectivelyEmpty(li)) {
+      if (backspaceOutdentOrExitListItem(li, ed, range)) {
         e.preventDefault();
-        backspaceEmptyListItem(li, ed);
-        return handled();
-      }
-
-      const atStart = isCaretAtStartOfLi(li, range);
-      if (atStart) {
-        e.preventDefault();
-        pendingListMarginExitRef.current = null;
-        if (isNestedListItem(li)) {
-          returnToParentListItem(li);
-        } else {
-          // Remove bullet from current item only; keep text; leave sibling items in the list.
-          exitListItem(li, ed, true);
-        }
-        saveSel();
-        readCommandState();
-        emitHtml();
         return handled();
       }
       return false;
