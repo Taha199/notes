@@ -698,7 +698,12 @@ function countUserQuizSets(sets: QuizSet[]) {
 }
 
 function countQuizItemsInSets(sets: QuizSet[]): number {
-  return sets.reduce((sum, set) => sum + (Array.isArray(set.items) ? set.items.length : firebaseToArray(set.items).length), 0);
+  if (!Array.isArray(sets)) return 0;
+  return sets.reduce((sum, set) => {
+    if (!set) return sum;
+    const items = Array.isArray(set.items) ? set.items : firebaseToArray(set.items);
+    return sum + items.length;
+  }, 0);
 }
 
 function quizItemIdsInSets(sets: QuizSet[]): Set<number> {
@@ -1958,9 +1963,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [user, loaded]);
 
   const writeLocalCache = () => {
-    localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
-    localStorage.setItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
+    try {
+      localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
+      localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
+      localStorage.setItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
+    } catch (err) {
+      recoveryLog('localStorage write failed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const buildDraftCloudPayload = (dList: Draft[]) => {
@@ -2294,6 +2305,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const prevSets = quizSetsRef.current;
         quizSetsRef.current = normalizedSets;
         localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+        lastKnownCloudSetItemCountRef.current = Math.max(
+          lastKnownCloudSetItemCountRef.current,
+          countQuizItemsInSets(normalizedSets),
+        );
         if (!quizSetsEqualForUI(normalizedSets, prevSets)) setQuizSets(normalizedSets);
       }
       if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
@@ -2378,13 +2393,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  /** Firebase RTDB `update()` rejects `undefined` values — strip them (JSON.stringify already does for REST). */
+  /** Strip `undefined` for Firebase RTDB without JSON-cloning huge note HTML/base64. */
   const sanitizeForRtdb = <T,>(value: T): T => {
-    try {
-      return JSON.parse(JSON.stringify(value)) as T;
-    } catch {
-      return value;
+    if (value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+      return value.map((item) => sanitizeForRtdb(item)) as T;
     }
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (nested === undefined) continue;
+      out[key] = sanitizeForRtdb(nested);
+    }
+    return out as T;
   };
 
   const flushPendingCloudSavesAfterRemote = () => {
@@ -2403,7 +2423,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     if (pendingCloudSaveAfterRemoteRef.current) {
       pendingCloudSaveAfterRemoteRef.current = false;
-      runCloudSave(true);
+      try {
+        runCloudSave(true);
+      } catch (err) {
+        recoveryLog('flush runCloudSave failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   };
 
@@ -2452,10 +2478,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       );
     }
     const syncedAt = Date.now();
-    const body = sanitizeForRtdb({
-      ...safe,
-      cloudSyncAt: syncedAt,
-    });
+    // Never JSON-clone notes (base64 images) — only strip undefined on quiz payloads.
+    const body: Record<string, unknown> = { cloudSyncAt: syncedAt };
+    if (safe.notes) body.notes = safe.notes;
+    if (safe.quizzes) body.quizzes = sanitizeForRtdb(safe.quizzes);
+    if (safe.quizSets) body.quizSets = sanitizeForRtdb(safe.quizSets);
+    if (safe.quizFolders) body.quizFolders = safe.quizFolders;
     try {
       await getRtdbAuthToken(true);
       try {
@@ -3082,6 +3110,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const mutateNotes = (fn: (prev: Note[]) => Note[], instantCloud = false) => {
     setNotes((prev) => {
       const next = fn(prev);
+      notesRef.current = next;
+      try {
+        localStorage.setItem('malacadhati', JSON.stringify(next));
+      } catch (err) {
+        recoveryLog('notes localStorage write failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
       persist({ notes: next }, instantCloud);
       if (instantCloud) scheduleInstantDataCloudSave({ notes: next });
       return next;
@@ -3147,28 +3183,38 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       date: nowStr(),
       savedAt: new Date().toISOString(),
     };
-    setNotes((prevNotes) => {
-      const nextNotes = [newNote, ...prevNotes];
-      setDrafts((prevDrafts) => {
-        pendingLocalDraftIdsRef.current.delete(id);
-        pendingDeletedDraftIdsRef.current.add(id);
-        writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
-        const nextDrafts = prevDrafts.filter((d) => d.id !== id);
-        draftsRef.current = nextDrafts;
-        localStorage.setItem('malacadhati_drafts', JSON.stringify(nextDrafts));
-        persist({ notes: nextNotes, drafts: nextDrafts }, true);
-        void runDraftDeleteCloudSave(id);
-        return nextDrafts;
+    // Avoid nested setState (can crash React 19 render). Update refs, then set state.
+    const nextNotes = [newNote, ...notesRef.current];
+    pendingLocalDraftIdsRef.current.delete(id);
+    pendingDeletedDraftIdsRef.current.add(id);
+    writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
+    const nextDrafts = draftsRef.current.filter((d) => d.id !== id);
+    notesRef.current = nextNotes;
+    draftsRef.current = nextDrafts;
+    try {
+      localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
+      localStorage.setItem('malacadhati_drafts', JSON.stringify(nextDrafts));
+    } catch (err) {
+      recoveryLog('submitDraft localStorage write failed', {
+        message: err instanceof Error ? err.message : String(err),
       });
-      return nextNotes;
-    });
+    }
+    setNotes(nextNotes);
+    setDrafts(nextDrafts);
+    persist({ notes: nextNotes, drafts: nextDrafts }, true);
+    scheduleInstantDataCloudSave({ notes: nextNotes });
+    void runDraftDeleteCloudSave(id);
   };
 
   const noteMetaChanged = (patch: Partial<Note>) =>
     'read' in patch || 'archived' in patch || 'fav' in patch || 'trashed' in patch;
 
+  const noteContentChanged = (patch: Partial<Note>) =>
+    'html' in patch || 'title' in patch || 'text' in patch || 'lastEdited' in patch || 'savedAt' in patch;
+
   const updateNote = (id: number, patch: Partial<Note>) => {
-    const instant = noteMetaChanged(patch);
+    // Content edits must hit cloud instantly — otherwise refresh / other devices lose them.
+    const instant = noteMetaChanged(patch) || noteContentChanged(patch);
     mutateNotes((prev) => prev.map((n) => {
       if (n.id !== id) return n;
       const next = { ...n, ...patch };
