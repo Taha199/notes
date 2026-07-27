@@ -667,27 +667,39 @@ export function QuizPage({
   const finalizedDraftIdsRef = useRef<Set<number>>(new Set());
 
   const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
-    setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
+    setOpenForms((prev) => {
+      const next = prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f));
+      openFormsRef.current = next;
+      return next;
+    });
   };
 
   const updateFormContent = (formId: string, patch: Pick<OpenQuestionForm, 'question'> | Pick<OpenQuestionForm, 'answer'> | Pick<OpenQuestionForm, 'question' | 'answer'>) => {
-    setOpenForms((prev) =>
-      prev.map((f) => {
+    setOpenForms((prev) => {
+      // If this form was already closed (Save), ignore late editor flushes.
+      if (!prev.some((f) => f.formId === formId)) return prev;
+      const next = prev.map((f) => {
         if (f.formId !== formId) return f;
-        const next = { ...f, ...patch };
-        if (f.itemId !== null) return next;
-        const complete = hasContent(next.question) && hasContent(next.answer);
-        if (!complete) return { ...next, saveStatus: 'empty' as const };
-        return next;
-      }),
-    );
+        const merged = { ...f, ...patch };
+        if (f.itemId !== null) return merged;
+        const complete = hasContent(merged.question) && hasContent(merged.answer);
+        if (!complete) return { ...merged, saveStatus: 'empty' as const };
+        return merged;
+      });
+      openFormsRef.current = next;
+      return next;
+    });
   };
 
   const closeForm = (formId: string) => {
     const timer = autoSaveTimers.current.get(formId);
     if (timer) clearTimeout(timer);
     autoSaveTimers.current.delete(formId);
-    setOpenForms((prev) => prev.filter((f) => f.formId !== formId));
+    setOpenForms((prev) => {
+      const next = prev.filter((f) => f.formId !== formId);
+      openFormsRef.current = next;
+      return next;
+    });
   };
 
   const persistForm = (formId: string, override?: SavePayload, finalize = false): number | null => {
@@ -726,6 +738,8 @@ export function QuizPage({
           explanation: patch.explanation,
         });
         if (id < 0) return null;
+        // Match Jul 13 behavior: mark form finalized, then caller closes it.
+        updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved', finalized: true });
         return id;
       }
       const id = addQuiz({
@@ -764,6 +778,8 @@ export function QuizPage({
     if (setId) updateItemInSet(setId, form.itemId, patch, true);
     else updateQuiz(form.itemId, patch, true);
     window.setTimeout(() => {
+      // Form may already be closed after Save — never resurrect it.
+      if (!openFormsRef.current.some((f) => f.formId === formId)) return;
       updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
     }, 350);
     return form.itemId;
@@ -839,16 +855,24 @@ export function QuizPage({
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
+    // Jul 13 pattern: persist while the form still exists in openFormsRef, then close.
     const savedId = flushForm(formId, override, true);
-    if (savedId === null || savedId < 0) {
+    if (savedId == null || savedId < 0) {
       show(t.quizSaveFailed);
       return;
     }
     finalizedDraftIdsRef.current.add(savedId);
-    closeForm(formId);
-    window.setTimeout(() => {
-      setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));
-    }, 0);
+
+    // Force-close immediately and sync the ref so delayed onChange/timers cannot resurrect it.
+    const timer = autoSaveTimers.current.get(formId);
+    if (timer) clearTimeout(timer);
+    autoSaveTimers.current.delete(formId);
+    setOpenForms((prev) => {
+      const next = prev.filter((f) => f.formId !== formId && f.itemId !== savedId);
+      openFormsRef.current = next;
+      return next;
+    });
+    show(t.noteSavedQuiz);
   };
 
   const handleCancelForm = (formId: string) => {
