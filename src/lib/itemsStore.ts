@@ -354,8 +354,8 @@ export async function fetchQuizItemsByIdCloud(uid: string): Promise<StoredQuizIt
 /**
  * Fold durable quiz items into quizzes / quizSets.
  * - Trashed durable items always win (instant cross-device delete).
- * - Live durable items only UPDATE existing rows, or ADD when strictly newer
- *   than the set's updatedAt — never resurrect an item a newer set omitted.
+ * - Live durable items update ANY set row with the same id when newer
+ *   (setId is a hint for adds only — live typing must still land).
  */
 export function applyDurableQuizItems(
   quizzes: QuizItem[],
@@ -378,7 +378,6 @@ export function applyDurableQuizItems(
         if (setId && set.id !== setId && !set.items.some((i) => i.id === bare.id)) return set;
         if (!set.items.some((i) => i.id === bare.id)) {
           if (setId && set.id === setId) {
-            // Re-attach as trash only — do not bump set membership stamp.
             return { ...set, items: [...set.items, bare] };
           }
           return set;
@@ -391,32 +390,48 @@ export function applyDurableQuizItems(
       continue;
     }
 
-    if (setId) {
-      nextSets = nextSets.map((set) => {
-        if (set.id !== setId) return set;
-        const existing = set.items.find((i) => i.id === bare.id);
-        if (existing) {
-          if (existing.trashed && syncTime(existing) > syncTime(bare)) return set;
-          if (syncTime(existing) > syncTime(bare)) return set;
-          return {
-            ...set,
-            items: set.items.map((i) => (i.id === bare.id ? bare : i)),
-          };
+    let matchedInSet = false;
+    nextSets = nextSets.map((set) => {
+      const existing = set.items.find((i) => i.id === bare.id);
+      if (existing) {
+        matchedInSet = true;
+        if (existing.trashed && syncTime(existing) > syncTime(bare)) return set;
+        if (syncTime(existing) > syncTime(bare)) return set;
+        // Prefer incoming when timestamps tie but content changed (live typing).
+        if (syncTime(existing) === syncTime(bare)
+          && existing.question === bare.question
+          && existing.answer === bare.answer
+          && existing.explanation === bare.explanation) {
+          return set;
         }
-        // Missing from set: only add if this durable write is STRICTLY newer
-        // than the set (equality used to re-append after emptyTrash).
+        return {
+          ...set,
+          items: set.items.map((i) => (i.id === bare.id ? bare : i)),
+        };
+      }
+      if (setId && set.id === setId) {
         const setAt = syncTime({ updatedAt: set.updatedAt, createdAt: set.createdAt });
         if (syncTime(bare) <= setAt) return set;
+        matchedInSet = true;
         return { ...set, items: [...set.items, bare] };
-      });
-    } else {
+      }
+      return set;
+    });
+
+    if (!matchedInSet) {
       const existing = nextQuizzes.find((q) => q.id === bare.id);
       if (existing) {
         if (existing.trashed && syncTime(existing) > syncTime(bare)) continue;
         if (syncTime(existing) > syncTime(bare)) continue;
         nextQuizzes = nextQuizzes.map((q) => (q.id === bare.id ? bare : q));
-      } else {
+      } else if (!setId) {
         nextQuizzes = [...nextQuizzes, bare];
+      }
+    } else {
+      // Keep top-level quizzes list in sync when the same id exists there.
+      const existing = nextQuizzes.find((q) => q.id === bare.id);
+      if (existing && syncTime(bare) >= syncTime(existing)) {
+        nextQuizzes = nextQuizzes.map((q) => (q.id === bare.id ? bare : q));
       }
     }
   }

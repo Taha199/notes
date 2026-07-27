@@ -3150,12 +3150,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Instant quiz item sync (add/edit/delete) — tiny per-item path, not the
     // multi-MB quizSets array. Child listeners keep live typing snappy; a full
     // onValue would re-download every question on each keystroke.
+    let quizItemApplyQueue: StoredQuizItem[] = [];
     const applyQuizItemsBatch = (durable: StoredQuizItem[]) => {
-      if (!loadedRef.current || isApplyingRemoteRef.current || !durable.length) return;
+      if (!loadedRef.current || !durable.length) return;
+      if (isApplyingRemoteRef.current) {
+        // Never drop live keystrokes because another merge is in flight.
+        quizItemApplyQueue.push(...durable);
+        return;
+      }
       const applied = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, durable);
       const quizzesChanged = JSON.stringify(applied.quizzes) !== JSON.stringify(quizzesRef.current);
       const setsChanged = JSON.stringify(applied.sets) !== JSON.stringify(quizSetsRef.current);
-      if (!quizzesChanged && !setsChanged) return;
+      if (!quizzesChanged && !setsChanged) {
+        if (quizItemApplyQueue.length) {
+          const more = quizItemApplyQueue;
+          quizItemApplyQueue = [];
+          queueMicrotask(() => applyQuizItemsBatch(more));
+        }
+        return;
+      }
       isApplyingRemoteRef.current = true;
       try {
         if (quizzesChanged) {
@@ -3172,6 +3185,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
       } finally {
         isApplyingRemoteRef.current = false;
+        if (quizItemApplyQueue.length) {
+          const more = quizItemApplyQueue;
+          quizItemApplyQueue = [];
+          queueMicrotask(() => applyQuizItemsBatch(more));
+        }
       }
     };
 
@@ -3200,7 +3218,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ? Number((raw as StoredQuizItem).id)
         : Number(snap.key);
       if (!Number.isFinite(id)) return;
-      // Treat hard removal as a trash tombstone so UI hides the question.
       queueQuizItemChild({
         id,
         noteId: 0,

@@ -665,9 +665,38 @@ export function QuizPage({
   const allQuizSetsRef = useRef(allQuizSets);
   allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const livePushTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
+  };
+
+  /** Push question/answer to quizItemsById within ~50ms so the other device
+   *  sees typing in the same card without waiting for Save. */
+  const scheduleLiveCloudPush = (formId: string) => {
+    const existing = livePushTimers.current.get(formId);
+    if (existing) clearTimeout(existing);
+    livePushTimers.current.set(
+      formId,
+      setTimeout(() => {
+        livePushTimers.current.delete(formId);
+        const form = openFormsRef.current.find((f) => f.formId === formId);
+        if (!form || form.itemId == null) return;
+        const patch = {
+          question: form.question,
+          answer: form.answer,
+          draft: form.finalized ? false : true,
+        };
+        const setId = selectedSetIdRef.current;
+        updateForm(formId, { saveStatus: 'syncing' });
+        if (setId) updateItemInSet(setId, form.itemId, patch, false);
+        else updateQuiz(form.itemId, patch, false);
+        window.setTimeout(() => {
+          const still = openFormsRef.current.find((f) => f.formId === formId);
+          if (still && still.saveStatus === 'syncing') updateForm(formId, { saveStatus: 'saved' });
+        }, 200);
+      }, 50),
+    );
   };
 
   const updateFormContent = (formId: string, patch: Pick<OpenQuestionForm, 'question'> | Pick<OpenQuestionForm, 'answer'> | Pick<OpenQuestionForm, 'question' | 'answer'>) => {
@@ -681,12 +710,24 @@ export function QuizPage({
         return next;
       }),
     );
+    // Live push on the same tick as typing — do not wait for the 120ms autosave effect.
+    const form = openFormsRef.current.find((f) => f.formId === formId);
+    if (form?.itemId != null) {
+      // Ref still has previous content until re-render; merge patch for the push timer.
+      openFormsRef.current = openFormsRef.current.map((f) => (
+        f.formId === formId ? { ...f, ...patch } : f
+      ));
+      scheduleLiveCloudPush(formId);
+    }
   };
 
   const closeForm = (formId: string) => {
     const timer = autoSaveTimers.current.get(formId);
     if (timer) clearTimeout(timer);
     autoSaveTimers.current.delete(formId);
+    const live = livePushTimers.current.get(formId);
+    if (live) clearTimeout(live);
+    livePushTimers.current.delete(formId);
     setOpenForms((prev) => prev.filter((f) => f.formId !== formId));
   };
 
@@ -1225,7 +1266,7 @@ export function QuizPage({
     const questionNumber = visualIndex + 1;
     return (
       <QuizItemRow
-        key={item.id}
+        key={`${item.id}-${item.updatedAt || ''}-${(item.question || '').length}-${(item.answer || '').length}`}
         item={item}
         onEdit={startEdit}
         onDelete={() => deleteQuiz(item.id, selectedSetId)}
