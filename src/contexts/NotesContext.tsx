@@ -1735,7 +1735,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
-  const persistSets = (nextSets: QuizSet[], forceCloud = false) => {
+  // `skipDirectPut` avoids double-writing /quizSets: most forceCloud callers
+  // also call scheduleInstantDataCloudSave right after with this same snapshot.
+  // Firing both a raw REST PUT here AND the SDK update() there is a duplicate,
+  // unordered write to the same path — two independent in-flight writes computed
+  // from a moving quizSetsRef can land out of order and silently overwrite each
+  // other (whichever request reaches Firebase last wins), and our own realtime
+  // listener then echoes that stale result back into the UI — a just-saved
+  // question can vanish again with no refresh involved. Only a few one-off
+  // recovery/backup paths rely on this PUT as their sole delivery mechanism, so
+  // they keep skipDirectPut=false.
+  const persistSets = (nextSets: QuizSet[], forceCloud = false, skipDirectPut = false) => {
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     quizSetsRef.current = nextSets;
     // Never force a full-user PATCH here — that raced with empty notes and wiped the cloud.
@@ -1746,6 +1756,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (countUserQuizSets(nextSets) > 0) everHadSetsRef.current = true;
+      if (skipDirectPut) return;
       savesInFlight.current += 1;
       void rtdbFetch(`/users/${user.uid}/quizSets`, {
         method: 'PUT',
@@ -3052,7 +3063,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
-    persistSets(nextSets, true);
+    persistSets(nextSets, true, true);
     scheduleInstantDataCloudSave({ quizzes: nextQuizzes, quizSets: nextSets });
   };
 
@@ -3081,7 +3092,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setQuizSets(nextSets);
       safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
       persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
-      persistSets(nextSets, true);
+      persistSets(nextSets, true, true);
       scheduleInstantDataCloudSave({ quizzes: nextQuizzes, quizSets: nextSets });
     } else {
       persist({ quizzes: nextQuizzes }, true);
@@ -3133,7 +3144,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const trashAt = new Date().toISOString();
     setQuizSets((prev) => {
       const next = prev.map((s) => s.id === id ? { ...s, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : s);
-      persistSets(next, true);
+      persistSets(next, true, true);
       scheduleInstantDataCloudSave({ quizSets: next });
       return next;
     });
@@ -3150,7 +3161,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         folderId: RESTORED_FOLDER_ID,
         updatedAt: new Date().toISOString(),
       }];
-      persistSets(next, true);
+      persistSets(next, true, true);
       scheduleInstantDataCloudSave({ quizSets: next });
       return next;
     });
@@ -3167,7 +3178,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = nextSets;
     setQuizSets(nextSets);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    persistSets(nextSets, true);
+    persistSets(nextSets, true, true);
     void pushPermDeletedCloud({ quizSets: nextSets });
   };
 
@@ -3683,7 +3694,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets(next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
     everHadSetsRef.current = true;
-    persistSets(next, true);
+    persistSets(next, true, true);
     scheduleInstantDataCloudSave({ quizSets: next });
     return newId;
   };
@@ -3695,7 +3706,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, true);
+    persistSets(next, true, true);
     scheduleInstantDataCloudSave({ quizSets: next });
   };
 
@@ -3711,7 +3722,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, forceCloud);
+    persistSets(next, forceCloud, forceCloud);
     if (forceCloud) scheduleInstantDataCloudSave({ quizSets: next });
   };
 
