@@ -19,10 +19,14 @@
  * The big-array sync can keep running in the background for compatibility;
  * this path is what actually guarantees survival across refresh.
  */
-import { ref as dbRef, remove, update } from 'firebase/database';
+import { ref as dbRef, remove, set, update } from 'firebase/database';
 import type { Note, QuizItem } from '../types';
 import { database } from './firebase';
 import { rtdbFetch } from './rtdb';
+
+function stripUndefined<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
 const IDB_NAME = 'malacadhati_items_v1';
 const NOTES_STORE = 'notes';
@@ -232,17 +236,17 @@ export async function tombstoneQuizItemDurable(
   setId?: string | null,
 ): Promise<boolean> {
   const trashAt = new Date().toISOString();
-  const stored: StoredQuizItem = {
+  const stored: StoredQuizItem = stripUndefined({
     ...item,
     setId: setId ?? null,
     trashed: true,
     deletedAt: item.deletedAt || trashAt,
     updatedAt: trashAt,
-  };
+  });
   await putQuizItemLocal(stored);
   if (!uid) return false;
   try {
-    await update(dbRef(database, `users/${uid}/quizItemsById/${item.id}`), stored);
+    await set(dbRef(database, `users/${uid}/quizItemsById/${item.id}`), stored);
     return true;
   } catch (err) {
     console.error('[itemsStore] quizItemsById tombstone failed', err);
@@ -277,21 +281,23 @@ export async function removeQuizItemDurable(
   }
 }
 
-export async function persistQuizItemDurable(
-  uid: string | null | undefined,
-  item: QuizItem,
-  setId?: string | null,
-): Promise<boolean> {
-  const stored: StoredQuizItem = { ...item, setId: setId ?? null };
-  await putQuizItemLocal(stored);
-  if (!uid) return false;
+const quizCloudWriteTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const quizCloudWriteLatest = new Map<number, { uid: string; stored: StoredQuizItem }>();
+
+async function flushQuizItemCloud(id: number): Promise<boolean> {
+  const pending = quizCloudWriteLatest.get(id);
+  quizCloudWriteLatest.delete(id);
+  quizCloudWriteTimers.delete(id);
+  if (!pending) return false;
+  const { uid, stored } = pending;
   try {
-    await update(dbRef(database, `users/${uid}/quizItemsById/${item.id}`), stored);
+    // Full replace (set) so removed optional fields clear and listeners fire fast.
+    await set(dbRef(database, `users/${uid}/quizItemsById/${id}`), stored);
     return true;
   } catch (err) {
     console.error('[itemsStore] quizItemsById cloud write failed', err);
     try {
-      const res = await rtdbFetch(`/users/${uid}/quizItemsById/${item.id}`, {
+      const res = await rtdbFetch(`/users/${uid}/quizItemsById/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(stored),
@@ -301,6 +307,34 @@ export async function persistQuizItemDurable(
       return false;
     }
   }
+}
+
+/**
+ * Live-safe quiz item write: IndexedDB immediately, cloud coalesced (~80ms) so
+ * other devices see typing without a multi-MB quizSets rewrite on every key.
+ */
+export async function persistQuizItemDurable(
+  uid: string | null | undefined,
+  item: QuizItem,
+  setId?: string | null,
+  opts?: { immediate?: boolean },
+): Promise<boolean> {
+  const stored: StoredQuizItem = stripUndefined({ ...item, setId: setId ?? null });
+  await putQuizItemLocal(stored);
+  if (!uid) return false;
+
+  quizCloudWriteLatest.set(item.id, { uid, stored });
+  const existingTimer = quizCloudWriteTimers.get(item.id);
+  if (opts?.immediate) {
+    if (existingTimer) clearTimeout(existingTimer);
+    return flushQuizItemCloud(item.id);
+  }
+  if (existingTimer) return true;
+  quizCloudWriteTimers.set(
+    item.id,
+    setTimeout(() => { void flushQuizItemCloud(item.id); }, 80),
+  );
+  return true;
 }
 
 export async function fetchQuizItemsByIdCloud(uid: string): Promise<StoredQuizItem[]> {
@@ -362,8 +396,8 @@ export function applyDurableQuizItems(
         if (set.id !== setId) return set;
         const existing = set.items.find((i) => i.id === bare.id);
         if (existing) {
-          if (existing.trashed && syncTime(existing) >= syncTime(bare)) return set;
-          if (syncTime(existing) >= syncTime(bare)) return set;
+          if (existing.trashed && syncTime(existing) > syncTime(bare)) return set;
+          if (syncTime(existing) > syncTime(bare)) return set;
           return {
             ...set,
             items: set.items.map((i) => (i.id === bare.id ? bare : i)),
@@ -378,8 +412,8 @@ export function applyDurableQuizItems(
     } else {
       const existing = nextQuizzes.find((q) => q.id === bare.id);
       if (existing) {
-        if (existing.trashed && syncTime(existing) >= syncTime(bare)) continue;
-        if (syncTime(existing) >= syncTime(bare)) continue;
+        if (existing.trashed && syncTime(existing) > syncTime(bare)) continue;
+        if (syncTime(existing) > syncTime(bare)) continue;
         nextQuizzes = nextQuizzes.map((q) => (q.id === bare.id ? bare : q));
       } else {
         nextQuizzes = [...nextQuizzes, bare];

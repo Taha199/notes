@@ -3148,15 +3148,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const unsubFolders = bindRealtime('quizFolders', 'quizFolders');
 
     // Instant quiz item sync (add/edit/delete) — tiny per-item path, not the
-    // multi-MB quizSets array. A delete on mobile writes a trashed tombstone
-    // here and every other device hides the question immediately.
-    const applyQuizItemsByIdSnap = (val: unknown) => {
-      if (!loadedRef.current || isApplyingRemoteRef.current || val == null) return;
-      if (typeof val !== 'object') return;
-      const durable = Object.values(val as Record<string, StoredQuizItem>).filter(
-        (q): q is StoredQuizItem => !!q && typeof q === 'object' && q.id != null,
-      );
-      if (!durable.length) return;
+    // multi-MB quizSets array. Child listeners keep live typing snappy; a full
+    // onValue would re-download every question on each keystroke.
+    const applyQuizItemsBatch = (durable: StoredQuizItem[]) => {
+      if (!loadedRef.current || isApplyingRemoteRef.current || !durable.length) return;
       const applied = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, durable);
       const quizzesChanged = JSON.stringify(applied.quizzes) !== JSON.stringify(quizzesRef.current);
       const setsChanged = JSON.stringify(applied.sets) !== JSON.stringify(quizSetsRef.current);
@@ -3179,10 +3174,46 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         isApplyingRemoteRef.current = false;
       }
     };
-    const unsubQuizItemsById = onValue(
-      dbRef(database, `users/${uid}/quizItemsById`),
-      (snap) => applyQuizItemsByIdSnap(snap.val()),
-    );
+
+    let quizItemChildBuffer: StoredQuizItem[] = [];
+    let quizItemChildFlush: ReturnType<typeof setTimeout> | null = null;
+    const queueQuizItemChild = (val: unknown) => {
+      if (!val || typeof val !== 'object') return;
+      const item = val as StoredQuizItem;
+      if (item.id == null) return;
+      quizItemChildBuffer.push(item);
+      if (quizItemChildFlush) return;
+      quizItemChildFlush = setTimeout(() => {
+        quizItemChildFlush = null;
+        const batch = quizItemChildBuffer;
+        quizItemChildBuffer = [];
+        applyQuizItemsBatch(batch);
+      }, 0);
+    };
+
+    const quizItemsRefPath = dbRef(database, `users/${uid}/quizItemsById`);
+    const unsubQuizItemAdded = onChildAdded(quizItemsRefPath, (snap) => queueQuizItemChild(snap.val()));
+    const unsubQuizItemChanged = onChildChanged(quizItemsRefPath, (snap) => queueQuizItemChild(snap.val()));
+    const unsubQuizItemRemoved = onChildRemoved(quizItemsRefPath, (snap) => {
+      const raw = snap.val();
+      const id = typeof raw === 'object' && raw && 'id' in raw
+        ? Number((raw as StoredQuizItem).id)
+        : Number(snap.key);
+      if (!Number.isFinite(id)) return;
+      // Treat hard removal as a trash tombstone so UI hides the question.
+      queueQuizItemChild({
+        id,
+        noteId: 0,
+        noteTitle: '',
+        question: '',
+        answer: '',
+        date: '',
+        trashed: true,
+        deletedAt: nowStr(),
+        updatedAt: nowStr(),
+        setId: null,
+      } as StoredQuizItem);
+    });
 
     // Same for notes: trash/restore must land via notesById so refresh cannot
     // resurrect a live IndexedDB copy over a soft-delete that only hit notes[].
@@ -3244,7 +3275,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubQuizzes();
       unsubSets();
       unsubFolders();
-      unsubQuizItemsById();
+      unsubQuizItemAdded();
+      unsubQuizItemChanged();
+      unsubQuizItemRemoved();
+      if (quizItemChildFlush) clearTimeout(quizItemChildFlush);
       unsubNotesById();
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('visibilitychange', onHide);
@@ -3554,13 +3588,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
     const updated: QuizItem = { ...existing, ...patch, updatedAt: new Date().toISOString() };
     recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: updated });
-    void persistQuizItemDurable(userRef.current?.uid, updated, null);
+    void persistQuizItemDurable(userRef.current?.uid, updated, null, { immediate: true });
     const next = quizzesRef.current.map((q) => (q.id === id ? updated : q));
     quizzesRef.current = next;
     setQuizzes(next);
     safeSetItem('malacadhati_quiz', JSON.stringify(next));
-    persist({ quizzes: next }, forceCloud);
-    if (forceCloud) scheduleInstantDataCloudSave({ quizzes: next });
+    persist({ quizzes: next }, false);
+    if (forceCloud) {
+      persist({ quizzes: next }, true);
+      scheduleInstantDataCloudSave({ quizzes: next });
+    }
   };
 
   const addQuizSet = (name: string): QuizSet => {
@@ -4178,7 +4215,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
     const updated: QuizItem = { ...existing, ...patch, updatedAt: new Date().toISOString() };
     recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: updated });
-    void persistQuizItemDurable(userRef.current?.uid, updated, setId);
+    // Live path: always push the single item immediately. Full quizSets array
+    // only when forceCloud (finalize / explicit save) — keystrokes must not
+    // rewrite multi-MB arrays or other devices lag behind typing.
+    void persistQuizItemDurable(userRef.current?.uid, updated, setId, { immediate: true });
     const next = quizSetsRef.current.map((s) => (
       s.id === setId
         ? { ...s, items: s.items.map((i) => (i.id === itemId ? updated : i)) }
@@ -4187,8 +4227,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, forceCloud, forceCloud);
-    if (forceCloud) scheduleInstantDataCloudSave({ quizSets: next });
+    persistSets(next, false, true);
+    if (forceCloud) {
+      persistSets(next, true, true);
+      scheduleInstantDataCloudSave({ quizSets: next });
+    }
   };
 
   // ── Editor image → Storage URL swap ──────────────────────────────────────

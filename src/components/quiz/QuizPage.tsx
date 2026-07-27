@@ -756,8 +756,10 @@ export function QuizPage({
     }
 
     updateForm(formId, { saveStatus: 'syncing' });
-    if (setId) updateItemInSet(setId, form.itemId, patch, true);
-    else updateQuiz(form.itemId, patch, true);
+    // Live typing: durable quizItemsById only (forceCloud=false). Finalize/save
+    // still pushes the full quizSets array for compatibility.
+    if (setId) updateItemInSet(setId, form.itemId, patch, finalize);
+    else updateQuiz(form.itemId, patch, finalize);
     window.setTimeout(() => {
       updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
     }, 350);
@@ -870,7 +872,7 @@ export function QuizPage({
         form.formId,
         setTimeout(() => {
           persistForm(form.formId);
-        }, 400),
+        }, 120),
       );
     });
   }, [formSaveSigs, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
