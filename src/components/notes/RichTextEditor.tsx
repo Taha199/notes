@@ -1146,6 +1146,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     redoStackRef.current = [];
   };
 
+  /** Toolbar image delete: checkpoint (with image) first, then remove; keep focus for Cmd+Z. */
+  const deleteImageWithUndo = (img: HTMLImageElement) => {
+    const ed = editorRef.current;
+    if (!ed || !ed.contains(img)) return;
+    ed.focus({ preventScroll: true });
+    pushUndoCheckpoint();
+    removeImageBlock(img);
+    hideImageToolbar();
+    saveSel();
+    readCommandState();
+    emitHtml();
+  };
+
   const restoreEditorSnapshot = (snap: EditorSnapshot) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -3870,6 +3883,23 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return handled();
     }
 
+    // Selected image frame: Backspace removes only the image (checkpoint already pushed).
+    {
+      const selectedFrame = activeFrameRef.current;
+      if (selectedFrame?.isConnected && ed.contains(selectedFrame)) {
+        const img = selectedFrame.querySelector(':scope > img');
+        if (img instanceof HTMLImageElement) {
+          e.preventDefault();
+          removeImageBlock(img);
+          hideImageToolbar();
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return handled();
+        }
+      }
+    }
+
     // Caret at start of block after a YouTube embed → remove the embed only.
     {
       const ytBlock = getLineBlock(range.startContainer, ed);
@@ -4031,6 +4061,23 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return true;
     }
 
+    // Selected image frame: Delete removes only the image (checkpoint already pushed).
+    {
+      const selectedFrame = activeFrameRef.current;
+      if (selectedFrame?.isConnected && ed.contains(selectedFrame)) {
+        const img = selectedFrame.querySelector(':scope > img');
+        if (img instanceof HTMLImageElement) {
+          e.preventDefault();
+          removeImageBlock(img);
+          hideImageToolbar();
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return true;
+        }
+      }
+    }
+
     // Caret at end of block before a YouTube embed → remove the embed only.
     {
       const ytBlock = getLineBlock(range.startContainer, ed);
@@ -4107,6 +4154,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     if (ed.innerHTML === html || isEquivalentEditorHtml(ed.innerHTML, html)) {
       lastLocalHtmlRef.current = ed.innerHTML;
+      return;
+    }
+    // Echo of our own emit (serialized HTML without ephemeral chrome) — keep live DOM + undo stack.
+    if (html === lastLocalHtmlRef.current) {
       return;
     }
     // Parent sent shorter html — keep local DOM during active typing; never push longer html back up.
@@ -4257,6 +4308,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         e.stopImmediatePropagation();
         if (e.shiftKey) performEditorRedoRef.current();
         else performEditorUndoRef.current();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y' && !e.shiftKey && inEditor) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        performEditorRedoRef.current();
         return;
       }
       if (e.key !== 'Tab') return;
@@ -5793,7 +5850,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                 }); }} className={imgBtn + (imgResizeMode ? ' bg-primary/15 text-primary' : '')} title={t.titleResizeImage}>↔</button>
               </>
             )}
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => { removeImageBlock(hoveredImg.el); hideImageToolbar(); emitHtml(); }); }} className={compact ? 'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15' : 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15'} title={t.titleDel}>{compact ? <><span className="w-4 text-center">✕</span><span>{t.titleDel}</span></> : '✕'}</button>
+            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => { deleteImageWithUndo(hoveredImg.el); }); }} className={compact ? 'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15' : 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/15'} title={t.titleDel}>{compact ? <><span className="w-4 text-center">✕</span><span>{t.titleDel}</span></> : '✕'}</button>
           </>
         );
         return (
