@@ -8,6 +8,8 @@ import {
   clipboardToNormalizedHtml,
   convertPseudoBulletBlocksToNativeLists,
   convertSymbolPrefixedRunsToLists,
+  extractInnerBlockFromListToRoot,
+  extractListItemToRootParagraph,
   inferPlainListType,
   plainTextToMixedHtml,
   isCaretInBulletPrefixZone,
@@ -99,6 +101,53 @@ describe('listEditorBehavior', () => {
     expect(ed.querySelectorAll('li').length).toBe(3);
     expect(ed.textContent).toContain('Bye');
     expect(div?.nextElementSibling?.textContent).toContain('Bye');
+    ed.remove();
+  });
+
+  it('extractListItemToRootParagraph lifts nested item to heading margin', () => {
+    const ed = editorHtml(
+      '<div><b>Behandling</b></div>'
+      + '<ul><li>Antivirala</li><li>Kortiko<ul><li>Vad är skillnad</li></ul></li></ul>',
+    );
+    const nested = ed.querySelector('ul ul li') as HTMLLIElement;
+    const div = extractListItemToRootParagraph(nested, ed);
+    expect(div?.textContent).toBe('Vad är skillnad');
+    expect(div?.parentElement).toBe(ed);
+    expect(div?.closest('li, ul, ol')).toBeNull();
+    expect(ed.querySelector('ul ul')).toBeNull();
+    expect(ed.textContent).toContain('Antivirala');
+    expect(ed.textContent).toContain('Kortiko');
+    // Same parent as Behandling heading
+    expect(ed.querySelector('div')?.parentElement).toBe(ed);
+    expect(div?.parentElement).toBe(ed);
+    ed.remove();
+  });
+
+  it('extractInnerBlockFromListToRoot lifts stuck div inside li without bullet', () => {
+    const ed = editorHtml(
+      '<div><b>Behandling</b></div>'
+      + '<ul><li>Antivirala</li><li>Kortiko<div>Vad är skillnad</div></li></ul>',
+    );
+    const stuck = ed.querySelector('li div') as HTMLElement;
+    const div = extractInnerBlockFromListToRoot(stuck, ed);
+    expect(div?.textContent).toBe('Vad är skillnad');
+    expect(div?.closest('li, ul, ol')).toBeNull();
+    expect(div?.parentElement).toBe(ed);
+    expect(ed.textContent).toContain('Kortiko');
+    expect(ed.querySelectorAll('li').length).toBe(2);
+    ed.remove();
+  });
+
+  it('extractListItemToRootParagraph on top-level item clears list membership', () => {
+    const ed = editorHtml(
+      '<div><b>Behandling</b></div><ul><li>A</li><li>B</li><li>Vad</li></ul>',
+    );
+    const last = ed.querySelectorAll('li')[2] as HTMLLIElement;
+    const div = extractListItemToRootParagraph(last, ed);
+    expect(div?.textContent).toBe('Vad');
+    expect(div?.closest('ul, ol, li')).toBeNull();
+    expect(div?.parentElement).toBe(ed);
+    expect(ed.querySelectorAll('li').length).toBe(2);
     ed.remove();
   });
 

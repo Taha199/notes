@@ -952,9 +952,211 @@ export function removeEmptyListItemSimple(
   return null;
 }
 
+/** Outermost ul/ol containing `from` under `root` (null when not inside a list). */
+export function findOutermostList(
+  from: HTMLElement,
+  root: HTMLElement,
+): HTMLUListElement | HTMLOListElement | null {
+  let top: HTMLUListElement | HTMLOListElement | null = null;
+  let el: HTMLElement | null = from;
+  while (el && el !== root) {
+    if (LIST_TAG_NAMES.has(el.tagName)) top = el as HTMLUListElement | HTMLOListElement;
+    el = el.parentElement;
+  }
+  return top;
+}
+
+/** Insert `node` after a list, walking out of indented wrappers that only wrap the list. */
+export function insertAfterListAtRoot(
+  list: HTMLUListElement | HTMLOListElement,
+  root: HTMLElement,
+  node: Node,
+): void {
+  let anchor: HTMLElement = list;
+  let parent: Node | null = list.parentNode;
+  let before: Node | null = list.nextSibling;
+
+  while (parent instanceof HTMLElement && parent !== root) {
+    const wrapper = parent;
+    const hasIndent =
+      LIST_EXIT_INDENT_PROPS.some((prop) => wrapper.style.getPropertyValue(prop))
+      || [...wrapper.classList].some((cls) => /mso/i.test(cls));
+    const onlyListContent = [...wrapper.children].every((child) => {
+      if (child === anchor) return true;
+      if (child instanceof HTMLElement && LIST_TAG_NAMES.has(child.tagName)) return true;
+      if (child instanceof HTMLElement) {
+        const text = child.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim() ?? '';
+        return !text && !child.querySelector('img');
+      }
+      return !(child.textContent?.replace(/\u200B/g, '').trim());
+    });
+    if (hasIndent && onlyListContent && wrapper.parentNode) {
+      before = wrapper.nextSibling;
+      anchor = wrapper;
+      parent = wrapper.parentNode;
+      continue;
+    }
+    break;
+  }
+
+  (parent ?? root).insertBefore(node, before);
+}
+
+function cleanupEmptyListAncestors(start: HTMLElement | null, root: HTMLElement): void {
+  let clean: HTMLElement | null = start;
+  while (clean && clean !== root) {
+    const parent: HTMLElement | null = clean.parentElement;
+    if (LIST_TAG_NAMES.has(clean.tagName) && clean.children.length === 0) {
+      clean.remove();
+    } else if (
+      clean.tagName === 'LI'
+      && !(clean.textContent?.replace(/\u200B/g, '').trim())
+      && !clean.querySelector('img, ul, ol')
+    ) {
+      clean.remove();
+    } else {
+      break;
+    }
+    clean = parent;
+  }
+}
+
+function makeRootParagraphFromContents(source: HTMLElement): HTMLDivElement {
+  const div = document.createElement('div');
+  div.setAttribute('dir', 'auto');
+  while (source.firstChild) div.appendChild(source.firstChild);
+  stripNewParagraphIndent(div);
+  const text = div.textContent?.replace(/\u200B/g, '').trim() ?? '';
+  if (!text && !div.querySelector('img')) div.innerHTML = '<br>';
+  return div;
+}
+
+/** Promote nested li to its parent list (one level). */
+function outdentListItemOnce(li: HTMLLIElement): boolean {
+  const subList = li.parentElement;
+  if (!subList || !LIST_TAG_NAMES.has(subList.tagName)) return false;
+  const parentLi = subList.parentElement;
+  if (!(parentLi instanceof HTMLLIElement)) return false;
+  const outerList = parentLi.parentElement;
+  if (!outerList || !LIST_TAG_NAMES.has(outerList.tagName)) return false;
+  outerList.insertBefore(li, parentLi.nextSibling);
+  if (subList.children.length === 0) subList.remove();
+  return true;
+}
+
+function isNestedListItemNode(li: HTMLLIElement): boolean {
+  const list = li.parentElement;
+  return !!list
+    && LIST_TAG_NAMES.has(list.tagName)
+    && list.parentElement?.closest('li') instanceof HTMLLIElement;
+}
+
+/** Lift paragraph out of any remaining list/indent wrappers up to `root`. */
+export function forceParagraphToContentMargin(block: HTMLElement, root: HTMLElement): void {
+  stripNewParagraphIndent(block);
+  let guard = 0;
+  while (block.isConnected && block.parentElement && block.parentElement !== root && guard++ < 20) {
+    const wrapper = block.parentElement;
+    if (LIST_TAG_NAMES.has(wrapper.tagName) || wrapper.tagName === 'LI') {
+      const topList = findOutermostList(wrapper, root);
+      if (topList?.isConnected) insertAfterListAtRoot(topList, root, block);
+      else wrapper.parentNode?.insertBefore(block, wrapper.nextSibling);
+      cleanupEmptyListAncestors(wrapper, root);
+      stripNewParagraphIndent(block);
+      continue;
+    }
+    const hasIndent =
+      LIST_EXIT_INDENT_PROPS.some((prop) => wrapper.style.getPropertyValue(prop))
+      || [...wrapper.classList].some((cls) => /mso/i.test(cls));
+    if (hasIndent) {
+      wrapper.parentNode?.insertBefore(block, wrapper.nextSibling);
+      stripNewParagraphIndent(block);
+      continue;
+    }
+    break;
+  }
+  stripNewParagraphIndent(block);
+}
+
+/**
+ * Lift a list item completely out of ALL ancestor ul/ol/li to a free paragraph
+ * at the same content margin as sibling headings.
+ * Outdents fully, splits the top-level list (preserves order), then clears indent wrappers.
+ */
+export function extractListItemToRootParagraph(
+  li: HTMLLIElement,
+  root: HTMLElement,
+): HTMLDivElement | null {
+  if (!root.contains(li)) return null;
+
+  let current = li;
+  let guard = 0;
+  while (isNestedListItemNode(current) && current.isConnected && guard++ < 20) {
+    if (!outdentListItemOnce(current)) break;
+  }
+  if (!current.isConnected) return null;
+
+  const div = convertListItemToParagraph(current, (listEl) => {
+    cleanupEmptyListAncestors(listEl, root);
+  });
+  if (!div) return null;
+
+  forceParagraphToContentMargin(div, root);
+  return div;
+}
+
+/**
+ * Lift an inner block stuck inside a list item (e.g. `<li>text<div>stuck</div></li>`)
+ * out to the editor content margin — without taking sibling content of the li.
+ */
+export function extractInnerBlockFromListToRoot(
+  block: HTMLElement,
+  root: HTMLElement,
+): HTMLDivElement | null {
+  if (!root.contains(block) || block === root) return null;
+  if (block.tagName === 'LI') return extractListItemToRootParagraph(block as HTMLLIElement, root);
+
+  const li = block.closest('li');
+  if (!(li instanceof HTMLLIElement) || !root.contains(li)) {
+    const topList = findOutermostList(block, root);
+    stripNewParagraphIndent(block);
+    if (topList) insertAfterListAtRoot(topList, root, block);
+    else if (block.parentElement !== root) root.appendChild(block);
+    forceParagraphToContentMargin(block, root);
+    return block instanceof HTMLDivElement ? block : null;
+  }
+
+  // If this block is effectively the only content of the li, exit the whole item.
+  const probe = li.cloneNode(true) as HTMLLIElement;
+  const blocks = [...li.querySelectorAll(':scope > div, :scope > p')];
+  const idx = blocks.indexOf(block);
+  if (idx >= 0) {
+    const probeBlocks = [...probe.querySelectorAll(':scope > div, :scope > p')];
+    probeBlocks[idx]?.remove();
+  } else {
+    const all = [...li.querySelectorAll('div, p')];
+    const allIdx = all.indexOf(block);
+    if (allIdx >= 0) [...probe.querySelectorAll('div, p')][allIdx]?.remove();
+  }
+  probe.querySelectorAll('ul, ol').forEach((n) => n.remove());
+  const otherText = (probe.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
+  if (!otherText && !probe.querySelector('img')) {
+    return extractListItemToRootParagraph(li, root);
+  }
+
+  const topList = findOutermostList(li, root);
+  const div = makeRootParagraphFromContents(block);
+  block.remove();
+  if (topList?.isConnected) insertAfterListAtRoot(topList, root, div);
+  else root.appendChild(div);
+  forceParagraphToContentMargin(div, root);
+  return div;
+}
+
 /**
  * Split list at the current item → normal margin paragraph (keep text if any).
  * Result: [list before?][paragraph][list after?]. Never unwraps sibling items.
+ * For nested items prefer {@link extractListItemToRootParagraph}.
  */
 export function convertListItemToParagraph(
   li: HTMLLIElement,
