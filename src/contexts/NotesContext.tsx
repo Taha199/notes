@@ -18,7 +18,7 @@ import {
   persistNoteDurable,
   persistQuizItemDurable,
 } from '../lib/itemsStore';
-import { onEditorImageSwap, pendingEditorUploads, uploadEditorImage } from '../lib/imageUpload';
+import { onEditorImageSwap, pendingEditorUploads, clearPendingEditorUploads, uploadEditorImage } from '../lib/imageUpload';
 import {
   applyRecentEditsToData,
   loadRecentEdits,
@@ -1302,6 +1302,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const lastLocalSaveAt = useRef(0);
   const lastAppliedRemoteSyncAt = useRef(0);
   const saveFailedRef = useRef(false);
+  /** Max time "Saving…" may stay up before we force-clear a hung counter. */
+  const STUCK_SAVING_MS = 45_000;
   const pendingDeletedDraftIdsRef = useRef<Set<string>>(readDeletedDraftIds());
   const permDeletedRef = useRef<PermanentlyDeletedIds>(readPermDeleted());
   /** Once true, refuse to PATCH/PUT empty arrays over cloud (prevents accidental wipe). */
@@ -1342,6 +1344,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const draftsRef = useRef(drafts);
   const tokenUsageRef = useRef(tokenUsage);
   const MIN_SYNC_VISIBLE_MS = 650;
+
+  const beginTrackedSave = () => {
+    savesInFlight.current += 1;
+    setCloudStatus('saving');
+    savingStartedAt.current = Date.now();
+  };
+
+  const endTrackedSave = () => {
+    savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+    if (savesInFlight.current > 0) return;
+    if (saveFailedRef.current) {
+      setCloudStatus('error');
+      return;
+    }
+    const elapsed = Date.now() - savingStartedAt.current;
+    const delay = Math.max(0, MIN_SYNC_VISIBLE_MS - elapsed);
+    const markSaved = () => setCloudStatus('saved');
+    if (delay > 0) setTimeout(markSaved, delay);
+    else markSaved();
+  };
 
   notesRef.current = notes;
   quizzesRef.current = quizzes;
@@ -1891,13 +1913,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
       if (countUserQuizSets(nextSets) > 0) everHadSetsRef.current = true;
       if (skipDirectPut) return;
-      savesInFlight.current += 1;
+      beginTrackedSave();
       void rtdbFetch(`/users/${user.uid}/quizSets`, {
         method: 'PUT',
         body: JSON.stringify(nextSets),
         headers: { 'Content-Type': 'application/json' },
       }).finally(() => {
-        savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+        endTrackedSave();
       });
     }
   };
@@ -2417,12 +2439,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const runInstantDataCloudSave = async (patch: {
-    notes?: Note[];
-    quizzes?: QuizItem[];
-    quizSets?: QuizSet[];
-    quizFolders?: QuizFolder[];
-  }) => {
+  const runInstantDataCloudSave = async (
+    patch: {
+      notes?: Note[];
+      quizzes?: QuizItem[];
+      quizSets?: QuizSet[];
+      quizFolders?: QuizFolder[];
+    },
+    opts?: { trackInFlight?: boolean },
+  ) => {
     const u = userRef.current;
     if (!u || !loadedRef.current) return;
     const safe: typeof patch = { ...patch };
@@ -2443,10 +2468,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (safe.quizzes?.length) everHadQuizzesRef.current = true;
     if (safe.quizSets && countUserQuizSets(safe.quizSets) > 0) everHadSetsRef.current = true;
     const syncedAt = Date.now();
-    // Track this write in savesInFlight so a hasty refresh right after clicking
-    // Save (e.g. adding a quiz question) is caught by the beforeunload guard —
-    // this is the hot path for every quiz/note instant save.
-    savesInFlight.current += 1;
+    // Default: track so a hasty refresh right after Save is caught by beforeunload.
+    // Callers that already wrap this in beginTrackedSave/endTrackedSave pass
+    // trackInFlight:false so one logical save cannot double-count and leave
+    // "Saving…" stuck after both writes finish.
+    const track = opts?.trackInFlight !== false;
+    if (track) beginTrackedSave();
     try {
       // No manual token fetch: update() authenticates over the SDK's own
       // realtime connection and never uses this REST token. getIdToken can hang
@@ -2470,27 +2497,35 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       // vanished on the next reload with no hint why.
       console.error('[cloud-save] instant data save failed', err);
       saveFailedRef.current = true;
-      setCloudStatus('error');
     } finally {
-      savesInFlight.current = Math.max(0, savesInFlight.current - 1);
+      if (track) endTrackedSave();
     }
   };
 
-  const scheduleInstantDataCloudSave = (patch: {
-    notes?: Note[];
-    quizzes?: QuizItem[];
-    quizSets?: QuizSet[];
-    quizFolders?: QuizFolder[];
-  }) => {
+  const scheduleInstantDataCloudSave = (
+    patch: {
+      notes?: Note[];
+      quizzes?: QuizItem[];
+      quizSets?: QuizSet[];
+      quizFolders?: QuizFolder[];
+    },
+    opts?: { trackInFlight?: boolean },
+  ) => {
     if (!userRef.current || !loadedRef.current || isApplyingRemoteRef.current) return;
     pendingInstantDataSaveRef.current = { ...pendingInstantDataSaveRef.current, ...patch };
     if (instantDataSaveQueuedRef.current) return;
     instantDataSaveQueuedRef.current = true;
+    const trackInFlight = opts?.trackInFlight;
     queueMicrotask(() => {
       instantDataSaveQueuedRef.current = false;
       const nextPatch = pendingInstantDataSaveRef.current;
       pendingInstantDataSaveRef.current = null;
-      if (nextPatch) void runInstantDataCloudSave(nextPatch);
+      if (nextPatch) {
+        void runInstantDataCloudSave(
+          nextPatch,
+          trackInFlight === undefined ? undefined : { trackInFlight },
+        );
+      }
     });
   };
 
@@ -2999,9 +3034,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // native confirmation gives the write a chance to finish (and lets the user
     // simply not leave).
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Also block while an editor image is still uploading to Storage: the
-      // persisted content still holds the base64 form at that point, and
-      // leaving now can strand it before the URL swap + cloud write land.
+      // Only warn for real in-flight user saves / editor uploads — not background
+      // image migration (those use trackPending:false and quiet durable writes).
       if (savesInFlight.current <= 0 && pendingEditorUploads() <= 0) return;
       e.preventDefault();
       e.returnValue = '';
@@ -3014,6 +3048,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     pullTimer.current = window.setInterval(() => {
       if (document.visibilityState === 'visible') void pullFromCloud(true);
     }, 60_000);
+    // Safety valve: if "Saving…" has been up for too long (hung Firebase write,
+    // mismatched increment), clear the badge and beforeunload counter so refresh
+    // is not blocked forever. Real in-flight work that finishes later still
+    // updates timestamps; we only unstick the UI / leave-page guard.
+    const stuckTimer = window.setInterval(() => {
+      if (savingStartedAt.current <= 0) return;
+      if (Date.now() - savingStartedAt.current < STUCK_SAVING_MS) return;
+      if (savesInFlight.current > 0 || pendingEditorUploads() > 0) {
+        console.warn(
+          '[cloud-save] clearing stuck in-flight state',
+          { saves: savesInFlight.current, uploads: pendingEditorUploads() },
+        );
+        savesInFlight.current = 0;
+        clearPendingEditorUploads();
+      }
+      setCloudStatus((prev) => (
+        prev === 'saving' ? (saveFailedRef.current ? 'error' : 'saved') : prev
+      ));
+    }, 5_000);
     return () => {
       unsubPermDeleted();
       unsubNotes();
@@ -3026,6 +3079,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('pagehide', flushPersist);
       window.removeEventListener('beforeunload', onBeforeUnload);
       if (pullTimer.current) clearInterval(pullTimer.current);
+      clearInterval(stuckTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, loaded]);
@@ -3121,71 +3175,82 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       savedAt: new Date().toISOString(),
     };
     recordRecentEdit({ kind: 'note', at: Date.now(), note: newNote });
-    // Radical path: one note → IndexedDB + notesById. This is what survives
-    // refresh; the big-array sync below is only for compatibility.
-    savesInFlight.current += 1;
-    setCloudStatus('saving');
-    void persistNoteDurable(userRef.current?.uid, newNote).then((ok) => {
-      savesInFlight.current = Math.max(0, savesInFlight.current - 1);
-      if (ok) {
-        saveFailedRef.current = false;
-        if (savesInFlight.current === 0) setCloudStatus('saved');
-      } else {
+
+    const nextNotes = [newNote, ...notesRef.current];
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+    pendingLocalDraftIdsRef.current.delete(id);
+    pendingDeletedDraftIdsRef.current.add(id);
+    writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
+    const nextDrafts = draftsRef.current.filter((d) => d.id !== id);
+    draftsRef.current = nextDrafts;
+    setDrafts(nextDrafts);
+    safeSetItem('malacadhati_drafts', JSON.stringify(nextDrafts));
+    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+
+    // One tracked save for durable + notes-only instant sync. Do NOT call
+    // persist() — that schedules a full-user PATCH and left "Saving…" stuck.
+    beginTrackedSave();
+    void (async () => {
+      try {
+        const durableOk = await persistNoteDurable(userRef.current?.uid, newNote).catch(() => false);
+        await runInstantDataCloudSave({ notes: nextNotes }, { trackInFlight: false });
+        if (durableOk) saveFailedRef.current = false;
+        else saveFailedRef.current = true;
+      } catch {
         saveFailedRef.current = true;
-        setCloudStatus('error');
+      } finally {
+        endTrackedSave();
       }
-    });
-    setNotes((prevNotes) => {
-      const nextNotes = [newNote, ...prevNotes];
-      notesRef.current = nextNotes;
-      setDrafts((prevDrafts) => {
-        pendingLocalDraftIdsRef.current.delete(id);
-        pendingDeletedDraftIdsRef.current.add(id);
-        writeDeletedDraftIds(pendingDeletedDraftIdsRef.current);
-        const nextDrafts = prevDrafts.filter((d) => d.id !== id);
-        draftsRef.current = nextDrafts;
-        safeSetItem('malacadhati_drafts', JSON.stringify(nextDrafts));
-        persist({ notes: nextNotes, drafts: nextDrafts }, true);
-        scheduleInstantDataCloudSave({ notes: nextNotes });
-        void runDraftDeleteCloudSave(id);
-        return nextDrafts;
-      });
-      return nextNotes;
-    });
+    })();
+    void runDraftDeleteCloudSave(id);
   };
 
   const noteMetaChanged = (patch: Partial<Note>) =>
     'read' in patch || 'archived' in patch || 'fav' in patch || 'trashed' in patch;
 
   const updateNote = (id: number, patch: Partial<Note>) => {
-    const instant = noteMetaChanged(patch)
-      || 'html' in patch
-      || 'title' in patch
-      || 'text' in patch
-      || 'savedAt' in patch;
+    const contentChanged = 'html' in patch || 'title' in patch || 'text' in patch || 'savedAt' in patch;
+    const instant = noteMetaChanged(patch) || contentChanged;
     const base = notesRef.current.find((n) => n.id === id);
     if (!base) return;
-    const merged: Note = instant && !patch.savedAt
+    const merged: Note = contentChanged && !patch.savedAt
       ? { ...base, ...patch, savedAt: new Date().toISOString() }
       : { ...base, ...patch };
     recordRecentEdit({ kind: 'note', at: Date.now(), note: merged });
-    if (instant) {
-      savesInFlight.current += 1;
-      setCloudStatus('saving');
-      void persistNoteDurable(userRef.current?.uid, merged).then((ok) => {
-        savesInFlight.current = Math.max(0, savesInFlight.current - 1);
-        if (ok) {
-          saveFailedRef.current = false;
-          const syncedAt = Date.now();
-          lastLocalSaveAt.current = syncedAt;
-          setCloudSyncedAt(syncedAt);
-          if (savesInFlight.current === 0) setCloudStatus('saved');
-        } else {
+
+    if (contentChanged) {
+      const next = notesRef.current.map((n) => (n.id === id ? merged : n));
+      notesRef.current = next;
+      setNotes(next);
+      safeSetItem('malacadhati', JSON.stringify(next));
+      // Single in-flight tracker for durable + notes-only instant write.
+      // Previously both persistNoteDurable AND scheduleInstantDataCloudSave
+      // incremented, and persist() also queued a full-user PATCH — any hang in
+      // that PATCH left cloudStatus='saving' / beforeunload stuck forever.
+      beginTrackedSave();
+      void (async () => {
+        try {
+          const durableOk = await persistNoteDurable(userRef.current?.uid, merged).catch(() => false);
+          await runInstantDataCloudSave({ notes: next }, { trackInFlight: false });
+          if (durableOk) {
+            saveFailedRef.current = false;
+            const syncedAt = Date.now();
+            lastLocalSaveAt.current = syncedAt;
+            setCloudSyncedAt(syncedAt);
+            safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+          } else {
+            saveFailedRef.current = true;
+          }
+        } catch {
           saveFailedRef.current = true;
-          setCloudStatus('error');
+        } finally {
+          endTrackedSave();
         }
-      });
+      })();
+      return;
     }
+
     mutateNotes((prev) => prev.map((n) => (n.id === id ? merged : n)), instant);
   };
 
@@ -3935,10 +4000,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // write slow enough for a refresh to cancel it — i.e. the "saved then gone
   // after reload" failures. This rewrites every persisted copy of the base64
   // form to the short URL, whenever the upload lands.
-  const replaceEditorImageUrl = (fromUrl: string, toUrl: string) => {
+  const replaceEditorImageUrl = (fromUrl: string, toUrl: string, quiet = false) => {
     if (!fromUrl || !toUrl || fromUrl === toUrl) return;
     const swap = (s: string) => (s.includes(fromUrl) ? s.split(fromUrl).join(toUrl) : s);
     const now = new Date().toISOString();
+    const uid = userRef.current?.uid;
 
     if (notesRef.current.some((n) => n.html.includes(fromUrl))) {
       const next = notesRef.current.map((n) => (
@@ -3947,8 +4013,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       notesRef.current = next;
       setNotes(next);
       safeSetItem('malacadhati', JSON.stringify(next));
-      persist({ notes: next }, true);
-      scheduleInstantDataCloudSave({ notes: next });
+      // Always persist the changed notes one-by-one (durable). Full-array cloud
+      // sync is skipped in quiet/migration mode — that was what kept "Saving…"
+      // and the leave-page warning stuck for minutes while 60 images migrated.
+      next.filter((n) => n.html.includes(toUrl)).forEach((n) => {
+        void persistNoteDurable(uid, n);
+      });
+      if (!quiet) {
+        persist({ notes: next }, true);
+        scheduleInstantDataCloudSave({ notes: next });
+      }
     }
 
     const quizItemHasUrl = (q: QuizItem) =>
@@ -3974,8 +4048,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizzesRef.current = next;
       setQuizzes(next);
       safeSetItem('malacadhati_quiz', JSON.stringify(next));
-      persist({ quizzes: next }, true);
-      scheduleInstantDataCloudSave({ quizzes: next });
+      next.filter(quizItemHasUrl).forEach((q) => {
+        void persistQuizItemDurable(uid, q, null);
+      });
+      if (!quiet) {
+        persist({ quizzes: next }, true);
+        scheduleInstantDataCloudSave({ quizzes: next });
+      }
     }
 
     if (quizSetsRef.current.some((s) => s.items.some(quizItemHasUrl))) {
@@ -3987,12 +4066,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSetsRef.current = next;
       setQuizSets(next);
       safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
-      persistSets(next, true, true);
-      scheduleInstantDataCloudSave({ quizSets: next });
+      next.forEach((s) => {
+        s.items.filter(quizItemHasUrl).forEach((q) => {
+          void persistQuizItemDurable(uid, q, s.id);
+        });
+      });
+      if (!quiet) {
+        persistSets(next, true, true);
+        scheduleInstantDataCloudSave({ quizSets: next });
+      }
     }
   };
 
-  useEffect(() => onEditorImageSwap(replaceEditorImageUrl), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => onEditorImageSwap((from, to) => {
+    // Quiet: URL upgrade is an optimization on already-saved content. Firing the
+    // full-array cloud sync here was what left "Saving…" / leave-page warnings
+    // stuck long after the user finished editing.
+    replaceEditorImageUrl(from, to, true);
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Legacy inline-image migration ─────────────────────────────────────────
   // Old notes/questions still embed images as base64, which keeps localStorage
@@ -4000,7 +4091,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // silently. Once per session, quietly upload those to Storage and swap the
   // content to short URLs, a few images at a time.
   const INLINE_IMAGE_MIGRATE_MIN_CHARS = 65_000;
-  const INLINE_IMAGE_MIGRATE_MAX_PER_SESSION = 60;
+  const INLINE_IMAGE_MIGRATE_MAX_PER_SESSION = 40;
 
   const collectInlineImageUrls = (): string[] => {
     const found = new Set<string>();
@@ -4035,12 +4126,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     for (const dataUrl of urls) {
       if (!userRef.current) return;
       try {
-        const remoteUrl = await uploadEditorImage(dataUrl);
-        if (remoteUrl) replaceEditorImageUrl(dataUrl, remoteUrl);
+        // Quiet: do not hold beforeunload / "Saving…" for background migration.
+        const remoteUrl = await uploadEditorImage(dataUrl, { trackPending: false });
+        if (remoteUrl) replaceEditorImageUrl(dataUrl, remoteUrl, true);
       } catch {
         /* keep the base64 copy — retried next session */
       }
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 1200));
     }
   };
 

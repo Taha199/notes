@@ -38,6 +38,11 @@ export function pendingEditorUploads(): number {
   return pendingUploadCount;
 }
 
+/** Force-clear after a hung upload so leave-page warnings cannot stick forever. */
+export function clearPendingEditorUploads(): void {
+  pendingUploadCount = 0;
+}
+
 async function uploadToBucket(
   bucket: typeof storage,
   path: string,
@@ -56,8 +61,14 @@ async function uploadToBucket(
  * Upload an editor image to Firebase Storage and return its download URL.
  * Tries the primary bucket, then the legacy appspot bucket. Returns null when
  * signed out or both uploads fail — the caller keeps the already-inserted preview.
+ *
+ * Pass `{ trackPending: false }` for background migration so the beforeunload
+ * guard and "Saving…" badge are not held open by silent housekeeping uploads.
  */
-export async function uploadEditorImage(dataUrl: string): Promise<string | null> {
+export async function uploadEditorImage(
+  dataUrl: string,
+  opts?: { trackPending?: boolean },
+): Promise<string | null> {
   const uid = auth.currentUser?.uid;
   if (!uid) return null;
   let blob: Blob;
@@ -68,9 +79,10 @@ export async function uploadEditorImage(dataUrl: string): Promise<string | null>
     return null;
   }
   if (!blob.size) return null;
+  const trackPending = opts?.trackPending !== false;
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const path = `users/${uid}/files/${id}/editor-image.${extForMime(blob.type || 'image/jpeg')}`;
-  pendingUploadCount += 1;
+  if (trackPending) pendingUploadCount += 1;
   try {
     try {
       return await uploadToBucket(storage, path, blob);
@@ -82,6 +94,6 @@ export async function uploadEditorImage(dataUrl: string): Promise<string | null>
     console.error('[imageUpload] both buckets failed', err);
     return null;
   } finally {
-    pendingUploadCount = Math.max(0, pendingUploadCount - 1);
+    if (trackPending) pendingUploadCount = Math.max(0, pendingUploadCount - 1);
   }
 }
