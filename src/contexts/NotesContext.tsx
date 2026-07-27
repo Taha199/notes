@@ -515,8 +515,84 @@ function syncAccountLocalStorage(uid: string) {
   safeSetItem(LAST_UID_KEY, uid);
 }
 
+// ── Recent-edit journal (write-ahead log) ────────────────────────────────
+// A tiny separate localStorage key holding the last few edited notes / quiz
+// items. The big arrays ('malacadhati', 'malacadhati_quiz_sets', …) can fail
+// to write when legacy base64 images keep the quota nearly full, and an
+// in-flight cloud write can be cancelled by a quick refresh — the combination
+// that made a just-saved item vanish on reload. Each edit is also recorded
+// here (one item per entry, so it fits even under a tight quota), and
+// readLocalNotesData folds entries back in on load; the sync-time union merge
+// then sees the fresh copy and keeps it.
+const RECENT_EDITS_KEY = 'malacadhati_recent_edits';
+const RECENT_EDITS_MAX = 12;
+const RECENT_EDITS_TTL_MS = 48 * 60 * 60 * 1000;
+
+type RecentEdit =
+  | { kind: 'note'; at: number; note: Note }
+  | { kind: 'quiz'; at: number; quiz: QuizItem }
+  | { kind: 'setItem'; at: number; setId: string; item: QuizItem };
+
+function readRecentEdits(): RecentEdit[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_EDITS_KEY) ?? '[]') as RecentEdit[];
+    const cutoff = Date.now() - RECENT_EDITS_TTL_MS;
+    return Array.isArray(raw) ? raw.filter((e) => e && typeof e.at === 'number' && e.at > cutoff) : [];
+  } catch {
+    return [];
+  }
+}
+
+function sameEditTarget(a: RecentEdit, b: RecentEdit): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'note' && b.kind === 'note') return a.note.id === b.note.id;
+  if (a.kind === 'quiz' && b.kind === 'quiz') return a.quiz.id === b.quiz.id;
+  if (a.kind === 'setItem' && b.kind === 'setItem') return a.setId === b.setId && a.item.id === b.item.id;
+  return false;
+}
+
+function recordRecentEdit(entry: RecentEdit) {
+  // Replace any older entry for the same item so repeated autosaves of one
+  // note don't crowd out (or bloat) the journal.
+  const rest = readRecentEdits().filter((e) => !sameEditTarget(e, entry));
+  safeSetItem(RECENT_EDITS_KEY, JSON.stringify([entry, ...rest].slice(0, RECENT_EDITS_MAX)));
+}
+
+/** Fold journaled edits into locally-loaded data; newer copies always win. */
+function applyRecentEdits<T extends { notes: Note[]; quizzes: QuizItem[]; sets: QuizSet[] }>(data: T): T {
+  const edits = readRecentEdits();
+  if (edits.length === 0) return data;
+  let { notes, quizzes, sets } = data;
+  for (const edit of [...edits].reverse()) {
+    if (edit.kind === 'note') {
+      const existing = notes.find((n) => n.id === edit.note.id);
+      if (existing?.trashed) continue;
+      if (existing && entitySyncTime(existing) >= entitySyncTime(edit.note)) continue;
+      notes = existing ? notes.map((n) => (n.id === edit.note.id ? edit.note : n)) : [edit.note, ...notes];
+    } else if (edit.kind === 'quiz') {
+      const existing = quizzes.find((q) => q.id === edit.quiz.id);
+      if (existing?.trashed) continue;
+      if (existing && entitySyncTime(existing) >= entitySyncTime(edit.quiz)) continue;
+      quizzes = existing ? quizzes.map((q) => (q.id === edit.quiz.id ? edit.quiz : q)) : [...quizzes, edit.quiz];
+    } else {
+      sets = sets.map((set) => {
+        if (set.id !== edit.setId) return set;
+        const existing = set.items.find((i) => i.id === edit.item.id);
+        if (existing?.trashed) return set;
+        if (existing && entitySyncTime(existing) >= entitySyncTime(edit.item)) return set;
+        const items = existing
+          ? set.items.map((i) => (i.id === edit.item.id ? edit.item : i))
+          : [...set.items, edit.item];
+        const editAtIso = new Date(edit.at).toISOString();
+        return { ...set, items, updatedAt: !set.updatedAt || set.updatedAt < editAtIso ? editAtIso : set.updatedAt };
+      });
+    }
+  }
+  return { ...data, notes, quizzes, sets };
+}
+
 function readLocalNotesData() {
-  return {
+  return applyRecentEdits({
     notes: firebaseToArray<Note>(readLocalJson<Note[]>('malacadhati') ?? []),
     drafts: firebaseToArray<Draft>(readLocalJson<Draft[]>('malacadhati_drafts') ?? []),
     quizzes: firebaseToArray<QuizItem>(readLocalJson<QuizItem[]>('malacadhati_quiz') ?? []),
@@ -529,7 +605,7 @@ function readLocalNotesData() {
       ...set,
       items: set.items ?? [],
     })),
-  };
+  });
 }
 
 function readDeletedDraftIds(): Set<string> {
@@ -3009,6 +3085,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       date: nowStr(),
       savedAt: new Date().toISOString(),
     };
+    recordRecentEdit({ kind: 'note', at: Date.now(), note: newNote });
     setNotes((prevNotes) => {
       const nextNotes = [newNote, ...prevNotes];
       setDrafts((prevDrafts) => {
@@ -3031,6 +3108,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const updateNote = (id: number, patch: Partial<Note>) => {
     const instant = noteMetaChanged(patch);
+    const base = notesRef.current.find((n) => n.id === id);
+    if (base) {
+      const merged = { ...base, ...patch };
+      recordRecentEdit({
+        kind: 'note',
+        at: Date.now(),
+        note: instant && !patch.savedAt ? { ...merged, savedAt: new Date().toISOString() } : merged,
+      });
+    }
     mutateNotes((prev) => prev.map((n) => {
       if (n.id !== id) return n;
       const next = { ...n, ...patch };
@@ -3044,7 +3130,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
     const newId = Date.now();
     const now = new Date().toISOString();
-    const next = [...quizzesRef.current, { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now }];
+    const newItem: QuizItem = { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now };
+    recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: newItem });
+    const next = [...quizzesRef.current, newItem];
     quizzesRef.current = next;
     setQuizzes(next);
     safeSetItem('malacadhati_quiz', JSON.stringify(next));
@@ -3161,6 +3249,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
     const existing = quizzesRef.current.find((q) => q.id === id);
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
+    recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: { ...existing, ...patch, updatedAt: new Date().toISOString() } });
     const next = quizzesRef.current.map((q) => (q.id === id ? { ...q, ...patch, updatedAt: new Date().toISOString() } : q));
     quizzesRef.current = next;
     setQuizzes(next);
@@ -3721,6 +3810,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const newId = Date.now();
     const newItem: QuizItem = { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now };
+    recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: newItem });
     let found = false;
     const next = quizSetsRef.current.map((s) => {
       if (s.id !== setId) return s;
@@ -3755,6 +3845,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const set = quizSetsRef.current.find((s) => s.id === setId);
     const existing = set?.items.find((i) => i.id === itemId);
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
+    recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: { ...existing, ...patch, updatedAt: new Date().toISOString() } });
     const next = quizSetsRef.current.map((s) => (
       s.id === setId
         ? { ...s, items: s.items.map((i) => (i.id === itemId ? { ...i, ...patch, updatedAt: new Date().toISOString() } : i)) }
@@ -3841,7 +3932,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // silently. Once per session, quietly upload those to Storage and swap the
   // content to short URLs, a few images at a time.
   const INLINE_IMAGE_MIGRATE_MIN_CHARS = 65_000;
-  const INLINE_IMAGE_MIGRATE_MAX_PER_SESSION = 20;
+  const INLINE_IMAGE_MIGRATE_MAX_PER_SESSION = 60;
 
   const collectInlineImageUrls = (): string[] => {
     const found = new Set<string>();
@@ -3881,7 +3972,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       } catch {
         /* keep the base64 copy — retried next session */
       }
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, 800));
     }
   };
 
@@ -3889,8 +3980,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user || !loaded || inlineImageMigrationRanRef.current) return;
     inlineImageMigrationRanRef.current = true;
-    // Wait for the initial load/sync to settle before generating extra writes.
-    const timer = setTimeout(() => { void migrateInlineImagesToStorage(); }, 15_000);
+    // Start soon after load settles: every save ships the full notes/quizSets
+    // arrays, so leftover base64 images tax every single write until migrated.
+    const timer = setTimeout(() => { void migrateInlineImagesToStorage(); }, 4000);
     return () => clearTimeout(timer);
   }, [user?.uid, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
