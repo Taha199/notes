@@ -7,7 +7,12 @@ import { AppRichTextEditor } from './AppRichTextEditor';
 import { generateQuiz, generateOneQa, answerQuestion, type QuizResult } from '../../lib/gemini';
 import type { Page } from '../../types';
 
-const hasContent = (h: string) => !!h.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+const hasContent = (h: string) => {
+  if (!h) return false;
+  if (/<(img|video|audio|iframe|svg|embed|object)\b/i.test(h)) return true;
+  if (/note-img-frame|note-yt-frame/i.test(h)) return true;
+  return !!h.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+};
 
 const NOTE_QUIZ_PANEL_MIN = 400;
 const NOTE_QUIZ_PANEL_MAX = 960;

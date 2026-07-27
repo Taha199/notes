@@ -66,11 +66,12 @@ function normalizeQuizName(value: string) {
   return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
-// Content is valid if it has visible text OR an embedded image.
+// Content is valid if it has visible text OR an embedded image/media.
 function hasContent(html: string): boolean {
-  if (/<img\b/i.test(html)) return true;
-  if (/note-yt-frame/i.test(html)) return true;
-  return html.replace(/<[^>]*>/g, '').trim().length > 0;
+  if (!html) return false;
+  if (/<(img|video|audio|iframe|svg|embed|object)\b/i.test(html)) return true;
+  if (/note-img-frame|note-yt-frame/i.test(html)) return true;
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;
 }
 
 function mdToHtml(content: string): string {
@@ -337,6 +338,8 @@ interface OpenQuestionForm {
   question: string;
   answer: string;
   saveStatus: 'empty' | 'syncing' | 'saved';
+  /** Bumps on Q/A edits so autosave can detect same-length changes without hashing HTML. */
+  contentRev?: number;
   // true when editing an already-saved question; drafts leave this falsy so
   // Cancel discards them even if they contain partial content.
   finalized?: boolean;
@@ -405,7 +408,12 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   });
 
   const handleSave = () => {
-    if (!mcq) { onSave(); return; }
+    if (!mcq) {
+      // Always pass live Q/A so Save does not depend on a stale openForms snapshot
+      // (large data:image updates can lag a render behind the visible editor).
+      onSave({ question, answer });
+      return;
+    }
     const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
     if (kept.length < 2) return;
     const finalOptions = kept.map((x) => x.o);
@@ -653,7 +661,7 @@ export function QuizPage({
     const apply = (prev: OpenQuestionForm[]) =>
       prev.map((f) => {
         if (f.formId !== formId) return f;
-        const next = { ...f, ...patch };
+        const next = { ...f, ...patch, contentRev: (f.contentRev ?? 0) + 1 };
         if (f.itemId !== null) return next;
         const complete = hasContent(next.question) && hasContent(next.answer);
         if (!complete) return { ...next, saveStatus: 'empty' as const };
@@ -841,7 +849,13 @@ export function QuizPage({
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
-    const savedId = flushForm(formId, override, true);
+    let savedId: number | null = null;
+    try {
+      savedId = flushForm(formId, override, true);
+    } catch (err) {
+      console.error('[quiz-save]', err);
+      return; // keep editor open so the user can retry
+    }
     if (savedId === null) return; // keep editor open if nothing was saved
 
     // Guarantee the saved item is a visible card, not a hidden draft.
@@ -881,7 +895,8 @@ export function QuizPage({
   };
 
   const formSaveSigs = useMemo(
-    () => openForms.map((f) => `${f.formId}:${f.question}:${f.answer}`).join('|'),
+    // Fingerprint only — never concatenate full HTML (data:image base64 freezes autosave).
+    () => openForms.map((f) => `${f.formId}:${f.contentRev ?? 0}:${f.question.length}:${f.answer.length}:${f.saveStatus}:${f.itemId ?? 'n'}`).join('|'),
     [openForms],
   );
 

@@ -581,6 +581,20 @@ function recoveryLog(message: string, detail?: Record<string, unknown>) {
   else console.info('[malacadhati-recovery]', message);
 }
 
+/** localStorage quota is ~5MB — quiz/note HTML with data:image often exceeds it. Never throw. */
+function safeLocalStorageSet(key: string, value: unknown): boolean {
+  try {
+    localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+    return true;
+  } catch (err) {
+    recoveryLog('localStorage write failed', {
+      key,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
 function isEmptyUserPayload(
   nextNotes: Note[],
   qList: QuizItem[],
@@ -695,6 +709,11 @@ function countUserQuizFolders(folders: QuizFolder[]) {
 
 function countUserQuizSets(sets: QuizSet[]) {
   return sets.filter((set) => !set.system && !set.trashed).length;
+}
+
+function notesFingerprint(notes: Note[]): string {
+  // Cheap echo fingerprint — never JSON.stringify full HTML/base64 note bodies.
+  return notes.map((n) => `${n.id}:${n.savedAt ?? n.lastEdited ?? ''}:${(n.html || '').length}:${n.trashed ? 1 : 0}`).join('|');
 }
 
 function countQuizItemsInSets(sets: QuizSet[]): number {
@@ -1851,10 +1870,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const persistSets = (nextSets: QuizSet[], forceCloud = false) => {
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     quizSetsRef.current = nextSets;
     // Never force a full-user PATCH here — that raced with empty notes and wiped the cloud.
     persist({ quizSets: nextSets }, false);
+    // Defer quota-sensitive stringify so Save can close the editor even with large images.
+    queueMicrotask(() => {
+      safeLocalStorageSet('malacadhati_quiz_sets', quizSetsRef.current);
+    });
     if (user && loadedRef.current && forceCloud) {
       if (countUserQuizSets(nextSets) === 0 && everHadSetsRef.current) {
         recoveryLog('skipped quizSets PUT wipe');
@@ -1869,7 +1891,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         method: 'PUT',
         body: JSON.stringify(nextSets),
         headers: { 'Content-Type': 'application/json' },
-      });
+      }).catch(() => { /* best-effort quizSets PUT */ });
     }
   };
 
@@ -1963,15 +1985,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [user, loaded]);
 
   const writeLocalCache = () => {
-    try {
-      localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
-      localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
-      localStorage.setItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
-    } catch (err) {
-      recoveryLog('localStorage write failed', {
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
+    safeLocalStorageSet('malacadhati', notesRef.current);
+    safeLocalStorageSet('malacadhati_quiz', quizzesRef.current);
+    safeLocalStorageSet('malacadhati_quiz_sets', quizSetsRef.current);
+    safeLocalStorageSet('malacadhati_drafts', draftsRef.current);
   };
 
   const buildDraftCloudPayload = (dList: Draft[]) => {
@@ -2208,14 +2225,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFolders?: QuizFolder[];
   }, at = Date.now()) => {
     lastPushedDataAtRef.current = at;
-    if (patch.notes) lastPushedPayloadRef.current.notes = JSON.stringify(patch.notes);
+    // Never retain a full JSON clone of note HTML/base64 in memory.
+    if (patch.notes) lastPushedPayloadRef.current.notes = notesFingerprint(patch.notes);
     if (patch.quizzes) lastPushedPayloadRef.current.quizzes = JSON.stringify(patch.quizzes);
     if (patch.quizSets) lastPushedPayloadRef.current.quizSets = JSON.stringify(patch.quizSets);
     if (patch.quizFolders) lastPushedPayloadRef.current.quizFolders = JSON.stringify(patch.quizFolders);
   };
 
-  const shouldSkipRemoteEcho = (key: 'notes' | 'quizzes' | 'quizSets' | 'quizFolders', json: string) =>
-    Date.now() - lastPushedDataAtRef.current < 450 && lastPushedPayloadRef.current[key] === json;
+  const shouldSkipRemoteEcho = (key: 'notes' | 'quizzes' | 'quizSets' | 'quizFolders', fingerprint: string) =>
+    Date.now() - lastPushedDataAtRef.current < 450 && lastPushedPayloadRef.current[key] === fingerprint;
 
   const applyRemoteTrashData = (patch: {
     notes?: unknown;
@@ -2237,8 +2255,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
         notesRef.current,
       );
-      const json = JSON.stringify(merged);
-      if (!shouldSkipRemoteEcho('notes', json) && json !== JSON.stringify(notesRef.current)) {
+      const fingerprint = notesFingerprint(merged);
+      if (!shouldSkipRemoteEcho('notes', fingerprint) && fingerprint !== notesFingerprint(notesRef.current)) {
         nextNotes = merged;
         changed = true;
       }
@@ -3111,6 +3129,30 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setNotes((prev) => {
       const next = fn(prev);
       notesRef.current = next;
+      // Instant path mirrors quiz: field-level cloud push only — never stack a full-user
+      // runCloudSave/history stringify on top (that OOMs tabs when notes embed images).
+      if (instantCloud) {
+        scheduleInstantDataCloudSave({ notes: next });
+        if (userRef.current && loadedRef.current) {
+          const uid = userRef.current.uid;
+          void rtdbFetch(`/users/${uid}/notes`, {
+            method: 'PUT',
+            body: JSON.stringify(next),
+            headers: { 'Content-Type': 'application/json' },
+          }).catch(() => { /* instant notes PUT best-effort */ });
+        }
+        // Defer localStorage so Save stays responsive; ignore quota failures.
+        queueMicrotask(() => {
+          try {
+            localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
+          } catch (err) {
+            recoveryLog('notes localStorage write failed', {
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
+        });
+        return next;
+      }
       try {
         localStorage.setItem('malacadhati', JSON.stringify(next));
       } catch (err) {
@@ -3118,8 +3160,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           message: err instanceof Error ? err.message : String(err),
         });
       }
-      persist({ notes: next }, instantCloud);
-      if (instantCloud) scheduleInstantDataCloudSave({ notes: next });
+      persist({ notes: next }, false);
       return next;
     });
   };
@@ -3191,19 +3232,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const nextDrafts = draftsRef.current.filter((d) => d.id !== id);
     notesRef.current = nextNotes;
     draftsRef.current = nextDrafts;
-    try {
-      localStorage.setItem('malacadhati', JSON.stringify(nextNotes));
-      localStorage.setItem('malacadhati_drafts', JSON.stringify(nextDrafts));
-    } catch (err) {
-      recoveryLog('submitDraft localStorage write failed', {
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
     setNotes(nextNotes);
     setDrafts(nextDrafts);
-    persist({ notes: nextNotes, drafts: nextDrafts }, true);
+    // Instant notes push only (quiz-style). Do NOT force a full-user cloud save here.
     scheduleInstantDataCloudSave({ notes: nextNotes });
+    if (userRef.current && loadedRef.current) {
+      void rtdbFetch(`/users/${userRef.current.uid}/notes`, {
+        method: 'PUT',
+        body: JSON.stringify(nextNotes),
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => { /* best-effort */ });
+    }
     void runDraftDeleteCloudSave(id);
+    queueMicrotask(() => {
+      try {
+        localStorage.setItem('malacadhati', JSON.stringify(notesRef.current));
+        localStorage.setItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
+      } catch (err) {
+        recoveryLog('submitDraft localStorage write failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   };
 
   const noteMetaChanged = (patch: Partial<Note>) =>
@@ -3231,11 +3281,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = [...quizzesRef.current, { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now }];
     quizzesRef.current = next;
     setQuizzes(next);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
     everHadQuizzesRef.current = true;
-    // Field-level cloud write + immediate push (sanitize undefined for Firebase SDK).
-    persist({ quizzes: next }, true);
+    // Instant field push only — avoid stacking a full-user runCloudSave (OOMs with images).
     scheduleInstantDataCloudSave({ quizzes: next });
+    if (userRef.current && loadedRef.current) {
+      void rtdbFetch(`/users/${userRef.current.uid}/quizzes`, {
+        method: 'PUT',
+        body: JSON.stringify(next),
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => { /* best-effort */ });
+    }
+    queueMicrotask(() => {
+      safeLocalStorageSet('malacadhati_quiz', quizzesRef.current);
+      persist({ quizzes: quizzesRef.current }, false);
+    });
     return newId;
   };
 
@@ -3349,9 +3408,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = quizzesRef.current.map((q) => (q.id === id ? { ...q, ...clean, updatedAt: new Date().toISOString() } : q));
     quizzesRef.current = next;
     setQuizzes(next);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
-    persist({ quizzes: next }, forceCloud);
-    if (forceCloud) scheduleInstantDataCloudSave({ quizzes: next });
+    if (forceCloud) {
+      scheduleInstantDataCloudSave({ quizzes: next });
+      if (userRef.current && loadedRef.current) {
+        void rtdbFetch(`/users/${userRef.current.uid}/quizzes`, {
+          method: 'PUT',
+          body: JSON.stringify(next),
+          headers: { 'Content-Type': 'application/json' },
+        }).catch(() => { /* best-effort */ });
+      }
+    }
+    queueMicrotask(() => {
+      safeLocalStorageSet('malacadhati_quiz', quizzesRef.current);
+      persist({ quizzes: quizzesRef.current }, false);
+    });
   };
 
   const addQuizSet = (name: string): QuizSet => {
@@ -3909,12 +3979,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = quizSetsRef.current.map((s) => (
       s.id === setId ? { ...s, items: [...s.items, newItem], updatedAt: now } : s
     ));
+    // Update memory first and return id immediately so quiz Save can close even when
+    // localStorage/stringify of large data:image payloads would throw or hang.
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
     everHadSetsRef.current = true;
-    persistSets(next, true);
     scheduleInstantDataCloudSave({ quizSets: next });
+    persistSets(next, true);
     return newId;
   };
 
@@ -3924,9 +3995,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, true);
     scheduleInstantDataCloudSave({ quizSets: next });
+    persistSets(next, true);
   };
 
   const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
@@ -3941,9 +4011,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, forceCloud);
     if (forceCloud) scheduleInstantDataCloudSave({ quizSets: next });
+    persistSets(next, forceCloud);
   };
 
   const moveItemInSet = (setId: string, itemId: number, direction: 'up' | 'down') => {

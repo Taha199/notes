@@ -5003,19 +5003,58 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   // ── Image ─────────────────────────────────────────────────────────────
+  /** Shrink camera/phone photos before inlining — raw base64 multi‑MB saves OOM the tab. */
+  const fileToCompressedDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('read-failed'));
+    reader.onload = () => {
+      const raw = reader.result as string;
+      if (!raw || file.size < 180_000) {
+        resolve(raw);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const maxEdge = 1400;
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(raw);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          // Prefer JPEG for photos; keep PNG/WebP alpha when needed.
+          const out = file.type === 'image/png' || file.type === 'image/webp'
+            ? canvas.toDataURL(file.type, 0.82)
+            : canvas.toDataURL('image/jpeg', 0.72);
+          resolve(out.length < raw.length ? out : raw);
+        } catch {
+          resolve(raw);
+        }
+      };
+      img.onerror = () => resolve(raw);
+      img.src = raw;
+    };
+    reader.readAsDataURL(file);
+  });
+
   const insertImage = (file: File) => {
     const ed = editorRef.current;
     if (!ed || !file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
+    void fileToCompressedDataUrl(file).then((url) => {
+      if (!editorRef.current) return;
       ensureFocus(true);
       document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto" style="width:160px;max-width:100%"><img src="${url}" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;max-height:none;cursor:zoom-in;" /></div><br>`);
-      normalizeEditorImages(ed);
+      normalizeEditorImages(editorRef.current);
       saveSel();
       emitHtml();
-    };
-    reader.readAsDataURL(file);
+    }).catch(() => { /* ignore failed image insert */ });
   };
 
   // ── Image resize: drag a handle to grow/shrink (corner keeps ratio) ────
