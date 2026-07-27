@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } fr
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
+import { compressImageForInline } from '../../lib/imageCompress';
 import {
   extractYouTubeVideoId,
   ensureYouTubeEmbedCaretSiblingsIn,
@@ -5123,20 +5124,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   // ── Image ─────────────────────────────────────────────────────────────
+  /** Shared by file-picker inserts and clipboard-paste inserts. */
+  const insertImageDataUrl = (url: string) => {
+    const liveEd = editorRef.current;
+    if (!liveEd) return;
+    ensureFocus(true);
+    document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto" style="width:160px;max-width:100%"><img src="${url}" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;max-height:none;cursor:zoom-in;" /></div><div dir="auto"><br></div>`);
+    normalizeEditorImages(liveEd);
+    separateEmbedsFromTextBlocks(liveEd);
+    saveSel();
+    emitHtml();
+  };
+
   const insertImage = (file: File) => {
     const ed = editorRef.current;
     if (!ed || !file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
-      ensureFocus(true);
-      document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto" style="width:160px;max-width:100%"><img src="${url}" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;max-height:none;cursor:zoom-in;" /></div><div dir="auto"><br></div>`);
-      normalizeEditorImages(ed);
-      separateEmbedsFromTextBlocks(ed);
-      saveSel();
-      emitHtml();
-    };
-    reader.readAsDataURL(file);
+    // Downscale/re-encode before embedding as base64 — uncompressed phone photos and
+    // document scans (several MB each) blow past localStorage quota and RTDB's
+    // practical write size once they pile up, which silently drops the save (it
+    // "works" in the current tab but the item never survives a reload).
+    void compressImageForInline(file).then(insertImageDataUrl);
   };
 
   // ── Image resize: drag a handle to grow/shrink (corner keeps ratio) ────
@@ -5730,6 +5737,21 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           });
         }}
         onPaste={(e) => {
+          // Pasted screenshots/images (e.g. Cmd+V from clipboard) never carry a
+          // text/html or text/plain payload — the browser's default paste would
+          // insert them as an uncompressed base64 <img> otherwise, bypassing the
+          // same size cap file-picker inserts get. Intercept and compress first.
+          const pastedFiles = Array.from(e.clipboardData.items || [])
+            .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+            .map((item) => item.getAsFile())
+            .filter((f): f is File => !!f);
+          if (pastedFiles.length > 0) {
+            e.preventDefault();
+            pastedFiles.forEach((file) => {
+              void compressImageForInline(file).then(insertImageDataUrl);
+            });
+            return;
+          }
           const pastedHtml = e.clipboardData.getData('text/html').trim();
           const plain = e.clipboardData.getData('text/plain');
           const tableFromHtml = pastedHtml ? extractTableHtmlFromClipboard(pastedHtml) : null;
