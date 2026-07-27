@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
@@ -400,6 +400,8 @@ interface Props {
   onLockedTripleClick?: () => void;
   resizable?: boolean;
   stickyToolbar?: boolean;
+  /** When set, exposes a flush() that syncs DOM → html and returns the latest serialized html. */
+  flushRef?: MutableRefObject<(() => string) | null>;
 }
 
 type EditorSelectionBookmark = {
@@ -417,7 +419,7 @@ type EditorSnapshot = {
 
 const EDITOR_UNDO_LIMIT = 80;
 
-export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
+export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true, flushRef }: Props) {
   const { t, lang } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -1017,6 +1019,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     onChangeRef.current(next);
   };
+
+  useEffect(() => {
+    if (!flushRef) return;
+    flushRef.current = () => {
+      flushEmitHtml();
+      const ed = editorRef.current;
+      return ed ? serializeEditorHtml(ed) : html;
+    };
+    return () => {
+      flushRef.current = null;
+    };
+  }); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Helpers ──────────────────────────────────────────────────────────
   // Get the live selection inside the editor right now (returns null if focus is elsewhere).

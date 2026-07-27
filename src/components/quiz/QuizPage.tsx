@@ -361,6 +361,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   const { t } = useLanguage();
   const { hasAi } = useAuth();
   const { show } = useToast();
+  const questionFlushRef = useRef<(() => string) | null>(null);
+  const answerFlushRef = useRef<(() => string) | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
@@ -405,7 +407,9 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   });
 
   const handleSave = () => {
-    if (!mcq) { onSave(); return; }
+    const q = questionFlushRef.current?.() ?? question;
+    const a = answerFlushRef.current?.() ?? answer;
+    if (!mcq) { onSave({ question: q, answer: a }); return; }
     const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
     if (kept.length < 2) return;
     const finalOptions = kept.map((x) => x.o);
@@ -417,7 +421,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     const optionsHtml = finalOptions
       .map((o, i) => `<div>${OPT_LETTERS[i]}) ${escapeHtml(o)}</div>`)
       .join('');
-    const composedQ = `${question}<div style="margin-top:6px">${optionsHtml}</div>`;
+    const composedQ = `${q}<div style="margin-top:6px">${optionsHtml}</div>`;
     const composedA = safeCorrects.map((ci) => `${OPT_LETTERS[ci]}) ${escapeHtml(finalOptions[ci])} ✓`).join('<br>');
     onSave({
       question: composedQ,
@@ -462,6 +466,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             html={question}
             onChange={onChangeQ}
             onLiveChange={onChangeQ}
+            flushRef={questionFlushRef}
             placeholder={`${t.quizQuestionLabel}...`}
             minHeight="140px"
           />
@@ -519,6 +524,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             html={answer}
             onChange={onChangeA}
             onLiveChange={onChangeA}
+            flushRef={answerFlushRef}
             placeholder={`${t.quizAnswerLabel}...`}
             minHeight="140px"
           />
@@ -550,8 +556,18 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         </div>
         )}
         <div className="flex justify-end gap-2 md:col-span-2">
-          <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
-          <button onClick={handleSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{t.mSave}</button>
+          <button type="button" onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleSave();
+            }}
+            className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+          >
+            {t.mSave}
+          </button>
         </div>
       </div>
     </div>
@@ -629,6 +645,7 @@ export function QuizPage({
   const allQuizSetsRef = useRef(allQuizSets);
   allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const finalizedDraftIdsRef = useRef<Set<number>>(new Set());
 
   const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
@@ -689,7 +706,6 @@ export function QuizPage({
           correctIndexes: patch.correctIndexes,
           explanation: patch.explanation,
         });
-        updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved', finalized: true });
         return id;
       }
       const id = addQuiz({
@@ -715,7 +731,12 @@ export function QuizPage({
       ? allQuizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === form.itemId)
       : quizzesRef.current.find((item) => item.id === form.itemId);
     if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
-      if (form.saveStatus !== 'saved') updateForm(formId, { saveStatus: 'saved' });
+      if (finalize && storedItem.draft) {
+        const finalizePatch = { draft: false as const };
+        if (setId) updateItemInSet(setId, form.itemId, finalizePatch, true);
+        else updateQuiz(form.itemId, finalizePatch, true);
+      }
+      if (form.saveStatus !== 'saved') updateForm(formId, { saveStatus: 'saved', finalized: finalize || undefined });
       return form.itemId;
     }
 
@@ -742,7 +763,7 @@ export function QuizPage({
       clearTimeout(timer);
       autoSaveTimers.current.delete(formId);
     }
-    persistForm(formId, override, finalize);
+    return persistForm(formId, override, finalize);
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
@@ -798,8 +819,13 @@ export function QuizPage({
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
-    flushForm(formId, override, true);
+    const savedId = flushForm(formId, override, true);
+    if (savedId === null) return;
+    finalizedDraftIdsRef.current.add(savedId);
     closeForm(formId);
+    window.setTimeout(() => {
+      setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));
+    }, 0);
   };
 
   const handleCancelForm = (formId: string) => {
@@ -949,7 +975,7 @@ export function QuizPage({
 
     setOpenForms(
       items
-        .filter((item) => item.draft)
+        .filter((item) => item.draft && !finalizedDraftIdsRef.current.has(item.id))
         .map((item) => ({
           formId: `item-${item.id}`,
           itemId: item.id,
@@ -970,7 +996,7 @@ export function QuizPage({
     setOpenForms((prev) => {
       const openIds = new Set(prev.map((f) => f.itemId));
       const additions = drafts
-        .filter((d) => !openIds.has(d.id))
+        .filter((d) => !openIds.has(d.id) && !finalizedDraftIdsRef.current.has(d.id))
         .map((item) => ({
           formId: `item-${item.id}`,
           itemId: item.id,
