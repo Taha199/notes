@@ -4032,9 +4032,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!changed) return;
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, true);
     scheduleInstantDataCloudSave({ quizSets: next });
+    persistSets(next, true);
   };
 
   const moveQuiz = (itemId: number, direction: 'up' | 'down') => {
@@ -4046,9 +4045,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
     quizzesRef.current = next;
     setQuizzes(next);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
-    persist({ quizzes: next }, true);
     scheduleInstantDataCloudSave({ quizzes: next });
+    if (userRef.current && loadedRef.current) {
+      void rtdbFetch(`/users/${userRef.current.uid}/quizzes`, {
+        method: 'PUT',
+        body: JSON.stringify(next),
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => { /* best-effort */ });
+    }
+    queueMicrotask(() => {
+      safeLocalStorageSet('malacadhati_quiz', quizzesRef.current);
+      persist({ quizzes: quizzesRef.current }, false);
+    });
   };
 
   const reorderItemInSet = (setId: string, dragId: number, targetId: number) => {
@@ -4068,9 +4076,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!changed) return;
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, true);
     scheduleInstantDataCloudSave({ quizSets: next });
+    persistSets(next, true);
   };
 
   const reorderQuiz = (dragId: number, targetId: number) => {
@@ -4082,9 +4089,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     next.splice(to, 0, item);
     quizzesRef.current = next;
     setQuizzes(next);
-    localStorage.setItem('malacadhati_quiz', JSON.stringify(next));
-    persist({ quizzes: next }, true);
     scheduleInstantDataCloudSave({ quizzes: next });
+    if (userRef.current && loadedRef.current) {
+      void rtdbFetch(`/users/${userRef.current.uid}/quizzes`, {
+        method: 'PUT',
+        body: JSON.stringify(next),
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => { /* best-effort */ });
+    }
+    queueMicrotask(() => {
+      safeLocalStorageSet('malacadhati_quiz', quizzesRef.current);
+      persist({ quizzes: quizzesRef.current }, false);
+    });
   };
 
   const orderItemsByIds = (items: QuizItem[], itemIds: number[]) => {
@@ -4102,9 +4118,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
     quizSetsRef.current = next;
     setQuizSets(next);
-    localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, true);
     scheduleInstantDataCloudSave({ quizSets: next });
+    persistSets(next, true);
   };
 
   const setQuizzesOrder = (itemIds: number[]) => {

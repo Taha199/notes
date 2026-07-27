@@ -373,15 +373,30 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     : initialCorrect !== undefined ? new Set([initialCorrect]) : new Set([0]);
   const [correctSet, setCorrectSet] = useState<Set<number>>(initCorrectSet);
   const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');
+  // Keep live HTML here — parent props can lag one render behind onLiveChange after
+  // inserting a large data:image, and Save must not send the stale empty snapshot.
+  const liveQRef = useRef(question);
+  const liveARef = useRef(answer);
+  liveQRef.current = question;
+  liveARef.current = answer;
+
+  const handleChangeQ = (v: string) => {
+    liveQRef.current = v;
+    onChangeQ(v);
+  };
+  const handleChangeA = (v: string) => {
+    liveARef.current = v;
+    onChangeA(v);
+  };
 
   const handleAiAnswer = async () => {
-    const plain = question.replace(/<[^>]*>/g, '').trim();
+    const plain = liveQRef.current.replace(/<[^>]*>/g, '').trim();
     if (!plain) return;
     setAiLoading(true);
     try {
       const res = await answerQuestion(plain);
-      if (hasContent(answer)) setAiSuggestion(res);
-      else onChangeA(res);
+      if (hasContent(liveARef.current)) setAiSuggestion(res);
+      else handleChangeA(res);
     } catch (e) {
       show(e instanceof Error ? e.message : 'AI-svar misslyckades');
     } finally {
@@ -408,10 +423,10 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   });
 
   const handleSave = () => {
+    const q = liveQRef.current;
+    const a = liveARef.current;
     if (!mcq) {
-      // Always pass live Q/A so Save does not depend on a stale openForms snapshot
-      // (large data:image updates can lag a render behind the visible editor).
-      onSave({ question, answer });
+      onSave({ question: q, answer: a });
       return;
     }
     const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
@@ -425,7 +440,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     const optionsHtml = finalOptions
       .map((o, i) => `<div>${OPT_LETTERS[i]}) ${escapeHtml(o)}</div>`)
       .join('');
-    const composedQ = `${question}<div style="margin-top:6px">${optionsHtml}</div>`;
+    const composedQ = `${q}<div style="margin-top:6px">${optionsHtml}</div>`;
     const composedA = safeCorrects.map((ci) => `${OPT_LETTERS[ci]}) ${escapeHtml(finalOptions[ci])} ✓`).join('<br>');
     onSave({
       question: composedQ,
@@ -468,8 +483,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
             html={question}
-            onChange={onChangeQ}
-            onLiveChange={onChangeQ}
+            onChange={handleChangeQ}
+            onLiveChange={handleChangeQ}
             placeholder={`${t.quizQuestionLabel}...`}
             minHeight="140px"
           />
@@ -525,8 +540,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
             html={answer}
-            onChange={onChangeA}
-            onLiveChange={onChangeA}
+            onChange={handleChangeA}
+            onLiveChange={handleChangeA}
             placeholder={`${t.quizAnswerLabel}...`}
             minHeight="140px"
           />
@@ -551,7 +566,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
               <div dir="auto" className="note-content px-3 py-2 text-[13px] leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(aiSuggestion) }} />
               <div className="flex justify-end gap-2 border-t border-violet-200 px-3 py-2 dark:border-violet-500/20">
                 <button onClick={() => setAiSuggestion(null)} className="rounded-lg border border-app-border px-3 py-1 text-[11px] text-app-text-secondary hover:bg-white/50 dark:border-white/10">{t.quizKeepCurrent}</button>
-                <button onClick={() => { onChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {t.quizReplaceAnswer}</button>
+                <button onClick={() => { handleChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {t.quizReplaceAnswer}</button>
               </div>
             </div>
           )}

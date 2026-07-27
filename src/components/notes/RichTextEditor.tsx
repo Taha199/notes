@@ -5004,45 +5004,68 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   // ── Image ─────────────────────────────────────────────────────────────
   /** Shrink camera/phone photos before inlining — raw base64 multi‑MB saves OOM the tab. */
+  const compressDataUrl = (raw: string, mimeHint = 'image/jpeg'): Promise<string> => new Promise((resolve) => {
+    if (!raw || raw.length < 180_000) {
+      resolve(raw);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      const maxEdge = 1400;
+      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(raw);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        const preferAlpha = /image\/(png|webp)/i.test(mimeHint);
+        const out = preferAlpha
+          ? canvas.toDataURL(mimeHint.includes('webp') ? 'image/webp' : 'image/png', 0.82)
+          : canvas.toDataURL('image/jpeg', 0.72);
+        resolve(out.length < raw.length ? out : raw);
+      } catch {
+        resolve(raw);
+      }
+    };
+    img.onerror = () => resolve(raw);
+    img.src = raw;
+  });
+
   const fileToCompressedDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error ?? new Error('read-failed'));
     reader.onload = () => {
-      const raw = reader.result as string;
-      if (!raw || file.size < 180_000) {
-        resolve(raw);
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        const maxEdge = 1400;
-        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(raw);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, w, h);
-        try {
-          // Prefer JPEG for photos; keep PNG/WebP alpha when needed.
-          const out = file.type === 'image/png' || file.type === 'image/webp'
-            ? canvas.toDataURL(file.type, 0.82)
-            : canvas.toDataURL('image/jpeg', 0.72);
-          resolve(out.length < raw.length ? out : raw);
-        } catch {
-          resolve(raw);
-        }
-      };
-      img.onerror = () => resolve(raw);
-      img.src = raw;
+      void compressDataUrl(reader.result as string, file.type || 'image/jpeg').then(resolve);
     };
     reader.readAsDataURL(file);
   });
+
+  /** Recompress oversized pasted/dropped data: URLs already in the editor DOM. */
+  const compressInlineEditorImages = async (ed: HTMLElement): Promise<boolean> => {
+    const imgs = [...ed.querySelectorAll('img')].filter((node): node is HTMLImageElement => {
+      const src = node.getAttribute('src') || '';
+      return src.startsWith('data:image') && src.length > 180_000;
+    });
+    if (imgs.length === 0) return false;
+    let changed = false;
+    for (const img of imgs) {
+      const src = img.getAttribute('src') || '';
+      const mime = src.match(/^data:(image\/[a-z0-9.+-]+)/i)?.[1] ?? 'image/jpeg';
+      const next = await compressDataUrl(src, mime);
+      if (next !== src) {
+        img.setAttribute('src', next);
+        changed = true;
+      }
+    }
+    return changed;
+  };
 
   const insertImage = (file: File) => {
     const ed = editorRef.current;
@@ -5648,6 +5671,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           });
         }}
         onPaste={(e) => {
+          const imageFile = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
+          if (imageFile) {
+            e.preventDefault();
+            insertImage(imageFile);
+            return;
+          }
           const pastedHtml = e.clipboardData.getData('text/html').trim();
           const plain = e.clipboardData.getData('text/plain');
           const tableFromHtml = pastedHtml ? extractTableHtmlFromClipboard(pastedHtml) : null;
@@ -5688,6 +5717,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               normalizePastedBlocks(live);
               promotePseudoListsToNative(live);
               normalizeAutoLinks(live);
+              void compressInlineEditorImages(live).then((changed) => {
+                if (changed) normalizeEditorImages(live);
+                readCommandState();
+                emitHtml();
+              });
+              return;
             }
             readCommandState();
             emitHtml();
@@ -5725,8 +5760,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             syncYouTubeRemoveChrome(live);
             normalizeAutoLinks(live);
             normalizeTablesInEditor(live);
-            readCommandState();
-            emitHtml();
+            void compressInlineEditorImages(live).then((changed) => {
+              if (changed) normalizeEditorImages(live);
+              readCommandState();
+              emitHtml();
+            });
           };
           requestAnimationFrame(() => {
             normalizeAfterPaste();
