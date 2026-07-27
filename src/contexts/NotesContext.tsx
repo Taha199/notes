@@ -418,6 +418,24 @@ function pickBetterQuizFolder(local: QuizFolder, remote: QuizFolder): QuizFolder
   return entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
 }
 
+function foldersToFirebaseMap(folders: QuizFolder[]): Record<string, QuizFolder> {
+  const out: Record<string, QuizFolder> = {};
+  for (const folder of folders) {
+    if (!folder?.id) continue;
+    out[folder.id] = JSON.parse(JSON.stringify(folder)) as QuizFolder;
+  }
+  return out;
+}
+
+function setsToFirebaseMap(sets: QuizSet[]): Record<string, QuizSet> {
+  const out: Record<string, QuizSet> = {};
+  for (const set of sets) {
+    if (!set?.id) continue;
+    out[set.id] = JSON.parse(JSON.stringify({ ...set, items: set.items ?? [] })) as QuizSet;
+  }
+  return out;
+}
+
 function chatSyncTime(chat: ChatConversation) {
   const last = chat.messages?.[chat.messages.length - 1]?.timestamp;
   return Date.parse(last || chat.createdAt || '') || 0;
@@ -2106,8 +2124,83 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           headers: { 'Content-Type': 'application/json' },
         }).catch(() => {});
       });
+      // Per-id mirror — same pattern as quizItemsById; survives array LWW races.
+      void update(dbRef(database, `users/${user.uid}/quizFoldersById`), foldersToFirebaseMap(nextFolders)).catch(() => {});
       void appendFolderHistory(user.uid, nextFolders);
     }
+  };
+
+  const pushQuizFolderById = (folder: QuizFolder) => {
+    const uid = userRef.current?.uid;
+    if (!uid || !loadedRef.current) return;
+    void set(
+      dbRef(database, `users/${uid}/quizFoldersById/${folder.id}`),
+      JSON.parse(JSON.stringify(folder)),
+    ).catch((err) => console.error('[cloud-save] quizFoldersById write failed', err));
+  };
+
+  const pushQuizSetById = (quizSet: QuizSet) => {
+    const uid = userRef.current?.uid;
+    if (!uid || !loadedRef.current) return;
+    void set(
+      dbRef(database, `users/${uid}/quizSetsById/${quizSet.id}`),
+      JSON.parse(JSON.stringify({ ...quizSet, items: quizSet.items ?? [] })),
+    ).catch((err) => console.error('[cloud-save] quizSetsById write failed', err));
+  };
+
+  const applyRemoteFolderById = (raw: unknown) => {
+    if (!loadedRef.current || !raw || typeof raw !== 'object') return;
+    const folder = raw as QuizFolder;
+    if (!folder.id) return;
+    if (permDeletedRef.current.quizFolders.includes(folder.id)) {
+      const filtered = quizFoldersRef.current.filter((f) => f.id !== folder.id);
+      if (filtered.length === quizFoldersRef.current.length) return;
+      const next = finalizeQuizFolders(filtered, quizSetsRef.current);
+      quizFoldersRef.current = next;
+      setQuizFolders(next);
+      safeSetItem('malacadhati_quiz_folders', JSON.stringify(next));
+      return;
+    }
+    const prev = quizFoldersRef.current;
+    const existing = prev.find((f) => f.id === folder.id);
+    const merged = existing ? pickBetterQuizFolder(existing, folder) : folder;
+    if (existing && JSON.stringify(existing) === JSON.stringify(merged)) return;
+    const nextList = existing
+      ? prev.map((f) => (f.id === folder.id ? merged : f))
+      : [...prev, merged];
+    const next = finalizeQuizFolders(nextList, quizSetsRef.current);
+    quizFoldersRef.current = next;
+    setQuizFolders(next);
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(next));
+  };
+
+  const applyRemoteSetById = (raw: unknown) => {
+    if (!loadedRef.current || !raw || typeof raw !== 'object') return;
+    const incoming = raw as QuizSet;
+    if (!incoming.id) return;
+    const setVal: QuizSet = { ...incoming, items: incoming.items ?? [] };
+    if (permDeletedRef.current.quizSets.includes(setVal.id)) {
+      const filtered = quizSetsRef.current.filter((s) => s.id !== setVal.id);
+      if (filtered.length === quizSetsRef.current.length) return;
+      quizSetsRef.current = filtered;
+      setQuizSets(filtered);
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(filtered));
+      return;
+    }
+    const prev = quizSetsRef.current;
+    const existing = prev.find((s) => s.id === setVal.id);
+    const merged = existing
+      ? pickBetterQuizSet(existing, setVal, permDeletedRef.current)
+      : setVal;
+    if (existing && JSON.stringify(existing) === JSON.stringify(merged)) return;
+    const nextList = existing
+      ? prev.map((s) => (s.id === setVal.id ? merged : s))
+      : [...prev, merged];
+    const colors = quizFoldersRef.current.map((f) => f.color).filter((c): c is string => !!c);
+    const next = initializeQuizColors(ensureFavoritesSet(nextList), colors);
+    quizSetsRef.current = next;
+    if (!quizSetsEqualForUI(next, prev)) setQuizSets(next);
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
   };
 
   const appendFolderHistory = async (uid: string, folders: QuizFolder[]) => {
@@ -3245,6 +3338,40 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       firebaseToArray<QuizSet>(val as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] })));
     const unsubFolders = bindRealtime('quizFolders', 'quizFolders');
 
+    // Per-id folder/set mirrors — create/delete appears on other devices even when
+    // the full quizFolders/quizSets array write is delayed or dropped.
+    const foldersByIdRef = dbRef(database, `users/${uid}/quizFoldersById`);
+    const unsubFolderAdded = onChildAdded(foldersByIdRef, (snap) => applyRemoteFolderById(snap.val()));
+    const unsubFolderChanged = onChildChanged(foldersByIdRef, (snap) => applyRemoteFolderById(snap.val()));
+    const unsubFolderRemoved = onChildRemoved(foldersByIdRef, (snap) => {
+      const id = String(snap.key || '');
+      if (!id) return;
+      applyRemoteFolderById({
+        id,
+        name: '',
+        createdAt: new Date().toISOString(),
+        trashed: true,
+        deletedAt: nowStr(),
+        updatedAt: new Date().toISOString(),
+      } as QuizFolder);
+    });
+    const setsByIdRef = dbRef(database, `users/${uid}/quizSetsById`);
+    const unsubSetAdded = onChildAdded(setsByIdRef, (snap) => applyRemoteSetById(snap.val()));
+    const unsubSetChanged = onChildChanged(setsByIdRef, (snap) => applyRemoteSetById(snap.val()));
+    const unsubSetRemoved = onChildRemoved(setsByIdRef, (snap) => {
+      const id = String(snap.key || '');
+      if (!id) return;
+      applyRemoteSetById({
+        id,
+        name: '',
+        items: [],
+        createdAt: new Date().toISOString(),
+        trashed: true,
+        deletedAt: nowStr(),
+        updatedAt: new Date().toISOString(),
+      } as QuizSet);
+    });
+
     // Instant quiz item sync (add/edit/delete) — tiny per-item path, not the
     // multi-MB quizSets array. Child listeners keep live typing snappy; a full
     // onValue would re-download every question on each keystroke.
@@ -3397,6 +3524,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubQuizzes();
       unsubSets();
       unsubFolders();
+      unsubFolderAdded();
+      unsubFolderChanged();
+      unsubFolderRemoved();
+      unsubSetAdded();
+      unsubSetChanged();
+      unsubSetRemoved();
       unsubQuizItemAdded();
       unsubQuizItemChanged();
       unsubQuizItemRemoved();
@@ -3766,6 +3899,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     everHadSetsRef.current = true;
     // Direct node write (not skipDirectPut) so mobile's quizSets listener fires immediately.
     persistSets(next, true, false);
+    pushQuizSetById(newSet);
     scheduleInstantDataCloudSave({ quizSets: next });
     return newSet;
   };
@@ -3779,6 +3913,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     persistSets(next, true, true);
+    const trashed = next.find((s) => s.id === id);
+    if (trashed) pushQuizSetById(trashed);
     scheduleInstantDataCloudSave({ quizSets: next });
   };
 
@@ -3840,6 +3976,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     persistSets(next, true, true);
+    const updated = next.find((s) => s.id === id);
+    if (updated) pushQuizSetById(updated);
     scheduleInstantDataCloudSave({ quizSets: next });
   };
 
@@ -3851,6 +3989,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     persistSets(next, true, true);
+    const updated = next.find((s) => s.id === id);
+    if (updated) pushQuizSetById(updated);
     scheduleInstantDataCloudSave({ quizSets: next });
   };
 
@@ -3883,6 +4023,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFoldersRef.current = next;
     setQuizFolders(next);
     persistFolders(next, true);
+    pushQuizFolderById(folder);
     scheduleInstantDataCloudSave({ quizFolders: next });
     return folder;
   };
@@ -3898,6 +4039,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFoldersRef.current = next;
     setQuizFolders(next);
     persistFolders(next, true);
+    const updated = next.find((f) => f.id === id);
+    if (updated) pushQuizFolderById(updated);
     scheduleInstantDataCloudSave({ quizFolders: next });
   };
 
@@ -3910,6 +4053,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFoldersRef.current = next;
     setQuizFolders(next);
     persistFolders(next, true);
+    const updated = next.find((f) => f.id === id);
+    if (updated) pushQuizFolderById(updated);
     scheduleInstantDataCloudSave({ quizFolders: next });
   };
 
@@ -3948,6 +4093,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets(nextSets);
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    const trashedFolder = nextFolders.find((f) => f.id === id);
+    if (trashedFolder) pushQuizFolderById(trashedFolder);
     persist({ quizFolders: nextFolders, quizSets: nextSets }, true);
     scheduleInstantDataCloudSave({ quizFolders: nextFolders, quizSets: nextSets });
   };
