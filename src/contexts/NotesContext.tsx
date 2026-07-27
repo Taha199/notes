@@ -697,6 +697,40 @@ function countUserQuizSets(sets: QuizSet[]) {
   return sets.filter((set) => !set.system && !set.trashed).length;
 }
 
+function countQuizItemsInSets(sets: QuizSet[]): number {
+  return sets.reduce((sum, set) => sum + (Array.isArray(set.items) ? set.items.length : firebaseToArray(set.items).length), 0);
+}
+
+function quizItemIdsInSets(sets: QuizSet[]): Set<number> {
+  const ids = new Set<number>();
+  for (const set of sets) {
+    for (const item of (Array.isArray(set.items) ? set.items : firebaseToArray<QuizItem>(set.items))) {
+      if (item?.id != null) ids.add(item.id);
+    }
+  }
+  return ids;
+}
+
+/** True when local has quiz/set item ids the cloud snapshot is missing — safe to push up. */
+function hasLocalOnlyQuizData(
+  localQuizzes: QuizItem[],
+  localSets: QuizSet[],
+  cloudQuizzes: QuizItem[],
+  cloudSets: QuizSet[],
+): boolean {
+  const cloudQuizIds = new Set(cloudQuizzes.map((q) => q.id));
+  if (localQuizzes.some((q) => !cloudQuizIds.has(q.id))) return true;
+  const cloudSetIds = new Set(cloudSets.map((s) => s.id));
+  if (localSets.some((s) => !s.system && !cloudSetIds.has(s.id))) return true;
+  const cloudItemIds = quizItemIdsInSets(cloudSets);
+  for (const set of localSets) {
+    for (const item of set.items ?? []) {
+      if (item?.id != null && !cloudItemIds.has(item.id)) return true;
+    }
+  }
+  return false;
+}
+
 async function fetchLatestFolderHistory(uid: string): Promise<QuizFolder[] | null> {
   try {
     const res = await rtdbFetch(`/users/${uid}/quizFoldersHistory?shallow=true`);
@@ -1328,6 +1362,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const instantDataSaveQueuedRef = useRef(false);
   /** When remote apply blocks cloud writes, queue a full save and flush afterwards. */
   const pendingCloudSaveAfterRemoteRef = useRef(false);
+  /** Last known cloud quiz item counts — block accidental shrink overwrites from stale devices. */
+  const lastKnownCloudQuizCountRef = useRef(0);
+  const lastKnownCloudSetItemCountRef = useRef(0);
   const notesRef = useRef(notes);
   const quizzesRef = useRef(quizzes);
   const chatsRef = useRef(chats);
@@ -1458,6 +1495,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     void bootstrapDraftsFromCloud();
 
     (async () => {
+      let shouldPushLocalOnlyQuizData = false;
       try {
         const r = await rtdbFetch(`/users/${user.uid}`);
         if (!r.ok) throw new Error('cloud-fetch-failed');
@@ -1538,12 +1576,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
 
         setNotes(notes);
+        notesRef.current = notes;
         localStorage.setItem('malacadhati', JSON.stringify(notes));
 
         setQuizzes(quizzes);
+        quizzesRef.current = quizzes;
         localStorage.setItem('malacadhati_quiz', JSON.stringify(quizzes));
+        lastKnownCloudQuizCountRef.current = Math.max(lastKnownCloudQuizCountRef.current, cloudQuizzes.length, quizzes.length);
 
         setChats(chats);
+        chatsRef.current = chats;
         localStorage.setItem('malacadhati_chats', JSON.stringify(chats));
 
         let dedicatedFolders: QuizFolder[] = [];
@@ -1615,9 +1657,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
         );
         setQuizSets(normalizedSets);
+        quizSetsRef.current = normalizedSets;
         localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
         setQuizFolders(normalizedFolders);
+        quizFoldersRef.current = normalizedFolders;
         localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+        const cloudSetsMerged = mergeQuizSetsForSync(cloudSets, dedicatedSets, tombstones);
+        lastKnownCloudSetItemCountRef.current = Math.max(
+          lastKnownCloudSetItemCountRef.current,
+          countQuizItemsInSets(cloudSetsMerged),
+          countQuizItemsInSets(normalizedSets),
+        );
+        const shouldPushLocalOnlyQuizDataFlag = hasLocalOnlyQuizData(
+          local.quizzes,
+          local.sets,
+          cloudQuizzes,
+          cloudSetsMerged,
+        );
+        shouldPushLocalOnlyQuizData = shouldPushLocalOnlyQuizDataFlag;
 
         const needsRepair = notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
           || (cloudSetsEmpty && dedicatedSetsEmpty && local.sets.length > 0)
@@ -1766,8 +1823,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             } else {
               setCloudStatus('idle');
             }
-            // Push any desktop-only quizzes/sets so other devices (mobile) receive them.
-            if (quizzesRef.current.length > 0 || countUserQuizSets(quizSetsRef.current) > 0) {
+            // Only push when THIS device has quiz ids the cloud lacked — never re-push a
+            // full snapshot on every load (that wiped newer questions from other devices).
+            if (shouldPushLocalOnlyQuizData) {
+              recoveryLog('pushing local-only quiz data after load');
               scheduleInstantDataCloudSave({
                 quizzes: quizzesRef.current,
                 quizSets: quizSetsRef.current,
@@ -1797,6 +1856,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (countUserQuizSets(nextSets) > 0) everHadSetsRef.current = true;
+      lastKnownCloudSetItemCountRef.current = Math.max(
+        lastKnownCloudSetItemCountRef.current,
+        countQuizItemsInSets(nextSets),
+      );
       void rtdbFetch(`/users/${user.uid}/quizSets`, {
         method: 'PUT',
         body: JSON.stringify(nextSets),
@@ -2329,7 +2392,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const pendingPatch = pendingInstantDataSaveRef.current;
     if (pendingPatch) {
       pendingInstantDataSaveRef.current = null;
-      void runInstantDataCloudSave(pendingPatch);
+      // Never flush a frozen pre-remote snapshot — write live refs so a stale
+      // 1-item array cannot overwrite a just-merged 2-item cloud set.
+      const live: typeof pendingPatch = {};
+      if (pendingPatch.notes) live.notes = notesRef.current;
+      if (pendingPatch.quizzes) live.quizzes = quizzesRef.current;
+      if (pendingPatch.quizSets) live.quizSets = quizSetsRef.current;
+      if (pendingPatch.quizFolders) live.quizFolders = quizFoldersRef.current;
+      void runInstantDataCloudSave(live);
     }
     if (pendingCloudSaveAfterRemoteRef.current) {
       pendingCloudSaveAfterRemoteRef.current = false;
@@ -2350,7 +2420,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       pendingCloudSaveAfterRemoteRef.current = true;
       return;
     }
+    // Prefer live refs over any closed-over snapshot passed into the patch.
     const safe: typeof patch = { ...patch };
+    if (safe.notes) safe.notes = notesRef.current;
+    if (safe.quizzes) safe.quizzes = quizzesRef.current;
+    if (safe.quizSets) safe.quizSets = quizSetsRef.current;
+    if (safe.quizFolders) safe.quizFolders = quizFoldersRef.current;
     if (safe.notes && safe.notes.length === 0 && everHadNotesRef.current) {
       recoveryLog('skipped instant notes wipe');
       delete safe.notes;
@@ -2365,8 +2440,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     if (!safe.notes && !safe.quizzes && !safe.quizSets && !safe.quizFolders) return;
     if (safe.notes?.length) everHadNotesRef.current = true;
-    if (safe.quizzes?.length) everHadQuizzesRef.current = true;
-    if (safe.quizSets && countUserQuizSets(safe.quizSets) > 0) everHadSetsRef.current = true;
+    if (safe.quizzes?.length) {
+      everHadQuizzesRef.current = true;
+      lastKnownCloudQuizCountRef.current = Math.max(lastKnownCloudQuizCountRef.current, safe.quizzes.length);
+    }
+    if (safe.quizSets && countUserQuizSets(safe.quizSets) > 0) {
+      everHadSetsRef.current = true;
+      lastKnownCloudSetItemCountRef.current = Math.max(
+        lastKnownCloudSetItemCountRef.current,
+        countQuizItemsInSets(safe.quizSets),
+      );
+    }
     const syncedAt = Date.now();
     const body = sanitizeForRtdb({
       ...safe,
@@ -2565,11 +2649,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
     if (nextNotes.length > 0 || !everHadNotesRef.current) body.notes = nextNotes;
     else recoveryLog('skipped wiping notes with empty local array');
-    if (qList.length > 0 || !everHadQuizzesRef.current) body.quizzes = qList;
-    else recoveryLog('skipped wiping quizzes with empty local array');
+    if (qList.length > 0 || !everHadQuizzesRef.current) {
+      body.quizzes = qList;
+      lastKnownCloudQuizCountRef.current = Math.max(lastKnownCloudQuizCountRef.current, qList.length);
+    } else recoveryLog('skipped wiping quizzes with empty local array');
     if (chatList.length > 0) body.chats = chatList;
-    if (countUserQuizSets(qsList) > 0 || !everHadSetsRef.current) body.quizSets = qsList;
-    else recoveryLog('skipped wiping quizSets with empty local array');
+    if (countUserQuizSets(qsList) > 0 || !everHadSetsRef.current) {
+      body.quizSets = qsList;
+      lastKnownCloudSetItemCountRef.current = Math.max(
+        lastKnownCloudSetItemCountRef.current,
+        countQuizItemsInSets(qsList),
+      );
+    } else recoveryLog('skipped wiping quizSets with empty local array');
     if (qfList.length > 0) body.quizFolders = qfList;
     void rtdbFetch(`/users/${u.uid}`, {
       method: 'PATCH',
@@ -2740,26 +2831,36 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     let changed = false;
     if (JSON.stringify(mergedNotes) !== JSON.stringify(notesRef.current)) {
+      notesRef.current = mergedNotes;
       setNotes(mergedNotes);
       localStorage.setItem('malacadhati', JSON.stringify(mergedNotes));
       changed = true;
     }
     if (JSON.stringify(mergedQuizzes) !== JSON.stringify(quizzesRef.current)) {
+      quizzesRef.current = mergedQuizzes;
       setQuizzes(mergedQuizzes);
       localStorage.setItem('malacadhati_quiz', JSON.stringify(mergedQuizzes));
+      lastKnownCloudQuizCountRef.current = Math.max(lastKnownCloudQuizCountRef.current, mergedQuizzes.length);
       changed = true;
     }
     if (JSON.stringify(mergedChats) !== JSON.stringify(chatsRef.current)) {
+      chatsRef.current = mergedChats;
       setChats(mergedChats);
       localStorage.setItem('malacadhati_chats', JSON.stringify(mergedChats));
       changed = true;
     }
     if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
+      quizSetsRef.current = normalizedSets;
       setQuizSets(normalizedSets);
       localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+      lastKnownCloudSetItemCountRef.current = Math.max(
+        lastKnownCloudSetItemCountRef.current,
+        countQuizItemsInSets(normalizedSets),
+      );
       changed = true;
     }
     if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
+      quizFoldersRef.current = normalizedFolders;
       setQuizFolders(normalizedFolders);
       localStorage.setItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
       changed = true;
