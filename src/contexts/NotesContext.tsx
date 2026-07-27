@@ -18,6 +18,7 @@ import {
   persistNoteDurable,
   persistQuizItemDurable,
   removeNoteDurable,
+  removeQuizItemDurable,
   tombstoneNoteDurable,
   tombstoneQuizItemDurable,
   type StoredQuizItem,
@@ -84,7 +85,12 @@ function quizSyncTime(item: QuizItem) {
 }
 
 function pickNewerQuizItem(a: QuizItem, b: QuizItem) {
-  if (!!a.trashed !== !!b.trashed) return b.trashed ? b : a;
+  if (!!a.trashed !== !!b.trashed) {
+    const trashed = a.trashed ? a : b;
+    const live = a.trashed ? b : a;
+    // Soft-delete wins unless a restore/edit is strictly newer.
+    return quizSyncTime(live) > quizSyncTime(trashed) ? live : trashed;
+  }
   return quizSyncTime(b) >= quizSyncTime(a) ? b : a;
 }
 
@@ -358,29 +364,42 @@ function filterResurrectedTrash<T extends { id: string | number; trashed?: boole
   });
 }
 
+function quizSetOrderTime(set: QuizSet) {
+  return Date.parse(set.orderUpdatedAt || '') || entitySyncTime(set);
+}
+
+function quizFolderOrderTime(folder: QuizFolder) {
+  return Date.parse(folder.orderUpdatedAt || '') || entitySyncTime(folder);
+}
+
 function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: PermanentlyDeletedIds = emptyPermDeleted()): QuizSet {
   if (!!local.trashed !== !!remote.trashed) return remote.trashed ? remote : local;
-  const remoteNewer = entitySyncTime(remote) >= entitySyncTime(local);
-  const base = remoteNewer ? remote : local;
+  // Membership/content authority is updatedAt — Manual reorder uses orderUpdatedAt
+  // so dragging on one device cannot revive questions deleted on another.
+  const remoteMembershipNewer = entitySyncTime(remote) >= entitySyncTime(local);
+  const membershipAuthority = remoteMembershipNewer ? remote : local;
+  const base = membershipAuthority;
+  const preferRemoteOrder = quizSetOrderTime(remote) >= quizSetOrderTime(local);
   let items = mergeQuizzesForSync(
     local.items ?? [],
     remote.items ?? [],
     tombstones,
-    remoteNewer ? 'remote' : 'local',
+    preferRemoteOrder ? 'remote' : 'local',
   );
-  // When the remote set is the newer authority, drop local-only live items that
-  // are older than the remote set — those were deleted (hard-removed) on another
-  // device. Without this, union-merge resurrects every deleted question.
-  if (remoteNewer) {
-    const remoteIds = new Set((remote.items ?? []).map((i) => i.id));
-    const remoteAt = entitySyncTime(remote);
-    items = items.filter((i) => {
-      if (remoteIds.has(i.id)) return true;
-      if (i.trashed) return true;
-      return quizSyncTime(i) > remoteAt;
-    });
-  }
-  return { ...base, items };
+  // Newer membership side is authoritative for which live ids belong in the set.
+  // Keep only: ids present on the authority, soft-deleted rows, or concurrent
+  // adds stamped strictly after the authority set.
+  const authorityIds = new Set((membershipAuthority.items ?? []).map((i) => i.id));
+  const authorityAt = entitySyncTime(membershipAuthority);
+  items = items.filter((i) => {
+    if (authorityIds.has(i.id)) return true;
+    if (i.trashed) return true;
+    return quizSyncTime(i) > authorityAt;
+  });
+  const orderUpdatedAt = preferRemoteOrder
+    ? (remote.orderUpdatedAt ?? local.orderUpdatedAt)
+    : (local.orderUpdatedAt ?? remote.orderUpdatedAt);
+  return orderUpdatedAt ? { ...base, items, orderUpdatedAt } : { ...base, items };
 }
 
 function pickBetterQuizFolder(local: QuizFolder, remote: QuizFolder): QuizFolder {
@@ -420,9 +439,9 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: P
     const existing = map.get(set.id);
     map.set(set.id, existing ? pickBetterQuizSet(existing, set, tombstones) : set);
   }
-  // Prefer remote Manual set-list order when remote collection is at least as new.
-  const localMax = Math.max(0, ...local.map((set) => entitySyncTime(set)));
-  const remoteMax = Math.max(0, ...remote.map((set) => entitySyncTime(set)));
+  // Prefer remote Manual set-list order when its order stamp is at least as new.
+  const localMax = Math.max(0, ...local.map((set) => quizSetOrderTime(set)));
+  const remoteMax = Math.max(0, ...remote.map((set) => quizSetOrderTime(set)));
   const orderSource = remoteMax >= localMax ? remote : local;
   const ordered: QuizSet[] = [];
   const seen = new Set<string>();
@@ -454,8 +473,8 @@ function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[], tombston
     const existing = map.get(folder.id);
     map.set(folder.id, existing ? pickBetterQuizFolder(existing, folder) : folder);
   }
-  const localMax = Math.max(0, ...local.map((folder) => entitySyncTime(folder)));
-  const remoteMax = Math.max(0, ...remote.map((folder) => entitySyncTime(folder)));
+  const localMax = Math.max(0, ...local.map((folder) => quizFolderOrderTime(folder)));
+  const remoteMax = Math.max(0, ...remote.map((folder) => quizFolderOrderTime(folder)));
   const orderSource = remoteMax >= localMax ? remote : local;
   const ordered: QuizFolder[] = [];
   const seen = new Set<string>();
@@ -2421,6 +2440,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
     );
 
+    const shouldReconcileQuizSets = patch.quizSets !== undefined
+      && JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current);
+    const shouldReconcileQuizzes = patch.quizzes !== undefined
+      && JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current);
+    const shouldReconcileFolders = patch.quizFolders !== undefined
+      && JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current);
+
     isApplyingRemoteRef.current = true;
     try {
       if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
@@ -2447,6 +2473,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       isApplyingRemoteRef.current = false;
+    }
+
+    // Push healed membership/order so the other device's stale "Saved" snapshot
+    // cannot remain cloud truth after a merge that dropped resurrected items.
+    if (shouldReconcileQuizSets || shouldReconcileQuizzes || shouldReconcileFolders) {
+      const reconcile: {
+        quizzes?: QuizItem[];
+        quizSets?: QuizSet[];
+        quizFolders?: QuizFolder[];
+      } = {};
+      if (shouldReconcileQuizzes) reconcile.quizzes = quizzesRef.current;
+      if (shouldReconcileQuizSets) reconcile.quizSets = quizSetsRef.current;
+      if (shouldReconcileFolders) reconcile.quizFolders = quizFoldersRef.current;
+      queueMicrotask(() => scheduleInstantDataCloudSave(reconcile));
     }
   };
 
@@ -3586,7 +3626,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (next[from].system || next[to].system) return prev;
       const stamp = nowStr();
       const [item] = next.splice(from, 1);
-      next.splice(to, 0, { ...item, updatedAt: stamp });
+      // orderUpdatedAt only — never bump updatedAt or Manual order steals deletes.
+      next.splice(to, 0, { ...item, orderUpdatedAt: stamp });
       persistSets(next, true, true);
       scheduleInstantDataCloudSave({ quizSets: next });
       return next;
@@ -3665,7 +3706,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (from < 0 || to < 0) return prev;
       const stamp = nowStr();
       const [item] = normalFolders.splice(from, 1);
-      normalFolders.splice(to, 0, { ...item, updatedAt: stamp });
+      normalFolders.splice(to, 0, { ...item, orderUpdatedAt: stamp });
       const next = [...systemFolders, ...normalFolders];
       persistFolders(next, true);
       scheduleInstantDataCloudSave({ quizFolders: next });
@@ -4318,7 +4359,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (swapIdx < 0 || swapIdx >= items.length) return s;
         [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
         changed = true;
-        return { ...s, items, updatedAt: stamp };
+        return { ...s, items, orderUpdatedAt: stamp };
       });
       if (!changed) return prev;
       persistSets(next, true, true);
@@ -4357,7 +4398,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const [item] = items.splice(from, 1);
         items.splice(to, 0, item);
         changed = true;
-        return { ...s, items, updatedAt: stamp };
+        return { ...s, items, orderUpdatedAt: stamp };
       });
       if (!changed) return prev;
       persistSets(next, true, true);
@@ -4397,7 +4438,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const items = orderItemsByIds(s.items, itemIds);
         if (items.map((i) => i.id).join() === s.items.map((i) => i.id).join()) return s;
         changed = true;
-        return { ...s, items, updatedAt: stamp };
+        return { ...s, items, orderUpdatedAt: stamp };
       });
       if (!changed) return prev;
       persistSets(next, true, true);
@@ -4471,9 +4512,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const trashedSets = quizSetsRef.current.filter((set) => set.trashed);
     const trashedFolders = quizFoldersRef.current.filter((folder) => folder.trashed);
     const quizIdsFromTrashedSets = trashedSets.flatMap((set) => (set.items ?? []).map((item) => item.id));
+    const inSetTrashedIds = quizSetsRef.current
+      .filter((set) => !set.trashed)
+      .flatMap((set) => (set.items ?? []).filter((item) => item.trashed).map((item) => item.id));
+    const emptiedAt = new Date().toISOString();
     recordPermDeleted({
       notes: trashedNotes.map((n) => n.id),
-      quizzes: [...trashedQuizzes.map((q) => q.id), ...quizIdsFromTrashedSets],
+      quizzes: [...trashedQuizzes.map((q) => q.id), ...quizIdsFromTrashedSets, ...inSetTrashedIds],
       quizSets: trashedSets.map((set) => set.id),
       quizFolders: trashedFolders.map((folder) => folder.id),
     });
@@ -4483,11 +4528,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const removedFolderIds = new Set(trashedFolders.map((folder) => folder.id));
     const nextSets = quizSetsRef.current
       .filter((set) => !set.trashed)
-      .map((set) => ({
-        ...set,
-        folderId: set.folderId && removedFolderIds.has(set.folderId) ? undefined : set.folderId,
-        items: (set.items ?? []).filter((item) => !item.trashed && !deadQuizzes.has(item.id)),
-      }));
+      .map((set) => {
+        const hadTrashed = (set.items ?? []).some((item) => item.trashed || deadQuizzes.has(item.id));
+        return {
+          ...set,
+          folderId: set.folderId && removedFolderIds.has(set.folderId) ? undefined : set.folderId,
+          items: (set.items ?? []).filter((item) => !item.trashed && !deadQuizzes.has(item.id)),
+          // Bump membership so durable live copies cannot re-append stripped ids.
+          ...(hadTrashed ? { updatedAt: emptiedAt } : {}),
+        };
+      });
     const nextFolders = quizFoldersRef.current.filter((folder) => !folder.trashed);
 
     notesRef.current = nextNotes;
@@ -4508,6 +4558,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const uid = userRef.current?.uid;
     trashedNotes.forEach((n) => { void removeNoteDurable(uid, n.id); });
+    [...trashedQuizzes.map((q) => q.id), ...quizIdsFromTrashedSets, ...inSetTrashedIds]
+      .forEach((id) => { void removeQuizItemDurable(uid, id); });
 
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);

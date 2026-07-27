@@ -75,6 +75,8 @@ export interface QuizSet {
   items: QuizItem[];
   createdAt: string;
   updatedAt?: string;
+  /** Manual list/item order only — must not steal membership authority from updatedAt. */
+  orderUpdatedAt?: string;
   color?: string;
   colorInitialized?: boolean;
   trashed?: boolean;
@@ -95,5 +97,7 @@ export interface QuizFolder {
   deletedAt?: string;
   createdAt: string;
   updatedAt?: string;
+  /** Manual folder-list order only. */
+  orderUpdatedAt?: string;
   system?: 'restored' | 'favorites';
 }

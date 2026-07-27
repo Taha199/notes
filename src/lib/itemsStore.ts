@@ -259,6 +259,24 @@ export async function tombstoneQuizItemDurable(
   }
 }
 
+/** Permanent delete from IndexedDB + quizItemsById. */
+export async function removeQuizItemDurable(
+  uid: string | null | undefined,
+  id: number,
+): Promise<void> {
+  await deleteQuizItemLocal(id);
+  if (!uid) return;
+  try {
+    await remove(dbRef(database, `users/${uid}/quizItemsById/${id}`));
+  } catch {
+    try {
+      await rtdbFetch(`/users/${uid}/quizItemsById/${id}`, { method: 'DELETE' });
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 export async function persistQuizItemDurable(
   uid: string | null | undefined,
   item: QuizItem,
@@ -302,8 +320,8 @@ export async function fetchQuizItemsByIdCloud(uid: string): Promise<StoredQuizIt
 /**
  * Fold durable quiz items into quizzes / quizSets.
  * - Trashed durable items always win (instant cross-device delete).
- * - Live durable items only UPDATE existing rows, or ADD when newer than the
- *   set's updatedAt — never resurrect an item that was removed from a newer set.
+ * - Live durable items only UPDATE existing rows, or ADD when strictly newer
+ *   than the set's updatedAt — never resurrect an item a newer set omitted.
  */
 export function applyDurableQuizItems(
   quizzes: QuizItem[],
@@ -326,16 +344,14 @@ export function applyDurableQuizItems(
         if (setId && set.id !== setId && !set.items.some((i) => i.id === bare.id)) return set;
         if (!set.items.some((i) => i.id === bare.id)) {
           if (setId && set.id === setId) {
-            return { ...set, items: [...set.items, bare], updatedAt: bare.updatedAt || set.updatedAt };
+            // Re-attach as trash only — do not bump set membership stamp.
+            return { ...set, items: [...set.items, bare] };
           }
           return set;
         }
         return {
           ...set,
           items: set.items.map((i) => (i.id === bare.id ? { ...i, ...bare } : i)),
-          updatedAt: bare.updatedAt && (!set.updatedAt || bare.updatedAt > set.updatedAt)
-            ? bare.updatedAt
-            : set.updatedAt,
         };
       });
       continue;
@@ -351,14 +367,13 @@ export function applyDurableQuizItems(
           return {
             ...set,
             items: set.items.map((i) => (i.id === bare.id ? bare : i)),
-            updatedAt: bare.updatedAt || set.updatedAt,
           };
         }
-        // Missing from set: only add if this durable write is at least as new as
-        // the set (otherwise it was intentionally removed on another device).
+        // Missing from set: only add if this durable write is STRICTLY newer
+        // than the set (equality used to re-append after emptyTrash).
         const setAt = syncTime({ updatedAt: set.updatedAt, createdAt: set.createdAt });
-        if (syncTime(bare) < setAt) return set;
-        return { ...set, items: [...set.items, bare], updatedAt: bare.updatedAt || set.updatedAt };
+        if (syncTime(bare) <= setAt) return set;
+        return { ...set, items: [...set.items, bare] };
       });
     } else {
       const existing = nextQuizzes.find((q) => q.id === bare.id);
