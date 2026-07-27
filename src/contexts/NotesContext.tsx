@@ -3702,41 +3702,51 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const addQuizSet = (name: string): QuizSet => {
     const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value));
-    const newSet: QuizSet = { id: Date.now().toString(), name, items: [], createdAt: nowStr(), color, colorInitialized: true };
-    setQuizSets((prev) => {
-      const next = [...prev, newSet];
-      persistSets(next);
-      return next;
-    });
+    const stamp = new Date().toISOString();
+    const newSet: QuizSet = {
+      id: Date.now().toString(),
+      name,
+      items: [],
+      createdAt: stamp,
+      updatedAt: stamp,
+      color,
+      colorInitialized: true,
+    };
+    const next = [...quizSetsRef.current, newSet];
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    everHadSetsRef.current = true;
+    persistSets(next, true, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
     return newSet;
   };
 
   const deleteQuizSet = (id: string) => {
     if (id === FAVORITES_SET_ID) return;
     const trashAt = new Date().toISOString();
-    setQuizSets((prev) => {
-      const next = prev.map((s) => s.id === id ? { ...s, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : s);
-      persistSets(next, true, true);
-      scheduleInstantDataCloudSave({ quizSets: next });
-      return next;
-    });
+    const next = quizSetsRef.current.map((s) => (
+      s.id === id ? { ...s, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : s
+    ));
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    persistSets(next, true, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const restoreQuizSet = (id: string) => {
-    setQuizSets((prev) => {
-      const set = prev.find((item) => item.id === id);
-      if (!set) return prev;
-      const next = [...prev.filter((item) => item.id !== id), {
-        ...set,
-        trashed: false,
-        deletedAt: undefined,
-        folderId: RESTORED_FOLDER_ID,
-        updatedAt: new Date().toISOString(),
-      }];
-      persistSets(next, true, true);
-      scheduleInstantDataCloudSave({ quizSets: next });
-      return next;
-    });
+    const set = quizSetsRef.current.find((item) => item.id === id);
+    if (!set) return;
+    const next = [...quizSetsRef.current.filter((item) => item.id !== id), {
+      ...set,
+      trashed: false,
+      deletedAt: undefined,
+      folderId: RESTORED_FOLDER_ID,
+      updatedAt: new Date().toISOString(),
+    }];
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    persistSets(next, true, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const permDeleteQuizSet = (id: string) => {
@@ -3772,42 +3782,59 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const renameQuizSet = (id: string, name: string) => {
-    setQuizSets((prev) => {
-      const next = prev.map((s) => (s.id === id ? { ...s, name } : s));
-      persistSets(next);
-      return next;
-    });
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const stamp = new Date().toISOString();
+    const next = quizSetsRef.current.map((s) => (
+      s.id === id ? { ...s, name: trimmed, updatedAt: stamp } : s
+    ));
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    persistSets(next, true, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const setQuizSetColor = (id: string, color: string) => {
-    setQuizSets((prev) => {
-      const next = prev.map((s) => (s.id === id ? { ...s, color, colorInitialized: true } : s));
-      persistSets(next);
-      return next;
-    });
+    const stamp = new Date().toISOString();
+    const next = quizSetsRef.current.map((s) => (
+      s.id === id ? { ...s, color, colorInitialized: true, updatedAt: stamp } : s
+    ));
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    persistSets(next, true, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const setQuizSetFolder = (id: string, folderId: string | undefined) => {
     if (id === FAVORITES_SET_ID) return;
-    setQuizSets((prev) => {
-      const set = prev.find((s) => s.id === id);
-      if (set?.system) return prev;
-      if (folderId && quizFolders.find((f) => f.id === folderId)?.system) return prev;
-      if (!set || set.folderId === folderId) return prev;
-      const next = [...prev.filter((s) => s.id !== id), { ...set, folderId }];
-      persistSets(next);
-      return next;
-    });
+    const set = quizSetsRef.current.find((s) => s.id === id);
+    if (!set || set.system) return;
+    if (folderId && quizFoldersRef.current.find((f) => f.id === folderId)?.system) return;
+    if (set.folderId === folderId) return;
+    const stamp = new Date().toISOString();
+    const next = [...quizSetsRef.current.filter((s) => s.id !== id), { ...set, folderId, updatedAt: stamp }];
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    persistSets(next, true, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   const addQuizFolder = (name: string): QuizFolder => {
     const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value));
-    const folder: QuizFolder = { id: 'f' + Date.now().toString(), name, createdAt: nowStr(), color, colorInitialized: true };
-    setQuizFolders((prev) => {
-      const next = [...prev, folder];
-      persistFolders(next);
-      return next;
-    });
+    const stamp = new Date().toISOString();
+    const folder: QuizFolder = {
+      id: 'f' + Date.now().toString(),
+      name,
+      createdAt: stamp,
+      updatedAt: stamp,
+      color,
+      colorInitialized: true,
+    };
+    const next = [...quizFoldersRef.current, folder];
+    quizFoldersRef.current = next;
+    setQuizFolders(next);
+    persistFolders(next, true);
+    scheduleInstantDataCloudSave({ quizFolders: next });
     return folder;
   };
 
@@ -3815,20 +3842,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
     const trimmed = name.trim();
     if (!trimmed) return;
-    setQuizFolders((prev) => {
-      const next = prev.map((f) => (f.id === id ? { ...f, name: trimmed, updatedAt: nowStr() } : f));
-      persistFolders(next, true);
-      return next;
-    });
+    const stamp = new Date().toISOString();
+    const next = quizFoldersRef.current.map((f) => (
+      f.id === id ? { ...f, name: trimmed, updatedAt: stamp } : f
+    ));
+    quizFoldersRef.current = next;
+    setQuizFolders(next);
+    persistFolders(next, true);
+    scheduleInstantDataCloudSave({ quizFolders: next });
   };
 
   const setQuizFolderColor = (id: string, color: string) => {
     if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
-    setQuizFolders((prev) => {
-      const next = prev.map((f) => (f.id === id ? { ...f, color, colorInitialized: true } : f));
-      persistFolders(next);
-      return next;
-    });
+    const stamp = new Date().toISOString();
+    const next = quizFoldersRef.current.map((f) => (
+      f.id === id ? { ...f, color, colorInitialized: true, updatedAt: stamp } : f
+    ));
+    quizFoldersRef.current = next;
+    setQuizFolders(next);
+    persistFolders(next, true);
+    scheduleInstantDataCloudSave({ quizFolders: next });
   };
 
   const reorderQuizFolders = (dragId: string, targetId: string) => {
