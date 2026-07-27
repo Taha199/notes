@@ -311,6 +311,142 @@ export function adjustTableColumnWidth(
   return { rowIndex: ctx.rowIndex, colIndex: ctx.colIndex };
 }
 
+/** Hit-zone half-width (px) for drag-resize on vertical column borders. */
+export const TABLE_COLUMN_RESIZE_HIT_PX = 4;
+export const NOTE_TABLE_COL_RESIZE_HOVER = 'note-table--col-resize-hover';
+export const NOTE_TABLE_COL_RESIZING = 'note-table--col-resizing';
+
+export type TableColumnResizeHit = {
+  table: HTMLTableElement;
+  /** DOM column index visually to the left of the boundary. */
+  leftColIndex: number;
+  /** DOM column index visually to the right of the boundary. */
+  rightColIndex: number;
+};
+
+/**
+ * Detect whether (clientX, clientY) is within the narrow hit zone of a vertical
+ * border between two columns. Uses geometry so RTL tables still map correctly.
+ */
+export function hitTableColumnResize(
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+  hitPx = TABLE_COLUMN_RESIZE_HIT_PX,
+): TableColumnResizeHit | null {
+  const fromPoint = typeof document !== 'undefined'
+    ? document.elementFromPoint(clientX, clientY)
+    : null;
+  let tableEl: Element | null = fromPoint instanceof Element
+    ? fromPoint.closest(`table.${NOTE_TABLE_CLASS}`)
+    : null;
+  if (!(tableEl instanceof HTMLTableElement) || !root.contains(tableEl)) {
+    // Fallback: scan tables in root when point lands on a border gap / scrollbar.
+    const tables = root.querySelectorAll(`table.${NOTE_TABLE_CLASS}`);
+    tableEl = null;
+    for (const candidate of tables) {
+      if (!(candidate instanceof HTMLTableElement)) continue;
+      const rect = candidate.getBoundingClientRect();
+      if (
+        clientX >= rect.left - hitPx
+        && clientX <= rect.right + hitPx
+        && clientY >= rect.top
+        && clientY <= rect.bottom
+      ) {
+        tableEl = candidate;
+        break;
+      }
+    }
+  }
+  if (!(tableEl instanceof HTMLTableElement) || !root.contains(tableEl)) return null;
+
+  const tableRect = tableEl.getBoundingClientRect();
+  if (clientY < tableRect.top || clientY > tableRect.bottom) return null;
+
+  const count = tableColumnCount(tableEl);
+  if (count < 2) return null;
+  const firstRow = tableRows(tableEl)[0];
+  if (!firstRow) return null;
+  const cells = rowCells(firstRow);
+  if (cells.length < 2) return null;
+
+  let best: TableColumnResizeHit | null = null;
+  let bestDist = hitPx + 1;
+  for (let i = 0; i < cells.length - 1; i += 1) {
+    const a = cells[i].getBoundingClientRect();
+    const b = cells[i + 1].getBoundingClientRect();
+    const aCenter = (a.left + a.right) / 2;
+    const bCenter = (b.left + b.right) / 2;
+    const aIsLeft = aCenter <= bCenter;
+    const boundaryX = aIsLeft ? (a.right + b.left) / 2 : (b.right + a.left) / 2;
+    const dist = Math.abs(clientX - boundaryX);
+    if (dist <= hitPx && dist < bestDist) {
+      bestDist = dist;
+      best = {
+        table: tableEl,
+        leftColIndex: aIsLeft ? i : i + 1,
+        rightColIndex: aIsLeft ? i + 1 : i,
+      };
+    }
+  }
+  return best;
+}
+
+/**
+ * Resize the two columns on either side of a border by transferring
+ * `deltaPercent` from the right column to the left (positive = widen left).
+ * Sum is conserved; each column respects TABLE_COLUMN_WIDTH_MIN.
+ */
+export function resizeAdjacentTableColumns(
+  table: HTMLTableElement,
+  leftColIndex: number,
+  rightColIndex: number,
+  deltaPercent: number,
+  startWidths?: number[],
+): boolean {
+  const count = tableColumnCount(table);
+  if (
+    count < 2
+    || leftColIndex < 0
+    || rightColIndex < 0
+    || leftColIndex >= count
+    || rightColIndex >= count
+    || leftColIndex === rightColIndex
+  ) {
+    return false;
+  }
+  const min = Math.min(TABLE_COLUMN_WIDTH_MIN, Math.floor(100 / count));
+  const base = startWidths && startWidths.length === count
+    ? [...startWidths]
+    : (readStoredColumnWidths(table, count) ?? measureColumnWidths(table, count));
+  let nextLeft = base[leftColIndex] + deltaPercent;
+  let nextRight = base[rightColIndex] - deltaPercent;
+  if (nextLeft < min) {
+    nextRight -= (min - nextLeft);
+    nextLeft = min;
+  }
+  if (nextRight < min) {
+    nextLeft -= (min - nextRight);
+    nextRight = min;
+  }
+  if (nextLeft < min - 0.05 || nextRight < min - 0.05) {
+    ensureColgroup(table, count, base);
+    return false;
+  }
+  const widths = [...base];
+  widths[leftColIndex] = nextLeft;
+  widths[rightColIndex] = nextRight;
+  ensureColgroup(table, count, normalizeColumnWidths(widths, min));
+  return true;
+}
+
+/** Current stored (or measured) percentage widths for drag start snapshots. */
+export function getTableColumnWidths(table: HTMLTableElement): number[] {
+  const count = tableColumnCount(table);
+  if (count <= 0) return [];
+  return readStoredColumnWidths(table, count) ?? measureColumnWidths(table, count);
+}
+
 export function addTableColumn(ctx: TableCellContext, position: 'before' | 'after'): TableEditPosition {
   const prevCount = tableColumnCount(ctx.table);
   const prevWidths = prevCount > 0

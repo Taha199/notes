@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   adjustTableColumnWidth,
   addTableColumn,
+  getTableColumnWidths,
   removeTableColumn,
+  resizeAdjacentTableColumns,
   resolveTableContext,
   TABLE_COLUMN_WIDTH_MIN,
   TABLE_COLUMN_WIDTH_STEP,
@@ -75,5 +77,22 @@ describe('table column width', () => {
     const before = colWidths(ctx.table);
     const cleaned = sanitizeTableElement(ctx.table);
     expect(colWidths(cleaned)).toEqual(before);
+  });
+
+  it('drag-resizes adjacent columns while conserving 100% and respecting the floor', () => {
+    const ctx = mountTwoColTable();
+    const start = getTableColumnWidths(ctx.table);
+    expect(start).toHaveLength(2);
+    resizeAdjacentTableColumns(ctx.table, 0, 1, 12, start);
+    const after = colWidths(ctx.table);
+    expect(after[0]).toBeGreaterThan(start[0]);
+    expect(after[1]).toBeLessThan(start[1]);
+    expect(Math.round(after[0] + after[1])).toBe(100);
+
+    resizeAdjacentTableColumns(ctx.table, 0, 1, -100, after);
+    const floored = colWidths(ctx.table);
+    expect(floored[0]).toBeGreaterThanOrEqual(TABLE_COLUMN_WIDTH_MIN - 0.05);
+    expect(floored[1]).toBeLessThanOrEqual(100 - TABLE_COLUMN_WIDTH_MIN + 0.05);
+    expect(Math.round(floored[0] + floored[1])).toBe(100);
   });
 });

@@ -515,6 +515,26 @@ body {
   cursor: text;
 }
 
+/* Drag-resize: col-resize cursor only while hovering the vertical border hit-zone. */
+.note-content table.note-table.note-table--col-resize-hover th,
+.note-content table.note-table.note-table--col-resize-hover td,
+[contenteditable] table.note-table.note-table--col-resize-hover th,
+[contenteditable] table.note-table.note-table--col-resize-hover td,
+.note-content table.note-table.note-table--col-resizing th,
+.note-content table.note-table.note-table--col-resizing td,
+[contenteditable] table.note-table.note-table--col-resizing th,
+[contenteditable] table.note-table.note-table--col-resizing td {
+  cursor: col-resize;
+}
+
+.note-content table.note-table.note-table--col-resizing th,
+.note-content table.note-table.note-table--col-resizing td,
+[contenteditable] table.note-table.note-table--col-resizing th,
+[contenteditable] table.note-table.note-table--col-resizing td {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .note-content table.note-table th,
 [contenteditable] table.note-table th {
   background: rgba(108, 99, 255, 0.08);
