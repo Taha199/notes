@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, memo } from 'react';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { AppRichTextEditor } from '../notes/AppRichTextEditor';
+import type { RichTextEditorHandle } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 import { useAuth } from '../../contexts/AuthContext';
 import { StudyMode } from './StudyMode';
@@ -377,6 +378,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   // inserting a large data:image, and Save must not send the stale empty snapshot.
   const liveQRef = useRef(question);
   const liveARef = useRef(answer);
+  const qEditorRef = useRef<RichTextEditorHandle>(null);
+  const aEditorRef = useRef<RichTextEditorHandle>(null);
   liveQRef.current = question;
   liveARef.current = answer;
 
@@ -423,8 +426,11 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   });
 
   const handleSave = () => {
-    const q = liveQRef.current;
-    const a = liveARef.current;
+    // Always read from the live editor DOM — image-only HTML can lag in React props/refs.
+    const q = qEditorRef.current?.flush() ?? liveQRef.current;
+    const a = aEditorRef.current?.flush() ?? liveARef.current;
+    liveQRef.current = q;
+    liveARef.current = a;
     if (!mcq) {
       onSave({ question: q, answer: a });
       return;
@@ -482,6 +488,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             first/last children instead. */}
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
+            ref={qEditorRef}
             html={question}
             onChange={handleChangeQ}
             onLiveChange={handleChangeQ}
@@ -539,6 +546,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         ) : (
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
+            ref={aEditorRef}
             html={answer}
             onChange={handleChangeA}
             onLiveChange={handleChangeA}

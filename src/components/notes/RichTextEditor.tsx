@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
@@ -58,6 +58,23 @@ function isEquivalentEditorHtml(a: string, b: string): boolean {
   const normalize = (html: string) => html.replace(/\s+/g, ' ').trim();
   return normalize(a) === normalize(b);
 }
+
+/** Plain-text length ignores images — use this so image-only edits are not treated as empty. */
+function htmlContentScore(html: string): number {
+  const plain = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\u200B/g, '').trim().length;
+  let score = plain;
+  if (/<(img|video|audio|iframe|svg|embed|object)\b/i.test(html)) score += 10_000;
+  if (/note-img-frame|note-yt-frame|note-table/i.test(html)) score += 5_000;
+  if (/data:image|blob:/i.test(html)) score += 10_000;
+  return score;
+}
+
+export type RichTextEditorHandle = {
+  /** Serialize live DOM HTML (includes images even if parent props lagged). */
+  getHtml: () => string;
+  /** Flush live DOM into onChange/onLiveChange and return it. */
+  flush: () => string;
+};
 
 const HIGHLIGHT_INLINE_TAGS = new Set(['SPAN', 'FONT', 'MARK', 'B', 'STRONG', 'EM', 'I', 'U', 'A']);
 
@@ -417,7 +434,7 @@ type EditorSnapshot = {
 
 const EDITOR_UNDO_LIMIT = 80;
 
-export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
+export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }, ref) {
   const { t, lang } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -1017,6 +1034,27 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     onChangeRef.current(next);
   };
+
+  useImperativeHandle(ref, () => ({
+    getHtml: () => {
+      const ed = editorRef.current;
+      if (!ed) return lastLocalHtmlRef.current || '';
+      return serializeEditorHtml(ed);
+    },
+    flush: () => {
+      const ed = editorRef.current;
+      if (!ed) return lastLocalHtmlRef.current || '';
+      const next = serializeEditorHtml(ed);
+      lastLocalHtmlRef.current = next;
+      onLiveChangeRef.current?.(next);
+      if (emitTimerRef.current) {
+        clearTimeout(emitTimerRef.current);
+        emitTimerRef.current = null;
+      }
+      onChangeRef.current(next);
+      return next;
+    },
+  }));
 
   // ── Helpers ──────────────────────────────────────────────────────────
   // Get the live selection inside the editor right now (returns null if focus is elsewhere).
@@ -4242,12 +4280,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (html === lastLocalHtmlRef.current) {
       return;
     }
-    // Parent sent shorter html — keep local DOM during active typing; never push longer html back up.
+    // Parent sent weaker html — keep local DOM during active editing (esp. image-only:
+    // plain-text length is 0 for <img>, so the old check wiped photos on re-render).
     if (propChanged && html !== lastLocalHtmlRef.current) {
-      const plain = (s: string) => s.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-      const localPlainLen = plain(ed.innerHTML).length;
-      const propPlainLen = plain(html).length;
-      if (localPlainLen > propPlainLen) {
+      const localScore = htmlContentScore(ed.innerHTML);
+      const propScore = htmlContentScore(html);
+      if (localScore > propScore) {
         const focused = active && editorWrapRef.current?.contains(active);
         if (focused || Date.now() - lastKeystrokeAtRef.current < 12_000) return;
         const remoteIsNewer = remoteSyncAdvance && syncAt > lastKeystrokeAtRef.current;
@@ -5717,8 +5755,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               normalizePastedBlocks(live);
               promotePseudoListsToNative(live);
               normalizeAutoLinks(live);
+              readCommandState();
+              emitHtml();
               void compressInlineEditorImages(live).then((changed) => {
-                if (changed) normalizeEditorImages(live);
+                if (!changed) return;
+                normalizeEditorImages(live);
                 readCommandState();
                 emitHtml();
               });
@@ -5760,8 +5801,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             syncYouTubeRemoveChrome(live);
             normalizeAutoLinks(live);
             normalizeTablesInEditor(live);
+            // Emit immediately so Save/live refs see pasted images before async compress finishes.
+            readCommandState();
+            emitHtml();
             void compressInlineEditorImages(live).then((changed) => {
-              if (changed) normalizeEditorImages(live);
+              if (!changed) return;
+              normalizeEditorImages(live);
               readCommandState();
               emitHtml();
             });
@@ -6163,4 +6208,4 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       })()}
     </div>
   );
-}
+});
