@@ -821,6 +821,7 @@ async function fetchLatestFolderHistory(uid: string): Promise<QuizFolder[] | nul
 
 const AUTO_QUIZ_COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#10b981', '#ec4899', '#06b6d4', '#f97316'];
 const RESTORED_FOLDER_ID = 'system-restored-sets';
+const RESTORED_QUESTIONS_SET_ID = 'system-restored-questions';
 export const FAVORITES_FOLDER_ID = 'system-favorites';
 export const FAVORITES_SET_ID = 'system-favorites-set';
 const MAX_FOLDER_HISTORY = 40;
@@ -1261,6 +1262,37 @@ function ensureFavoritesFolder(folders: QuizFolder[]) {
     return copy;
   }
   return [favFolder, ...folders];
+}
+
+function ensureRestoredQuestionsSet(sets: QuizSet[]): QuizSet[] {
+  const existing = sets.find((s) => s.id === RESTORED_QUESTIONS_SET_ID);
+  if (existing) {
+    return sets.map((s) => (
+      s.id === RESTORED_QUESTIONS_SET_ID
+        ? {
+            ...s,
+            folderId: RESTORED_FOLDER_ID,
+            trashed: false,
+            deletedAt: undefined,
+            name: s.name?.trim() ? s.name : 'Restored questions',
+            color: s.color || '#6c63ff',
+            colorInitialized: true,
+          }
+        : s
+    ));
+  }
+  return [
+    ...sets,
+    {
+      id: RESTORED_QUESTIONS_SET_ID,
+      name: 'Restored questions',
+      folderId: RESTORED_FOLDER_ID,
+      items: [],
+      createdAt: new Date().toISOString(),
+      color: '#6c63ff',
+      colorInitialized: true,
+    },
+  ];
 }
 
 function ensureFavoritesSet(sets: QuizSet[]) {
@@ -3552,35 +3584,61 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const restoreQuiz = (id: number) => {
     const restoredAt = new Date().toISOString();
-    const nextQuizzes = quizzesRef.current.map((q) => (
-      q.id === id ? { ...q, trashed: false, deletedAt: undefined, updatedAt: restoredAt } : q
-    ));
-    let setsChanged = false;
-    const nextSets = quizSetsRef.current.map((set) => {
-      if (!set.items.some((q) => q.id === id && q.trashed)) return set;
-      setsChanged = true;
+    let source: QuizItem | undefined = quizzesRef.current.find((q) => q.id === id);
+    if (!source?.trashed) {
+      for (const set of quizSetsRef.current) {
+        const found = set.items.find((q) => q.id === id && q.trashed);
+        if (found) {
+          source = found;
+          break;
+        }
+      }
+    }
+    if (!source) return;
+
+    const live: QuizItem = {
+      ...source,
+      trashed: false,
+      deletedAt: undefined,
+      updatedAt: restoredAt,
+    };
+
+    // Leave "Questions from Notes" — restored quiz questions live under Restored.
+    const nextQuizzes = quizzesRef.current.filter((q) => q.id !== id);
+
+    let nextSets = ensureRestoredQuestionsSet(quizSetsRef.current).map((set) => {
+      if (set.id === RESTORED_QUESTIONS_SET_ID) {
+        const items = set.items.some((i) => i.id === id)
+          ? set.items.map((i) => (i.id === id ? live : i))
+          : [...set.items, live];
+        return {
+          ...set,
+          folderId: RESTORED_FOLDER_ID,
+          trashed: false,
+          deletedAt: undefined,
+          items,
+          updatedAt: restoredAt,
+        };
+      }
+      if (!set.items.some((i) => i.id === id)) return set;
+      // Drop the trashed copy from the original set so it only lives in Restored.
       return {
         ...set,
+        items: set.items.filter((i) => i.id !== id),
         updatedAt: restoredAt,
-        items: set.items.map((q) => (
-          q.id === id ? { ...q, trashed: false, deletedAt: undefined, updatedAt: restoredAt } : q
-        )),
       };
     });
+
     quizzesRef.current = nextQuizzes;
+    quizSetsRef.current = nextSets;
     setQuizzes(nextQuizzes);
+    setQuizSets(nextSets);
     safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    if (setsChanged) {
-      quizSetsRef.current = nextSets;
-      setQuizSets(nextSets);
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-      persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
-      persistSets(nextSets, true, true);
-      scheduleInstantDataCloudSave({ quizzes: nextQuizzes, quizSets: nextSets });
-    } else {
-      persist({ quizzes: nextQuizzes }, true);
-      scheduleInstantDataCloudSave({ quizzes: nextQuizzes });
-    }
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    void persistQuizItemDurable(userRef.current?.uid, live, RESTORED_QUESTIONS_SET_ID, { immediate: true });
+    persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
+    persistSets(nextSets, true, true);
+    scheduleInstantDataCloudSave({ quizzes: nextQuizzes, quizSets: nextSets });
   };
 
   const permDeleteQuiz = (id: number) => {
