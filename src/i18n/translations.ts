@@ -166,6 +166,8 @@ export interface Translation {
   tableDelete: string;
   insertLineAboveBlock: string;
   titleInsertLineAboveBlock: string;
+  insertLineBelowBlock: string;
+  titleInsertLineBelowBlock: string;
   titleRight: string;
   titleLeft: string;
   titleCenter: string;
@@ -605,6 +607,7 @@ export const LANGS: Record<Lang, Translation> = {
     tableAddColBefore: 'Column left', tableAddColAfter: 'Column right', tableRemoveCol: 'Delete column',
     tableWidenCol: 'Widen column', tableNarrowCol: 'Narrow column', tableDelete: 'Delete table',
     insertLineAboveBlock: 'Line above', titleInsertLineAboveBlock: 'Add empty line above',
+    insertLineBelowBlock: 'Line below', titleInsertLineBelowBlock: 'Add empty line below',
     titleRight: 'Align Right', titleLeft: 'Align Left', titleCenter: 'Align Center', titleMoveImageUp: 'Move image up', titleMoveImageDown: 'Move image down', titleClr: 'Clear Formatting', titleColor: 'Text Color', titleResizeImage: 'Drag to resize (keep ratio)', titleResizeWidth: 'Drag to change width', titleResizeHeight: 'Drag to change height',
     titleBulletList: 'Bullet list', titleNumberedList: 'Numbered list', titleRemoveList: 'Remove list', titleSubList: 'Sub-list', titleOutdentSubList: 'Back to parent list',
     titleUnarch: 'Unarchive', titleDone: 'Mark as Read', titleUnread: 'Move to Unread', titleArch: 'Archive',
@@ -972,6 +975,7 @@ export const LANGS: Record<Lang, Translation> = {
     tableAddColBefore: 'Kolumn vänster', tableAddColAfter: 'Kolumn höger', tableRemoveCol: 'Ta bort kolumn',
     tableWidenCol: 'Bredda kolumn', tableNarrowCol: 'Smalna kolumn', tableDelete: 'Ta bort tabell',
     insertLineAboveBlock: 'Tom rad ovanför', titleInsertLineAboveBlock: 'Lägg till tom rad ovanför',
+    insertLineBelowBlock: 'Tom rad under', titleInsertLineBelowBlock: 'Lägg till tom rad under',
     titleRight: 'Höger', titleLeft: 'Vänster', titleCenter: 'Centrera', titleMoveImageUp: 'Flytta bild uppåt', titleMoveImageDown: 'Flytta bild nedåt', titleClr: 'Ta bort formatering', titleColor: 'Textfärg', titleResizeImage: 'Dra för att ändra storlek (behåll proportioner)', titleResizeWidth: 'Dra för att ändra bredd', titleResizeHeight: 'Dra för att ändra höjd',
     titleBulletList: 'Punktlista', titleNumberedList: 'Numrerad lista', titleRemoveList: 'Ta bort lista', titleSubList: 'Underlista', titleOutdentSubList: 'Tillbaka till överliggande lista',
     titleUnarch: 'Avarkivera', titleDone: 'Markera som Läst', titleUnread: 'Flytta till Olästa', titleArch: 'Arkivera',

@@ -3425,6 +3425,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
+  const insertEmptyLineBelowBlock = (ed: HTMLElement, block: HTMLElement) => {
+    if (!block.parentElement || !ed.contains(block)) return;
+    const next = block.nextElementSibling;
+    if (next instanceof HTMLElement && BLOCK_TAGS.has(next.tagName) && isEmptyTextLine(next)) {
+      placeCaretInBlock(next, true);
+      ed.focus({ preventScroll: true });
+      saveSel();
+      emitHtml();
+      return;
+    }
+    const line = document.createElement('div');
+    line.setAttribute('dir', 'auto');
+    line.innerHTML = '<br>';
+    block.parentElement.insertBefore(line, block.nextSibling);
+    placeCaretInBlock(line, true);
+    ed.focus({ preventScroll: true });
+    saveSel();
+    emitHtml();
+  };
+
   const editorTopBlock = (ed: HTMLElement, el: HTMLElement): HTMLElement | null => {
     let node: HTMLElement | null = el;
     while (node.parentElement && node.parentElement !== ed) {
@@ -6051,6 +6071,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                   onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, wrap); })}
                   className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
                 >↵ {t.insertLineAboveBlock}</span>
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  title={t.titleInsertLineBelowBlock}
+                  onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineBelowBlock(ed, wrap); })}
+                  className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
+                >↵ {t.insertLineBelowBlock}</span>
                 <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
                 <span role="button" tabIndex={-1} title={t.tableAddRowAbove} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'above'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↑ {t.tableAddRowAbove}</span>
                 <span role="button" tabIndex={-1} title={t.tableAddRowBelow} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'below'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↓ {t.tableAddRowBelow}</span>
