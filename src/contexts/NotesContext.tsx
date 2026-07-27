@@ -3112,31 +3112,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const onHide = () => {
       if (document.visibilityState === 'hidden') flushPersist();
     };
-    // A user who clicks Save and immediately hits refresh (Cmd+R) can cancel the
-    // in-flight cloud write before it reaches Firebase — the item was already
-    // applied to local React state so it looked saved, but nothing durable ever
-    // received it. Warn on unload while a save is still pending so the browser's
-    // native confirmation gives the write a chance to finish (and lets the user
-    // simply not leave).
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Only warn for real in-flight user saves / editor uploads — not background
-      // image migration (those use trackPending:false and quiet durable writes).
-      if (savesInFlight.current <= 0 && pendingEditorUploads() <= 0) return;
-      e.preventDefault();
-      e.returnValue = '';
-    };
     document.addEventListener('visibilitychange', onVisible);
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('focus', onVisible);
     window.addEventListener('pagehide', flushPersist);
-    window.addEventListener('beforeunload', onBeforeUnload);
     pullTimer.current = window.setInterval(() => {
       if (document.visibilityState === 'visible') void pullFromCloud(true);
     }, 60_000);
     // Safety valve: if "Saving…" has been up for too long (hung Firebase write,
-    // mismatched increment), clear the badge and beforeunload counter so refresh
-    // is not blocked forever. Real in-flight work that finishes later still
-    // updates timestamps; we only unstick the UI / leave-page guard.
+    // mismatched increment), clear the badge so the UI is not stuck forever.
     const stuckTimer = window.setInterval(() => {
       if (savingStartedAt.current <= 0) return;
       if (Date.now() - savingStartedAt.current < STUCK_SAVING_MS) return;
@@ -3164,7 +3148,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
       window.removeEventListener('pagehide', flushPersist);
-      window.removeEventListener('beforeunload', onBeforeUnload);
       if (pullTimer.current) clearInterval(pullTimer.current);
       clearInterval(stuckTimer);
     };
