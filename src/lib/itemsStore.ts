@@ -187,6 +187,44 @@ export async function getAllQuizItemsLocal(): Promise<StoredQuizItem[]> {
   return idbGetAll<StoredQuizItem>(QUIZ_STORE);
 }
 
+export async function deleteQuizItemLocal(id: number): Promise<void> {
+  await idbDelete(QUIZ_STORE, id);
+}
+
+/** Soft-delete tombstone for cross-device realtime sync (small single-item write). */
+export async function tombstoneQuizItemDurable(
+  uid: string | null | undefined,
+  item: QuizItem,
+  setId?: string | null,
+): Promise<boolean> {
+  const trashAt = new Date().toISOString();
+  const stored: StoredQuizItem = {
+    ...item,
+    setId: setId ?? null,
+    trashed: true,
+    deletedAt: item.deletedAt || trashAt,
+    updatedAt: trashAt,
+  };
+  await putQuizItemLocal(stored);
+  if (!uid) return false;
+  try {
+    await update(dbRef(database, `users/${uid}/quizItemsById/${item.id}`), stored);
+    return true;
+  } catch (err) {
+    console.error('[itemsStore] quizItemsById tombstone failed', err);
+    try {
+      const res = await rtdbFetch(`/users/${uid}/quizItemsById/${item.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stored),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export async function persistQuizItemDurable(
   uid: string | null | undefined,
   item: QuizItem,
@@ -227,7 +265,12 @@ export async function fetchQuizItemsByIdCloud(uid: string): Promise<StoredQuizIt
   }
 }
 
-/** Fold durable quiz items back into quizSets / standalone quizzes. */
+/**
+ * Fold durable quiz items into quizzes / quizSets.
+ * - Trashed durable items always win (instant cross-device delete).
+ * - Live durable items only UPDATE existing rows, or ADD when newer than the
+ *   set's updatedAt — never resurrect an item that was removed from a newer set.
+ */
 export function applyDurableQuizItems(
   quizzes: QuizItem[],
   sets: import('../types').QuizSet[],
@@ -240,22 +283,58 @@ export function applyDurableQuizItems(
   for (const item of durable) {
     const { setId, ...quiz } = item;
     const bare: QuizItem = quiz;
+
+    if (bare.trashed) {
+      nextQuizzes = nextQuizzes.some((q) => q.id === bare.id)
+        ? nextQuizzes.map((q) => (q.id === bare.id ? { ...q, ...bare } : q))
+        : [...nextQuizzes, bare];
+      nextSets = nextSets.map((set) => {
+        if (setId && set.id !== setId && !set.items.some((i) => i.id === bare.id)) return set;
+        if (!set.items.some((i) => i.id === bare.id)) {
+          if (setId && set.id === setId) {
+            return { ...set, items: [...set.items, bare], updatedAt: bare.updatedAt || set.updatedAt };
+          }
+          return set;
+        }
+        return {
+          ...set,
+          items: set.items.map((i) => (i.id === bare.id ? { ...i, ...bare } : i)),
+          updatedAt: bare.updatedAt && (!set.updatedAt || bare.updatedAt > set.updatedAt)
+            ? bare.updatedAt
+            : set.updatedAt,
+        };
+      });
+      continue;
+    }
+
     if (setId) {
       nextSets = nextSets.map((set) => {
         if (set.id !== setId) return set;
         const existing = set.items.find((i) => i.id === bare.id);
-        if (existing && syncTime(existing) >= syncTime(bare)) return set;
-        const items = existing
-          ? set.items.map((i) => (i.id === bare.id ? bare : i))
-          : [...set.items, bare];
-        return { ...set, items, updatedAt: bare.updatedAt || set.updatedAt };
+        if (existing) {
+          if (existing.trashed && syncTime(existing) >= syncTime(bare)) return set;
+          if (syncTime(existing) >= syncTime(bare)) return set;
+          return {
+            ...set,
+            items: set.items.map((i) => (i.id === bare.id ? bare : i)),
+            updatedAt: bare.updatedAt || set.updatedAt,
+          };
+        }
+        // Missing from set: only add if this durable write is at least as new as
+        // the set (otherwise it was intentionally removed on another device).
+        const setAt = syncTime({ updatedAt: set.updatedAt, createdAt: set.createdAt });
+        if (syncTime(bare) < setAt) return set;
+        return { ...set, items: [...set.items, bare], updatedAt: bare.updatedAt || set.updatedAt };
       });
     } else {
       const existing = nextQuizzes.find((q) => q.id === bare.id);
-      if (existing && syncTime(existing) >= syncTime(bare)) continue;
-      nextQuizzes = existing
-        ? nextQuizzes.map((q) => (q.id === bare.id ? bare : q))
-        : [...nextQuizzes, bare];
+      if (existing) {
+        if (existing.trashed && syncTime(existing) >= syncTime(bare)) continue;
+        if (syncTime(existing) >= syncTime(bare)) continue;
+        nextQuizzes = nextQuizzes.map((q) => (q.id === bare.id ? bare : q));
+      } else {
+        nextQuizzes = [...nextQuizzes, bare];
+      }
     }
   }
   return { quizzes: nextQuizzes, sets: nextSets };

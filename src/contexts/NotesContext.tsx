@@ -17,6 +17,8 @@ import {
   mergeByIdNewer,
   persistNoteDurable,
   persistQuizItemDurable,
+  tombstoneQuizItemDurable,
+  type StoredQuizItem,
 } from '../lib/itemsStore';
 import { onEditorImageSwap, pendingEditorUploads, clearPendingEditorUploads, uploadEditorImage } from '../lib/imageUpload';
 import {
@@ -332,8 +334,22 @@ function filterResurrectedTrash<T extends { id: string | number; trashed?: boole
 
 function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: PermanentlyDeletedIds = emptyPermDeleted()): QuizSet {
   if (!!local.trashed !== !!remote.trashed) return remote.trashed ? remote : local;
-  const base = entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
-  return { ...base, items: mergeQuizzesForSync(local.items ?? [], remote.items ?? [], tombstones) };
+  const remoteNewer = entitySyncTime(remote) >= entitySyncTime(local);
+  const base = remoteNewer ? remote : local;
+  let items = mergeQuizzesForSync(local.items ?? [], remote.items ?? [], tombstones);
+  // When the remote set is the newer authority, drop local-only live items that
+  // are older than the remote set — those were deleted (hard-removed) on another
+  // device. Without this, union-merge resurrects every deleted question.
+  if (remoteNewer) {
+    const remoteIds = new Set((remote.items ?? []).map((i) => i.id));
+    const remoteAt = entitySyncTime(remote);
+    items = items.filter((i) => {
+      if (remoteIds.has(i.id)) return true;
+      if (i.trashed) return true;
+      return quizSyncTime(i) > remoteAt;
+    });
+  }
+  return { ...base, items };
 }
 
 function pickBetterQuizFolder(local: QuizFolder, remote: QuizFolder): QuizFolder {
@@ -3021,6 +3037,43 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const unsubSets = bindRealtime('quizSets', 'quizSets', (val) =>
       firebaseToArray<QuizSet>(val as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] })));
     const unsubFolders = bindRealtime('quizFolders', 'quizFolders');
+
+    // Instant quiz item sync (add/edit/delete) — tiny per-item path, not the
+    // multi-MB quizSets array. A delete on mobile writes a trashed tombstone
+    // here and every other device hides the question immediately.
+    const applyQuizItemsByIdSnap = (val: unknown) => {
+      if (!loadedRef.current || isApplyingRemoteRef.current || val == null) return;
+      if (typeof val !== 'object') return;
+      const durable = Object.values(val as Record<string, StoredQuizItem>).filter(
+        (q): q is StoredQuizItem => !!q && typeof q === 'object' && q.id != null,
+      );
+      if (!durable.length) return;
+      const applied = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, durable);
+      const quizzesChanged = JSON.stringify(applied.quizzes) !== JSON.stringify(quizzesRef.current);
+      const setsChanged = JSON.stringify(applied.sets) !== JSON.stringify(quizSetsRef.current);
+      if (!quizzesChanged && !setsChanged) return;
+      isApplyingRemoteRef.current = true;
+      try {
+        if (quizzesChanged) {
+          const prev = quizzesRef.current;
+          quizzesRef.current = applied.quizzes;
+          safeSetItem('malacadhati_quiz', JSON.stringify(applied.quizzes));
+          if (!quizzesEqualForUI(applied.quizzes, prev)) setQuizzes(applied.quizzes);
+        }
+        if (setsChanged) {
+          const prev = quizSetsRef.current;
+          quizSetsRef.current = applied.sets;
+          safeSetItem('malacadhati_quiz_sets', JSON.stringify(applied.sets));
+          if (!quizSetsEqualForUI(applied.sets, prev)) setQuizSets(applied.sets);
+        }
+      } finally {
+        isApplyingRemoteRef.current = false;
+      }
+    };
+    const unsubQuizItemsById = onValue(
+      dbRef(database, `users/${uid}/quizItemsById`),
+      (snap) => applyQuizItemsByIdSnap(snap.val()),
+    );
     const onVisible = () => {
       if (document.visibilityState === 'visible') void pullFromCloud(true);
     };
@@ -3073,6 +3126,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubQuizzes();
       unsubSets();
       unsubFolders();
+      unsubQuizItemsById();
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
@@ -3319,6 +3373,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets(nextSets);
     safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    // Instant cross-device delete: tiny single-item write first, then the big
+    // quizSets array in the background. Other devices listen to quizItemsById.
+    void tombstoneQuizItemDurable(userRef.current?.uid, trashedItem, fromSetId ?? null);
     persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
     persistSets(nextSets, true, true);
     scheduleInstantDataCloudSave({ quizzes: nextQuizzes, quizSets: nextSets });
@@ -3962,12 +4019,32 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const removeItemFromSet = (setId: string, itemId: number) => {
-    const next = quizSetsRef.current.map((s) => (
-      s.id === setId ? { ...s, items: s.items.filter((i) => i.id !== itemId) } : s
-    ));
+    const trashAt = new Date().toISOString();
+    const existing = quizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === itemId);
+    // Soft-delete + bump set.updatedAt so remote merge drops the live copy on
+    // other devices (union-merge used to resurrect hard-removed items).
+    const next = quizSetsRef.current.map((s) => {
+      if (s.id !== setId) return s;
+      const items = existing
+        ? s.items.map((i) => (
+          i.id === itemId
+            ? { ...i, trashed: true, deletedAt: nowStr(), updatedAt: trashAt }
+            : i
+        ))
+        : s.items.filter((i) => i.id !== itemId);
+      return { ...s, items, updatedAt: trashAt };
+    });
     quizSetsRef.current = next;
     setQuizSets(next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+    if (existing) {
+      void tombstoneQuizItemDurable(userRef.current?.uid, {
+        ...existing,
+        trashed: true,
+        deletedAt: nowStr(),
+        updatedAt: trashAt,
+      }, setId);
+    }
     persistSets(next, true, true);
     scheduleInstantDataCloudSave({ quizSets: next });
   };
