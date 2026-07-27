@@ -1023,17 +1023,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     onChangeRef.current(next);
   };
 
-  useEffect(() => {
-    if (!flushRef) return;
+  // Expose flush synchronously during render so Save never hits a nullled
+  // ref (useEffect cleanup used to clear it between blur-driven re-renders
+  // and the Save click).
+  if (flushRef) {
     flushRef.current = () => {
       flushEmitHtml();
       const ed = editorRef.current;
-      return ed ? serializeEditorHtml(ed) : html;
+      return ed ? serializeEditorHtml(ed) : lastLocalHtmlRef.current;
     };
-    return () => {
-      flushRef.current = null;
-    };
-  }, [flushRef, html]);
+  }
 
   // ── Helpers ──────────────────────────────────────────────────────────
   // Get the live selection inside the editor right now (returns null if focus is elsewhere).

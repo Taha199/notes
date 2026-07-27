@@ -449,6 +449,9 @@ export interface Translation {
   quizKeepCurrent: string;
   quizReplaceAnswer: string;
   quizMcq: string;
+  quizSaveNeedContent: string;
+  quizSaveFailed: string;
+  quizMcqNeedOptions: string;
   quizOptionsLabel: string;
   quizAddOption: string;
   quizCorrect: string;
@@ -815,6 +818,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizKeepCurrent: 'Keep current',
     quizReplaceAnswer: 'Replace answer',
     quizMcq: 'MCQ',
+    quizSaveNeedContent: 'Write a question or answer before saving',
+    quizSaveFailed: 'Could not save the question — try again',
+    quizMcqNeedOptions: 'Add at least two options',
     quizOptionsLabel: 'Options',
     quizAddOption: 'Add option',
     quizCorrect: 'Correct',
@@ -1179,6 +1185,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizKeepCurrent: 'Behåll nuvarande',
     quizReplaceAnswer: 'Ersätt svaret',
     quizMcq: 'Flerval',
+    quizSaveNeedContent: 'Skriv en fråga eller ett svar innan du sparar',
+    quizSaveFailed: 'Kunde inte spara frågan — försök igen',
+    quizMcqNeedOptions: 'Lägg till minst två alternativ',
     quizOptionsLabel: 'Alternativ',
     quizAddOption: 'Lägg till alternativ',
     quizCorrect: 'Rätt',

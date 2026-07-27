@@ -3627,9 +3627,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const newId = Date.now();
     const newItem: QuizItem = { ...item, id: newId, createdAt: item.createdAt ?? now, updatedAt: now };
-    const next = quizSetsRef.current.map((s) => (
-      s.id === setId ? { ...s, items: [...s.items, newItem], updatedAt: now } : s
-    ));
+    let found = false;
+    const next = quizSetsRef.current.map((s) => {
+      if (s.id !== setId) return s;
+      found = true;
+      return { ...s, items: [...s.items, newItem], updatedAt: now };
+    });
+    if (!found) {
+      console.error('[addItemToSet] quiz set not found:', setId);
+      return -1;
+    }
     quizSetsRef.current = next;
     setQuizSets(next);
     localStorage.setItem('malacadhati_quiz_sets', JSON.stringify(next));

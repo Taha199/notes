@@ -363,6 +363,10 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   const { show } = useToast();
   const questionFlushRef = useRef<(() => string) | null>(null);
   const answerFlushRef = useRef<(() => string) | null>(null);
+  const latestQuestionRef = useRef(question);
+  const latestAnswerRef = useRef(answer);
+  latestQuestionRef.current = question;
+  latestAnswerRef.current = answer;
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
@@ -407,11 +411,26 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   });
 
   const handleSave = () => {
-    const q = questionFlushRef.current?.() ?? question;
-    const a = answerFlushRef.current?.() ?? answer;
-    if (!mcq) { onSave({ question: q, answer: a }); return; }
+    const flushedQ = questionFlushRef.current?.();
+    const flushedA = answerFlushRef.current?.();
+    const pick = (flushed: string | undefined, latest: string, prop: string) => {
+      if (flushed != null && hasContent(flushed)) return flushed;
+      if (hasContent(latest)) return latest;
+      if (hasContent(prop)) return prop;
+      return flushed ?? latest ?? prop;
+    };
+    const finalQ = pick(flushedQ, latestQuestionRef.current, question);
+    const finalA = pick(flushedA, latestAnswerRef.current, answer);
+    if (!hasContent(finalQ) && !hasContent(finalA)) {
+      show(t.quizSaveNeedContent);
+      return;
+    }
+    if (!mcq) { onSave({ question: finalQ, answer: finalA }); return; }
     const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
-    if (kept.length < 2) return;
+    if (kept.length < 2) {
+      show(t.quizMcqNeedOptions);
+      return;
+    }
     const finalOptions = kept.map((x) => x.o);
     const newCorrectIndexes = kept
       .map((x, newIdx) => ({ newIdx, old: x.i }))
@@ -421,7 +440,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     const optionsHtml = finalOptions
       .map((o, i) => `<div>${OPT_LETTERS[i]}) ${escapeHtml(o)}</div>`)
       .join('');
-    const composedQ = `${q}<div style="margin-top:6px">${optionsHtml}</div>`;
+    const composedQ = `${finalQ}<div style="margin-top:6px">${optionsHtml}</div>`;
     const composedA = safeCorrects.map((ci) => `${OPT_LETTERS[ci]}) ${escapeHtml(finalOptions[ci])} ✓`).join('<br>');
     onSave({
       question: composedQ,
@@ -464,8 +483,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
             html={question}
-            onChange={onChangeQ}
-            onLiveChange={onChangeQ}
+            onChange={(v) => { latestQuestionRef.current = v; onChangeQ(v); }}
+            onLiveChange={(v) => { latestQuestionRef.current = v; onChangeQ(v); }}
             flushRef={questionFlushRef}
             placeholder={`${t.quizQuestionLabel}...`}
             minHeight="140px"
@@ -522,8 +541,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
             html={answer}
-            onChange={onChangeA}
-            onLiveChange={onChangeA}
+            onChange={(v) => { latestAnswerRef.current = v; onChangeA(v); }}
+            onLiveChange={(v) => { latestAnswerRef.current = v; onChangeA(v); }}
             flushRef={answerFlushRef}
             placeholder={`${t.quizAnswerLabel}...`}
             minHeight="140px"
@@ -706,6 +725,7 @@ export function QuizPage({
           correctIndexes: patch.correctIndexes,
           explanation: patch.explanation,
         });
+        if (id < 0) return null;
         return id;
       }
       const id = addQuiz({
@@ -820,7 +840,10 @@ export function QuizPage({
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
     const savedId = flushForm(formId, override, true);
-    if (savedId === null) return;
+    if (savedId === null || savedId < 0) {
+      show(t.quizSaveFailed);
+      return;
+    }
     finalizedDraftIdsRef.current.add(savedId);
     closeForm(formId);
     window.setTimeout(() => {
