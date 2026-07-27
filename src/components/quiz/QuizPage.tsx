@@ -695,6 +695,8 @@ export function QuizPage({
     if (form.itemId === null) {
       if (!hasContent(q) && !hasContent(a)) return null;
       if (setId) {
+        // Noon-style set save: only persist on Save, and create as a finished card (draft:false).
+        if (!finalize) return null;
         const id = addItemToSet(setId, {
           noteId: 0,
           noteTitle: '',
@@ -702,7 +704,7 @@ export function QuizPage({
           answer: a,
           date: new Date().toLocaleDateString(),
           createdAt: new Date().toISOString(),
-          draft: !finalize,
+          draft: false,
           options: patch.options,
           correctIndex: patch.correctIndex,
           correctIndexes: patch.correctIndexes,
@@ -713,11 +715,8 @@ export function QuizPage({
           question: q,
           answer: a,
           saveStatus: 'saved',
-          finalized: finalize || undefined,
+          finalized: true,
         });
-        if (finalize) {
-          updateItemInSet(setId, id, { ...patch, draft: false }, true);
-        }
         return id;
       }
       const id = addQuiz({
@@ -739,16 +738,32 @@ export function QuizPage({
       return id;
     }
 
-    const storedItem = setId
-      ? allQuizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === form.itemId)
-      : quizzesRef.current.find((item) => item.id === form.itemId);
-    if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
+    // Locate the real container (selected set, any set, or notes list).
+    let targetSetId: string | null = setId;
+    let storedItem: QuizItem | undefined = targetSetId
+      ? allQuizSetsRef.current.find((s) => s.id === targetSetId)?.items.find((i) => i.id === form.itemId)
+      : undefined;
+    if (!storedItem) {
+      const owner = allQuizSetsRef.current.find((s) => s.items.some((i) => i.id === form.itemId));
+      if (owner) {
+        targetSetId = owner.id;
+        storedItem = owner.items.find((i) => i.id === form.itemId);
+      } else {
+        targetSetId = null;
+        storedItem = quizzesRef.current.find((item) => item.id === form.itemId);
+      }
+    }
+
+    if (finalize && storedItem?.draft) {
+      // Always clear draft on Save even if Q/A text did not change.
+      patch.draft = false;
+    } else if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
       if (form.saveStatus !== 'saved') updateForm(formId, { saveStatus: 'saved' });
       return form.itemId;
     }
 
-    updateForm(formId, { saveStatus: 'syncing' });
-    if (setId) updateItemInSet(setId, form.itemId, patch, true);
+    updateForm(formId, { saveStatus: 'syncing', finalized: finalize || form.finalized || undefined });
+    if (targetSetId) updateItemInSet(targetSetId, form.itemId, patch, true);
     else updateQuiz(form.itemId, patch, true);
     window.setTimeout(() => {
       updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
@@ -758,9 +773,9 @@ export function QuizPage({
 
   const flushAllOpenForms = () => {
     for (const form of openFormsRef.current) {
+      // Noon-style: unfinished set forms (no id yet) stay local until Save.
+      if (form.itemId === null) continue;
       const complete = hasContent(form.question) && hasContent(form.answer);
-      // Persist drafts with any content (including set drafts that still lack an id).
-      if (form.itemId === null && !hasContent(form.question) && !hasContent(form.answer)) continue;
       flushForm(form.formId, undefined, !!form.finalized || complete);
     }
   };
@@ -790,7 +805,22 @@ export function QuizPage({
       return;
     }
 
-    const item = {
+    // Set view (noon-style): keep the form local until Save creates a finished card.
+    if (selectedSetIdRef.current) {
+      const nextForm: OpenQuestionForm = {
+        formId: `new-${Date.now()}`,
+        itemId: null,
+        question: '',
+        answer: '',
+        saveStatus: 'empty',
+      };
+      openFormsRef.current = [...openFormsRef.current, nextForm];
+      setOpenForms((prev) => [...prev, nextForm]);
+      return;
+    }
+
+    // Notes view: persist draft immediately (same as noon).
+    const id = addQuiz({
       noteId: 0,
       noteTitle: '',
       question: '',
@@ -798,10 +828,7 @@ export function QuizPage({
       date: new Date().toLocaleDateString(),
       createdAt: new Date().toISOString(),
       draft: true,
-    };
-    // Persist set drafts immediately (same as notes-view) so refresh / other devices keep them.
-    const setId = selectedSetIdRef.current;
-    const id = setId ? addItemToSet(setId, item) : addQuiz(item);
+    });
     const nextForm: OpenQuestionForm = {
       formId: `item-${id}`,
       itemId: id,
@@ -815,9 +842,20 @@ export function QuizPage({
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
     const savedId = flushForm(formId, override, true);
-    if (savedId !== null) finalizedDraftIdsRef.current.add(savedId);
+    if (savedId === null) return; // keep editor open if nothing was saved
+
+    // Guarantee the saved item is a visible card, not a hidden draft.
+    const setId = selectedSetIdRef.current;
+    if (setId) {
+      const item = allQuizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === savedId);
+      if (item?.draft) updateItemInSet(setId, savedId, { draft: false }, true);
+    } else {
+      const item = quizzesRef.current.find((i) => i.id === savedId);
+      if (item?.draft) updateQuiz(savedId, { draft: false }, true);
+    }
+
+    finalizedDraftIdsRef.current.add(savedId);
     closeForm(formId);
-    // Drop any race where draft-sync re-adds an editor for the just-saved id.
     window.setTimeout(() => {
       openFormsRef.current = openFormsRef.current.filter((f) => f.formId !== formId && f.itemId !== savedId);
       setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));
@@ -849,8 +887,8 @@ export function QuizPage({
 
   useEffect(() => {
     openForms.forEach((form) => {
-      // New set drafts now get an id immediately; still allow autosave once content exists.
-      if (form.itemId === null && !hasContent(form.question) && !hasContent(form.answer)) return;
+      // Noon-style: set forms without an id wait for Save — no autosave create.
+      if (form.itemId === null) return;
       const existing = autoSaveTimers.current.get(form.formId);
       if (existing) clearTimeout(existing);
       autoSaveTimers.current.set(
