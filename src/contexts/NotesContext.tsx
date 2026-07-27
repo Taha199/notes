@@ -312,6 +312,14 @@ function mergeNotesForSync(local: Note[], remote: Note[], tombstones: Permanentl
   return [...map.values()];
 }
 
+/** notesById / IndexedDB must honor permanent-delete tombstones or trash X
+ *  resurrects image notes on every refresh. */
+function stripPermDeletedNotes(notes: Note[], tombstones: PermanentlyDeletedIds = readPermDeleted()): Note[] {
+  if (!tombstones.notes.length) return notes;
+  const dead = new Set(tombstones.notes);
+  return notes.filter((n) => !dead.has(n.id));
+}
+
 function mergeQuizzesForSync(
   local: QuizItem[],
   remote: QuizItem[],
@@ -1538,6 +1546,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
       local = applyRecentEditsToData(local, edits);
+      local = { ...local, notes: stripPermDeletedNotes(local.notes, permDeletedRef.current) };
       notesRef.current = local.notes;
       quizzesRef.current = local.quizzes;
       quizSetsRef.current = local.sets;
@@ -1553,7 +1562,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const [idbNotes, idbQuizzes] = await Promise.all([getAllNotesLocal(), getAllQuizItemsLocal()]);
       if (cancelled) return;
       if (idbNotes.length) {
-        local = { ...local, notes: mergeByIdNewer(local.notes, idbNotes) };
+        local = {
+          ...local,
+          notes: stripPermDeletedNotes(mergeByIdNewer(local.notes, idbNotes), permDeletedRef.current),
+        };
         notesRef.current = local.notes;
         setNotes(local.notes);
       }
@@ -1664,7 +1676,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ]);
         if (cancelled) return;
         if (cloudNotesById.length) {
-          const mergedNotes = mergeByIdNewer(notesRef.current, cloudNotesById);
+          const mergedNotes = stripPermDeletedNotes(
+            mergeByIdNewer(notesRef.current, cloudNotesById),
+            permDeletedRef.current,
+          );
           notesRef.current = mergedNotes;
           setNotes(mergedNotes);
           local = { ...local, notes: mergedNotes };
@@ -1774,10 +1789,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         // stale/incomplete notes[] can never wipe a note that notesById / IndexedDB
         // already holds (the exact failure mode for image notes on refresh).
         const idbNotesAgain = await getAllNotesLocal();
-        const durableNotes = mergeByIdNewer(cloudNotesById, idbNotesAgain);
+        const durableNotes = stripPermDeletedNotes(
+          mergeByIdNewer(cloudNotesById, idbNotesAgain),
+          tombstones,
+        );
         if (durableNotes.length) {
           const before = notes.length;
-          notes = mergeByIdNewer(notes, durableNotes);
+          notes = stripPermDeletedNotes(mergeByIdNewer(notes, durableNotes), tombstones);
           if (notes.length > before) notesRepair = true;
         }
         {
@@ -3273,7 +3291,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         (n): n is Note => !!n && typeof n === 'object' && n.id != null,
       );
       if (!durable.length) return;
-      const merged = mergeByIdNewer(notesRef.current, durable);
+      const tombstones = permDeletedRef.current;
+      const merged = stripPermDeletedNotes(mergeByIdNewer(notesRef.current, durable), tombstones);
       if (JSON.stringify(merged) === JSON.stringify(notesRef.current)) return;
       isApplyingRemoteRef.current = true;
       try {
@@ -3283,6 +3302,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       } finally {
         isApplyingRemoteRef.current = false;
       }
+      // Best-effort: scrub permanently-deleted ids still lingering in notesById
+      // (large image notes sometimes fail the single DELETE).
+      const dead = new Set(tombstones.notes);
+      durable.forEach((n) => {
+        if (dead.has(n.id)) void removeNoteDurable(userRef.current?.uid, n.id);
+      });
     };
     const unsubNotesById = onValue(
       dbRef(database, `users/${uid}/notesById`),
