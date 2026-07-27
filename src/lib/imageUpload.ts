@@ -1,20 +1,15 @@
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import { auth, storage } from './firebase';
+import { auth, storage, storageLegacy } from './firebase';
 import { dataUrlToBlob } from './files/fileStorage';
 import { withTimeout } from './files/fileTypes';
 
-const UPLOAD_TIMEOUT_MS = 60_000;
-const DOWNLOAD_URL_TIMEOUT_MS = 20_000;
+const UPLOAD_TIMEOUT_MS = 45_000;
+const DOWNLOAD_URL_TIMEOUT_MS = 15_000;
 
 /**
  * Broadcast for "base64 image finished uploading, use this URL instead".
- *
- * The editor swaps the src in its own DOM, but if the user saves and closes
- * the editor before the background upload finishes, the persisted note/quiz
- * item still holds the multi-hundred-KB base64 copy — exactly the payload
- * size that used to overflow localStorage and stall cloud writes. The data
- * layer (NotesContext) subscribes here and rewrites any persisted content
- * containing the base64 form, so the swap lands even after the editor is gone.
+ * The editor inserts immediately for responsiveness; when this fires, both the
+ * open editor DOM and any already-persisted note/quiz copy get rewritten.
  */
 type ImageSwapListener = (fromUrl: string, toUrl: string) => void;
 const swapListeners = new Set<ImageSwapListener>();
@@ -36,17 +31,6 @@ function extForMime(mime: string): string {
   return 'jpg';
 }
 
-/**
- * Upload an editor image (as a data URL) to Firebase Storage and return its
- * download URL, so note/quiz HTML stores a short link instead of megabytes of
- * base64. Inline base64 blows past localStorage quota and the Realtime
- * Database's practical write size as images pile up, which is how image-heavy
- * notes/questions used to silently fail to persist.
- *
- * Returns null when signed out — the caller keeps the inline base64 fallback.
- * Uploads live under the files feature's `users/{uid}/files/...` prefix so the
- * existing Storage security rules apply unchanged.
- */
 let pendingUploadCount = 0;
 
 /** Uploads still in flight — the beforeunload guard warns while this is > 0. */
@@ -54,21 +38,49 @@ export function pendingEditorUploads(): number {
   return pendingUploadCount;
 }
 
+async function uploadToBucket(
+  bucket: typeof storage,
+  path: string,
+  blob: Blob,
+): Promise<string> {
+  const storageRef = ref(bucket, path);
+  await withTimeout(
+    uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg' }),
+    UPLOAD_TIMEOUT_MS,
+    'upload-timeout',
+  );
+  return withTimeout(getDownloadURL(storageRef), DOWNLOAD_URL_TIMEOUT_MS, 'download-url-timeout');
+}
+
+/**
+ * Upload an editor image to Firebase Storage and return its download URL.
+ * Tries the primary bucket, then the legacy appspot bucket. Returns null when
+ * signed out or both uploads fail — the caller keeps the already-inserted preview.
+ */
 export async function uploadEditorImage(dataUrl: string): Promise<string | null> {
   const uid = auth.currentUser?.uid;
   if (!uid) return null;
-  const blob = dataUrlToBlob(dataUrl);
+  let blob: Blob;
+  try {
+    blob = dataUrlToBlob(dataUrl);
+  } catch (err) {
+    console.error('[imageUpload] dataUrlToBlob failed', err);
+    return null;
+  }
+  if (!blob.size) return null;
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const path = `users/${uid}/files/${id}/editor-image.${extForMime(blob.type)}`;
-  const storageRef = ref(storage, path);
+  const path = `users/${uid}/files/${id}/editor-image.${extForMime(blob.type || 'image/jpeg')}`;
   pendingUploadCount += 1;
   try {
-    await withTimeout(
-      uploadBytes(storageRef, blob, { contentType: blob.type || 'image/jpeg' }),
-      UPLOAD_TIMEOUT_MS,
-      'upload-timeout',
-    );
-    return await withTimeout(getDownloadURL(storageRef), DOWNLOAD_URL_TIMEOUT_MS, 'download-url-timeout');
+    try {
+      return await uploadToBucket(storage, path, blob);
+    } catch (primaryErr) {
+      console.warn('[imageUpload] primary bucket failed, trying legacy', primaryErr);
+      return await uploadToBucket(storageLegacy, path, blob);
+    }
+  } catch (err) {
+    console.error('[imageUpload] both buckets failed', err);
+    return null;
   } finally {
     pendingUploadCount = Math.max(0, pendingUploadCount - 1);
   }

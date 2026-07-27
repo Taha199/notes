@@ -106,7 +106,20 @@ export async function compressImageForInline(file: File): Promise<string> {
     }
 
     const original = await readFileAsDataUrl(file);
-    return dataUrlByteLength(out) < dataUrlByteLength(original) ? out : original;
+    // Prefer the smaller encoding — but NEVER return a multi-MB original when
+    // we have a usable canvas result: callers used to refuse insert entirely
+    // when canInlineImage(original) failed, so images "never loaded".
+    if (dataUrlByteLength(out) <= dataUrlByteLength(original)) return out;
+    if (dataUrlByteLength(original) <= INLINE_IMAGE_MAX_BYTES) return original;
+    // Original is huge; force a more aggressive JPEG so insert always has something.
+    mime = 'image/jpeg';
+    quality = MIN_JPEG_QUALITY;
+    out = canvas.toDataURL(mime, quality);
+    while (dataUrlByteLength(out) > INLINE_IMAGE_MAX_BYTES && quality > 0.3) {
+      quality -= 0.05;
+      out = canvas.toDataURL(mime, quality);
+    }
+    return out;
   } catch {
     return readFileAsDataUrl(file);
   }

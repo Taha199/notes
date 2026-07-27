@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
-import { canInlineImage, compressImageForInline } from '../../lib/imageCompress';
-import { uploadEditorImage } from '../../lib/imageUpload';
+import { compressImageForInline } from '../../lib/imageCompress';
+import { emitEditorImageSwap, uploadEditorImage } from '../../lib/imageUpload';
 import { auth } from '../../lib/firebase';
 import {
   extractYouTubeVideoId,
@@ -5140,14 +5140,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
+  /** Replace an inserted image's src (base64 → Storage URL) if still in the editor. */
+  const swapImageSrc = (fromUrl: string, toUrl: string) => {
+    const liveEd = editorRef.current;
+    if (!liveEd) return;
+    let swapped = false;
+    liveEd.querySelectorAll('img').forEach((img) => {
+      if (img.getAttribute('src') === fromUrl) {
+        img.setAttribute('src', toUrl);
+        swapped = true;
+      }
+    });
+    if (swapped) emitHtml();
+  };
+
   /**
-   * Insert an image. When signed in: upload to Firebase Storage FIRST, then
-   * insert only the short download URL — never persist megabytes of base64 into
-   * note/quiz HTML. That base64 path is what overflowed localStorage, stalled
-   * every cloud save, and made image notes vanish on refresh.
-   *
-   * Signed-out / upload-failed: fall back to inline base64 only when small
-   * enough (canInlineImage). Oversized images that cannot upload are refused.
+   * Insert immediately (so the user always sees the picture), then upgrade to a
+   * Storage URL in the background when signed in. Waiting for upload BEFORE
+   * insert made images appear to "never load" whenever Storage was slow or
+   * rejected the write — unacceptable. Persistence of the short URL is handled
+   * by emitEditorImageSwap → NotesContext even after the editor is closed.
    */
   const insertImageFile = async (file: File) => {
     let dataUrl: string;
@@ -5157,29 +5169,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       showToast(t.filesUploadFailed);
       return;
     }
+    insertImageDataUrl(dataUrl);
 
-    if (auth.currentUser) {
-      try {
-        const remoteUrl = await uploadEditorImage(dataUrl);
-        if (remoteUrl) {
-          insertImageDataUrl(remoteUrl);
-          return;
-        }
-      } catch {
-        /* fall through to tiny inline fallback if possible */
-      }
-      if (!canInlineImage(dataUrl)) {
-        showToast(t.filesUploadFailed);
-        return;
-      }
-      insertImageDataUrl(dataUrl);
-      return;
-    }
-
-    if (canInlineImage(dataUrl)) {
-      insertImageDataUrl(dataUrl);
-    } else {
-      showToast(t.filesUploadFailed);
+    if (!auth.currentUser) return;
+    try {
+      const remoteUrl = await uploadEditorImage(dataUrl);
+      if (!remoteUrl) return;
+      swapImageSrc(dataUrl, remoteUrl);
+      emitEditorImageSwap(dataUrl, remoteUrl);
+    } catch (err) {
+      console.warn('[RichTextEditor] background image upload failed; keeping inline preview', err);
     }
   };
 
