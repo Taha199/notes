@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
@@ -58,6 +58,23 @@ function isEquivalentEditorHtml(a: string, b: string): boolean {
   const normalize = (html: string) => html.replace(/\s+/g, ' ').trim();
   return normalize(a) === normalize(b);
 }
+
+/** Plain-text length ignores images — use this so image-only edits are not treated as empty. */
+function htmlContentScore(html: string): number {
+  const plain = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\u200B/g, '').trim().length;
+  let score = plain;
+  if (/<(img|video|audio|iframe|svg|embed|object)\b/i.test(html)) score += 10_000;
+  if (/note-img-frame|note-yt-frame|note-table/i.test(html)) score += 5_000;
+  if (/data:image|blob:/i.test(html)) score += 10_000;
+  return score;
+}
+
+export type RichTextEditorHandle = {
+  /** Serialize live DOM HTML (includes images even if parent props lagged). */
+  getHtml: () => string;
+  /** Flush live DOM into onChange/onLiveChange and return it. */
+  flush: () => string;
+};
 
 const HIGHLIGHT_INLINE_TAGS = new Set(['SPAN', 'FONT', 'MARK', 'B', 'STRONG', 'EM', 'I', 'U', 'A']);
 
@@ -417,7 +434,7 @@ type EditorSnapshot = {
 
 const EDITOR_UNDO_LIMIT = 80;
 
-export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }: Props) {
+export const RichTextEditor = forwardRef<RichTextEditorHandle, Props>(function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true }, ref) {
   const { t, lang } = useLanguage();
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -1017,6 +1034,27 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     onChangeRef.current(next);
   };
+
+  useImperativeHandle(ref, () => ({
+    getHtml: () => {
+      const ed = editorRef.current;
+      if (!ed) return lastLocalHtmlRef.current || '';
+      return serializeEditorHtml(ed);
+    },
+    flush: () => {
+      const ed = editorRef.current;
+      if (!ed) return lastLocalHtmlRef.current || '';
+      const next = serializeEditorHtml(ed);
+      lastLocalHtmlRef.current = next;
+      onLiveChangeRef.current?.(next);
+      if (emitTimerRef.current) {
+        clearTimeout(emitTimerRef.current);
+        emitTimerRef.current = null;
+      }
+      onChangeRef.current(next);
+      return next;
+    },
+  }));
 
   // ── Helpers ──────────────────────────────────────────────────────────
   // Get the live selection inside the editor right now (returns null if focus is elsewhere).
@@ -4242,12 +4280,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (html === lastLocalHtmlRef.current) {
       return;
     }
-    // Parent sent shorter html — keep local DOM during active typing; never push longer html back up.
+    // Parent sent weaker html — keep local DOM during active editing (esp. image-only:
+    // plain-text length is 0 for <img>, so the old check wiped photos on re-render).
     if (propChanged && html !== lastLocalHtmlRef.current) {
-      const plain = (s: string) => s.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
-      const localPlainLen = plain(ed.innerHTML).length;
-      const propPlainLen = plain(html).length;
-      if (localPlainLen > propPlainLen) {
+      const localScore = htmlContentScore(ed.innerHTML);
+      const propScore = htmlContentScore(html);
+      if (localScore > propScore) {
         const focused = active && editorWrapRef.current?.contains(active);
         if (focused || Date.now() - lastKeystrokeAtRef.current < 12_000) return;
         const remoteIsNewer = remoteSyncAdvance && syncAt > lastKeystrokeAtRef.current;
@@ -5003,19 +5041,81 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   // ── Image ─────────────────────────────────────────────────────────────
+  /** Shrink camera/phone photos before inlining — raw base64 multi‑MB saves OOM the tab. */
+  const compressDataUrl = (raw: string, mimeHint = 'image/jpeg'): Promise<string> => new Promise((resolve) => {
+    if (!raw || raw.length < 180_000) {
+      resolve(raw);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      const maxEdge = 1400;
+      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(raw);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        const preferAlpha = /image\/(png|webp)/i.test(mimeHint);
+        const out = preferAlpha
+          ? canvas.toDataURL(mimeHint.includes('webp') ? 'image/webp' : 'image/png', 0.82)
+          : canvas.toDataURL('image/jpeg', 0.72);
+        resolve(out.length < raw.length ? out : raw);
+      } catch {
+        resolve(raw);
+      }
+    };
+    img.onerror = () => resolve(raw);
+    img.src = raw;
+  });
+
+  const fileToCompressedDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('read-failed'));
+    reader.onload = () => {
+      void compressDataUrl(reader.result as string, file.type || 'image/jpeg').then(resolve);
+    };
+    reader.readAsDataURL(file);
+  });
+
+  /** Recompress oversized pasted/dropped data: URLs already in the editor DOM. */
+  const compressInlineEditorImages = async (ed: HTMLElement): Promise<boolean> => {
+    const imgs = [...ed.querySelectorAll('img')].filter((node): node is HTMLImageElement => {
+      const src = node.getAttribute('src') || '';
+      return src.startsWith('data:image') && src.length > 180_000;
+    });
+    if (imgs.length === 0) return false;
+    let changed = false;
+    for (const img of imgs) {
+      const src = img.getAttribute('src') || '';
+      const mime = src.match(/^data:(image\/[a-z0-9.+-]+)/i)?.[1] ?? 'image/jpeg';
+      const next = await compressDataUrl(src, mime);
+      if (next !== src) {
+        img.setAttribute('src', next);
+        changed = true;
+      }
+    }
+    return changed;
+  };
+
   const insertImage = (file: File) => {
     const ed = editorRef.current;
     if (!ed || !file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
+    void fileToCompressedDataUrl(file).then((url) => {
+      if (!editorRef.current) return;
       ensureFocus(true);
       document.execCommand('insertHTML', false, `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto" style="width:160px;max-width:100%"><img src="${url}" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;max-height:none;cursor:zoom-in;" /></div><br>`);
-      normalizeEditorImages(ed);
+      normalizeEditorImages(editorRef.current);
       saveSel();
       emitHtml();
-    };
-    reader.readAsDataURL(file);
+    }).catch(() => { /* ignore failed image insert */ });
   };
 
   // ── Image resize: drag a handle to grow/shrink (corner keeps ratio) ────
@@ -5609,6 +5709,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           });
         }}
         onPaste={(e) => {
+          const imageFile = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
+          if (imageFile) {
+            e.preventDefault();
+            insertImage(imageFile);
+            return;
+          }
           const pastedHtml = e.clipboardData.getData('text/html').trim();
           const plain = e.clipboardData.getData('text/plain');
           const tableFromHtml = pastedHtml ? extractTableHtmlFromClipboard(pastedHtml) : null;
@@ -5649,6 +5755,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               normalizePastedBlocks(live);
               promotePseudoListsToNative(live);
               normalizeAutoLinks(live);
+              readCommandState();
+              emitHtml();
+              void compressInlineEditorImages(live).then((changed) => {
+                if (!changed) return;
+                normalizeEditorImages(live);
+                readCommandState();
+                emitHtml();
+              });
+              return;
             }
             readCommandState();
             emitHtml();
@@ -5686,8 +5801,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             syncYouTubeRemoveChrome(live);
             normalizeAutoLinks(live);
             normalizeTablesInEditor(live);
+            // Emit immediately so Save/live refs see pasted images before async compress finishes.
             readCommandState();
             emitHtml();
+            void compressInlineEditorImages(live).then((changed) => {
+              if (!changed) return;
+              normalizeEditorImages(live);
+              readCommandState();
+              emitHtml();
+            });
           };
           requestAnimationFrame(() => {
             normalizeAfterPaste();
@@ -6086,4 +6208,4 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       })()}
     </div>
   );
-}
+});

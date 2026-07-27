@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, memo } from 'react';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { AppRichTextEditor } from '../notes/AppRichTextEditor';
+import type { RichTextEditorHandle } from '../notes/RichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 import { useAuth } from '../../contexts/AuthContext';
 import { StudyMode } from './StudyMode';
@@ -66,11 +67,12 @@ function normalizeQuizName(value: string) {
   return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
-// Content is valid if it has visible text OR an embedded image.
+// Content is valid if it has visible text OR an embedded image/media.
 function hasContent(html: string): boolean {
-  if (/<img\b/i.test(html)) return true;
-  if (/note-yt-frame/i.test(html)) return true;
-  return html.replace(/<[^>]*>/g, '').trim().length > 0;
+  if (!html) return false;
+  if (/<(img|video|audio|iframe|svg|embed|object)\b/i.test(html)) return true;
+  if (/note-img-frame|note-yt-frame/i.test(html)) return true;
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;
 }
 
 function mdToHtml(content: string): string {
@@ -337,6 +339,8 @@ interface OpenQuestionForm {
   question: string;
   answer: string;
   saveStatus: 'empty' | 'syncing' | 'saved';
+  /** Bumps on Q/A edits so autosave can detect same-length changes without hashing HTML. */
+  contentRev?: number;
   // true when editing an already-saved question; drafts leave this falsy so
   // Cancel discards them even if they contain partial content.
   finalized?: boolean;
@@ -370,15 +374,32 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     : initialCorrect !== undefined ? new Set([initialCorrect]) : new Set([0]);
   const [correctSet, setCorrectSet] = useState<Set<number>>(initCorrectSet);
   const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');
+  // Keep live HTML here — parent props can lag one render behind onLiveChange after
+  // inserting a large data:image, and Save must not send the stale empty snapshot.
+  const liveQRef = useRef(question);
+  const liveARef = useRef(answer);
+  const qEditorRef = useRef<RichTextEditorHandle>(null);
+  const aEditorRef = useRef<RichTextEditorHandle>(null);
+  liveQRef.current = question;
+  liveARef.current = answer;
+
+  const handleChangeQ = (v: string) => {
+    liveQRef.current = v;
+    onChangeQ(v);
+  };
+  const handleChangeA = (v: string) => {
+    liveARef.current = v;
+    onChangeA(v);
+  };
 
   const handleAiAnswer = async () => {
-    const plain = question.replace(/<[^>]*>/g, '').trim();
+    const plain = liveQRef.current.replace(/<[^>]*>/g, '').trim();
     if (!plain) return;
     setAiLoading(true);
     try {
       const res = await answerQuestion(plain);
-      if (hasContent(answer)) setAiSuggestion(res);
-      else onChangeA(res);
+      if (hasContent(liveARef.current)) setAiSuggestion(res);
+      else handleChangeA(res);
     } catch (e) {
       show(e instanceof Error ? e.message : 'AI-svar misslyckades');
     } finally {
@@ -405,7 +426,15 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   });
 
   const handleSave = () => {
-    if (!mcq) { onSave(); return; }
+    // Always read from the live editor DOM — image-only HTML can lag in React props/refs.
+    const q = qEditorRef.current?.flush() ?? liveQRef.current;
+    const a = aEditorRef.current?.flush() ?? liveARef.current;
+    liveQRef.current = q;
+    liveARef.current = a;
+    if (!mcq) {
+      onSave({ question: q, answer: a });
+      return;
+    }
     const kept = options.map((o, i) => ({ o: o.trim(), i })).filter((x) => x.o);
     if (kept.length < 2) return;
     const finalOptions = kept.map((x) => x.o);
@@ -417,7 +446,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     const optionsHtml = finalOptions
       .map((o, i) => `<div>${OPT_LETTERS[i]}) ${escapeHtml(o)}</div>`)
       .join('');
-    const composedQ = `${question}<div style="margin-top:6px">${optionsHtml}</div>`;
+    const composedQ = `${q}<div style="margin-top:6px">${optionsHtml}</div>`;
     const composedA = safeCorrects.map((ci) => `${OPT_LETTERS[ci]}) ${escapeHtml(finalOptions[ci])} ✓`).join('<br>');
     onSave({
       question: composedQ,
@@ -459,9 +488,10 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             first/last children instead. */}
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
+            ref={qEditorRef}
             html={question}
-            onChange={onChangeQ}
-            onLiveChange={onChangeQ}
+            onChange={handleChangeQ}
+            onLiveChange={handleChangeQ}
             placeholder={`${t.quizQuestionLabel}...`}
             minHeight="140px"
           />
@@ -516,9 +546,10 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
         ) : (
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-app-border dark:border-white/10 [&>:last-child]:rounded-b-[0.75rem] [&_[data-note-fmt-toolbar]]:rounded-t-[0.75rem]">
           <AppRichTextEditor
+            ref={aEditorRef}
             html={answer}
-            onChange={onChangeA}
-            onLiveChange={onChangeA}
+            onChange={handleChangeA}
+            onLiveChange={handleChangeA}
             placeholder={`${t.quizAnswerLabel}...`}
             minHeight="140px"
           />
@@ -543,15 +574,25 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
               <div dir="auto" className="note-content px-3 py-2 text-[13px] leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(aiSuggestion) }} />
               <div className="flex justify-end gap-2 border-t border-violet-200 px-3 py-2 dark:border-violet-500/20">
                 <button onClick={() => setAiSuggestion(null)} className="rounded-lg border border-app-border px-3 py-1 text-[11px] text-app-text-secondary hover:bg-white/50 dark:border-white/10">{t.quizKeepCurrent}</button>
-                <button onClick={() => { onChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {t.quizReplaceAnswer}</button>
+                <button onClick={() => { handleChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {t.quizReplaceAnswer}</button>
               </div>
             </div>
           )}
         </div>
         )}
         <div className="flex justify-end gap-2 md:col-span-2">
-          <button onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
-          <button onClick={handleSave} className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark">{t.mSave}</button>
+          <button type="button" onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleSave();
+            }}
+            className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark"
+          >
+            {t.mSave}
+          </button>
         </div>
       </div>
     </div>
@@ -629,28 +670,35 @@ export function QuizPage({
   const allQuizSetsRef = useRef(allQuizSets);
   allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  /** Just-finalized ids — keep draft-sync from reopening an editor right after Save. */
+  const finalizedDraftIdsRef = useRef<Set<number>>(new Set());
 
   const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
+    // Keep the ref in sync immediately so a double Save click cannot create a second item
+    // before React re-renders with the new itemId.
+    openFormsRef.current = openFormsRef.current.map((f) => (f.formId === formId ? { ...f, ...patch } : f));
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
   };
 
   const updateFormContent = (formId: string, patch: Pick<OpenQuestionForm, 'question'> | Pick<OpenQuestionForm, 'answer'> | Pick<OpenQuestionForm, 'question' | 'answer'>) => {
-    setOpenForms((prev) =>
+    const apply = (prev: OpenQuestionForm[]) =>
       prev.map((f) => {
         if (f.formId !== formId) return f;
-        const next = { ...f, ...patch };
+        const next = { ...f, ...patch, contentRev: (f.contentRev ?? 0) + 1 };
         if (f.itemId !== null) return next;
         const complete = hasContent(next.question) && hasContent(next.answer);
         if (!complete) return { ...next, saveStatus: 'empty' as const };
         return next;
-      }),
-    );
+      });
+    openFormsRef.current = apply(openFormsRef.current);
+    setOpenForms((prev) => apply(prev));
   };
 
   const closeForm = (formId: string) => {
     const timer = autoSaveTimers.current.get(formId);
     if (timer) clearTimeout(timer);
     autoSaveTimers.current.delete(formId);
+    openFormsRef.current = openFormsRef.current.filter((f) => f.formId !== formId);
     setOpenForms((prev) => prev.filter((f) => f.formId !== formId));
   };
 
@@ -659,22 +707,26 @@ export function QuizPage({
     if (!form) return null;
     const q = override?.question ?? form.question;
     const a = override?.answer ?? form.answer;
-    const patch = {
+    // Omit undefined optional fields so autosave cannot wipe MCQ options / explanation.
+    const patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>> = {
       question: q,
       answer: a,
-      options: override?.options,
-      correctIndex: override?.correctIndexes?.[0],
-      correctIndexes: override?.correctIndexes,
-      explanation: override?.explanation,
       // Never demote an already-saved question back to a draft on autosave.
       draft: finalize ? false : (form.finalized ? false : true),
     };
+    if (override?.options !== undefined) patch.options = override.options;
+    if (override?.correctIndexes !== undefined) {
+      patch.correctIndexes = override.correctIndexes;
+      patch.correctIndex = override.correctIndexes[0];
+    }
+    if (override?.explanation !== undefined) patch.explanation = override.explanation;
 
     const setId = selectedSetIdRef.current;
 
     if (form.itemId === null) {
       if (!hasContent(q) && !hasContent(a)) return null;
       if (setId) {
+        // Noon-style set save: only persist on Save, and create as a finished card (draft:false).
         if (!finalize) return null;
         const id = addItemToSet(setId, {
           noteId: 0,
@@ -689,7 +741,13 @@ export function QuizPage({
           correctIndexes: patch.correctIndexes,
           explanation: patch.explanation,
         });
-        updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved', finalized: true });
+        updateForm(formId, {
+          itemId: id,
+          question: q,
+          answer: a,
+          saveStatus: 'saved',
+          finalized: true,
+        });
         return id;
       }
       const id = addQuiz({
@@ -711,16 +769,32 @@ export function QuizPage({
       return id;
     }
 
-    const storedItem = setId
-      ? allQuizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === form.itemId)
-      : quizzesRef.current.find((item) => item.id === form.itemId);
-    if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
+    // Locate the real container (selected set, any set, or notes list).
+    let targetSetId: string | null = setId;
+    let storedItem: QuizItem | undefined = targetSetId
+      ? allQuizSetsRef.current.find((s) => s.id === targetSetId)?.items.find((i) => i.id === form.itemId)
+      : undefined;
+    if (!storedItem) {
+      const owner = allQuizSetsRef.current.find((s) => s.items.some((i) => i.id === form.itemId));
+      if (owner) {
+        targetSetId = owner.id;
+        storedItem = owner.items.find((i) => i.id === form.itemId);
+      } else {
+        targetSetId = null;
+        storedItem = quizzesRef.current.find((item) => item.id === form.itemId);
+      }
+    }
+
+    if (finalize && storedItem?.draft) {
+      // Always clear draft on Save even if Q/A text did not change.
+      patch.draft = false;
+    } else if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
       if (form.saveStatus !== 'saved') updateForm(formId, { saveStatus: 'saved' });
       return form.itemId;
     }
 
-    updateForm(formId, { saveStatus: 'syncing' });
-    if (setId) updateItemInSet(setId, form.itemId, patch, true);
+    updateForm(formId, { saveStatus: 'syncing', finalized: finalize || form.finalized || undefined });
+    if (targetSetId) updateItemInSet(targetSetId, form.itemId, patch, true);
     else updateQuiz(form.itemId, patch, true);
     window.setTimeout(() => {
       updateForm(formId, { question: q, answer: a, saveStatus: 'saved' });
@@ -730,39 +804,54 @@ export function QuizPage({
 
   const flushAllOpenForms = () => {
     for (const form of openFormsRef.current) {
+      // Noon-style: unfinished set forms (no id yet) stay local until Save.
       if (form.itemId === null) continue;
       const complete = hasContent(form.question) && hasContent(form.answer);
       flushForm(form.formId, undefined, !!form.finalized || complete);
     }
   };
 
-  const flushForm = (formId: string, override?: SavePayload, finalize = false) => {
+  const flushForm = (formId: string, override?: SavePayload, finalize = false): number | null => {
     const timer = autoSaveTimers.current.get(formId);
     if (timer) {
       clearTimeout(timer);
       autoSaveTimers.current.delete(formId);
     }
-    persistForm(formId, override, finalize);
+    return persistForm(formId, override, finalize);
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
     if (initial?.itemId) {
       if (openFormsRef.current.some((f) => f.itemId === initial.itemId)) return;
-      setOpenForms((prev) => [
-        ...prev,
-        {
-          formId: `item-${initial.itemId}`,
-          itemId: initial.itemId!,
-          question: initial.question ?? '',
-          answer: initial.answer ?? '',
-          saveStatus: 'saved',
-          finalized: true,
-        },
-      ]);
+      const nextForm: OpenQuestionForm = {
+        formId: `item-${initial.itemId}`,
+        itemId: initial.itemId!,
+        question: initial.question ?? '',
+        answer: initial.answer ?? '',
+        saveStatus: 'saved',
+        finalized: true,
+      };
+      openFormsRef.current = [...openFormsRef.current, nextForm];
+      setOpenForms((prev) => [...prev, nextForm]);
       return;
     }
 
-    const item = {
+    // Set view (noon-style): keep the form local until Save creates a finished card.
+    if (selectedSetIdRef.current) {
+      const nextForm: OpenQuestionForm = {
+        formId: `new-${Date.now()}`,
+        itemId: null,
+        question: '',
+        answer: '',
+        saveStatus: 'empty',
+      };
+      openFormsRef.current = [...openFormsRef.current, nextForm];
+      setOpenForms((prev) => [...prev, nextForm]);
+      return;
+    }
+
+    // Notes view: persist draft immediately (same as noon).
+    const id = addQuiz({
       noteId: 0,
       noteTitle: '',
       question: '',
@@ -770,36 +859,44 @@ export function QuizPage({
       date: new Date().toLocaleDateString(),
       createdAt: new Date().toISOString(),
       draft: true,
+    });
+    const nextForm: OpenQuestionForm = {
+      formId: `item-${id}`,
+      itemId: id,
+      question: '',
+      answer: '',
+      saveStatus: 'saved',
     };
-    if (selectedSetIdRef.current) {
-      setOpenForms((prev) => [
-        ...prev,
-        {
-          formId: `new-${Date.now()}`,
-          itemId: null,
-          question: '',
-          answer: '',
-          saveStatus: 'empty',
-        },
-      ]);
-      return;
-    }
-    const id = addQuiz(item);
-    setOpenForms((prev) => [
-      ...prev,
-      {
-        formId: `item-${id}`,
-        itemId: id,
-        question: '',
-        answer: '',
-        saveStatus: 'saved',
-      },
-    ]);
+    openFormsRef.current = [...openFormsRef.current, nextForm];
+    setOpenForms((prev) => [...prev, nextForm]);
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
-    flushForm(formId, override, true);
+    let savedId: number | null = null;
+    try {
+      savedId = flushForm(formId, override, true);
+    } catch (err) {
+      console.error('[quiz-save]', err);
+      return; // keep editor open so the user can retry
+    }
+    if (savedId === null) return; // keep editor open if nothing was saved
+
+    // Guarantee the saved item is a visible card, not a hidden draft.
+    const setId = selectedSetIdRef.current;
+    if (setId) {
+      const item = allQuizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === savedId);
+      if (item?.draft) updateItemInSet(setId, savedId, { draft: false }, true);
+    } else {
+      const item = quizzesRef.current.find((i) => i.id === savedId);
+      if (item?.draft) updateQuiz(savedId, { draft: false }, true);
+    }
+
+    finalizedDraftIdsRef.current.add(savedId);
     closeForm(formId);
+    window.setTimeout(() => {
+      openFormsRef.current = openFormsRef.current.filter((f) => f.formId !== formId && f.itemId !== savedId);
+      setOpenForms((prev) => prev.filter((f) => f.formId !== formId && f.itemId !== savedId));
+    }, 0);
   };
 
   const handleCancelForm = (formId: string) => {
@@ -821,12 +918,14 @@ export function QuizPage({
   };
 
   const formSaveSigs = useMemo(
-    () => openForms.map((f) => `${f.formId}:${f.question}:${f.answer}`).join('|'),
+    // Fingerprint only — never concatenate full HTML (data:image base64 freezes autosave).
+    () => openForms.map((f) => `${f.formId}:${f.contentRev ?? 0}:${f.question.length}:${f.answer.length}:${f.saveStatus}:${f.itemId ?? 'n'}`).join('|'),
     [openForms],
   );
 
   useEffect(() => {
     openForms.forEach((form) => {
+      // Noon-style: set forms without an id wait for Save — no autosave create.
       if (form.itemId === null) return;
       const existing = autoSaveTimers.current.get(form.formId);
       if (existing) clearTimeout(existing);
@@ -947,17 +1046,17 @@ export function QuizPage({
       ? (allQuizSets.find((s) => s.id === selectedSetId)?.items ?? [])
       : quizzes.filter((q) => !q.trashed);
 
-    setOpenForms(
-      items
-        .filter((item) => item.draft)
-        .map((item) => ({
-          formId: `item-${item.id}`,
-          itemId: item.id,
-          question: item.question,
-          answer: item.answer,
-          saveStatus: 'saved' as const,
-        })),
-    );
+    const draftForms = items
+      .filter((item) => item.draft && !finalizedDraftIdsRef.current.has(item.id))
+      .map((item) => ({
+        formId: `item-${item.id}`,
+        itemId: item.id,
+        question: item.question,
+        answer: item.answer,
+        saveStatus: 'saved' as const,
+      }));
+    openFormsRef.current = draftForms;
+    setOpenForms(draftForms);
   }, [selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -970,7 +1069,7 @@ export function QuizPage({
     setOpenForms((prev) => {
       const openIds = new Set(prev.map((f) => f.itemId));
       const additions = drafts
-        .filter((d) => !openIds.has(d.id))
+        .filter((d) => !openIds.has(d.id) && !finalizedDraftIdsRef.current.has(d.id))
         .map((item) => ({
           formId: `item-${item.id}`,
           itemId: item.id,
@@ -978,7 +1077,10 @@ export function QuizPage({
           answer: item.answer,
           saveStatus: 'saved' as const,
         }));
-      return additions.length ? [...prev, ...additions] : prev;
+      if (!additions.length) return prev;
+      const next = [...prev, ...additions];
+      openFormsRef.current = next;
+      return next;
     });
   }, [allQuizSets, quizzes, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -997,7 +1099,19 @@ export function QuizPage({
 
   // Show/hide the sets sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem('malacadhati_quiz_sidebar') !== 'closed');
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
   const toggleSidebar = () => setSidebarOpen((v) => { const n = !v; localStorage.setItem('malacadhati_quiz_sidebar', n ? 'open' : 'closed'); return n; });
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = () => setIsNarrow(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  // Phone/tablet: opening a set must free the full width — three columns crush question text.
+  useEffect(() => {
+    if (isNarrow && selectedSetId) setSidebarOpen(false);
+  }, [isNarrow, selectedSetId]);
   // Resizable width of the folders column
   const [folderColW, setFolderColW] = useState<number>(() => Number(localStorage.getItem('malacadhati_quiz_foldercol')) || 84);
   const startFolderResize = (e: React.MouseEvent) => {
@@ -1142,7 +1256,7 @@ export function QuizPage({
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet
     ? visibleQuizItems(selectedSet.items)
-    : isNotesView ? quizzes : [];
+    : isNotesView ? visibleQuizItems(quizzes) : [];
 
   const orderedItems = useMemo(() => {
     if (itemSort === 'manual') return displayItems;
@@ -1338,7 +1452,15 @@ export function QuizPage({
             <span className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm" style={{ backgroundColor: s.color || '#9ca3af' }} />
             <div className="flex w-full items-center">
               <span className="flex-shrink-0 select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100">{s.system === 'favorites' ? '⭐' : '⠿'}</span>
-              <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
+              <button
+                onClick={() => {
+                  setSelectedSetId(s.id);
+                  if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+                    setSidebarOpen(false);
+                  }
+                }}
+                className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0"
+              >
                 <AutoFitText
                   text={s.name}
                   maxSize={13}
@@ -1386,7 +1508,10 @@ export function QuizPage({
 
       {/* Sidebar — two-column: Folders | Sets */}
       {sidebarOpen && (
-      <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: isNotesView ? folderColW : folderColW + 184 }}>
+      <div
+        className={'flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950 ' + (isNarrow && !selectedSetId && !isNotesView ? 'w-full min-w-0 flex-1' : '')}
+        style={isNarrow && !selectedSetId && !isNotesView ? undefined : { width: isNotesView ? folderColW : folderColW + 184 }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">{t.quizTitle}</p>
@@ -1602,11 +1727,22 @@ export function QuizPage({
       </div>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Main content — min-w-0 prevents crushed vertical text beside a wide sidebar */}
+      {!(isNarrow && sidebarOpen && !selectedSetId && !isNotesView) && (
+      <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
+            {isNarrow && selectedSetId && (
+              <button
+                type="button"
+                onClick={() => { setSidebarOpen(true); setSelectedSetId(null); }}
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-app-border text-app-text-secondary hover:bg-app-bg dark:border-white/10"
+                title={t.quizShowSidebar}
+              >
+                ←
+              </button>
+            )}
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
               {selectedSet
                 ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`
@@ -1748,6 +1884,7 @@ export function QuizPage({
           )}
         </div>
       </div>
+      )}
 
       {/* Study mode overlay */}
       {studyMode && (studyDeck ?? studyItems).length > 0 && (
