@@ -19,7 +19,7 @@
  * The big-array sync can keep running in the background for compatibility;
  * this path is what actually guarantees survival across refresh.
  */
-import { ref as dbRef, update } from 'firebase/database';
+import { ref as dbRef, remove, update } from 'firebase/database';
 import type { Note, QuizItem } from '../types';
 import { database } from './firebase';
 import { rtdbFetch } from './rtdb';
@@ -171,6 +171,40 @@ export async function persistNoteDurable(uid: string | null | undefined, note: N
   await putNoteLocal(note);
   if (!uid) return false;
   return putNoteCloud(uid, note);
+}
+
+/** Soft-delete tombstone — must run on every trash so IndexedDB/notesById
+ *  cannot resurrect the live copy after refresh. */
+export async function tombstoneNoteDurable(
+  uid: string | null | undefined,
+  note: Note,
+): Promise<boolean> {
+  const trashAt = new Date().toISOString();
+  const stored: Note = {
+    ...note,
+    trashed: true,
+    deletedAt: note.deletedAt || trashAt,
+    savedAt: trashAt,
+  };
+  return persistNoteDurable(uid, stored);
+}
+
+/** Permanent delete from IndexedDB + notesById. */
+export async function removeNoteDurable(
+  uid: string | null | undefined,
+  id: number,
+): Promise<void> {
+  await deleteNoteLocal(id);
+  if (!uid) return;
+  try {
+    await remove(dbRef(database, `users/${uid}/notesById/${id}`));
+  } catch {
+    try {
+      await rtdbFetch(`/users/${uid}/notesById/${id}`, { method: 'DELETE' });
+    } catch {
+      /* best-effort */
+    }
+  }
 }
 
 // ── Quiz items ─────────────────────────────────────────────────────────────

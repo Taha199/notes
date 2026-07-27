@@ -17,6 +17,8 @@ import {
   mergeByIdNewer,
   persistNoteDurable,
   persistQuizItemDurable,
+  removeNoteDurable,
+  tombstoneNoteDurable,
   tombstoneQuizItemDurable,
   type StoredQuizItem,
 } from '../lib/itemsStore';
@@ -1629,7 +1631,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (notes.length === 0) {
           const historySnapshot = await fetchLatestDataHistorySnapshot(user.uid);
           if (historySnapshot?.notes.length) {
-            notes = mergeNotesForSync(notes, historySnapshot.notes, tombstones);
+            notes = mergeNotesForSync(notes, historySnapshot.notes.filter((n) => !n.trashed), tombstones);
             notesRepair = true;
             historyRepair = true;
             recoveryLog('recovered notes from latest dataHistory', { count: notes.length });
@@ -1638,8 +1640,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         const historySnapshots = await fetchAllDataHistorySnapshots(user.uid);
         for (const snapshot of historySnapshots) {
+          const trashedIds = new Set(notes.filter((n) => n.trashed).map((n) => n.id));
           const before = notes.length;
-          notes = mergeNotesForSync(notes, snapshot.notes.filter((n) => !n.trashed), tombstones);
+          notes = mergeNotesForSync(
+            notes,
+            snapshot.notes.filter((n) => !n.trashed && !trashedIds.has(n.id)),
+            tombstones,
+          );
           if (notes.length > before) {
             notesRepair = true;
             historyRepair = true;
@@ -3074,6 +3081,31 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       dbRef(database, `users/${uid}/quizItemsById`),
       (snap) => applyQuizItemsByIdSnap(snap.val()),
     );
+
+    // Same for notes: trash/restore must land via notesById so refresh cannot
+    // resurrect a live IndexedDB copy over a soft-delete that only hit notes[].
+    const applyNotesByIdSnap = (val: unknown) => {
+      if (!loadedRef.current || isApplyingRemoteRef.current || val == null) return;
+      if (typeof val !== 'object') return;
+      const durable = Object.values(val as Record<string, Note>).filter(
+        (n): n is Note => !!n && typeof n === 'object' && n.id != null,
+      );
+      if (!durable.length) return;
+      const merged = mergeByIdNewer(notesRef.current, durable);
+      if (JSON.stringify(merged) === JSON.stringify(notesRef.current)) return;
+      isApplyingRemoteRef.current = true;
+      try {
+        notesRef.current = merged;
+        setNotes(merged);
+        safeSetItem('malacadhati', JSON.stringify(merged));
+      } finally {
+        isApplyingRemoteRef.current = false;
+      }
+    };
+    const unsubNotesById = onValue(
+      dbRef(database, `users/${uid}/notesById`),
+      (snap) => applyNotesByIdSnap(snap.val()),
+    );
     const onVisible = () => {
       if (document.visibilityState === 'visible') void pullFromCloud(true);
     };
@@ -3127,6 +3159,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubSets();
       unsubFolders();
       unsubQuizItemsById();
+      unsubNotesById();
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
@@ -4325,21 +4358,31 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const unarchive = (id: number) => updateNote(id, { archived: false, read: false });
   const trash = (id: number) => {
     const savedAt = new Date().toISOString();
-    setNotes((prev) => {
-      const next = prev.map((n) => (n.id === id ? { ...n, trashed: true, deletedAt: nowStr(), savedAt } : n));
-      persist({ notes: next }, true);
-      scheduleInstantDataCloudSave({ notes: next });
-      return next;
-    });
+    const base = notesRef.current.find((n) => n.id === id);
+    if (!base) return;
+    const trashedNote: Note = { ...base, trashed: true, deletedAt: nowStr(), savedAt };
+    // Write the tombstone to IndexedDB + notesById FIRST — otherwise a refresh
+    // reloads the live copy from those stores and the note "comes back".
+    recordRecentEdit({ kind: 'note', at: Date.now(), note: trashedNote });
+    void tombstoneNoteDurable(userRef.current?.uid, trashedNote);
+    notesRef.current = notesRef.current.map((n) => (n.id === id ? trashedNote : n));
+    setNotes(notesRef.current);
+    safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+    persist({ notes: notesRef.current }, true);
+    scheduleInstantDataCloudSave({ notes: notesRef.current });
   };
   const restore = (id: number) => {
     const savedAt = new Date().toISOString();
-    setNotes((prev) => {
-      const next = prev.map((n) => (n.id === id ? { ...n, trashed: false, deletedAt: undefined, savedAt } : n));
-      persist({ notes: next }, true);
-      scheduleInstantDataCloudSave({ notes: next });
-      return next;
-    });
+    const base = notesRef.current.find((n) => n.id === id);
+    if (!base) return;
+    const restored: Note = { ...base, trashed: false, deletedAt: undefined, savedAt };
+    recordRecentEdit({ kind: 'note', at: Date.now(), note: restored });
+    void persistNoteDurable(userRef.current?.uid, restored);
+    notesRef.current = notesRef.current.map((n) => (n.id === id ? restored : n));
+    setNotes(notesRef.current);
+    safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+    persist({ notes: notesRef.current }, true);
+    scheduleInstantDataCloudSave({ notes: notesRef.current });
   };
   const permDelete = (id: number) => {
     recordPermDeleted({ notes: [id] });
@@ -4347,6 +4390,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     notesRef.current = nextNotes;
     setNotes(nextNotes);
     safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    void removeNoteDurable(userRef.current?.uid, id);
     persist({ notes: nextNotes }, true);
     void pushPermDeletedCloud({ notes: nextNotes });
   };
@@ -4391,6 +4435,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     safeSetItem(TRASH_EMPTIED_AT_KEY, String(Date.now()));
 
+    const uid = userRef.current?.uid;
+    trashedNotes.forEach((n) => { void removeNoteDurable(uid, n.id); });
+
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -4410,6 +4457,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     notesRef.current = nextNotes;
     setNotes(nextNotes);
     safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    ids.forEach((id) => { void removeNoteDurable(userRef.current?.uid, id); });
     persist({ notes: nextNotes }, true);
     void pushPermDeletedCloud({ notes: nextNotes });
   };
