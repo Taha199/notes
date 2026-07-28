@@ -258,7 +258,10 @@ body {
 .note-content .note-img-frame img,
 [contenteditable] .note-img-frame img {
   display: block;
+  width: 100%;
   max-width: 100%;
+  height: auto;
+  object-fit: contain;
   /* Author-set size must survive view-mode utilities (e.g. max-h-[280px]).
      Inline width/height from resize still win for width; max-height:none
      prevents proportional shrink when height is auto. */

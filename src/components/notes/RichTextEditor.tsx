@@ -601,25 +601,39 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     ed.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((frame) => {
       if (!(frame instanceof HTMLElement)) return;
       getToolbarHost(frame);
-      // Migrate legacy px width on <img> onto the frame so view mode matches edit.
+      // Heal layout so images never clip after save/reload on a narrower column.
+      // Absolute px width + max-width:none used to overflow the frame (overflow:hidden).
       const img = frame.querySelector(':scope > img');
       if (!(img instanceof HTMLImageElement)) return;
-      const imgW = img.style.width;
-      if ((!frame.style.width || frame.style.width === 'fit-content') && imgW && imgW.endsWith('px')) {
-        const px = parseFloat(imgW);
-        const maxW = Math.max(120, ed.clientWidth - 32);
+      const maxW = Math.max(120, ed.clientWidth - 32);
+      const frameW = frame.style.width || '';
+      const imgW = img.style.width || '';
+      const needsFluidHeal =
+        img.style.maxWidth === 'none'
+        || imgW.endsWith('px')
+        || frameW.endsWith('px')
+        || img.style.objectFit === 'fill'
+        || (img.style.height && img.style.height !== 'auto' && img.style.height !== '');
+      if (needsFluidHeal || ((!frameW || frameW === 'fit-content') && imgW.endsWith('px'))) {
+        let px = 0;
+        if (frameW.endsWith('px')) px = parseFloat(frameW);
+        else if (imgW.endsWith('px')) px = parseFloat(imgW);
+        else px = frame.getBoundingClientRect().width || img.getBoundingClientRect().width;
         if (px > 0 && maxW > 0) {
           const pct = Math.min(100, Math.max(8, (px / maxW) * 100));
           frame.style.width = `${Math.round(pct * 10) / 10}%`;
-          frame.style.maxWidth = '100%';
-          img.style.width = '100%';
-          img.style.maxWidth = '100%';
-          if (!img.style.height || img.style.height === 'auto') img.style.height = 'auto';
-          img.style.maxHeight = 'none';
         }
-      } else if (frame.style.width && frame.style.width.endsWith('%')) {
+        frame.style.maxWidth = '100%';
         img.style.width = '100%';
         img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.style.objectFit = 'contain';
+        img.style.maxHeight = 'none';
+      } else if (frameW.endsWith('%')) {
+        img.style.width = '100%';
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.style.objectFit = 'contain';
         img.style.maxHeight = 'none';
       }
     });
@@ -5214,23 +5228,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const frame = img.closest(`.${NOTE_IMG_FRAME}`);
     img.style.maxHeight = 'none';
     img.style.objectFit = 'contain';
-    if (mode === 'height') {
-      // Keep current visual width; only change height in px.
-      img.style.maxWidth = 'none';
-      img.style.width = `${Math.round(startWidth)}px`;
-      img.style.height = `${Math.max(40, Math.round(startHeight + dy))}px`;
-      if (frame instanceof HTMLElement) {
-        frame.style.width = `${Math.round(startWidth)}px`;
-        frame.style.maxWidth = '100%';
-      }
-      return;
-    }
-    const w = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
-    const pct = Math.min(100, Math.max(8, (w / maxW) * 100));
     img.style.maxWidth = '100%';
+    // Always size via frame % + img width:100%. Absolute px + max-width:none
+    // clipped the right side after save when the editor/column was narrower.
+    let nextW: number;
+    if (mode === 'height') {
+      const nextH = Math.max(40, Math.round(startHeight + dy));
+      nextW = Math.min(maxW, Math.max(60, Math.round(nextH / (ratio || 1))));
+    } else {
+      nextW = Math.min(maxW, Math.max(60, Math.round(startWidth + dx)));
+    }
+    const pct = Math.min(100, Math.max(8, (nextW / maxW) * 100));
     img.style.width = '100%';
-    img.style.height = mode === 'width' ? `${Math.max(40, Math.round(startHeight))}px` : 'auto';
-    if (mode === 'width') img.style.objectFit = 'fill';
+    img.style.height = 'auto';
     if (frame instanceof HTMLElement) {
       frame.style.width = `${Math.round(pct * 10) / 10}%`;
       frame.style.maxWidth = '100%';
