@@ -2144,9 +2144,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (countUserQuizSets(nextSets) > 0) everHadSetsRef.current = true;
-      // Per-id mirror always — survives array LWW races and is what boot reloads.
-      void update(dbRef(database, `users/${user.uid}/quizSetsById`), setsToFirebaseMap(nextSets)).catch(() => {});
+      // skipDirectPut callers already pushQuizSetById for the changed row — avoid a
+      // multi-MB quizSetsById map rewrite that delayed live create/delete on mobile.
       if (skipDirectPut) return;
+      void update(dbRef(database, `users/${user.uid}/quizSetsById`), setsToFirebaseMap(nextSets)).catch(() => {});
       markPushedData({ quizSets: nextSets });
       beginTrackedSave();
       void set(dbRef(database, `users/${user.uid}/quizSets`), nextSets)
@@ -2162,6 +2163,72 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           endTrackedSave();
         });
     }
+  };
+
+  /** Structure-only cloud bump — never nest giant quizSets/quizFolders in parent update(). */
+  const bumpCloudSyncAt = () => {
+    const u = userRef.current;
+    if (!u || !loadedRef.current) return;
+    const syncedAt = Date.now();
+    void update(dbRef(database, `users/${u.uid}`), { cloudSyncAt: syncedAt }).then(() => {
+      lastLocalSaveAt.current = syncedAt;
+      lastAppliedRemoteSyncAt.current = syncedAt;
+      setCloudSyncedAt(syncedAt);
+      safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+      saveFailedRef.current = false;
+    }).catch(() => {});
+  };
+
+  /** Instant create/delete/rename for sets: ById + dedicated quizSets set, no parent-array race. */
+  const pushQuizSetStructure = (nextSets: QuizSet[], changed?: QuizSet | QuizSet[]) => {
+    quizSetsRef.current = nextSets;
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    const changedList = changed ? (Array.isArray(changed) ? changed : [changed]) : [];
+    for (const row of changedList) pushQuizSetById(row);
+    if (countUserQuizSets(nextSets) === 0 && everHadSetsRef.current) {
+      recoveryLog('skipped quizSets structure PUT wipe');
+      bumpCloudSyncAt();
+      return;
+    }
+    if (countUserQuizSets(nextSets) > 0) everHadSetsRef.current = true;
+    const u = userRef.current;
+    if (!u || !loadedRef.current) return;
+    markPushedData({ quizSets: nextSets });
+    beginTrackedSave();
+    void set(dbRef(database, `users/${u.uid}/quizSets`), nextSets)
+      .catch((err) => {
+        console.error('[cloud-save] quizSets structure set failed', err);
+        return rtdbFetch(`/users/${u.uid}/quizSets`, {
+          method: 'PUT',
+          body: JSON.stringify(nextSets),
+          headers: { 'Content-Type': 'application/json' },
+        });
+      })
+      .finally(() => endTrackedSave());
+    bumpCloudSyncAt();
+  };
+
+  /** Instant create/delete/rename for folders: ById + dedicated quizFolders set. */
+  const pushQuizFolderStructure = (nextFolders: QuizFolder[], changed?: QuizFolder | QuizFolder[]) => {
+    quizFoldersRef.current = nextFolders;
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+    const changedList = changed ? (Array.isArray(changed) ? changed : [changed]) : [];
+    for (const row of changedList) pushQuizFolderById(row);
+    const u = userRef.current;
+    if (!u || !loadedRef.current) return;
+    markPushedData({ quizFolders: nextFolders });
+    beginTrackedSave();
+    void set(dbRef(database, `users/${u.uid}/quizFolders`), nextFolders)
+      .catch((err) => {
+        console.error('[cloud-save] quizFolders structure set failed', err);
+        return rtdbFetch(`/users/${u.uid}/quizFolders`, {
+          method: 'PUT',
+          body: JSON.stringify(nextFolders),
+          headers: { 'Content-Type': 'application/json' },
+        });
+      })
+      .finally(() => endTrackedSave());
+    bumpCloudSyncAt();
   };
 
   const persistFolders = (nextFolders: QuizFolder[], forceCloud = false) => {
@@ -2277,9 +2344,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFoldersRef.current = next;
     setQuizFolders(next);
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(next));
-    if (!existing || !!existing.trashed !== !!merged.trashed) {
-      queueMicrotask(() => scheduleInstantDataCloudSave({ quizFolders: quizFoldersRef.current }));
-    }
   };
 
   const applyRemoteSetById = (raw: unknown) => {
@@ -2315,10 +2379,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     if (!quizSetsEqualForUI(next, prev)) setQuizSets(next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
-    // Heal array for create, folder move, or soft-delete so other listeners catch up.
-    if (!existing || existing.folderId !== merged.folderId || !!existing.trashed !== !!merged.trashed) {
-      queueMicrotask(() => scheduleInstantDataCloudSave({ quizSets: quizSetsRef.current }));
-    }
   };
 
   const flushPendingRemoteById = () => {
@@ -2930,6 +2990,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const u = userRef.current;
     if (!u || !loadedRef.current) return;
     const safe: typeof patch = { ...patch };
+    // Always send the latest structure from refs — a queued save captured before
+    // create/delete must not overwrite the cloud array with a stale snapshot.
+    if (safe.quizSets !== undefined) safe.quizSets = quizSetsRef.current;
+    if (safe.quizFolders !== undefined) safe.quizFolders = quizFoldersRef.current;
     if (safe.notes && safe.notes.length === 0 && everHadNotesRef.current) {
       recoveryLog('skipped instant notes wipe');
       delete safe.notes;
@@ -4110,16 +4174,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     everHadSetsRef.current = true;
-    quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
-      quizSetsByIdCacheRef.current,
-      [newSet],
-      permDeletedRef.current,
-    );
-    // ById first (tiny, reliable), then one array write via scheduleInstant — no
-    // second racing PUT. Mobile/desktop both pick up via ById child listeners.
-    persistSets(next, true, true);
-    pushQuizSetById(newSet);
-    scheduleInstantDataCloudSave({ quizSets: next });
+    // ById + dedicated quizSets set — never nest the array in parent update()
+    // (in-flight item saves used to overwrite creates on mobile).
+    pushQuizSetStructure(next, newSet);
     return newSet;
   };
 
@@ -4131,10 +4188,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizSetsRef.current = next;
     setQuizSets(next);
-    persistSets(next, true, true);
     const trashed = next.find((s) => s.id === id);
-    if (trashed) pushQuizSetById(trashed);
-    scheduleInstantDataCloudSave({ quizSets: next });
+    pushQuizSetStructure(next, trashed ? [trashed] : []);
   };
 
   const restoreQuizSet = (id: string) => {
@@ -4150,9 +4205,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = [...quizSetsRef.current.filter((item) => item.id !== id), restored];
     quizSetsRef.current = next;
     setQuizSets(next);
-    persistSets(next, true, true);
-    pushQuizSetById(restored);
-    scheduleInstantDataCloudSave({ quizSets: next });
+    pushQuizSetStructure(next, restored);
   };
 
   const permDeleteQuizSet = (id: string) => {
@@ -4200,10 +4253,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizSetsRef.current = next;
     setQuizSets(next);
-    persistSets(next, true, true);
     const updated = next.find((s) => s.id === id);
-    if (updated) pushQuizSetById(updated);
-    scheduleInstantDataCloudSave({ quizSets: next });
+    pushQuizSetStructure(next, updated ? [updated] : []);
   };
 
   const setQuizSetColor = (id: string, color: string) => {
@@ -4213,10 +4264,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizSetsRef.current = next;
     setQuizSets(next);
-    persistSets(next, true, true);
     const updated = next.find((s) => s.id === id);
-    if (updated) pushQuizSetById(updated);
-    scheduleInstantDataCloudSave({ quizSets: next });
+    pushQuizSetStructure(next, updated ? [updated] : []);
   };
 
   const setQuizSetFolder = (id: string, folderId: string | undefined) => {
@@ -4230,9 +4279,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = [...quizSetsRef.current.filter((s) => s.id !== id), updated];
     quizSetsRef.current = next;
     setQuizSets(next);
-    persistSets(next, true, true);
-    pushQuizSetById(updated);
-    scheduleInstantDataCloudSave({ quizSets: next });
+    pushQuizSetStructure(next, updated);
   };
 
   const addQuizFolder = (name: string): QuizFolder => {
@@ -4249,9 +4296,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = [...quizFoldersRef.current, folder];
     quizFoldersRef.current = next;
     setQuizFolders(next);
-    persistFolders(next, true);
-    pushQuizFolderById(folder);
-    scheduleInstantDataCloudSave({ quizFolders: next });
+    pushQuizFolderStructure(next, folder);
     return folder;
   };
 
@@ -4265,10 +4310,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizFoldersRef.current = next;
     setQuizFolders(next);
-    persistFolders(next, true);
     const updated = next.find((f) => f.id === id);
-    if (updated) pushQuizFolderById(updated);
-    scheduleInstantDataCloudSave({ quizFolders: next });
+    pushQuizFolderStructure(next, updated ? [updated] : []);
   };
 
   const setQuizFolderColor = (id: string, color: string) => {
@@ -4279,10 +4322,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizFoldersRef.current = next;
     setQuizFolders(next);
-    persistFolders(next, true);
     const updated = next.find((f) => f.id === id);
-    if (updated) pushQuizFolderById(updated);
-    scheduleInstantDataCloudSave({ quizFolders: next });
+    pushQuizFolderStructure(next, updated ? [updated] : []);
   };
 
   const reorderQuizFolders = (dragId: string, targetId: string) => {
@@ -4319,16 +4360,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = nextSets;
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    persistFolders(nextFolders, true);
-    persistSets(nextSets, true, true);
     const trashedFolder = nextFolders.find((f) => f.id === id);
-    if (trashedFolder) pushQuizFolderById(trashedFolder);
-    for (const set of nextSets) {
-      if (movedSets.some((m) => m.id === set.id)) pushQuizSetById(set);
-    }
-    scheduleInstantDataCloudSave({ quizFolders: nextFolders, quizSets: nextSets });
+    pushQuizFolderStructure(nextFolders, trashedFolder ? [trashedFolder] : []);
+    const movedNow = nextSets.filter((s) => movedSets.some((m) => m.id === s.id));
+    pushQuizSetStructure(nextSets, movedNow);
   };
 
   const restoreQuizFolder = (id: string) => {
