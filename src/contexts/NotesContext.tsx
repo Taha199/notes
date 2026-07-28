@@ -1513,6 +1513,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSets?: unknown;
     quizFolders?: unknown;
   }>>([]);
+  /** ById child events while an array merge holds the lock — never drop creates/deletes. */
+  const pendingRemoteByIdRef = useRef<Array<{ kind: 'set' | 'folder'; raw: unknown }>>([]);
   const pendingInstantDataSaveRef = useRef<{
     notes?: Note[];
     quizzes?: QuizItem[];
@@ -2187,6 +2189,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const pushQuizFolderById = (folder: QuizFolder) => {
     const uid = userRef.current?.uid;
     if (!uid || !loadedRef.current) return;
+    quizFoldersByIdCacheRef.current = mergeById(
+      quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id),
+      [folder],
+    );
     void set(
       dbRef(database, `users/${uid}/quizFoldersById/${folder.id}`),
       JSON.parse(JSON.stringify(folder)),
@@ -2196,18 +2202,61 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const pushQuizSetById = (quizSet: QuizSet) => {
     const uid = userRef.current?.uid;
     if (!uid || !loadedRef.current) return;
+    quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
+      quizSetsByIdCacheRef.current.filter((s) => s.id !== quizSet.id),
+      [{ ...quizSet, items: quizSet.items ?? [] }],
+      permDeletedRef.current,
+    );
     void set(
       dbRef(database, `users/${uid}/quizSetsById/${quizSet.id}`),
       JSON.parse(JSON.stringify({ ...quizSet, items: quizSet.items ?? [] })),
     ).catch((err) => console.error('[cloud-save] quizSetsById write failed', err));
   };
 
+  const rememberRemoteFolderInCache = (folder: QuizFolder) => {
+    if (!folder.id) return;
+    if (permDeletedRef.current.quizFolders.includes(folder.id)) {
+      quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id);
+      return;
+    }
+    if (folder.trashed && !String(folder.name || '').trim()) {
+      quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id);
+      return;
+    }
+    quizFoldersByIdCacheRef.current = mergeById(
+      quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id),
+      [folder],
+    );
+  };
+
+  const rememberRemoteSetInCache = (setVal: QuizSet) => {
+    if (!setVal.id) return;
+    if (permDeletedRef.current.quizSets.includes(setVal.id)) {
+      quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id);
+      return;
+    }
+    if (setVal.trashed && !String(setVal.name || '').trim()) {
+      quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id);
+      return;
+    }
+    quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
+      quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id),
+      [{ ...setVal, items: setVal.items ?? [] }],
+      permDeletedRef.current,
+    );
+  };
+
   const applyRemoteFolderById = (raw: unknown) => {
     if (!loadedRef.current || !raw || typeof raw !== 'object') return;
     const folder = raw as QuizFolder;
     if (!folder.id) return;
+    rememberRemoteFolderInCache(folder);
+    // Queue UI apply while array merges hold the lock so creates/deletes are not overwritten.
+    if (isApplyingRemoteRef.current) {
+      pendingRemoteByIdRef.current.push({ kind: 'folder', raw });
+      return;
+    }
     if (permDeletedRef.current.quizFolders.includes(folder.id)) {
-      quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id);
       const filtered = quizFoldersRef.current.filter((f) => f.id !== folder.id);
       if (filtered.length === quizFoldersRef.current.length) return;
       const next = finalizeQuizFolders(filtered, quizSetsRef.current);
@@ -2216,16 +2265,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       safeSetItem('malacadhati_quiz_folders', JSON.stringify(next));
       return;
     }
-    // Soft-trash only when the remote payload is a real trashed folder (has a name
-    // or we already had it trashed). Never invent deletes from bare remove stubs.
-    if (folder.trashed && !String(folder.name || '').trim()) {
-      quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id);
-      return;
-    }
+    if (folder.trashed && !String(folder.name || '').trim()) return;
     const prev = quizFoldersRef.current;
     const existing = prev.find((f) => f.id === folder.id);
     const merged = existing ? pickBetterQuizFolder(existing, folder) : folder;
-    quizFoldersByIdCacheRef.current = mergeById(quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id), [merged]);
     if (existing && JSON.stringify(existing) === JSON.stringify(merged)) return;
     const nextList = existing
       ? prev.map((f) => (f.id === folder.id ? merged : f))
@@ -2234,6 +2277,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFoldersRef.current = next;
     setQuizFolders(next);
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(next));
+    if (!existing || !!existing.trashed !== !!merged.trashed) {
+      queueMicrotask(() => scheduleInstantDataCloudSave({ quizFolders: quizFoldersRef.current }));
+    }
   };
 
   const applyRemoteSetById = (raw: unknown) => {
@@ -2241,8 +2287,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const incoming = raw as QuizSet;
     if (!incoming.id) return;
     const setVal: QuizSet = { ...incoming, items: incoming.items ?? [] };
+    rememberRemoteSetInCache(setVal);
+    if (isApplyingRemoteRef.current) {
+      pendingRemoteByIdRef.current.push({ kind: 'set', raw });
+      return;
+    }
     if (permDeletedRef.current.quizSets.includes(setVal.id)) {
-      quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id);
       const filtered = quizSetsRef.current.filter((s) => s.id !== setVal.id);
       if (filtered.length === quizSetsRef.current.length) return;
       quizSetsRef.current = filtered;
@@ -2250,21 +2300,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       safeSetItem('malacadhati_quiz_sets', JSON.stringify(filtered));
       return;
     }
-    // Ignore fabricated empty trash stubs from onChildRemoved — never hide a live set.
-    if (setVal.trashed && !String(setVal.name || '').trim()) {
-      quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id);
-      return;
-    }
+    if (setVal.trashed && !String(setVal.name || '').trim()) return;
     const prev = quizSetsRef.current;
     const existing = prev.find((s) => s.id === setVal.id);
     const merged = existing
       ? pickBetterQuizSet(existing, setVal, permDeletedRef.current)
       : setVal;
-    quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
-      quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id),
-      [merged],
-      permDeletedRef.current,
-    );
     if (existing && JSON.stringify(existing) === JSON.stringify(merged)) return;
     const nextList = existing
       ? prev.map((s) => (s.id === setVal.id ? merged : s))
@@ -2274,10 +2315,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     if (!quizSetsEqualForUI(next, prev)) setQuizSets(next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
-    // Heal the giant array so devices that only listen to quizSets[] also catch up —
-    // never shrink; only publish the union we already have locally.
-    if (!existing || (merged.folderId && existing.folderId !== merged.folderId)) {
+    // Heal array for create, folder move, or soft-delete so other listeners catch up.
+    if (!existing || existing.folderId !== merged.folderId || !!existing.trashed !== !!merged.trashed) {
       queueMicrotask(() => scheduleInstantDataCloudSave({ quizSets: quizSetsRef.current }));
+    }
+  };
+
+  const flushPendingRemoteById = () => {
+    if (isApplyingRemoteRef.current || !pendingRemoteByIdRef.current.length) return;
+    const queued = pendingRemoteByIdRef.current;
+    pendingRemoteByIdRef.current = [];
+    for (const item of queued) {
+      if (item.kind === 'set') applyRemoteSetById(item.raw);
+      else applyRemoteFolderById(item.raw);
     }
   };
 
@@ -2708,15 +2758,30 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
     }
     if (!changed) {
+      flushPendingRemoteById();
       flushPendingRemoteTrashPatches();
       return;
     }
+
+    // Re-union ById cache at commit time — child events may have updated the cache
+    // while this array merge was computing (creates/soft-deletes must not be overwritten).
+    const tombstonesAtCommit = permDeletedRef.current;
+    nextSets = mergeQuizSetsForSync(nextSets, quizSetsByIdCacheRef.current, tombstonesAtCommit);
+    nextFolders = mergeFoldersForSync(nextFolders, quizFoldersByIdCacheRef.current, tombstonesAtCommit);
 
     const normalizedFolders = finalizeQuizFolders(nextFolders, nextSets);
     const normalizedSets = initializeQuizColors(
       nextSets,
       normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
     );
+
+    // Keep ById cache aligned with the committed union (including soft-deletes).
+    quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
+      quizSetsByIdCacheRef.current,
+      normalizedSets,
+      tombstonesAtCommit,
+    );
+    quizFoldersByIdCacheRef.current = mergeById(quizFoldersByIdCacheRef.current, normalizedFolders);
 
     const shouldReconcileQuizSets = patch.quizSets !== undefined && (
       JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)
@@ -2759,6 +2824,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       isApplyingRemoteRef.current = false;
+      flushPendingRemoteById();
       flushPendingRemoteTrashPatches();
       flushPendingInstantDataSave();
     }
@@ -3559,6 +3625,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizItemApplyQueue = [];
           queueMicrotask(() => applyQuizItemsBatch(more));
         } else {
+          flushPendingRemoteById();
           flushPendingInstantDataSave();
         }
       }
@@ -4244,8 +4311,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const nextFolders = quizFoldersRef.current.map((f) => (
       f.id === id ? { ...f, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : f
     ));
+    const movedSets = quizSetsRef.current.filter((s) => s.folderId === id);
     const nextSets = quizSetsRef.current.map((s) => (
-      s.folderId === id ? { ...s, folderId: undefined } : s
+      s.folderId === id ? { ...s, folderId: undefined, updatedAt: trashAt } : s
     ));
     quizFoldersRef.current = nextFolders;
     quizSetsRef.current = nextSets;
@@ -4253,9 +4321,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets(nextSets);
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistFolders(nextFolders, true);
+    persistSets(nextSets, true, true);
     const trashedFolder = nextFolders.find((f) => f.id === id);
     if (trashedFolder) pushQuizFolderById(trashedFolder);
-    persist({ quizFolders: nextFolders, quizSets: nextSets }, true);
+    for (const set of nextSets) {
+      if (movedSets.some((m) => m.id === set.id)) pushQuizSetById(set);
+    }
     scheduleInstantDataCloudSave({ quizFolders: nextFolders, quizSets: nextSets });
   };
 

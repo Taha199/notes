@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { onChildAdded, onChildChanged, onChildRemoved, ref as dbRef } from 'firebase/database';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
+import { database } from '../../lib/firebase';
 import { getStorageLimitBytes } from '../../lib/storageQuota';
 import {
   FILE_INPUT_ID,
@@ -114,6 +116,63 @@ export function FilesPage({ search }: { search: string }) {
 
     return () => { cancelled = true; };
   }, [user, reloadNonce, t.filesLoadFailed]);
+
+  // Live sync — create/delete appears on other devices without refresh.
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.uid;
+    const filesRefPath = dbRef(database, `users/${uid}/files`);
+    const foldersRefPath = dbRef(database, `users/${uid}/fileFolders`);
+
+    const upsertFile = (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return;
+      const file = raw as StoredFile;
+      if (!file.id) return;
+      setFiles((prev) => {
+        const idx = prev.findIndex((f) => f.id === file.id);
+        if (idx < 0) return [...prev, file];
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...file };
+        return next;
+      });
+    };
+    const removeFile = (key: string | null) => {
+      if (!key) return;
+      setFiles((prev) => prev.filter((f) => f.id !== key));
+    };
+    const upsertFolder = (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return;
+      const folder = raw as FileFolder;
+      if (!folder.id) return;
+      setFolders((prev) => {
+        const idx = prev.findIndex((f) => f.id === folder.id);
+        if (idx < 0) return [...prev, folder];
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...folder };
+        return next;
+      });
+    };
+    const removeFolder = (key: string | null) => {
+      if (!key) return;
+      setFolders((prev) => prev.filter((f) => f.id !== key));
+    };
+
+    const unsubFileAdded = onChildAdded(filesRefPath, (snap) => upsertFile(snap.val()));
+    const unsubFileChanged = onChildChanged(filesRefPath, (snap) => upsertFile(snap.val()));
+    const unsubFileRemoved = onChildRemoved(filesRefPath, (snap) => removeFile(snap.key));
+    const unsubFolderAdded = onChildAdded(foldersRefPath, (snap) => upsertFolder(snap.val()));
+    const unsubFolderChanged = onChildChanged(foldersRefPath, (snap) => upsertFolder(snap.val()));
+    const unsubFolderRemoved = onChildRemoved(foldersRefPath, (snap) => removeFolder(snap.key));
+
+    return () => {
+      unsubFileAdded();
+      unsubFileChanged();
+      unsubFileRemoved();
+      unsubFolderAdded();
+      unsubFolderChanged();
+      unsubFolderRemoved();
+    };
+  }, [user]);
 
   useEffect(() => {
     if (currentFolderId && !folders.some((f) => f.id === currentFolderId)) {
