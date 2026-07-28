@@ -20,7 +20,7 @@
  * this path is what actually guarantees survival across refresh.
  */
 import { ref as dbRef, remove, set, update } from 'firebase/database';
-import type { Note, QuizItem } from '../types';
+import type { Note, QuizFolder, QuizItem, QuizSet } from '../types';
 import { database } from './firebase';
 import { rtdbFetch } from './rtdb';
 
@@ -345,6 +345,36 @@ export async function fetchQuizItemsByIdCloud(uid: string): Promise<StoredQuizIt
     if (!data || typeof data !== 'object') return [];
     return Object.values(data as Record<string, StoredQuizItem>).filter(
       (q) => q && typeof q === 'object' && q.id != null,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Per-set mirror — survives quizSets[] LWW / localStorage quota failures. */
+export async function fetchQuizSetsByIdCloud(uid: string): Promise<QuizSet[]> {
+  try {
+    const res = await rtdbFetch(`/users/${uid}/quizSetsById`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    return Object.values(data as Record<string, QuizSet>)
+      .filter((s) => s && typeof s === 'object' && s.id != null)
+      .map((set) => ({ ...set, items: set.items ?? [] }));
+  } catch {
+    return [];
+  }
+}
+
+/** Per-folder mirror — same durability pattern as quizSetsById. */
+export async function fetchQuizFoldersByIdCloud(uid: string): Promise<QuizFolder[]> {
+  try {
+    const res = await rtdbFetch(`/users/${uid}/quizFoldersById`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    return Object.values(data as Record<string, QuizFolder>).filter(
+      (f) => f && typeof f === 'object' && f.id != null,
     );
   } catch {
     return [];
