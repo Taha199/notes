@@ -120,3 +120,11 @@ export async function readRtdb(accessToken, path) {
   if (!response.ok) return null;
   return response.json();
 }
+
+/** Keys only — avoids downloading multi-MB notesById / quizSetsById trees. */
+export async function readRtdbShallow(accessToken, path) {
+  const url = `${FB_DB_URL}${path}.json?shallow=true&access_token=${encodeURIComponent(accessToken)}`;
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  return response.json();
+}

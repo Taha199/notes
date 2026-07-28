@@ -3,16 +3,32 @@ import {
   getGoogleAccessToken,
   isAllowedOrigin,
   readRtdb,
+  readRtdbShallow,
   readServiceAccount,
   RTDB_SCOPES,
   verifyAdmin,
 } from './_lib/firebaseAdmin.js';
+
+/** Allow enough time for per-user light reads (Hobby may still cap lower). */
+export const config = { maxDuration: 60 };
 
 const AUTH_SCOPE = 'https://www.googleapis.com/auth/identitytoolkit';
 const FREE_STORAGE_LIMIT_MB = 100;
 const PLUS_STORAGE_LIMIT_MB = 1000;
 const MIN_STORAGE_LIMIT_MB = 10;
 const MAX_STORAGE_LIMIT_MB = 10_000;
+
+/** Only the fields used for admin storage — never pull ById / history mirrors. */
+const STORAGE_KEYS = [
+  'notes',
+  'quizzes',
+  'quizSets',
+  'quizFolders',
+  'chats',
+  'draftContents',
+  'files',
+  'fileFolders',
+];
 
 function jsonBytes(value) {
   return Buffer.byteLength(JSON.stringify(value ?? null), 'utf8');
@@ -74,6 +90,33 @@ async function listAuthUsers(serviceAccount, accessToken) {
   return users;
 }
 
+async function mapPool(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, Math.max(1, items.length)) }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/** Read profile + storage fields only — skips notesById / quiz*ById / dataHistory. */
+async function readUserLight(accessToken, uid) {
+  const [profile, ...storageParts] = await Promise.all([
+    readRtdb(accessToken, `/users/${uid}/profile`).catch(() => null),
+    ...STORAGE_KEYS.map((key) => readRtdb(accessToken, `/users/${uid}/${key}`).catch(() => null)),
+  ]);
+  const blob = { profile: profile && typeof profile === 'object' ? profile : {} };
+  STORAGE_KEYS.forEach((key, i) => {
+    blob[key] = storageParts[i];
+  });
+  return blob;
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
@@ -94,23 +137,31 @@ export default async function handler(request, response) {
       getGoogleAccessToken(serviceAccount, [AUTH_SCOPE]),
     ]);
 
-    // Server-to-server read of the whole tree, but only compact numbers go to the client.
-    const [users, authUsers, presence] = await Promise.all([
-      readRtdb(dbToken, '/users').catch(() => ({})),
+    // Shallow UID list + Auth + presence — never download the full /users tree
+    // (ById mirrors made that hang the admin panel).
+    const [usersShallow, authUsers, presence] = await Promise.all([
+      readRtdbShallow(dbToken, '/users').catch(() => ({})),
       listAuthUsers(serviceAccount, authToken).catch(() => []),
       readRtdb(dbToken, '/presence').catch(() => ({})),
     ]);
-    const data = users && typeof users === 'object' ? users : {};
     const presenceByUid = presence && typeof presence === 'object' ? presence : {};
+    const authByUid = new Map(authUsers.map((u) => [u.localId, u]));
+    const rtdbUids = usersShallow && typeof usersShallow === 'object'
+      ? Object.keys(usersShallow)
+      : [];
+    const allUids = [...new Set([...rtdbUids, ...authByUid.keys()])];
 
-    const authByUid = new Map(
-      authUsers.map((u) => [u.localId, u]),
-    );
-    const allUids = new Set([...Object.keys(data), ...authByUid.keys()]);
+    const blobs = await mapPool(allUids, 4, async (uid) => {
+      try {
+        return await readUserLight(dbToken, uid);
+      } catch {
+        return { profile: {} };
+      }
+    });
 
-    const rows = Array.from(allUids).map((uid) => {
-      const blob = (data[uid] ?? {});
-      const profile = (blob.profile ?? {});
+    const rows = allUids.map((uid, index) => {
+      const blob = blobs[index] ?? { profile: {} };
+      const profile = blob.profile ?? {};
       const authUser = authByUid.get(uid);
       const live = presenceByUid[uid] ?? {};
       const email = ((profile.email) || authUser?.email || live.email || '').trim();
@@ -118,7 +169,6 @@ export default async function handler(request, response) {
       const profileSeen = Number(profile.lastSeen) || 0;
       const authSeen = Number(authUser?.lastLoginAt) || 0;
       const presenceSeen = Number(live.lastSeen) || 0;
-      // Prefer live /presence heartbeat when newer than profile or auth lastLoginAt.
       const lastSeen = Math.max(presenceSeen, profileSeen, authSeen);
       const ip = (typeof live.ip === 'string' && live.ip) || profile.ip || '';
       return {

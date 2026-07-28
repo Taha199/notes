@@ -68,6 +68,7 @@ export function AdminPanel() {
   const isAdmin = user?.email === ADMIN_EMAIL;
   const [rows, setRows] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<UserRow | null>(null);
   const [editingLimitUid, setEditingLimitUid] = useState<string | null>(null);
@@ -77,19 +78,34 @@ export function AdminPanel() {
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
-    if (!silent) setLoading(true);
+    if (!silent) {
+      setLoading(true);
+      setLoadError(null);
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 45_000);
     try {
       const authUser = user ?? (await waitForAuthUser());
-      if (!authUser) return;
+      if (!authUser) {
+        if (!silent) setLoadError('Inte inloggad.');
+        return;
+      }
 
       // Everything (names + storage) is computed server-side in one compact request,
       // instead of downloading the whole database to the browser.
       const token = await getRtdbAuthToken();
-      if (!token) return;
+      if (!token) {
+        if (!silent) setLoadError('Kunde inte hämta autentiseringstoken.');
+        return;
+      }
       const res = await fetch('/api/admin-user-stats', {
         headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (!silent) setLoadError(`Kunde inte ladda användare (${res.status}).`);
+        return;
+      }
       const data = (await res.json()) as { users?: Array<Partial<UserRow>> };
       const list: UserRow[] = (data.users ?? []).map((u) => ({
         uid: u.uid ?? '',
@@ -106,7 +122,16 @@ export function AdminPanel() {
       // Prefer fresher live presence over API/auth lastLoginAt when merging storage stats.
       setRows(mergePresenceIntoRows(list, presenceRef.current));
       setNow(Date.now());
+      setLoadError(null);
+    } catch (err) {
+      console.error('admin-user-stats load failed', err);
+      if (!silent) {
+        setLoadError(err instanceof Error && err.name === 'AbortError'
+          ? 'Timeout — försök igen.'
+          : 'Kunde inte ladda användarpanelen.');
+      }
     } finally {
+      window.clearTimeout(timer);
       if (!silent) setLoading(false);
     }
   }, [user]);
@@ -267,6 +292,17 @@ export function AdminPanel() {
 
       {loading ? (
         <p className="py-10 text-center text-sm text-app-text-secondary">Laddar…</p>
+      ) : loadError ? (
+        <div className="py-10 text-center">
+          <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-3 rounded-xl border border-app-border px-4 py-2 text-sm font-medium text-app-text-secondary transition hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
+          >
+            🔄 Försök igen
+          </button>
+        </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-900">
           <table className="w-full min-w-[920px] text-left text-[13px]">
