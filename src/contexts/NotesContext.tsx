@@ -967,6 +967,62 @@ function resolveDraftsFromSources(
   return { drafts: [{ id: 'd1', title: '', html: '' }], counter: 1 };
 }
 
+/**
+ * The only fields any merge path reads out of the user node.
+ *
+ * Reading `/users/{uid}` wholesale also downloaded `dataHistory` (up to 48 full
+ * snapshots of notes + quizzes + sets), `quizFoldersHistory` (40 more), every
+ * ById mirror and `files` with inline base64 dataUrls. That node is easily tens
+ * of megabytes, and it was re-fetched on boot, on every visibilitychange, on
+ * every window focus, every 60s, and on every cloudSyncAt bump from the other
+ * device. On mobile the parse alone froze the main thread long enough to look
+ * like the page had reloaded itself.
+ */
+const CLOUD_SYNC_FIELDS = [
+  'notes',
+  'quizzes',
+  'chats',
+  'quizSets',
+  'quizFolders',
+  'drafts',
+  'draftContents',
+  'draftId',
+  'deletedDraftIds',
+  'permanentlyDeletedIds',
+  'cloudSyncAt',
+  'tokenUsage',
+] as const;
+
+/**
+ * Field-scoped replacement for a whole-node read. Fields whose value is null are
+ * left out of the result so `'quizSets' in cloud` membership checks keep the
+ * exact meaning they had before (RTDB omits empty children from a node read too,
+ * and a GET on a path that does not exist answers 200 + null rather than 404).
+ *
+ * All-or-nothing on purpose: a half-read bundle would look like "the cloud has
+ * no notes" to the merge paths and trigger a bogus repair push. One failed field
+ * therefore fails the whole read, exactly like the single node fetch it replaces,
+ * so callers fall back to local data instead of acting on a partial picture.
+ */
+async function fetchCloudSyncBundle(uid: string): Promise<Record<string, unknown> | null> {
+  const results = await Promise.all(CLOUD_SYNC_FIELDS.map(async (field) => {
+    try {
+      const res = await rtdbFetch(`/users/${uid}/${field}`);
+      if (!res.ok) return [field, undefined] as const;
+      return [field, (await res.json()) as unknown] as const;
+    } catch {
+      return [field, undefined] as const;
+    }
+  }));
+  const bundle: Record<string, unknown> = {};
+  for (const [field, value] of results) {
+    if (value === undefined) return null;
+    if (value === null) continue;
+    bundle[field] = value;
+  }
+  return bundle;
+}
+
 async function fetchCloudDraftBundle(uid: string, _getToken: () => Promise<string | null>) {
   const get = async (field: string) => {
     const r = await rtdbFetch(`/users/${uid}/${field}`);
@@ -1514,23 +1570,41 @@ function colorDistance(a: string, b: string) {
   return Math.hypot(ar - br, ag - bg, ab - bb);
 }
 
-function pickSpacedColor(usedColors: string[]) {
+function hashSeed(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  return Math.abs(hash);
+}
+
+/**
+ * Colour assignment must be a pure function of the row id.
+ *
+ * These pickers run inside every merge pass (boot, each realtime tick, each
+ * pull). With `Math.random()` tie-breaks the same colourless row got a
+ * different colour on every pass, so the merged array never compared equal to
+ * the previous one: the UI re-rendered the whole quiz tree, the reconcile push
+ * shipped the new colour to the cloud, that bumped cloudSyncAt, the other
+ * device pulled, re-rolled its own colour and pushed back — an endless
+ * cross-device write loop that looked like constant flicker/self-refresh.
+ */
+function pickSpacedColor(usedColors: string[], seed = '') {
   const used = usedColors.filter((color) => /^#[0-9a-f]{6}$/i.test(color));
   const counts = new Map(AUTO_QUIZ_COLORS.map((color) => [color, used.filter((usedColor) => usedColor.toLowerCase() === color).length]));
   const lowestUse = Math.min(...counts.values());
   const leastUsed = AUTO_QUIZ_COLORS.filter((color) => counts.get(color) === lowestUse);
-  if (used.length === 0) return leastUsed[Math.floor(Math.random() * leastUsed.length)];
+  const pick = (candidates: string[]) => candidates[hashSeed(seed) % candidates.length];
+  if (used.length === 0) return pick(leastUsed);
   const scored = leastUsed.map((color) => ({ color, score: Math.min(...used.map((usedColor) => colorDistance(color, usedColor))) }));
   const bestScore = Math.max(...scored.map(({ score }) => score));
-  const best = scored.filter(({ score }) => score === bestScore);
-  return best[Math.floor(Math.random() * best.length)].color;
+  const best = scored.filter(({ score }) => score === bestScore).map(({ color }) => color);
+  return pick(best);
 }
 
-function initializeQuizColors<T extends { color?: string; colorInitialized?: boolean }>(items: T[], initialColors: string[] = []) {
+function initializeQuizColors<T extends { id: string; color?: string; colorInitialized?: boolean }>(items: T[], initialColors: string[] = []) {
   const used = [...initialColors, ...items.map((item) => item.color).filter((color): color is string => !!color)];
   return items.map((item) => {
     if (item.colorInitialized || item.color) return item;
-    const color = pickSpacedColor(used);
+    const color = pickSpacedColor(used, item.id);
     used.push(color);
     return { ...item, color, colorInitialized: true };
   });
@@ -1581,11 +1655,18 @@ function recoverMissingFoldersFromSets(folders: QuizFolder[], sets: QuizSet[]): 
     if (known.has(folderId)) continue;
     const setsInFolder = sets.filter((set) => set.folderId === folderId && !set.trashed);
     const usedColors = [...folders, ...sets].map((item) => item.color).filter((color): color is string => !!color);
+    // Derive createdAt from the sets that reference the folder instead of
+    // Date.now(): this runs on every merge pass, and a fresh timestamp made the
+    // rebuilt folder differ from the previous pass forever (see pickSpacedColor).
+    const createdAt = setsInFolder
+      .map((set) => set.createdAt)
+      .filter(Boolean)
+      .sort()[0] ?? new Date(0).toISOString();
     recovered.push({
       id: folderId,
       name: recoveredFolderNameFromLocal(folderId, setsInFolder),
-      createdAt: new Date().toISOString(),
-      color: pickSpacedColor(usedColors),
+      createdAt,
+      color: pickSpacedColor(usedColors, folderId),
       colorInitialized: true,
     });
     known.set(folderId, recovered[recovered.length - 1]);
@@ -1663,6 +1744,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const pendingLocalDraftIdsRef = useRef<Set<string>>(new Set());
   const pullTimer = useRef<number | null>(null);
   const pendingRemotePullRef = useRef(false);
+  const lastRemotePullAt = useRef(0);
   const lastPushedDataAtRef = useRef(0);
   const lastPushedPayloadRef = useRef<Partial<Record<'notes' | 'quizzes' | 'quizSets' | 'quizFolders', string>>>({});
   const pendingRemoteTrashPatchesRef = useRef<Array<{
@@ -1926,10 +2008,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           local = { ...local, folders: mergedFolders };
         }
 
-        const r = await rtdbFetch(`/users/${user.uid}`);
-        if (!r.ok) throw new Error('cloud-fetch-failed');
+        const cloud = await fetchCloudSyncBundle(user.uid);
+        if (!cloud) throw new Error('cloud-fetch-failed');
         cloudLoadSucceededRef.current = true;
-        const cloud = (await r.json()) as Record<string, unknown> | null;
         if (cancelled) return;
 
         if (cloud?.tokenUsage) {
@@ -2048,23 +2129,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setChats(chats);
         safeSetItem('malacadhati_chats', JSON.stringify(chats));
 
-        let dedicatedFolders: QuizFolder[] = [];
-        let dedicatedSets: QuizSet[] = [];
-        try {
-          const folderRes = await rtdbFetch(`/users/${user.uid}/quizFolders`);
-          if (folderRes.ok) dedicatedFolders = firebaseToArray<QuizFolder>(await folderRes.json());
-        } catch { /* ignore */ }
-        try {
-          const setRes = await rtdbFetch(`/users/${user.uid}/quizSets`);
-          if (setRes.ok) {
-            dedicatedSets = firebaseToArray<QuizSet>(await setRes.json()).map((set) => ({ ...set, items: set.items ?? [] }));
-          }
-        } catch { /* ignore */ }
-
         const cloudFolders = cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [];
         const cloudSets = cloud
           ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
           : [];
+        // These used to be two extra reads of /quizFolders and /quizSets — the
+        // very nodes the bundle above already fetched. quizSets carries every
+        // question and inline image, so re-downloading it doubled boot traffic.
+        const dedicatedFolders = cloudFolders;
+        const dedicatedSets = cloudSets;
         const cloudFoldersEmpty = cloud && 'quizFolders' in cloud && cloudFolders.length === 0;
         const cloudSetsEmpty = cloud && 'quizSets' in cloud && cloudSets.length === 0;
         const dedicatedFoldersEmpty = dedicatedFolders.length === 0;
@@ -3759,13 +3832,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!localDraftsEmpty && Date.now() - lastLocalSaveAt.current < 800) return;
     }
     try {
-      const [r, byIdSets, byIdFolders] = await Promise.all([
-        rtdbFetch(`/users/${u.uid}`),
+      const [cloud, byIdSets, byIdFolders] = await Promise.all([
+        fetchCloudSyncBundle(u.uid),
         fetchQuizSetsByIdCloud(u.uid),
         fetchQuizFoldersByIdCloud(u.uid),
       ]);
-      if (!r.ok) return;
-      const cloud = (await r.json()) as Record<string, unknown> | null;
       if (!cloud) return;
       if (byIdSets.length) {
         quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
@@ -3787,13 +3858,33 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Every write from the other device bumps cloudSyncAt, so a burst (someone
+   * typing a quiz answer) used to fire one full reconcile pull per tick. The
+   * realtime listeners already deliver the content itself; this pull only exists
+   * to reconcile membership/order, so space bursts out instead of racing them.
+   */
+  const REMOTE_PULL_MIN_GAP_MS = 1500;
   const scheduleRemotePull = (force = true) => {
     if (pendingRemotePullRef.current) return;
     pendingRemotePullRef.current = true;
+    const sinceLast = Date.now() - lastRemotePullAt.current;
+    const delay = force ? Math.max(0, REMOTE_PULL_MIN_GAP_MS - sinceLast) : 400;
     window.setTimeout(() => {
       pendingRemotePullRef.current = false;
+      lastRemotePullAt.current = Date.now();
       void pullFromCloud(force);
-    }, force ? 0 : 400);
+    }, delay);
+  };
+
+  /** Same coalescing for the draft bundle — draftContents child listeners are
+   *  the live path; this is the catch-up read. */
+  const scheduleRemoteDraftPull = () => {
+    if (draftPullDebounceRef.current) return;
+    draftPullDebounceRef.current = setTimeout(() => {
+      draftPullDebounceRef.current = null;
+      void pullDraftsFromCloud(true);
+    }, 600);
   };
 
   useEffect(() => {
@@ -3878,17 +3969,68 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         isApplyingRemoteRef.current = false;
       }
     });
+    // Whole-array nodes: Firebase re-delivers the complete value of every
+    // onValue listener after each reconnect, and mobile Safari drops the socket
+    // constantly (backgrounding, network switches, even long scrolls). Re-running
+    // the array merges on a payload we already applied replaced notes/quizSets/
+    // quizFolders wholesale every time — that is what made the page blink and
+    // feel like it had reloaded itself. Skip snapshots byte-identical to the last
+    // one applied, and coalesce a burst of nodes into one merge pass so four
+    // listeners firing together cost one state update instead of four.
+    const lastAppliedArrayJson = new Map<string, string>();
+    let arrayPatch: Parameters<typeof applyRemoteTrashData>[0] = {};
+    let arrayPatchTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushArrayPatch = () => {
+      arrayPatchTimer = null;
+      const patch = arrayPatch;
+      arrayPatch = {};
+      if (Object.keys(patch).length) applyRemoteTrashData(patch);
+    };
     const bindRealtime = <T,>(path: string, key: 'notes' | 'quizzes' | 'quizSets' | 'quizFolders', map?: (val: unknown) => T) =>
       onValue(dbRef(database, `users/${uid}/${path}`), (snap) => {
         const val = snap.val();
-        if (val == null) return;
-        applyRemoteTrashData({ [key]: map ? map(val) : val });
+        // Bail before recording: a snapshot applyRemoteTrashData would refuse
+        // (not loaded yet) must not poison the dedupe cache, or the change would
+        // never be applied at all.
+        if (val == null || !loadedRef.current) return;
+        const json = JSON.stringify(val);
+        if (lastAppliedArrayJson.get(key) === json) return;
+        lastAppliedArrayJson.set(key, json);
+        arrayPatch = { ...arrayPatch, [key]: map ? map(val) : val };
+        if (arrayPatchTimer) return;
+        arrayPatchTimer = setTimeout(flushArrayPatch, 60);
       });
     const unsubNotes = bindRealtime('notes', 'notes');
     const unsubQuizzes = bindRealtime('quizzes', 'quizzes');
     const unsubSets = bindRealtime('quizSets', 'quizSets', (val) =>
       firebaseToArray<QuizSet>(val as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] })));
     const unsubFolders = bindRealtime('quizFolders', 'quizFolders');
+
+    // AI chat conversations had no listener at all: a chat started on the phone
+    // only showed up on the desktop after a refresh or the 60s poll.
+    let lastAppliedChatsJson = '';
+    const unsubChats = onValue(dbRef(database, `users/${uid}/chats`), (snap) => {
+      const val = snap.val();
+      if (val == null || !loadedRef.current) return;
+      const json = JSON.stringify(val);
+      if (json === lastAppliedChatsJson) return;
+      lastAppliedChatsJson = json;
+      const remote = firebaseToArray<ChatConversation>(val as ChatConversation[] | Record<string, ChatConversation>)
+        .map((c) => ({ ...c, messages: c.messages ?? [] }));
+      const merged = mergeChatsForSync(chatsRef.current, remote);
+      if (JSON.stringify(merged) === JSON.stringify(chatsRef.current)) return;
+      chatsRef.current = merged;
+      setChats(merged);
+      safeSetItem('malacadhati_chats', JSON.stringify(merged));
+    });
+
+    // Token counter is a single number — cheap to keep live so the AI quota
+    // shown on one device reflects usage from the other.
+    const unsubTokenUsage = onValue(dbRef(database, `users/${uid}/tokenUsage`), (snap) => {
+      const remote = Number(snap.val());
+      if (!Number.isFinite(remote) || remote < 0) return;
+      setTokenUsage((prev) => (prev === remote ? prev : remote));
+    });
 
     // Per-id folder/set mirrors — create/delete appears on other devices even when
     // the full quizFolders/quizSets array write is delayed or dropped.
@@ -4073,23 +4215,33 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     // Same for notes: trash/restore must land via notesById so refresh cannot
     // resurrect a live IndexedDB copy over a soft-delete that only hit notes[].
-    const applyNotesByIdSnap = (val: unknown) => {
-      if (!loadedRef.current || isApplyingRemoteRef.current || val == null) return;
-      if (typeof val !== 'object') return;
-      const durable = Object.values(val as Record<string, Note>).filter(
-        (n): n is Note => !!n && typeof n === 'object' && n.id != null,
-      );
-      if (!durable.length) return;
+    // Per-child events, not onValue: an onValue here re-downloaded EVERY note
+    // (legacy base64 images included) whenever any single note changed anywhere,
+    // and again after every socket reconnect. One edited note now costs one small
+    // payload.
+    let notesByIdBuffer: Note[] = [];
+    let notesByIdFlush: ReturnType<typeof setTimeout> | null = null;
+    const applyNotesByIdBatch = (durable: Note[]) => {
+      if (!loadedRef.current || !durable.length) return;
+      if (isApplyingRemoteRef.current) {
+        // Used to return outright, which silently dropped a remote note edit
+        // whenever an array merge happened to hold the lock — the other device
+        // then needed a manual refresh to see it.
+        notesByIdBuffer.push(...durable);
+        scheduleNotesByIdFlush();
+        return;
+      }
       const tombstones = permDeletedRef.current;
       const merged = stripPermDeletedNotes(mergeByIdNewer(notesRef.current, durable), tombstones);
-      if (JSON.stringify(merged) === JSON.stringify(notesRef.current)) return;
-      isApplyingRemoteRef.current = true;
-      try {
-        notesRef.current = merged;
-        setNotes(merged);
-        safeSetItem('malacadhati', JSON.stringify(merged));
-      } finally {
-        isApplyingRemoteRef.current = false;
+      if (JSON.stringify(merged) !== JSON.stringify(notesRef.current)) {
+        isApplyingRemoteRef.current = true;
+        try {
+          notesRef.current = merged;
+          setNotes(merged);
+          safeSetItem('malacadhati', JSON.stringify(merged));
+        } finally {
+          isApplyingRemoteRef.current = false;
+        }
       }
       // Best-effort: scrub permanently-deleted ids still lingering in notesById
       // (large image notes sometimes fail the single DELETE).
@@ -4098,12 +4250,52 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (dead.has(n.id)) void removeNoteDurable(userRef.current?.uid, n.id);
       });
     };
-    const unsubNotesById = onValue(
-      dbRef(database, `users/${uid}/notesById`),
-      (snap) => applyNotesByIdSnap(snap.val()),
-    );
+    function scheduleNotesByIdFlush() {
+      if (notesByIdFlush) return;
+      notesByIdFlush = setTimeout(() => {
+        notesByIdFlush = null;
+        const batch = notesByIdBuffer;
+        notesByIdBuffer = [];
+        applyNotesByIdBatch(batch);
+      }, 40);
+    }
+    const queueNoteChild = (val: unknown) => {
+      if (!val || typeof val !== 'object') return;
+      const note = val as Note;
+      if (note.id == null) return;
+      notesByIdBuffer.push(note);
+      scheduleNotesByIdFlush();
+    };
+    const notesByIdRef = dbRef(database, `users/${uid}/notesById`);
+    const unsubNoteAdded = onChildAdded(notesByIdRef, (snap) => queueNoteChild(snap.val()));
+    const unsubNoteChanged = onChildChanged(notesByIdRef, (snap) => queueNoteChild(snap.val()));
+    const unsubNoteRemoved = onChildRemoved(notesByIdRef, (snap) => {
+      // A missing mirror is not a delete — only an explicit permanent-delete
+      // tombstone may drop a note, exactly like quizSetsById.
+      const id = Number(snap.key);
+      if (!Number.isFinite(id) || !permDeletedRef.current.notes.includes(id)) return;
+      const next = notesRef.current.filter((n) => n.id !== id);
+      if (next.length === notesRef.current.length) return;
+      notesRef.current = next;
+      setNotes(next);
+      safeSetItem('malacadhati', JSON.stringify(next));
+    });
+
+    // Returning to the tab used to trigger a full pull every time. On iOS
+    // visibilitychange and focus fire in bursts (keyboard, share sheet, tab
+    // switcher), so each burst kicked off another whole-payload download and
+    // wholesale state replacement — the flicker the user sees. Realtime
+    // listeners already carry every change; this pull is only a safety net.
+    const VISIBILITY_PULL_GAP_MS = 20_000;
+    let lastVisibilityPullAt = 0;
+    const pullIfNotJustPulled = () => {
+      const now = Date.now();
+      if (now - lastVisibilityPullAt < VISIBILITY_PULL_GAP_MS) return;
+      lastVisibilityPullAt = now;
+      void pullFromCloud(true);
+    };
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void pullFromCloud(true);
+      if (document.visibilityState === 'visible') pullIfNotJustPulled();
     };
     const onHide = () => {
       if (document.visibilityState === 'hidden') flushPersist();
@@ -4113,7 +4305,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     window.addEventListener('focus', onVisible);
     window.addEventListener('pagehide', flushPersist);
     pullTimer.current = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void pullFromCloud(true);
+      if (document.visibilityState === 'visible') pullIfNotJustPulled();
     }, 60_000);
     // Safety valve: if "Saving…" has been up for too long (hung Firebase write,
     // mismatched increment), clear the badge so the UI is not stuck forever.
@@ -4138,6 +4330,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubQuizzes();
       unsubSets();
       unsubFolders();
+      unsubChats();
+      unsubTokenUsage();
+      if (arrayPatchTimer) clearTimeout(arrayPatchTimer);
       unsubFolderAdded();
       unsubFolderChanged();
       unsubFolderRemoved();
@@ -4151,7 +4346,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubQuizItemChanged();
       unsubQuizItemRemoved();
       if (quizItemChildFlush) clearTimeout(quizItemChildFlush);
-      unsubNotesById();
+      unsubNoteAdded();
+      unsubNoteChanged();
+      unsubNoteRemoved();
+      if (notesByIdFlush) clearTimeout(notesByIdFlush);
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
@@ -4175,10 +4373,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         scheduleRemotePull(true);
         return;
       }
-      void pullDraftsFromCloud(true);
+      scheduleRemoteDraftPull();
       if (loadedRef.current) scheduleRemotePull(true);
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (draftPullDebounceRef.current) {
+        clearTimeout(draftPullDebounceRef.current);
+        draftPullDebounceRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, draftsReady]);
 
@@ -4514,10 +4718,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const addQuizSet = (name: string): QuizSet => {
-    const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value));
+    const id = Date.now().toString();
+    const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value), id);
     const stamp = new Date().toISOString();
     const newSet: QuizSet = {
-      id: Date.now().toString(),
+      id,
       name,
       items: [],
       createdAt: stamp,
@@ -4653,10 +4858,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const addQuizFolder = (name: string): QuizFolder => {
-    const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value));
+    const id = 'f' + Date.now().toString();
+    const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value), id);
     const stamp = new Date().toISOString();
     const folder: QuizFolder = {
-      id: 'f' + Date.now().toString(),
+      id,
       name,
       createdAt: stamp,
       updatedAt: stamp,
