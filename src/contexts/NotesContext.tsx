@@ -142,14 +142,22 @@ function parseCloudPermDeleted(cloud: Record<string, unknown> | null | undefined
   return parsePermDeletedVal(cloud?.permanentlyDeletedIds);
 }
 
+/** Firebase may return dense arrays as Array or as `{0: id, 1: id}` objects. */
+function cloudIdList(val: unknown): unknown[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter((v) => v != null && v !== false);
+  if (typeof val === 'object') return Object.values(val as Record<string, unknown>).filter((v) => v != null && v !== false);
+  return [];
+}
+
 function parsePermDeletedVal(val: unknown): PermanentlyDeletedIds {
   if (!val || typeof val !== 'object') return emptyPermDeleted();
-  const raw = val as Partial<PermanentlyDeletedIds>;
+  const raw = val as Record<string, unknown>;
   return {
-    notes: Array.isArray(raw.notes) ? [...new Set(raw.notes.map(Number).filter(Number.isFinite))] : [],
-    quizzes: Array.isArray(raw.quizzes) ? [...new Set(raw.quizzes.map(Number).filter(Number.isFinite))] : [],
-    quizSets: Array.isArray(raw.quizSets) ? [...new Set(raw.quizSets.map(String))] : [],
-    quizFolders: Array.isArray(raw.quizFolders) ? [...new Set(raw.quizFolders.map(String))] : [],
+    notes: [...new Set(cloudIdList(raw.notes).map(Number).filter(Number.isFinite))],
+    quizzes: [...new Set(cloudIdList(raw.quizzes).map(Number).filter(Number.isFinite))],
+    quizSets: [...new Set(cloudIdList(raw.quizSets).map(String).filter(Boolean))],
+    quizFolders: [...new Set(cloudIdList(raw.quizFolders).map(String).filter(Boolean))],
   };
 }
 
@@ -287,6 +295,7 @@ function clearTrashTombstoneCloud(uid: string, path: 'sets' | 'folders', id: str
  * live remote merge so an incomplete/stale live copy pulled from the cloud
  * array can never resurrect a soft-delete that already has a durable tombstone.
  * `deletedAt` is only stamped when the row has none (Trash card label).
+ * Empty-Trash watermark wins over soft tombstones for rows deleted at-or-before it.
  */
 function applyTrashTombstones<T extends { id: string; trashed?: boolean; deletedAt?: string; updatedAt?: string; createdAt?: string }>(
   items: T[],
@@ -294,10 +303,12 @@ function applyTrashTombstones<T extends { id: string; trashed?: boolean; deleted
   deletedAt?: string,
 ): T[] {
   if (!Object.keys(tombstones).length) return items;
+  const emptiedAt = readTrashEmptiedAt();
   let changed = false;
   const next = items.map((item) => {
     const at = tombstones[item.id];
     if (at === undefined || item.trashed) return item;
+    if (emptiedAt && at <= emptiedAt) return item;
     if (at < entitySyncTime(item)) return item;
     changed = true;
     if (item.deletedAt || !deletedAt) return { ...item, trashed: true };
@@ -490,14 +501,52 @@ function mergeQuizzesForSync(
   return ordered;
 }
 
-function filterResurrectedTrash<T extends { id: string | number; trashed?: boolean; updatedAt?: string; createdAt?: string; savedAt?: string }>(merged: T[], local: T[]): T[] {
-  const emptiedAt = Number(localStorage.getItem(TRASH_EMPTIED_AT_KEY)) || 0;
-  const localTrashIds = new Set(local.filter((item) => item.trashed).map((item) => String(item.id)));
+function readTrashEmptiedAt(): number {
+  return Number(localStorage.getItem(TRASH_EMPTIED_AT_KEY)) || 0;
+}
+
+function writeTrashEmptiedAt(at: number) {
+  if (!Number.isFinite(at) || at <= 0) return;
+  const prev = readTrashEmptiedAt();
+  if (at <= prev) return;
+  safeSetItem(TRASH_EMPTIED_AT_KEY, String(at));
+}
+
+/** Adopt cloud Empty-Trash watermark so every device drops the same ghosts. */
+function mergeTrashEmptiedAt(cloud: Record<string, unknown> | null | undefined): number {
+  const remote = Number(cloud?.trashEmptiedAt);
+  if (Number.isFinite(remote) && remote > 0) writeTrashEmptiedAt(remote);
+  return readTrashEmptiedAt();
+}
+
+/** Drop soft-delete markers that Empty Trash already finalized. */
+function pruneSoftTombstonesAfterEmpty(tombstones: TrashTombstones, key: string, emptiedAt: number): TrashTombstones {
+  if (!emptiedAt || !Object.keys(tombstones).length) return tombstones;
+  let changed = false;
+  const next: TrashTombstones = {};
+  for (const [id, at] of Object.entries(tombstones)) {
+    if (at > emptiedAt) next[id] = at;
+    else changed = true;
+  }
+  if (!changed) return tombstones;
+  writeTrashTombstones(key, next);
+  return next;
+}
+
+function filterResurrectedTrash<T extends { id: string | number; trashed?: boolean; updatedAt?: string; createdAt?: string; savedAt?: string }>(
+  merged: T[],
+  _local: T[],
+  softTombstones?: TrashTombstones,
+): T[] {
+  const emptiedAt = readTrashEmptiedAt();
   return merged.filter((item) => {
     if (!item.trashed) return true;
-    if (localTrashIds.has(String(item.id))) return true;
-    if (!emptiedAt) return true;
-    return entitySyncTime(item) > emptiedAt;
+    const softAt = softTombstones?.[String(item.id)];
+    // Soft-delete after the last Empty Trash still belongs in Trash.
+    if (softAt !== undefined && (!emptiedAt || softAt > emptiedAt)) return true;
+    // Empty Trash watermark — drop ghosts deleted at-or-before that moment.
+    if (emptiedAt && entitySyncTime(item) <= emptiedAt) return false;
+    return true;
   });
 }
 
@@ -611,18 +660,27 @@ function mergeChatsForSync(local: ChatConversation[], remote: ChatConversation[]
 
 function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
   const dead = new Set(tombstones.quizSets);
+  const remoteIds = new Set(remote.map((set) => set.id));
+  const emptiedAt = readTrashEmptiedAt();
   const map = new Map<string, QuizSet>();
   for (const set of local) {
     if (dead.has(set.id)) continue;
+    // Local-only trashed row omitted from remote: keep only while Empty Trash has
+    // not already passed its delete time. Otherwise this is the ghost that used to
+    // re-seed quizSetsById on the other device after Empty Trash.
+    if (set.trashed && !remoteIds.has(set.id) && emptiedAt && entitySyncTime(set) <= emptiedAt) {
+      continue;
+    }
     // A local-only trashed set is a pending soft-delete that hasn't reached
     // the remote array yet — dropping it here (instead of keeping it so it
     // can sync) is exactly what let deletes resurrect after a refresh that
     // raced the cloud write. Only an explicit permanent-delete tombstone may
-    // remove a row.
+    // remove a row before Empty Trash.
     map.set(set.id, set);
   }
   for (const set of remote) {
     if (dead.has(set.id)) continue;
+    if (set.trashed && emptiedAt && entitySyncTime(set) <= emptiedAt) continue;
     const existing = map.get(set.id);
     map.set(set.id, existing ? pickBetterQuizSet(existing, set, tombstones) : set);
   }
@@ -648,15 +706,21 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: P
 
 function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
   const dead = new Set(tombstones.quizFolders);
+  const remoteIds = new Set(remote.map((folder) => folder.id));
+  const emptiedAt = readTrashEmptiedAt();
   const map = new Map<string, QuizFolder>();
   for (const folder of local) {
     if (dead.has(folder.id)) continue;
+    if (folder.trashed && !remoteIds.has(folder.id) && emptiedAt && entitySyncTime(folder) <= emptiedAt) {
+      continue;
+    }
     // Keep local-only trashed folders (pending soft-delete not yet on the
     // remote array) so they persist through sync instead of resurrecting.
     map.set(folder.id, folder);
   }
   for (const folder of remote) {
     if (dead.has(folder.id)) continue;
+    if (folder.trashed && emptiedAt && entitySyncTime(folder) <= emptiedAt) continue;
     const existing = map.get(folder.id);
     map.set(folder.id, existing ? pickBetterQuizFolder(existing, folder) : folder);
   }
@@ -989,6 +1053,7 @@ const CLOUD_SYNC_FIELDS = [
   'draftId',
   'deletedDraftIds',
   'permanentlyDeletedIds',
+  'trashEmptiedAt',
   'cloudSyncAt',
   'tokenUsage',
 ] as const;
@@ -2025,7 +2090,45 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         pendingDeletedDraftIdsRef.current = mergeDeletedDraftIds(pendingDeletedDraftIdsRef.current, cloud);
         permDeletedRef.current = mergePermDeleted(permDeletedRef.current, cloud);
+        const emptiedAtBoot = mergeTrashEmptiedAt(cloud);
+        quizSetTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+          quizSetTombstonesRef.current,
+          QUIZ_SET_TRASH_TOMBSTONE_KEY,
+          emptiedAtBoot,
+        );
+        quizFolderTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+          quizFolderTombstonesRef.current,
+          QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
+          emptiedAtBoot,
+        );
         const tombstones = permDeletedRef.current;
+
+        // Heal orphaned ById rows left by older Empty Trash (merge-only maps never
+        // deleted keys). Destroy them so they cannot re-enter Trash on this boot.
+        const deadSetIds = new Set(tombstones.quizSets);
+        const deadFolderIds = new Set(tombstones.quizFolders);
+        for (const row of cloudSetsById) {
+          if (!row?.id) continue;
+          if (deadSetIds.has(row.id) || (row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)) {
+            void remove(dbRef(database, `users/${user.uid}/quizSetsById/${row.id}`)).catch(() => {});
+          }
+        }
+        for (const row of cloudFoldersById) {
+          if (!row?.id) continue;
+          if (deadFolderIds.has(row.id) || (row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)) {
+            void remove(dbRef(database, `users/${user.uid}/quizFoldersById/${row.id}`)).catch(() => {});
+          }
+        }
+        quizSetsByIdCacheRef.current = cloudSetsById.filter((row) => (
+          row?.id
+          && !deadSetIds.has(row.id)
+          && !(row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)
+        ));
+        quizFoldersByIdCacheRef.current = cloudFoldersById.filter((row) => (
+          row?.id
+          && !deadFolderIds.has(row.id)
+          && !(row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)
+        ));
 
         // This whole initial-load chain makes several sequential network round
         // trips (main fetch, folders, sets, history snapshots) and can take many
@@ -2155,6 +2258,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         let rawFolders = filterResurrectedTrash(
           mergeFoldersForSync(liveFolders, mergeById(cloudFolders, dedicatedFolders, cloudFoldersById), tombstones),
           liveFolders,
+          quizFolderTombstonesRef.current,
         );
         let rawSets: QuizSet[] = filterResurrectedTrash(
           mergeQuizSetsForSync(
@@ -2163,6 +2267,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             tombstones,
           ),
           liveSets,
+          quizSetTombstonesRef.current,
         );
         // Re-apply ById mirrors after array merge so a stale quizSets[] cannot
         // drop a set that already landed in quizSetsById (create-then-refresh).
@@ -2514,9 +2619,42 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Hard-delete must destroy the per-id mirrors. `update(quizSetsById, map)` only
+   * merges keys — orphans stay forever — and emptyTrash used to clear quizTrash
+   * while leaving ById `trashed` rows, which other devices re-imported and
+   * re-stamped as soft-delete tombstones (Trash resurrection loop).
+   */
+  const purgeQuizSetByIdCloud = (id: string) => {
+    quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== id);
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    void remove(dbRef(database, `users/${uid}/quizSetsById/${id}`)).catch(() => (
+      rtdbFetch(`/users/${uid}/quizSetsById/${id}`, { method: 'DELETE' }).catch(() => {})
+    ));
+  };
+
+  const purgeQuizFolderByIdCloud = (id: string) => {
+    quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => f.id !== id);
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    void remove(dbRef(database, `users/${uid}/quizFoldersById/${id}`)).catch(() => (
+      rtdbFetch(`/users/${uid}/quizFoldersById/${id}`, { method: 'DELETE' }).catch(() => {})
+    ));
+  };
+
   const pushQuizFolderById = (folder: QuizFolder) => {
     const uid = userRef.current?.uid;
     if (!uid || !loadedRef.current) return;
+    if (permDeletedRef.current.quizFolders.includes(folder.id)) {
+      purgeQuizFolderByIdCloud(folder.id);
+      return;
+    }
+    const emptiedAt = readTrashEmptiedAt();
+    if (folder.trashed && emptiedAt && entitySyncTime(folder) <= emptiedAt) {
+      purgeQuizFolderByIdCloud(folder.id);
+      return;
+    }
     quizFoldersByIdCacheRef.current = mergeById(
       quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id),
       [folder],
@@ -2539,6 +2677,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const pushQuizSetById = (quizSet: QuizSet) => {
     const uid = userRef.current?.uid;
     if (!uid || !loadedRef.current) return;
+    if (permDeletedRef.current.quizSets.includes(quizSet.id)) {
+      purgeQuizSetByIdCloud(quizSet.id);
+      return;
+    }
+    const emptiedAt = readTrashEmptiedAt();
+    if (quizSet.trashed && emptiedAt && entitySyncTime(quizSet) <= emptiedAt) {
+      purgeQuizSetByIdCloud(quizSet.id);
+      return;
+    }
     quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
       quizSetsByIdCacheRef.current.filter((s) => s.id !== quizSet.id),
       [{ ...quizSet, items: quizSet.items ?? [] }],
@@ -2564,6 +2711,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id);
       return;
     }
+    const emptiedAt = readTrashEmptiedAt();
+    if (folder.trashed && emptiedAt && entitySyncTime(folder) <= emptiedAt) {
+      quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id);
+      return;
+    }
     if (folder.trashed && !String(folder.name || '').trim()) {
       quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => f.id !== folder.id);
       return;
@@ -2577,6 +2729,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const rememberRemoteSetInCache = (setVal: QuizSet) => {
     if (!setVal.id) return;
     if (permDeletedRef.current.quizSets.includes(setVal.id)) {
+      quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id);
+      return;
+    }
+    const emptiedAt = readTrashEmptiedAt();
+    if (setVal.trashed && emptiedAt && entitySyncTime(setVal) <= emptiedAt) {
       quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id);
       return;
     }
@@ -2602,9 +2759,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     row: { id: string; trashed?: boolean; updatedAt?: string; createdAt?: string },
   ) => {
     const isSet = kind === 'sets';
+    if (isSet ? permDeletedRef.current.quizSets.includes(row.id) : permDeletedRef.current.quizFolders.includes(row.id)) {
+      return;
+    }
+    const at = entitySyncTime(row);
+    const emptiedAt = readTrashEmptiedAt();
+    // Do not re-stamp soft-delete markers for rows Empty Trash already finalized.
+    if (row.trashed && emptiedAt && at <= emptiedAt) return;
     const key = isSet ? QUIZ_SET_TRASH_TOMBSTONE_KEY : QUIZ_FOLDER_TRASH_TOMBSTONE_KEY;
     const current = isSet ? quizSetTombstonesRef.current : quizFolderTombstonesRef.current;
-    const at = entitySyncTime(row);
     const known = current[row.id];
     let next: TrashTombstones;
     if (row.trashed) {
@@ -2624,17 +2787,35 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const stamp = nowStr();
     const setTombstones = quizSetTombstonesRef.current;
     const folderTombstones = quizFolderTombstonesRef.current;
-    quizSetsByIdCacheRef.current = applyTrashTombstones(quizSetsByIdCacheRef.current, setTombstones, stamp);
-    quizFoldersByIdCacheRef.current = applyTrashTombstones(quizFoldersByIdCacheRef.current, folderTombstones, stamp);
-    const nextSets = applyTrashTombstones(quizSetsRef.current, setTombstones, stamp);
-    const nextFolders = applyTrashTombstones(quizFoldersRef.current, folderTombstones, stamp);
-    if (nextSets !== quizSetsRef.current) {
+    quizSetsByIdCacheRef.current = filterResurrectedTrash(
+      applyTrashTombstones(quizSetsByIdCacheRef.current, setTombstones, stamp),
+      quizSetsByIdCacheRef.current,
+      setTombstones,
+    );
+    quizFoldersByIdCacheRef.current = filterResurrectedTrash(
+      applyTrashTombstones(quizFoldersByIdCacheRef.current, folderTombstones, stamp),
+      quizFoldersByIdCacheRef.current,
+      folderTombstones,
+    );
+    let nextSets = filterResurrectedTrash(
+      applyTrashTombstones(quizSetsRef.current, setTombstones, stamp),
+      quizSetsRef.current,
+      setTombstones,
+    );
+    nextSets = stripPermDeletedQuizSets(nextSets, permDeletedRef.current);
+    let nextFolders = filterResurrectedTrash(
+      applyTrashTombstones(quizFoldersRef.current, folderTombstones, stamp),
+      quizFoldersRef.current,
+      folderTombstones,
+    );
+    nextFolders = nextFolders.filter((f) => !permDeletedRef.current.quizFolders.includes(f.id));
+    if (JSON.stringify(nextSets) !== JSON.stringify(quizSetsRef.current)) {
       const prevSets = quizSetsRef.current;
       quizSetsRef.current = nextSets;
       safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
       if (!quizSetsEqualForUI(nextSets, prevSets)) setQuizSets(nextSets);
     }
-    if (nextFolders !== quizFoldersRef.current) {
+    if (JSON.stringify(nextFolders) !== JSON.stringify(quizFoldersRef.current)) {
       quizFoldersRef.current = nextFolders;
       safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
       setQuizFolders(nextFolders);
@@ -2652,12 +2833,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (permDeletedRef.current.quizFolders.includes(folder.id)) {
+      // Orphan still on cloud from a pre-fix emptyTrash — destroy it so it
+      // cannot keep re-entering trash via soft-delete tombstone re-stamp.
+      purgeQuizFolderByIdCloud(folder.id);
       const filtered = quizFoldersRef.current.filter((f) => f.id !== folder.id);
       if (filtered.length === quizFoldersRef.current.length) return;
       const next = finalizeQuizFolders(filtered, quizSetsRef.current);
       quizFoldersRef.current = next;
       setQuizFolders(next);
       safeSetItem('malacadhati_quiz_folders', JSON.stringify(next));
+      return;
+    }
+    const emptiedAtFolder = readTrashEmptiedAt();
+    if (folder.trashed && emptiedAtFolder && entitySyncTime(folder) <= emptiedAtFolder) {
+      purgeQuizFolderByIdCloud(folder.id);
       return;
     }
     if (folder.trashed && !String(folder.name || '').trim()) return;
@@ -2691,11 +2880,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (permDeletedRef.current.quizSets.includes(setVal.id)) {
+      purgeQuizSetByIdCloud(setVal.id);
       const filtered = quizSetsRef.current.filter((s) => s.id !== setVal.id);
       if (filtered.length === quizSetsRef.current.length) return;
       quizSetsRef.current = filtered;
       setQuizSets(filtered);
       safeSetItem('malacadhati_quiz_sets', JSON.stringify(filtered));
+      return;
+    }
+    const emptiedAt = readTrashEmptiedAt();
+    if (setVal.trashed && emptiedAt && entitySyncTime(setVal) <= emptiedAt) {
+      purgeQuizSetByIdCloud(setVal.id);
       return;
     }
     if (setVal.trashed && !String(setVal.name || '').trim()) return;
@@ -3002,13 +3197,46 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const deadSets = new Set(tombstones.quizSets);
     const deadFolders = new Set(tombstones.quizFolders);
 
-    const nextNotes = notesRef.current.filter((n) => !deadNotes.has(n.id));
-    const nextQuizzes = quizzesRef.current.filter((q) => !deadQuizzes.has(q.id));
+    // Drop orphaned ById cache rows; cloud remove happens in purge* on the
+    // delete path and opportunistically when a dead ById child event arrives.
+    if (deadSets.size) {
+      quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => !deadSets.has(s.id));
+    }
+    if (deadFolders.size) {
+      quizFoldersByIdCacheRef.current = quizFoldersByIdCacheRef.current.filter((f) => !deadFolders.has(f.id));
+    }
+    quizSetsByIdCacheRef.current = filterResurrectedTrash(
+      quizSetsByIdCacheRef.current,
+      quizSetsByIdCacheRef.current,
+      quizSetTombstonesRef.current,
+    );
+    quizFoldersByIdCacheRef.current = filterResurrectedTrash(
+      quizFoldersByIdCacheRef.current,
+      quizFoldersByIdCacheRef.current,
+      quizFolderTombstonesRef.current,
+    );
+
+    const nextNotes = filterResurrectedTrash(
+      notesRef.current.filter((n) => !deadNotes.has(n.id)),
+      notesRef.current,
+    );
+    const nextQuizzes = filterResurrectedTrash(
+      quizzesRef.current.filter((q) => !deadQuizzes.has(q.id)),
+      quizzesRef.current,
+    );
     const nextSets = stripPermDeletedQuizSets(
-      quizSetsRef.current.filter((s) => !deadSets.has(s.id)),
+      filterResurrectedTrash(
+        quizSetsRef.current.filter((s) => !deadSets.has(s.id)),
+        quizSetsRef.current,
+        quizSetTombstonesRef.current,
+      ),
       tombstones,
     );
-    const nextFolders = quizFoldersRef.current.filter((f) => !deadFolders.has(f.id));
+    const nextFolders = filterResurrectedTrash(
+      quizFoldersRef.current.filter((f) => !deadFolders.has(f.id)),
+      quizFoldersRef.current,
+      quizFolderTombstonesRef.current,
+    );
     const normalizedFolders = finalizeQuizFolders(nextFolders, nextSets);
     const normalizedSets = initializeQuizColors(
       nextSets,
@@ -3128,6 +3356,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       let merged = filterResurrectedTrash(
         mergeQuizSetsForSync(quizSetsRef.current, remoteSets, tombstones),
         quizSetsRef.current,
+        quizSetTombstonesRef.current,
       );
       // Always re-union ById cache — array LWW must never hide a live set.
       if (quizSetsByIdCacheRef.current.length) {
@@ -3146,6 +3375,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       let merged = filterResurrectedTrash(
         mergeFoldersForSync(quizFoldersRef.current, remoteFolders, tombstones),
         quizFoldersRef.current,
+        quizFolderTombstonesRef.current,
       );
       if (quizFoldersByIdCacheRef.current.length) {
         merged = mergeFoldersForSync(merged, quizFoldersByIdCacheRef.current, tombstones);
@@ -3274,6 +3504,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizSets: nextSets,
         quizFolders: nextFolders,
         permanentlyDeletedIds: permDeletedRef.current,
+        trashEmptiedAt: readTrashEmptiedAt(),
         cloudSyncAt: syncedAt,
       });
       saveFailedRef.current = false;
@@ -3699,6 +3930,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     pendingDeletedDraftIdsRef.current = mergeDeletedDraftIds(pendingDeletedDraftIdsRef.current, cloud);
     permDeletedRef.current = mergePermDeleted(permDeletedRef.current, cloud);
+    const emptiedAtPull = mergeTrashEmptiedAt(cloud);
+    quizSetTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+      quizSetTombstonesRef.current,
+      QUIZ_SET_TRASH_TOMBSTONE_KEY,
+      emptiedAtPull,
+    );
+    quizFolderTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+      quizFolderTombstonesRef.current,
+      QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
+      emptiedAtPull,
+    );
     const tombstones = permDeletedRef.current;
     const remoteNotes = firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>);
     const remoteQuizzes = firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>);
@@ -3716,6 +3958,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     let mergedSets = filterResurrectedTrash(
       mergeQuizSetsForSync(quizSetsRef.current, remoteSets, tombstones),
       quizSetsRef.current,
+      quizSetTombstonesRef.current,
     );
     if (quizSetsByIdCacheRef.current.length) {
       mergedSets = mergeQuizSetsForSync(mergedSets, quizSetsByIdCacheRef.current, tombstones);
@@ -3723,6 +3966,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     let mergedFolders = filterResurrectedTrash(
       mergeFoldersForSync(quizFoldersRef.current, remoteFolders, tombstones),
       quizFoldersRef.current,
+      quizFolderTombstonesRef.current,
     );
     if (quizFoldersByIdCacheRef.current.length) {
       mergedFolders = mergeFoldersForSync(mergedFolders, quizFoldersByIdCacheRef.current, tombstones);
@@ -3969,6 +4213,38 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         isApplyingRemoteRef.current = false;
       }
     });
+    const unsubTrashEmptied = onValue(dbRef(database, `users/${uid}/trashEmptiedAt`), (snap) => {
+      const remote = Number(snap.val());
+      if (!Number.isFinite(remote) || remote <= 0) return;
+      const prev = readTrashEmptiedAt();
+      if (remote <= prev) return;
+      writeTrashEmptiedAt(remote);
+      quizSetTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+        quizSetTombstonesRef.current,
+        QUIZ_SET_TRASH_TOMBSTONE_KEY,
+        remote,
+      );
+      quizFolderTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+        quizFolderTombstonesRef.current,
+        QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
+        remote,
+      );
+      // Drop emptied ghosts immediately so Trash matches the device that emptied.
+      applyPermDeletedLocally();
+      applyTrashTombstonesToState();
+      const nextNotes = filterResurrectedTrash(notesRef.current, notesRef.current);
+      const nextQuizzes = filterResurrectedTrash(quizzesRef.current, quizzesRef.current);
+      if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
+        notesRef.current = nextNotes;
+        setNotes(nextNotes);
+        safeSetItem('malacadhati', JSON.stringify(nextNotes));
+      }
+      if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
+        quizzesRef.current = nextQuizzes;
+        setQuizzes(nextQuizzes);
+        safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+      }
+    });
     // Whole-array nodes: Firebase re-delivers the complete value of every
     // onValue listener after each reconnect, and mobile Safari drops the socket
     // constantly (backgrounding, network switches, even long scrolls). Re-running
@@ -4101,6 +4377,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const id = String(snap.key || '');
         const at = Number(snap.val());
         if (!id || !Number.isFinite(at) || at <= 0) return;
+        if (path === 'sets' ? permDeletedRef.current.quizSets.includes(id) : permDeletedRef.current.quizFolders.includes(id)) {
+          return;
+        }
+        const emptiedAt = readTrashEmptiedAt();
+        // Stale soft-delete markers left over after Empty Trash must not re-open Trash.
+        if (emptiedAt && at <= emptiedAt) return;
         const current = currentTombstones();
         if ((current[id] ?? 0) >= at) return;
         commit(markTrashTombstone(key, current, id, at));
@@ -4326,6 +4608,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }, 5_000);
     return () => {
       unsubPermDeleted();
+      unsubTrashEmptied();
       unsubNotes();
       unsubQuizzes();
       unsubSets();
@@ -4793,12 +5076,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets(nextSets);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     persistSets(nextSets, true, true);
-    const uid = userRef.current?.uid;
     quizSetTombstonesRef.current = clearTrashTombstone(QUIZ_SET_TRASH_TOMBSTONE_KEY, quizSetTombstonesRef.current, id);
-    if (uid) {
-      void remove(dbRef(database, `users/${uid}/quizSetsById/${id}`)).catch(() => {});
-      clearTrashTombstoneCloud(uid, 'sets', id);
-    }
+    const uid = userRef.current?.uid;
+    purgeQuizSetByIdCloud(id);
+    if (uid) clearTrashTombstoneCloud(uid, 'sets', id);
     void pushPermDeletedCloud({ quizSets: nextSets });
   };
 
@@ -4983,6 +5264,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persist({ quizSets: nextSets, quizFolders: nextFolders }, true);
     quizFolderTombstonesRef.current = clearTrashTombstone(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY, quizFolderTombstonesRef.current, id);
     const uid = userRef.current?.uid;
+    purgeQuizFolderByIdCloud(id);
     if (uid) clearTrashTombstoneCloud(uid, 'folders', id);
     void pushPermDeletedCloud({ quizSets: nextSets, quizFolders: nextFolders });
   };
@@ -5748,6 +6030,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       .filter((set) => !set.trashed)
       .flatMap((set) => (set.items ?? []).filter((item) => item.trashed).map((item) => item.id));
     const emptiedAt = new Date().toISOString();
+    const emptiedAtMs = Date.now();
     recordPermDeleted({
       notes: trashedNotes.map((n) => n.id),
       quizzes: [...trashedQuizzes.map((q) => q.id), ...quizIdsFromTrashedSets, ...inSetTrashedIds],
@@ -5786,11 +6069,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    safeSetItem(TRASH_EMPTIED_AT_KEY, String(Date.now()));
+    writeTrashEmptiedAt(emptiedAtMs);
+    quizSetTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+      quizSetTombstonesRef.current,
+      QUIZ_SET_TRASH_TOMBSTONE_KEY,
+      emptiedAtMs,
+    );
+    quizFolderTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+      quizFolderTombstonesRef.current,
+      QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
+      emptiedAtMs,
+    );
 
     const uid = userRef.current?.uid;
-    // These ids are permanently gone, so drop their soft-delete markers — the
-    // tiny quizTrash node other devices listen to must not collect dead ids.
+    // Destroy ById mirrors BEFORE clearing soft-delete markers. Otherwise a
+    // lingering trashed ById row re-imports and re-stamps quizTrash (Empty Trash
+    // looks like it worked, then "dia" comes back alone).
+    trashedSets.forEach((s) => purgeQuizSetByIdCloud(s.id));
+    trashedFolders.forEach((f) => purgeQuizFolderByIdCloud(f.id));
+    // Soft-delete markers are obsolete once the row is permanently gone.
     trashedSets.forEach((s) => {
       quizSetTombstonesRef.current = clearTrashTombstone(QUIZ_SET_TRASH_TOMBSTONE_KEY, quizSetTombstonesRef.current, s.id);
       if (uid) clearTrashTombstoneCloud(uid, 'sets', s.id);
