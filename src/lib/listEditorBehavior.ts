@@ -1395,33 +1395,6 @@ export function blockHasListableContent(block: HTMLElement): boolean {
   return !!text || !!block.querySelector('img');
 }
 
-export type EmptyListEnterAction = 'exit-after-content' | 'exit-double-empty' | 'add-bullet';
-
-/**
- * Decide what Enter should do on an empty <li>.
- * Fresh lists under a heading must add a bullet — not dissolve back onto the heading.
- */
-export function planEmptyListItemEnter(
-  li: HTMLLIElement,
-  isEmpty: (item: HTMLLIElement) => boolean,
-): EmptyListEnterAction {
-  const list = li.parentElement;
-  if (!list || !LIST_TAG_NAMES.has(list.tagName)) return 'add-bullet';
-
-  let next: Element | null = li.nextElementSibling;
-  let isLast = true;
-  while (next) {
-    if (next.tagName === 'LI') { isLast = false; break; }
-    next = next.nextElementSibling;
-  }
-
-  const prev = li.previousElementSibling;
-  const prevLi = prev instanceof HTMLLIElement ? prev : null;
-  if (prevLi && !isEmpty(prevLi) && isLast) return 'exit-after-content';
-  if (prevLi && isEmpty(prevLi) && isLast) return 'exit-double-empty';
-  return 'add-bullet';
-}
-
 /** True when the caret sits on a visual line below content in the same block (after a <br>). */
 export function caretFollowsLineBreakInBlock(block: HTMLElement, range: Range): boolean {
   try {

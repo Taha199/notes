@@ -44,7 +44,6 @@ import {
   isCaretInBulletPrefixZone,
   mergeListWithNeighbors,
   normalizePseudoListsInHtmlString,
-  planEmptyListItemEnter,
   proseAnchorToKeepOutOfList,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
@@ -2131,72 +2130,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return true;
   };
 
-  const exitListAfterLastItem = (li: HTMLLIElement) => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    const list = li.parentElement;
-    if (!list || !LIST_TAGS.has(list.tagName)) return;
-    const listEl = list as HTMLUListElement | HTMLOListElement;
-    const { parent, before } = getBlockLevelInsertAfterList(listEl, ed);
-    li.remove();
-    cleanupEmptyListShell(listEl, ed);
-    insertParagraphAtMargin(parent, before);
-  };
-
-  /** Exit only when an empty last bullet immediately follows an item with content. */
-  const shouldExitListAfterEmptyItem = (li: HTMLLIElement) => {
-    const prevLi = li.previousElementSibling;
-    if (!isLastListItem(li) || !(prevLi instanceof HTMLLIElement)) return false;
-    return !isLiEffectivelyEmpty(prevLi);
-  };
-
-  const handleEmptyListItemEnter = (li: HTMLLIElement): boolean => {
-    // Empty Enter exits to a left-margin paragraph (Word/Docs). Non-empty Enter still adds a bullet.
-    const ed = editorRef.current;
-    if (!ed) return false;
-    exitListItemToMargin(li, ed, true);
-    saveSel();
-    readCommandState();
-    emitHtml();
-    return true;
-  };
-
-  /**
-   * Enter on an empty list item:
-   * - After a filled item → exit list (Word/Docs).
-   * - Sole/fresh empty bullet (e.g. under a heading) → add another bullet instead of
-   *   dissolving the list and jumping the caret back onto the heading.
-   * - Second Enter on consecutive empties → exit (double-Enter).
-   */
-  const handleEnterOnEmptyListItem = (li: HTMLLIElement, ed: HTMLElement): void => {
-    const action = planEmptyListItemEnter(li, isLiEffectivelyEmpty);
-
-    if (action === 'exit-after-content') {
-      handleEmptyListItemEnter(li);
-      finishNewLineEditing(ed);
-      return;
-    }
-
-    if (action === 'exit-double-empty') {
-      const prevLi = li.previousElementSibling;
-      li.remove();
-      if (prevLi instanceof HTMLLIElement && prevLi.isConnected) {
-        handleEmptyListItemEnter(prevLi);
-      } else {
-        const list = li.parentElement;
-        if (list && LIST_TAGS.has(list.tagName) && list.children.length === 0) list.remove();
-        saveSel();
-        readCommandState();
-        emitHtml();
-      }
-      finishNewLineEditing(ed);
-      return;
-    }
-
-    insertNewListItemAfter(li);
-    finishNewLineEditing(ed, { inList: true });
-  };
-
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
     // One Backspace: current empty bullet → empty normal paragraph (split list, keep siblings).
     pendingListMarginExitRef.current = null;
@@ -4014,26 +3947,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       const li = resolveListItemAtSelection(range, ed);
       if (li) {
         e.preventDefault();
-        if (isLiEffectivelyEmpty(li)) {
-          handleEnterOnEmptyListItem(li, ed);
-        } else if (isCaretAtEffectiveEndOfLi(li, range)) {
-          const next = li.nextElementSibling;
-          if (isLastListItem(li) && next instanceof HTMLLIElement && shouldExitListAfterEmptyItem(next)) {
-            exitListAfterLastItem(next);
-            finishNewLineEditing(ed);
-          } else {
-            insertNewListItemAfter(li);
-            finishNewLineEditing(ed, { inList: true });
-          }
+        // Enter in a list only moves down / adds a list line — never exits back to
+        // the heading above. Leave the list with Backspace on an empty item.
+        if (isLiEffectivelyEmpty(li) || isCaretAtEffectiveEndOfLi(li, range)) {
+          insertNewListItemAfter(li);
+          finishNewLineEditing(ed, { inList: true });
         } else if (isCaretAtStartOfLi(li, range)) {
-          const list = li.parentElement;
-          if (list && LIST_TAGS.has(list.tagName) && li === list.firstElementChild) {
-            insertEmptyLineAboveBlock(ed, list);
-            finishNewLineEditing(ed);
-          } else {
-            splitListItemAtStart(li);
-            finishNewLineEditing(ed, { inList: true });
-          }
+          splitListItemAtStart(li);
+          finishNewLineEditing(ed, { inList: true });
         } else {
           splitListItemAtCaret(li, range);
           finishNewLineEditing(ed, { inList: true });
@@ -4054,12 +3975,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         const items = Array.from(orphanList.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
         const target = items[items.length - 1];
         if (target) {
-          if (isLiEffectivelyEmpty(target)) {
-            handleEnterOnEmptyListItem(target, ed);
-          } else {
-            insertNewListItemAfter(target);
-            finishNewLineEditing(ed, { inList: true });
-          }
+          insertNewListItemAfter(target);
+          finishNewLineEditing(ed, { inList: true });
         }
         return;
       }

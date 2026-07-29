@@ -34,7 +34,6 @@ import {
   shouldStartListBelowBlock,
   insertEmptyListAfterBlock,
   isolateCaretLineForList,
-  planEmptyListItemEnter,
   proseAnchorToKeepOutOfList,
   stripListPasteIndent,
 } from './listEditorBehavior';
@@ -654,24 +653,4 @@ describe('listEditorBehavior', () => {
     ed.remove();
   });
 
-  it('planEmptyListItemEnter adds a bullet for a fresh sole empty item under a heading', () => {
-    const ed = editorHtml('<div>Rubrik 2</div><ul><li><br></li></ul>');
-    const li = ed.querySelector('li') as HTMLLIElement;
-    expect(planEmptyListItemEnter(li, isLiEffectivelyEmpty)).toBe('add-bullet');
-    ed.remove();
-  });
-
-  it('planEmptyListItemEnter exits after a filled item', () => {
-    const ed = editorHtml('<ul><li>filled</li><li><br></li></ul>');
-    const empty = ed.querySelectorAll('li')[1] as HTMLLIElement;
-    expect(planEmptyListItemEnter(empty, isLiEffectivelyEmpty)).toBe('exit-after-content');
-    ed.remove();
-  });
-
-  it('planEmptyListItemEnter double-enters out of consecutive empties', () => {
-    const ed = editorHtml('<ul><li><br></li><li><br></li></ul>');
-    const empty = ed.querySelectorAll('li')[1] as HTMLLIElement;
-    expect(planEmptyListItemEnter(empty, isLiEffectivelyEmpty)).toBe('exit-double-empty');
-    ed.remove();
-  });
 });
