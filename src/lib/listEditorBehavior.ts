@@ -1272,6 +1272,33 @@ export function mergeAdjacentLists(root: ParentNode): void {
   }
 }
 
+/**
+ * Merge `list` with an immediately-adjacent same-type sibling list, if any.
+ * Unlike {@link mergeAdjacentLists}, this never touches unrelated lists elsewhere
+ * in the document — a document-wide scan after every list-item Backspace could
+ * silently fuse together two otherwise-separate lists far from the edit (e.g. two
+ * different bullet lists in a long note), making a later list "inherit" behavior
+ * from an earlier one.
+ */
+export function mergeListWithNeighbors(
+  list: HTMLUListElement | HTMLOListElement,
+): HTMLUListElement | HTMLOListElement | null {
+  if (!list.isConnected) return null;
+  let target: HTMLUListElement | HTMLOListElement = list;
+  const next = target.nextElementSibling;
+  if (next instanceof HTMLElement && next.tagName === target.tagName) {
+    while (next.firstChild) target.appendChild(next.firstChild);
+    next.remove();
+  }
+  const prev = target.previousElementSibling;
+  if (prev instanceof HTMLElement && prev.tagName === target.tagName) {
+    while (target.firstChild) prev.appendChild(target.firstChild);
+    target.remove();
+    target = prev as HTMLUListElement | HTMLOListElement;
+  }
+  return target;
+}
+
 /** Only strip a lone empty list shell; keep multi-item lists even when all items are empty. */
 export function shouldRemoveOrphanEmptyLists(allLiCount: number, hasNonEmptyLi: boolean): boolean {
   if (hasNonEmptyLi) return false;
@@ -1330,6 +1357,7 @@ export function deleteSelectionRangeContents(
   const del = range.cloneRange();
   del.deleteContents();
 
+  const touchedLists = new Set<HTMLUListElement | HTMLOListElement>();
   for (const el of fullyCovered) {
     if (!el.isConnected) continue;
     const text = (el.textContent?.replace(/\u200B/g, '').replace(/\u00a0/g, ' ') ?? '').trim();
@@ -1338,12 +1366,25 @@ export function deleteSelectionRangeContents(
     if (el.tagName === 'LI') {
       const list = el.parentElement;
       el.remove();
-      if (list && LIST_TAG_NAMES.has(list.tagName) && list.children.length === 0) list.remove();
+      if (list && LIST_TAG_NAMES.has(list.tagName)) {
+        if (list.children.length === 0) list.remove();
+        else touchedLists.add(list as HTMLUListElement | HTMLOListElement);
+      }
     } else if (!el.closest('li, ul, ol')) {
       el.remove();
     }
   }
 
-  mergeAdjacentLists(root);
+  // Only re-check adjacency for lists this delete actually touched (plus whatever
+  // list sits at the resulting caret boundary) — never scan the whole document.
+  // A document-wide merge here could silently fuse two otherwise-unrelated lists
+  // elsewhere in a long note together whenever the user deletes a selection.
+  const boundaryNode = del.startContainer.nodeType === Node.TEXT_NODE
+    ? del.startContainer.parentElement
+    : (del.startContainer as HTMLElement | null);
+  const boundaryList = boundaryNode ? findOutermostList(boundaryNode, root) : null;
+  if (boundaryList) touchedLists.add(boundaryList);
+  touchedLists.forEach((list) => mergeListWithNeighbors(list));
+
   return del;
 }

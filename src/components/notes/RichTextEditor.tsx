@@ -38,7 +38,7 @@ import {
   getStuckInnerBlockInListItem,
   insertParagraphAboveList,
   isCaretInBulletPrefixZone,
-  mergeAdjacentLists,
+  mergeListWithNeighbors,
   normalizePseudoListsInHtmlString,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
@@ -1586,10 +1586,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     pendingListMarginExitRef.current = null;
     pendingIndentExitRef.current = null;
     const ed = editorRef.current;
+    const originalList = startLi.parentElement;
     const caretTarget = removeListItemsInRangeDom(startLi, endLi, (list) => {
       if (ed) cleanupEmptyListShell(list, ed);
     });
-    if (ed) mergeAdjacentLists(ed);
+    if (
+      originalList
+      && LIST_TAGS.has(originalList.tagName)
+      && originalList.isConnected
+    ) {
+      mergeListWithNeighbors(originalList as HTMLUListElement | HTMLOListElement);
+    }
     if (caretTarget) placeCaretInBlock(caretTarget, false);
     else selectEditorEnd();
     saveSel();
@@ -1664,17 +1671,21 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       li.remove();
       if (list && LIST_TAGS.has(list.tagName)) {
         if (list.children.length === 0) list.remove();
-        else cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement, ed);
+        else {
+          cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement, ed);
+          if (list.isConnected) mergeListWithNeighbors(list as HTMLUListElement | HTMLOListElement);
+        }
       }
-      mergeAdjacentLists(ed);
       placeCaretInBlock(prevLi, false);
     } else if (nextLi instanceof HTMLLIElement) {
       li.remove();
       if (list && LIST_TAGS.has(list.tagName)) {
         if (list.children.length === 0) list.remove();
-        else cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement, ed);
+        else {
+          cleanupEmptyListShell(list as HTMLUListElement | HTMLOListElement, ed);
+          if (list.isConnected) mergeListWithNeighbors(list as HTMLUListElement | HTMLOListElement);
+        }
       }
-      mergeAdjacentLists(ed);
       placeCaretInBlock(nextLi, true);
     } else if (isNestedListItem(li)) {
       returnToParentListItem(li);
@@ -4461,8 +4472,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
         });
       }
-      try { if (document.queryCommandState('insertUnorderedList')) active.add('insertUnorderedList'); } catch { /* noop */ }
-      try { if (document.queryCommandState('insertOrderedList')) active.add('insertOrderedList'); } catch { /* noop */ }
       // DOM marks (including data-note-mark spans) — trustworthy in table cells.
       if (ed && sel?.anchorNode) {
         TOGGLE_COMMANDS.forEach((c) => {
@@ -4470,13 +4479,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         });
       }
     }
+    // List button state is derived purely from the live DOM below — never seeded from
+    // document.queryCommandState('insertUnorderedList'/'insertOrderedList'). We only ever
+    // mutate lists via direct DOM ops (never execCommand), so the browser's native command
+    // state can go stale and report a list as "active" on a plain paragraph that has none —
+    // that stuck toolbar state made new lists look already-open and confused subsequent edits.
     if (ed && selInThisEditor && sel?.rangeCount) {
       const list = getListContainer(sel.anchorNode, ed);
       if (list?.tagName === 'UL') {
-        active.delete('insertOrderedList');
         active.add('insertUnorderedList');
       } else if (list?.tagName === 'OL') {
-        active.delete('insertUnorderedList');
         active.add('insertOrderedList');
       }
       const li = resolveListItemAtSelection(sel.getRangeAt(0), ed);

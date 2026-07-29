@@ -24,6 +24,7 @@ import {
   isLiEffectivelyEmpty,
   isLiEmpty,
   mergeAdjacentLists,
+  mergeListWithNeighbors,
   normalizePseudoListsInHtmlString,
   plainTextToListHtml,
   removeEmptyListItemSimple,
@@ -223,6 +224,17 @@ describe('listEditorBehavior', () => {
     ed.remove();
   });
 
+  it('mergeListWithNeighbors only merges the given list with its own neighbors', () => {
+    const ed = editorHtml('<ul><li>A</li></ul><ul><li>B</li></ul><div>gap</div><ul><li>C</li></ul><ul><li>D</li></ul>');
+    const lists = [...ed.querySelectorAll('ul')] as HTMLUListElement[];
+    // Merging the first list must not touch the unrelated pair separated by "gap".
+    mergeListWithNeighbors(lists[0]);
+    expect(ed.querySelectorAll('ul').length).toBe(3);
+    expect(ed.querySelectorAll('li').length).toBe(4);
+    expect(ed.textContent).toContain('gap');
+    ed.remove();
+  });
+
   it('removeEmptyListItemSimple drops trailing empty item only', () => {
     const ed = editorHtml('<ul><li><br></li><li><br></li><li><br></li></ul>');
     const items = [...ed.querySelectorAll('li')] as HTMLLIElement[];
@@ -296,6 +308,23 @@ describe('listEditorBehavior', () => {
     deleteSelectionRangeContents(ed, range);
     expect(ed.textContent?.replace(/\u200B/g, '')).toBe('Hej');
     expect(ed.querySelectorAll('div').length).toBe(1);
+    ed.remove();
+  });
+
+  it('deleteSelectionRangeContents never merges unrelated lists elsewhere in the document', () => {
+    // Two independent adjacent lists sit far from the edit — deleting "2"/"3" must
+    // not fuse them together. A document-wide merge would incorrectly join a
+    // later, unrelated list to an earlier one just because *something* was
+    // deleted anywhere in the note (the reported "list sticks to later content" bug).
+    const ed = editorHtml('<div>Hej</div><div>2</div><div>3</div><ul><li>A</li></ul><ul><li>B</li></ul>');
+    const two = ed.querySelectorAll('div')[1] as HTMLElement;
+    const three = ed.querySelectorAll('div')[2] as HTMLElement;
+    const range = document.createRange();
+    range.setStart(two, 0);
+    range.setEnd(three, three.childNodes.length);
+    deleteSelectionRangeContents(ed, range);
+    expect(ed.querySelectorAll('ul').length).toBe(2);
+    expect(ed.querySelectorAll('li').length).toBe(2);
     ed.remove();
   });
 
