@@ -265,7 +265,16 @@ async function fetchCloudTrashTombstones(uid: string): Promise<{ sets: TrashTomb
 }
 
 function pushTrashTombstoneCloud(uid: string, path: 'sets' | 'folders', id: string, at: number) {
-  void set(dbRef(database, `users/${uid}/quizTrash/${path}/${id}`), at).catch(() => {});
+  // Other devices apply the delete from this node, so a dropped SDK write here
+  // would leave them showing the set until the (much larger) array/ById write
+  // lands — retry over REST just like the ById mirrors do.
+  void set(dbRef(database, `users/${uid}/quizTrash/${path}/${id}`), at).catch(() => (
+    rtdbFetch(`/users/${uid}/quizTrash/${path}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(at),
+      headers: { 'Content-Type': 'application/json' },
+    }).catch(() => {})
+  ));
 }
 
 function clearTrashTombstoneCloud(uid: string, path: 'sets' | 'folders', id: string) {
@@ -274,13 +283,15 @@ function clearTrashTombstoneCloud(uid: string, path: 'sets' | 'folders', id: str
 
 /**
  * Force `trashed: true` back onto any row whose tombstone timestamp is at
- * least as new as its own updatedAt. Called around boot merges so an
- * incomplete/stale live copy pulled from the cloud array can never resurrect
- * a soft-delete that already has a durable tombstone.
+ * least as new as its own updatedAt. Called around boot merges AND around every
+ * live remote merge so an incomplete/stale live copy pulled from the cloud
+ * array can never resurrect a soft-delete that already has a durable tombstone.
+ * `deletedAt` is only stamped when the row has none (Trash card label).
  */
-function applyTrashTombstones<T extends { id: string; trashed?: boolean; updatedAt?: string; createdAt?: string }>(
+function applyTrashTombstones<T extends { id: string; trashed?: boolean; deletedAt?: string; updatedAt?: string; createdAt?: string }>(
   items: T[],
   tombstones: TrashTombstones,
+  deletedAt?: string,
 ): T[] {
   if (!Object.keys(tombstones).length) return items;
   let changed = false;
@@ -289,7 +300,8 @@ function applyTrashTombstones<T extends { id: string; trashed?: boolean; updated
     if (at === undefined || item.trashed) return item;
     if (at < entitySyncTime(item)) return item;
     changed = true;
-    return { ...item, trashed: true };
+    if (item.deletedAt || !deletedAt) return { ...item, trashed: true };
+    return { ...item, trashed: true, deletedAt };
   });
   return changed ? next : items;
 }
@@ -301,13 +313,20 @@ function noteContentKey(note: Note) {
 function pickBetterNote(local: Note, remote: Note) {
   if (noteSyncKey(local) === noteSyncKey(remote)) return local;
   if (local.trashed !== remote.trashed) return remote.trashed ? remote : local;
+  const localAt = entitySyncTime(local);
+  const remoteAt = entitySyncTime(remote);
+  // Same body, different meta (read/fav/archived): newer savedAt wins. On a
+  // tie prefer local so a just-toggled read isn't overwritten by a stale
+  // cloud echo that still has the old flag and the same timestamp.
   if (noteContentKey(local) === noteContentKey(remote)) {
-    return entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
+    if (remoteAt !== localAt) return remoteAt > localAt ? remote : local;
+    return local;
   }
   const localLen = noteContentLength(local);
   const remoteLen = noteContentLength(remote);
   if (remoteLen !== localLen) return remoteLen > localLen ? remote : local;
-  return entitySyncTime(remote) >= entitySyncTime(local) ? remote : local;
+  if (remoteAt !== localAt) return remoteAt > localAt ? remote : local;
+  return local;
 }
 
 function draftContentLength(d: Draft) {
@@ -2499,6 +2518,56 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  /**
+   * Keep the durable soft-delete marker in step with a row that just arrived
+   * from cloud: a trashed row records one, a strictly newer live row (a real
+   * restore) clears it. Without this, only the boot merge knew about deletes
+   * made on another device.
+   */
+  const syncTrashTombstoneFromRemote = (
+    kind: 'sets' | 'folders',
+    row: { id: string; trashed?: boolean; updatedAt?: string; createdAt?: string },
+  ) => {
+    const isSet = kind === 'sets';
+    const key = isSet ? QUIZ_SET_TRASH_TOMBSTONE_KEY : QUIZ_FOLDER_TRASH_TOMBSTONE_KEY;
+    const current = isSet ? quizSetTombstonesRef.current : quizFolderTombstonesRef.current;
+    const at = entitySyncTime(row);
+    const known = current[row.id];
+    let next: TrashTombstones;
+    if (row.trashed) {
+      if (known !== undefined && known >= at) return;
+      next = markTrashTombstone(key, current, row.id, at || Date.now());
+    } else {
+      if (known === undefined || at <= known) return;
+      next = clearTrashTombstone(key, current, row.id);
+    }
+    if (isSet) quizSetTombstonesRef.current = next;
+    else quizFolderTombstonesRef.current = next;
+  };
+
+  /** Push every known soft-delete marker onto live state/caches right now. */
+  const applyTrashTombstonesToState = () => {
+    if (!loadedRef.current) return;
+    const stamp = nowStr();
+    const setTombstones = quizSetTombstonesRef.current;
+    const folderTombstones = quizFolderTombstonesRef.current;
+    quizSetsByIdCacheRef.current = applyTrashTombstones(quizSetsByIdCacheRef.current, setTombstones, stamp);
+    quizFoldersByIdCacheRef.current = applyTrashTombstones(quizFoldersByIdCacheRef.current, folderTombstones, stamp);
+    const nextSets = applyTrashTombstones(quizSetsRef.current, setTombstones, stamp);
+    const nextFolders = applyTrashTombstones(quizFoldersRef.current, folderTombstones, stamp);
+    if (nextSets !== quizSetsRef.current) {
+      const prevSets = quizSetsRef.current;
+      quizSetsRef.current = nextSets;
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+      if (!quizSetsEqualForUI(nextSets, prevSets)) setQuizSets(nextSets);
+    }
+    if (nextFolders !== quizFoldersRef.current) {
+      quizFoldersRef.current = nextFolders;
+      safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
+      setQuizFolders(nextFolders);
+    }
+  };
+
   const applyRemoteFolderById = (raw: unknown) => {
     if (!loadedRef.current || !raw || typeof raw !== 'object') return;
     const folder = raw as QuizFolder;
@@ -2519,9 +2588,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (folder.trashed && !String(folder.name || '').trim()) return;
+    // Only real named rows may move the marker — a nameless trash stub must
+    // never tombstone a live folder (see pickBetterQuizFolder).
+    syncTrashTombstoneFromRemote('folders', folder);
     const prev = quizFoldersRef.current;
     const existing = prev.find((f) => f.id === folder.id);
-    const merged = existing ? pickBetterQuizFolder(existing, folder) : folder;
+    const picked = existing ? pickBetterQuizFolder(existing, folder) : folder;
+    // A durable tombstone (local delete, or one that arrived via quizTrash from
+    // another device) always beats a stale live copy of the same id.
+    const merged = applyTrashTombstones([picked], quizFolderTombstonesRef.current, nowStr())[0];
     if (existing && JSON.stringify(existing) === JSON.stringify(merged)) return;
     const nextList = existing
       ? prev.map((f) => (f.id === folder.id ? merged : f))
@@ -2551,11 +2626,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (setVal.trashed && !String(setVal.name || '').trim()) return;
+    // Only real named rows may move the marker — a nameless trash stub must
+    // never tombstone a live set (see pickBetterQuizSet).
+    syncTrashTombstoneFromRemote('sets', setVal);
     const prev = quizSetsRef.current;
     const existing = prev.find((s) => s.id === setVal.id);
-    const merged = existing
+    const picked = existing
       ? pickBetterQuizSet(existing, setVal, permDeletedRef.current)
       : setVal;
+    // Same tombstone guard as applyRemoteFolderById — a stale live copy can
+    // never undo a soft-delete that already has a durable marker.
+    const merged = applyTrashTombstones([picked], quizSetTombstonesRef.current, nowStr())[0];
     if (existing && JSON.stringify(existing) === JSON.stringify(merged)) return;
     const nextList = existing
       ? prev.map((s) => (s.id === setVal.id ? merged : s))
@@ -2979,6 +3060,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (quizSetsByIdCacheRef.current.length) {
         merged = mergeQuizSetsForSync(merged, quizSetsByIdCacheRef.current, tombstones);
       }
+      merged = applyTrashTombstones(merged, quizSetTombstonesRef.current, nowStr());
       const json = JSON.stringify(merged);
       const needsCloudHeal = quizSetsMissingFromRemote(merged, remoteSets);
       if ((!shouldSkipRemoteEcho('quizSets', json) && json !== JSON.stringify(quizSetsRef.current)) || needsCloudHeal) {
@@ -2995,6 +3077,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (quizFoldersByIdCacheRef.current.length) {
         merged = mergeFoldersForSync(merged, quizFoldersByIdCacheRef.current, tombstones);
       }
+      merged = applyTrashTombstones(merged, quizFolderTombstonesRef.current, nowStr());
       const json = JSON.stringify(merged);
       const remoteLive = new Set(remoteFolders.filter((f) => !f.trashed && !f.system).map((f) => f.id));
       const needsCloudHeal = merged.some((f) => !f.trashed && !f.system && !remoteLive.has(f.id));
@@ -3012,8 +3095,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Re-union ById cache at commit time — child events may have updated the cache
     // while this array merge was computing (creates/soft-deletes must not be overwritten).
     const tombstonesAtCommit = permDeletedRef.current;
-    nextSets = mergeQuizSetsForSync(nextSets, quizSetsByIdCacheRef.current, tombstonesAtCommit);
-    nextFolders = mergeFoldersForSync(nextFolders, quizFoldersByIdCacheRef.current, tombstonesAtCommit);
+    const trashStamp = nowStr();
+    nextSets = applyTrashTombstones(
+      mergeQuizSetsForSync(nextSets, quizSetsByIdCacheRef.current, tombstonesAtCommit),
+      quizSetTombstonesRef.current,
+      trashStamp,
+    );
+    nextFolders = applyTrashTombstones(
+      mergeFoldersForSync(nextFolders, quizFoldersByIdCacheRef.current, tombstonesAtCommit),
+      quizFolderTombstonesRef.current,
+      trashStamp,
+    );
 
     const normalizedFolders = finalizeQuizFolders(nextFolders, nextSets);
     const normalizedSets = initializeQuizColors(
@@ -3562,6 +3654,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (quizFoldersByIdCacheRef.current.length) {
       mergedFolders = mergeFoldersForSync(mergedFolders, quizFoldersByIdCacheRef.current, tombstones);
     }
+    // Soft-deletes made on another device survive this pull even if the cloud
+    // array it just fetched still carries a stale live copy of the row.
+    const trashStamp = nowStr();
+    mergedSets = applyTrashTombstones(mergedSets, quizSetTombstonesRef.current, trashStamp);
+    mergedFolders = applyTrashTombstones(mergedFolders, quizFolderTombstonesRef.current, trashStamp);
     const healQuizSets = quizSetsMissingFromRemote(mergedSets, remoteSets);
     const remoteFolderLive = new Set(remoteFolders.filter((f) => !f.trashed && !f.system).map((f) => f.id));
     const healQuizFolders = mergedFolders.some((f) => !f.trashed && !f.system && !remoteFolderLive.has(f.id));
@@ -3832,6 +3929,60 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // Soft-delete signal on its own tiny id -> timestamp node. The same
+    // `trashed` flag also rides along in quizSetsById/quizSets, but those
+    // payloads carry every question (and inline images) of every set, so on
+    // mobile they can land seconds later or lose a merge race against a stale
+    // live copy — this node is a few bytes and applies the delete immediately.
+    // Attaching fires one child event per existing tombstone — coalesce them
+    // into a single state pass instead of re-scanning every set each time.
+    let trashApplyTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleTrashTombstoneApply = () => {
+      if (trashApplyTimer) return;
+      trashApplyTimer = setTimeout(() => {
+        trashApplyTimer = null;
+        applyTrashTombstonesToState();
+      }, 0);
+    };
+    const bindTrashTombstoneNode = (path: 'sets' | 'folders') => {
+      const node = dbRef(database, `users/${uid}/quizTrash/${path}`);
+      const key = path === 'sets' ? QUIZ_SET_TRASH_TOMBSTONE_KEY : QUIZ_FOLDER_TRASH_TOMBSTONE_KEY;
+      const currentTombstones = () => (
+        path === 'sets' ? quizSetTombstonesRef.current : quizFolderTombstonesRef.current
+      );
+      const commit = (next: TrashTombstones) => {
+        if (path === 'sets') quizSetTombstonesRef.current = next;
+        else quizFolderTombstonesRef.current = next;
+        scheduleTrashTombstoneApply();
+      };
+      const mark = (snap: { key: string | null; val: () => unknown }) => {
+        const id = String(snap.key || '');
+        const at = Number(snap.val());
+        if (!id || !Number.isFinite(at) || at <= 0) return;
+        const current = currentTombstones();
+        if ((current[id] ?? 0) >= at) return;
+        commit(markTrashTombstone(key, current, id, at));
+      };
+      const unsubAdded = onChildAdded(node, mark);
+      const unsubChanged = onChildChanged(node, mark);
+      // Restore / permanent delete elsewhere — stop forcing the soft-delete so
+      // the restored row can come back through quizSetsById.
+      const unsubRemoved = onChildRemoved(node, (snap) => {
+        const id = String(snap.key || '');
+        if (!id) return;
+        const current = currentTombstones();
+        if (!(id in current)) return;
+        commit(clearTrashTombstone(key, current, id));
+      });
+      return () => {
+        unsubAdded();
+        unsubChanged();
+        unsubRemoved();
+      };
+    };
+    const unsubSetTrash = bindTrashTombstoneNode('sets');
+    const unsubFolderTrash = bindTrashTombstoneNode('folders');
+
     // Instant quiz item sync (add/edit/delete) — tiny per-item path, not the
     // multi-MB quizSets array. Child listeners keep live typing snappy; a full
     // onValue would re-download every question on each keystroke.
@@ -3993,6 +4144,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubSetAdded();
       unsubSetChanged();
       unsubSetRemoved();
+      unsubSetTrash();
+      unsubFolderTrash();
+      if (trashApplyTimer) clearTimeout(trashApplyTimer);
       unsubQuizItemAdded();
       unsubQuizItemChanged();
       unsubQuizItemRemoved();
@@ -4031,6 +4185,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const mutateNotes = (fn: (prev: Note[]) => Note[], instantCloud = false) => {
     setNotes((prev) => {
       const next = fn(prev);
+      // Keep notesRef in sync before React re-renders — otherwise a remote
+      // merge mid-toggle still sees the pre-read/fav snapshot.
+      notesRef.current = next;
       persist({ notes: next }, instantCloud);
       if (instantCloud) scheduleInstantDataCloudSave({ notes: next });
       return next;
@@ -4135,10 +4292,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const updateNote = (id: number, patch: Partial<Note>) => {
     const contentChanged = 'html' in patch || 'title' in patch || 'text' in patch || 'savedAt' in patch;
-    const instant = noteMetaChanged(patch) || contentChanged;
+    const metaChanged = noteMetaChanged(patch);
+    const instant = metaChanged || contentChanged;
     const base = notesRef.current.find((n) => n.id === id);
     if (!base) return;
-    const merged: Note = contentChanged && !patch.savedAt
+    // Stamp savedAt on meta toggles (read/fav/archive) too — otherwise
+    // pickBetterNote treats cloud's older unread copy as equal-age and the
+    // flag snaps back immediately after "Marked as read".
+    const merged: Note = (contentChanged || metaChanged) && !patch.savedAt
       ? { ...base, ...patch, savedAt: new Date().toISOString() }
       : { ...base, ...patch };
     recordRecentEdit({ kind: 'note', at: Date.now(), note: merged });
@@ -4175,7 +4336,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    mutateNotes((prev) => prev.map((n) => (n.id === id ? merged : n)), instant);
+    // Meta-only: durable ById + localStorage so refresh/boot cannot resurrect
+    // the previous read/fav/archive flag from notesById / IndexedDB.
+    const next = notesRef.current.map((n) => (n.id === id ? merged : n));
+    notesRef.current = next;
+    setNotes(next);
+    safeSetItem('malacadhati', JSON.stringify(next));
+    void persistNoteDurable(userRef.current?.uid, merged).catch(() => false);
+    persist({ notes: next }, instant);
+    if (instant) scheduleInstantDataCloudSave({ notes: next });
   };
 
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
@@ -5318,10 +5487,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const toggleRead = (id: number) => updateNote(id, { read: true });
   const toggleUnread = (id: number) => updateNote(id, { read: false });
-  const toggleFav = (id: number) =>
-    mutateNotes((prev) => prev.map((n) => (
-      n.id === id ? { ...n, fav: !n.fav, savedAt: new Date().toISOString() } : n
-    )), true);
+  const toggleFav = (id: number) => {
+    const base = notesRef.current.find((n) => n.id === id);
+    if (!base) return;
+    updateNote(id, { fav: !base.fav });
+  };
   const archive = (id: number) => updateNote(id, { archived: true });
   const unarchive = (id: number) => updateNote(id, { archived: false, read: false });
   const trash = (id: number) => {
@@ -5413,6 +5583,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     safeSetItem(TRASH_EMPTIED_AT_KEY, String(Date.now()));
 
     const uid = userRef.current?.uid;
+    // These ids are permanently gone, so drop their soft-delete markers — the
+    // tiny quizTrash node other devices listen to must not collect dead ids.
+    trashedSets.forEach((s) => {
+      quizSetTombstonesRef.current = clearTrashTombstone(QUIZ_SET_TRASH_TOMBSTONE_KEY, quizSetTombstonesRef.current, s.id);
+      if (uid) clearTrashTombstoneCloud(uid, 'sets', s.id);
+    });
+    trashedFolders.forEach((f) => {
+      quizFolderTombstonesRef.current = clearTrashTombstone(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY, quizFolderTombstonesRef.current, f.id);
+      if (uid) clearTrashTombstoneCloud(uid, 'folders', f.id);
+    });
     trashedNotes.forEach((n) => { void removeNoteDurable(uid, n.id); });
     [...trashedQuizzes.map((q) => q.id), ...quizIdsFromTrashedSets, ...inSetTrashedIds]
       .forEach((id) => { void removeQuizItemDurable(uid, id); });
