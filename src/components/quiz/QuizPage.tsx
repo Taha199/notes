@@ -1140,9 +1140,10 @@ export function QuizPage({
   const handleQuickCreateSet = () => {
     let num = quizSets.length + 1;
     while (allQuizSets.some((set) => normalizeQuizName(set.name) === normalizeQuizName(`Nameless ${num}`))) num += 1;
-    const s = addQuizSet(`Nameless ${num}`);
-    if (selectedFolderId) setQuizSetFolder(s.id, selectedFolderId);
-    setSelectedSetId(s.id);
+    // Single-shot create with folderId; awaits ById so hard refresh cannot lose it.
+    void addQuizSet(`Nameless ${num}`, selectedFolderId || undefined).then((s) => {
+      setSelectedSetId(s.id);
+    });
   };
 
   const commitSetName = (set: QuizSet) => {

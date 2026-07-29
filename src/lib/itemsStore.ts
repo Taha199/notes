@@ -31,7 +31,8 @@ function stripUndefined<T>(value: T): T {
 const IDB_NAME = 'malacadhati_items_v1';
 const NOTES_STORE = 'notes';
 const QUIZ_STORE = 'quizItems';
-const IDB_VERSION = 1;
+const QUIZ_SETS_STORE = 'quizSets';
+const IDB_VERSION = 2;
 
 export type StoredQuizItem = QuizItem & { setId?: string | null };
 
@@ -45,6 +46,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(QUIZ_STORE)) {
         db.createObjectStore(QUIZ_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(QUIZ_SETS_STORE)) {
+        db.createObjectStore(QUIZ_SETS_STORE, { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -348,6 +352,84 @@ export async function fetchQuizItemsByIdCloud(uid: string): Promise<StoredQuizIt
     );
   } catch {
     return [];
+  }
+}
+
+/** Slim set shell for IndexedDB — membership/metadata only (items live in quizItems). */
+function quizSetShell(set: QuizSet): QuizSet {
+  return stripUndefined({ ...set, items: [] });
+}
+
+export async function putQuizSetLocal(set: QuizSet): Promise<void> {
+  try {
+    await idbPut(QUIZ_SETS_STORE, quizSetShell(set));
+  } catch (err) {
+    console.error('[itemsStore] IndexedDB quizSet write failed', err);
+  }
+}
+
+export async function getAllQuizSetsLocal(): Promise<QuizSet[]> {
+  const rows = await idbGetAll<QuizSet>(QUIZ_SETS_STORE);
+  return rows
+    .filter((s) => s && typeof s === 'object' && s.id != null)
+    .map((set) => ({ ...set, items: set.items ?? [] }));
+}
+
+export async function deleteQuizSetLocal(id: string): Promise<void> {
+  await idbDelete(QUIZ_SETS_STORE, id);
+}
+
+/** Single-set cloud write — finishes in ms; does not wait on giant quizSets[]. */
+export async function putQuizSetCloud(uid: string, quizSet: QuizSet): Promise<boolean> {
+  // Keep items on the cloud mirror (rename/trash must not blank questions).
+  // Create paths pass items: [] so the row stays tiny and lands immediately.
+  const payload = stripUndefined({ ...quizSet, items: quizSet.items ?? [] });
+  try {
+    await set(dbRef(database, `users/${uid}/quizSetsById/${quizSet.id}`), payload);
+    return true;
+  } catch (err) {
+    console.error('[itemsStore] quizSetsById cloud write failed', err);
+    try {
+      const res = await rtdbFetch(`/users/${uid}/quizSetsById/${quizSet.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return res.ok;
+    } catch (err2) {
+      console.error('[itemsStore] quizSetsById REST fallback failed', err2);
+      return false;
+    }
+  }
+}
+
+/**
+ * Durable set create/rename/trash: IndexedDB first (survives refresh + quota),
+ * then await ById cloud write. Giant quizSets[] can catch up in the background.
+ */
+export async function persistQuizSetDurable(
+  uid: string | null | undefined,
+  quizSet: QuizSet,
+): Promise<boolean> {
+  await putQuizSetLocal(quizSet);
+  if (!uid) return false;
+  return putQuizSetCloud(uid, quizSet);
+}
+
+export async function removeQuizSetDurable(
+  uid: string | null | undefined,
+  id: string,
+): Promise<void> {
+  await deleteQuizSetLocal(id);
+  if (!uid) return;
+  try {
+    await remove(dbRef(database, `users/${uid}/quizSetsById/${id}`));
+  } catch {
+    try {
+      await rtdbFetch(`/users/${uid}/quizSetsById/${id}`, { method: 'DELETE' });
+    } catch {
+      /* best-effort */
+    }
   }
 }
 

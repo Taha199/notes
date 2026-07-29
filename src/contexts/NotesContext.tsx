@@ -16,11 +16,14 @@ import {
   fetchQuizSetsByIdCloud,
   getAllNotesLocal,
   getAllQuizItemsLocal,
+  getAllQuizSetsLocal,
   mergeByIdNewer,
   persistNoteDurable,
   persistQuizItemDurable,
+  persistQuizSetDurable,
   removeNoteDurable,
   removeQuizItemDurable,
+  removeQuizSetDurable,
   tombstoneNoteDurable,
   tombstoneQuizItemDurable,
   type StoredQuizItem,
@@ -661,7 +664,12 @@ function mergeChatsForSync(local: ChatConversation[], remote: ChatConversation[]
   return [...map.values()];
 }
 
-function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
+function mergeQuizSetsForSync(
+  local: QuizSet[],
+  remote: QuizSet[],
+  tombstones: PermanentlyDeletedIds = emptyPermDeleted(),
+  opts?: { preferLocalOrder?: boolean },
+) {
   const dead = new Set(tombstones.quizSets);
   const remoteIds = new Set(remote.map((set) => set.id));
   const emptiedAt = readTrashEmptiedAt();
@@ -687,12 +695,13 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: P
     const existing = map.get(set.id);
     map.set(set.id, existing ? pickBetterQuizSet(existing, set, tombstones) : set);
   }
-  // Prefer remote Manual set-list order only when strictly newer. Ties keep
-  // `local` (callers pass the live array / authoritative list first) so a
-  // quizSetsById Object.values snapshot cannot prepend a just-created set.
+  // ById Object.values is membership-only — never let it scramble Manual order.
+  // Array↔array merges still prefer remote when its order stamp is strictly newer.
   const localMax = Math.max(0, ...local.map((set) => quizSetOrderTime(set)));
   const remoteMax = Math.max(0, ...remote.map((set) => quizSetOrderTime(set)));
-  const orderSource = remoteMax > localMax ? remote : local;
+  const orderSource = opts?.preferLocalOrder
+    ? local
+    : (remoteMax > localMax ? remote : local);
   const ordered: QuizSet[] = [];
   const seen = new Set<string>();
   for (const set of orderSource) {
@@ -709,6 +718,16 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: P
     seen.add(merged.id);
   }
   return stripPermDeletedQuizSets(ordered, tombstones);
+}
+
+/** Union ById rows into an ordered array without adopting ById key order. */
+function unionQuizSetsFromById(
+  base: QuizSet[],
+  byId: QuizSet[],
+  tombstones: PermanentlyDeletedIds = emptyPermDeleted(),
+) {
+  if (!byId.length) return base;
+  return mergeQuizSetsForSync(base, byId, tombstones, { preferLocalOrder: true });
 }
 
 function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
@@ -786,7 +805,7 @@ interface NotesCtx {
   restoreQuiz: (id: number) => void;
   permDeleteQuiz: (id: number) => void;
   updateQuiz: (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud?: boolean) => void;
-  addQuizSet: (name: string) => QuizSet;
+  addQuizSet: (name: string, folderId?: string) => Promise<QuizSet>;
   deleteQuizSet: (id: string) => void;
   restoreQuizSet: (id: string) => void;
   permDeleteQuizSet: (id: string) => void;
@@ -871,14 +890,54 @@ const LAST_UID_KEY = 'malacadhati_last_uid';
 const CLOUD_SYNCED_AT_KEY = 'malacadhati_cloud_synced_at';
 const DELETED_DRAFT_IDS_KEY = 'malacadhati_deleted_draft_ids';
 
+const QUIZ_SETS_SHELL_KEY = 'malacadhati_quiz_sets_shells';
+
 const LOCAL_DATA_KEYS = [
   'malacadhati',
   'malacadhati_drafts',
   'malacadhati_quiz',
   'malacadhati_quiz_sets',
+  QUIZ_SETS_SHELL_KEY,
   'malacadhati_quiz_folders',
   'malacadhati_chats',
 ] as const;
+
+/** Tiny membership journal — survives when the full quizSets[] localStorage write hits QuotaExceeded. */
+function writeQuizSetsShellJournal(sets: QuizSet[]) {
+  const shells = sets.map((set) => ({ ...set, items: [] as QuizItem[] }));
+  safeSetItem(QUIZ_SETS_SHELL_KEY, JSON.stringify(shells));
+}
+
+function readQuizSetsShellJournal(): QuizSet[] {
+  return firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>(QUIZ_SETS_SHELL_KEY) ?? []).map((set) => ({
+    ...set,
+    items: set.items ?? [],
+  }));
+}
+
+/** Add shell-only sets that the giant array failed to persist. Never blank existing items. */
+function mergeSetsWithShellJournal(sets: QuizSet[]): QuizSet[] {
+  const shells = readQuizSetsShellJournal();
+  if (!shells.length) return sets;
+  const have = new Set(sets.map((s) => s.id));
+  const missing = shells.filter((s) => s?.id && !have.has(s.id));
+  if (!missing.length) return sets;
+  return [...sets, ...missing];
+}
+
+function insertQuizSetInFolderOrder(sets: QuizSet[], newSet: QuizSet): QuizSet[] {
+  if (!newSet.folderId) return [...sets, newSet];
+  let insertAt = sets.length;
+  for (let i = sets.length - 1; i >= 0; i -= 1) {
+    const row = sets[i];
+    if (row.system || row.trashed) continue;
+    if (row.folderId === newSet.folderId) {
+      insertAt = i + 1;
+      break;
+    }
+  }
+  return [...sets.slice(0, insertAt), newSet, ...sets.slice(insertAt)];
+}
 
 function clearLocalNotesData() {
   for (const key of LOCAL_DATA_KEYS) localStorage.removeItem(key);
@@ -892,6 +951,12 @@ function syncAccountLocalStorage(uid: string) {
 }
 
 function readLocalNotesDataRaw() {
+  const sets = mergeSetsWithShellJournal(
+    firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({
+      ...set,
+      items: set.items ?? [],
+    })),
+  );
   return {
     notes: firebaseToArray<Note>(readLocalJson<Note[]>('malacadhati') ?? []),
     drafts: firebaseToArray<Draft>(readLocalJson<Draft[]>('malacadhati_drafts') ?? []),
@@ -901,10 +966,7 @@ function readLocalNotesDataRaw() {
       messages: c.messages ?? [],
     })),
     folders: firebaseToArray<QuizFolder>(readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? []),
-    sets: firebaseToArray<QuizSet>(readLocalJson<QuizSet[]>('malacadhati_quiz_sets') ?? []).map((set) => ({
-      ...set,
-      items: set.items ?? [],
-    })),
+    sets,
   };
 }
 
@@ -1918,10 +1980,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return edits;
     });
 
-    // Radical durability: IndexedDB + notesById are the source of truth for
-    // recently-saved items. Fold them in before first paint settles / cloud merge.
+    // Radical durability: IndexedDB + notesById / quizSetsById are the source of
+    // truth for recently-saved items. Fold them in before first paint settles /
+    // cloud merge so a cancelled giant-array write cannot hide a just-created set.
     const durableReady = (async () => {
-      const [idbNotes, idbQuizzes] = await Promise.all([getAllNotesLocal(), getAllQuizItemsLocal()]);
+      const [idbNotes, idbQuizzes, idbSets] = await Promise.all([
+        getAllNotesLocal(),
+        getAllQuizItemsLocal(),
+        getAllQuizSetsLocal(),
+      ]);
       if (cancelled) return;
       if (idbNotes.length) {
         local = {
@@ -1930,6 +1997,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         };
         notesRef.current = local.notes;
         setNotes(local.notes);
+      }
+      if (idbSets.length) {
+        local = {
+          ...local,
+          sets: unionQuizSetsFromById(local.sets, idbSets, permDeletedRef.current),
+        };
+        quizSetsRef.current = local.sets;
+        setQuizSets(local.sets);
       }
       if (idbQuizzes.length) {
         const applied = applyDurableQuizItems(local.quizzes, local.sets, idbQuizzes);
@@ -2062,7 +2137,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (cloudSetsById.length) {
           quizSetsByIdCacheRef.current = cloudSetsById;
           const mergedSets = applyTrashTombstones(
-            mergeQuizSetsForSync(quizSetsRef.current, cloudSetsById, permDeletedRef.current),
+            unionQuizSetsFromById(quizSetsRef.current, cloudSetsById, permDeletedRef.current),
             quizSetTombstonesRef.current,
           );
           quizSetsRef.current = mergedSets;
@@ -2270,16 +2345,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         let rawSets: QuizSet[] = filterResurrectedTrash(
           mergeQuizSetsForSync(
             liveSets,
-            mergeQuizSetsForSync(mergeQuizSetsForSync(cloudSets, dedicatedSets, tombstones), cloudSetsById, tombstones),
+            unionQuizSetsFromById(
+              mergeQuizSetsForSync(cloudSets, dedicatedSets, tombstones),
+              cloudSetsById,
+              tombstones,
+            ),
             tombstones,
           ),
           liveSets,
           quizSetTombstonesRef.current,
         );
-        // Re-apply ById mirrors after array merge so a stale quizSets[] cannot
-        // drop a set that already landed in quizSetsById (create-then-refresh).
+        // Re-apply ById + local durable shells after array merge so a stale
+        // quizSets[] cannot drop a set that already landed in quizSetsById /
+        // IndexedDB (create-then-refresh). Membership-only — never Manual order.
         if (cloudSetsById.length) {
-          rawSets = mergeQuizSetsForSync(rawSets, cloudSetsById, tombstones);
+          rawSets = unionQuizSetsFromById(rawSets, cloudSetsById, tombstones);
+        }
+        {
+          const idbSetsFinal = await getAllQuizSetsLocal();
+          if (idbSetsFinal.length) {
+            rawSets = unionQuizSetsFromById(rawSets, idbSetsFinal, tombstones);
+          }
+          rawSets = mergeSetsWithShellJournal(rawSets);
         }
         if (cloudFoldersById.length) {
           rawFolders = mergeFoldersForSync(rawFolders, cloudFoldersById, tombstones);
@@ -2504,6 +2591,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // they keep skipDirectPut=false.
   const persistSets = (nextSets: QuizSet[], forceCloud = false, skipDirectPut = false) => {
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    writeQuizSetsShellJournal(nextSets);
     quizSetsRef.current = nextSets;
     // Never force a full-user PATCH here — that raced with empty notes and wiped the cloud.
     persist({ quizSets: nextSets }, false);
@@ -2550,12 +2638,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   };
 
-  /** Instant create/delete/rename for sets: ById + dedicated quizSets set, no parent-array race. */
-  const pushQuizSetStructure = (nextSets: QuizSet[], changed?: QuizSet | QuizSet[]) => {
+  /**
+   * Instant create/delete/rename for sets: await ById (+ IndexedDB) first, then
+   * fire-and-forget the giant quizSets[] array. Create durability must not wait
+   * on the multi-MB array write (that is what caused ~2 min post-refresh delays).
+   */
+  const pushQuizSetStructure = async (
+    nextSets: QuizSet[],
+    changed?: QuizSet | QuizSet[],
+  ): Promise<void> => {
     quizSetsRef.current = nextSets;
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    writeQuizSetsShellJournal(nextSets);
     const changedList = changed ? (Array.isArray(changed) ? changed : [changed]) : [];
-    for (const row of changedList) pushQuizSetById(row);
+    // Critical path: membership mirror lands before the caller can refresh away.
+    for (const row of changedList) {
+      await pushQuizSetById(row);
+    }
     // Only skip when the array is truly empty — a soft-deleted row is real
     // data that must still reach cloud, or the delete resurrects on refresh.
     if (!hasAnyUserQuizSetRows(nextSets) && everHadSetsRef.current) {
@@ -2634,11 +2733,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
    */
   const purgeQuizSetByIdCloud = (id: string) => {
     quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== id);
-    const uid = userRef.current?.uid;
-    if (!uid) return;
-    void remove(dbRef(database, `users/${uid}/quizSetsById/${id}`)).catch(() => (
-      rtdbFetch(`/users/${uid}/quizSetsById/${id}`, { method: 'DELETE' }).catch(() => {})
-    ));
+    void removeQuizSetDurable(userRef.current?.uid, id);
   };
 
   const purgeQuizFolderByIdCloud = (id: string) => {
@@ -2681,17 +2776,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const pushQuizSetById = (quizSet: QuizSet) => {
+  /** Awaitable ById + IndexedDB write — create durability must not depend on giant quizSets[]. */
+  const pushQuizSetById = async (quizSet: QuizSet): Promise<boolean> => {
     const uid = userRef.current?.uid;
-    if (!uid || !loadedRef.current) return;
     if (permDeletedRef.current.quizSets.includes(quizSet.id)) {
       purgeQuizSetByIdCloud(quizSet.id);
-      return;
+      return true;
     }
     const emptiedAt = readTrashEmptiedAt();
     if (quizSet.trashed && emptiedAt && entitySyncTime(quizSet) <= emptiedAt) {
       purgeQuizSetByIdCloud(quizSet.id);
-      return;
+      return true;
     }
     quizSetsByIdCacheRef.current = (() => {
       const row = { ...quizSet, items: quizSet.items ?? [] };
@@ -2703,18 +2798,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
       return [...quizSetsByIdCacheRef.current, row];
     })();
-    const payload = JSON.parse(JSON.stringify({ ...quizSet, items: quizSet.items ?? [] }));
-    // Same reliability gap as pushQuizFolderById above — retry over REST so a
-    // transient SDK failure can never leave the trash flag only on the live
-    // array (or nowhere at all).
-    void set(dbRef(database, `users/${uid}/quizSetsById/${quizSet.id}`), payload).catch((err) => {
-      console.error('[cloud-save] quizSetsById write failed', err);
-      return rtdbFetch(`/users/${uid}/quizSetsById/${quizSet.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-        headers: { 'Content-Type': 'application/json' },
-      }).catch(() => {});
-    });
+    // IndexedDB always; ById cloud even before loadedRef so create-then-refresh survives.
+    return persistQuizSetDurable(uid, quizSet);
   };
 
   const rememberRemoteFolderInCache = (folder: QuizFolder) => {
@@ -3377,7 +3462,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       );
       // Always re-union ById cache — array LWW must never hide a live set.
       if (quizSetsByIdCacheRef.current.length) {
-        merged = mergeQuizSetsForSync(merged, quizSetsByIdCacheRef.current, tombstones);
+        merged = unionQuizSetsFromById(merged, quizSetsByIdCacheRef.current, tombstones);
       }
       merged = applyTrashTombstones(merged, quizSetTombstonesRef.current, nowStr());
       const json = JSON.stringify(merged);
@@ -3417,7 +3502,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const tombstonesAtCommit = permDeletedRef.current;
     const trashStamp = nowStr();
     nextSets = applyTrashTombstones(
-      mergeQuizSetsForSync(nextSets, quizSetsByIdCacheRef.current, tombstonesAtCommit),
+      unionQuizSetsFromById(nextSets, quizSetsByIdCacheRef.current, tombstonesAtCommit),
       quizSetTombstonesRef.current,
       trashStamp,
     );
@@ -3434,9 +3519,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
 
     // Keep ById cache aligned with the committed union (including soft-deletes).
-    // Prefer normalizedSets as the order authority (first arg) so a scrambled
-    // ById Object.values cache cannot win on equal orderUpdatedAt ties.
-    quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
+    // Prefer normalizedSets as the order authority — ById never dictates Manual order.
+    quizSetsByIdCacheRef.current = unionQuizSetsFromById(
       normalizedSets,
       quizSetsByIdCacheRef.current,
       tombstonesAtCommit,
@@ -3980,7 +4064,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSetTombstonesRef.current,
     );
     if (quizSetsByIdCacheRef.current.length) {
-      mergedSets = mergeQuizSetsForSync(mergedSets, quizSetsByIdCacheRef.current, tombstones);
+      mergedSets = unionQuizSetsFromById(mergedSets, quizSetsByIdCacheRef.current, tombstones);
     }
     let mergedFolders = filterResurrectedTrash(
       mergeFoldersForSync(quizFoldersRef.current, remoteFolders, tombstones),
@@ -4102,7 +4186,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       ]);
       if (!cloud) return;
       if (byIdSets.length) {
-        quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
+        quizSetsByIdCacheRef.current = unionQuizSetsFromById(
           quizSetsByIdCacheRef.current,
           byIdSets,
           permDeletedRef.current,
@@ -5019,10 +5103,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addQuizSet = (name: string): QuizSet => {
+  const addQuizSet = async (name: string, folderId?: string): Promise<QuizSet> => {
     const id = Date.now().toString();
     const color = pickSpacedColor([...quizFolders, ...quizSets].map((item) => item.color).filter((value): value is string => !!value), id);
     const stamp = new Date().toISOString();
+    const targetFolderId = folderId
+      && !quizFoldersRef.current.find((f) => f.id === folderId)?.system
+      ? folderId
+      : undefined;
     const newSet: QuizSet = {
       id,
       name,
@@ -5033,14 +5121,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       orderUpdatedAt: stamp,
       color,
       colorInitialized: true,
+      ...(targetFolderId ? { folderId: targetFolderId } : {}),
     };
-    const next = [...quizSetsRef.current, newSet];
+    // Single shot with folder — avoids add-then-move racing two giant array writes.
+    const next = insertQuizSetInFolderOrder(quizSetsRef.current, newSet);
     quizSetsRef.current = next;
     setQuizSets(next);
     everHadSetsRef.current = true;
-    // ById + dedicated quizSets set — never nest the array in parent update()
-    // (in-flight item saves used to overwrite creates on mobile).
-    pushQuizSetStructure(next, newSet);
+    recordRecentEdit({ kind: 'quizSet', at: Date.now(), set: newSet });
+    // Await ById + IndexedDB before resolve so hard refresh cannot lose the set.
+    await pushQuizSetStructure(next, newSet);
     return newSet;
   };
 
@@ -5063,7 +5153,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const uid = userRef.current?.uid;
     if (uid) pushTrashTombstoneCloud(uid, 'sets', id, Date.parse(trashAt));
     const trashed = next.find((s) => s.id === id);
-    pushQuizSetStructure(next, trashed ? [trashed] : []);
+    void pushQuizSetStructure(next, trashed ? [trashed] : []);
   };
 
   const restoreQuizSet = (id: string) => {
@@ -5082,7 +5172,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetTombstonesRef.current = clearTrashTombstone(QUIZ_SET_TRASH_TOMBSTONE_KEY, quizSetTombstonesRef.current, id);
     const uid = userRef.current?.uid;
     if (uid) clearTrashTombstoneCloud(uid, 'sets', id);
-    pushQuizSetStructure(next, restored);
+    void pushQuizSetStructure(next, restored);
   };
 
   const permDeleteQuizSet = (id: string) => {
@@ -5131,7 +5221,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     const updated = next.find((s) => s.id === id);
-    pushQuizSetStructure(next, updated ? [updated] : []);
+    void pushQuizSetStructure(next, updated ? [updated] : []);
   };
 
   const setQuizSetColor = (id: string, color: string) => {
@@ -5142,7 +5232,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     const updated = next.find((s) => s.id === id);
-    pushQuizSetStructure(next, updated ? [updated] : []);
+    void pushQuizSetStructure(next, updated ? [updated] : []);
   };
 
   const setQuizSetFolder = (id: string, folderId: string | undefined) => {
@@ -5169,7 +5259,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = [...without.slice(0, insertAt), updated, ...without.slice(insertAt)];
     quizSetsRef.current = next;
     setQuizSets(next);
-    pushQuizSetStructure(next, updated);
+    recordRecentEdit({ kind: 'quizSet', at: Date.now(), set: updated });
+    void pushQuizSetStructure(next, updated);
   };
 
   const addQuizFolder = (name: string): QuizFolder => {
@@ -5265,7 +5356,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const trashedFolder = nextFolders.find((f) => f.id === id);
     pushQuizFolderStructure(nextFolders, trashedFolder ? [trashedFolder] : []);
     const movedNow = nextSets.filter((s) => movedSets.some((m) => m.id === s.id));
-    pushQuizSetStructure(nextSets, movedNow);
+    void pushQuizSetStructure(nextSets, movedNow);
   };
 
   const restoreQuizFolder = (id: string) => {

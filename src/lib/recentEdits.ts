@@ -7,7 +7,7 @@
  * IndexedDB has a much larger quota and is the durable last line of defence
  * when both the big localStorage arrays and an in-flight cloud write fail.
  */
-import type { Note, QuizItem } from '../types';
+import type { Note, QuizItem, QuizSet } from '../types';
 
 const IDB_NAME = 'malacadhati_recent_edits';
 const IDB_STORE = 'edits';
@@ -18,7 +18,9 @@ const TTL_MS = 48 * 60 * 60 * 1000;
 export type RecentEdit =
   | { kind: 'note'; at: number; note: Note }
   | { kind: 'quiz'; at: number; quiz: QuizItem }
-  | { kind: 'setItem'; at: number; setId: string; item: QuizItem };
+  | { kind: 'setItem'; at: number; setId: string; item: QuizItem }
+  /** Set create/rename/folder — survives refresh when quizSets[] localStorage quota fails. */
+  | { kind: 'quizSet'; at: number; set: QuizSet };
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -71,6 +73,7 @@ function sameTarget(a: RecentEdit, b: RecentEdit): boolean {
   if (a.kind === 'setItem' && b.kind === 'setItem') {
     return a.setId === b.setId && a.item.id === b.item.id;
   }
+  if (a.kind === 'quizSet' && b.kind === 'quizSet') return a.set.id === b.set.id;
   return false;
 }
 
@@ -128,6 +131,30 @@ export function applyRecentEditsToData<T extends {
       quizzes = existing
         ? quizzes.map((q) => (q.id === edit.quiz.id ? edit.quiz : q))
         : [...quizzes, edit.quiz];
+    } else if (edit.kind === 'quizSet') {
+      const incoming: QuizSet = { ...edit.set, items: edit.set.items ?? [] };
+      const existing = sets.find((s) => s.id === incoming.id);
+      if (existing && entitySyncTime(existing) > entitySyncTime(incoming)) continue;
+      if (existing) {
+        // Journal shells may have empty items — never blank a set that already has questions.
+        const items = (existing.items?.length ?? 0) > (incoming.items?.length ?? 0)
+          ? existing.items
+          : incoming.items;
+        sets = sets.map((s) => (s.id === incoming.id ? { ...incoming, items } : s));
+      } else if (incoming.folderId) {
+        let insertAt = sets.length;
+        for (let i = sets.length - 1; i >= 0; i -= 1) {
+          const row = sets[i];
+          if (row.system || row.trashed) continue;
+          if (row.folderId === incoming.folderId) {
+            insertAt = i + 1;
+            break;
+          }
+        }
+        sets = [...sets.slice(0, insertAt), incoming, ...sets.slice(insertAt)];
+      } else {
+        sets = [...sets, incoming];
+      }
     } else {
       sets = sets.map((set) => {
         if (set.id !== edit.setId) return set;
