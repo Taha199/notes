@@ -550,12 +550,14 @@ function filterResurrectedTrash<T extends { id: string | number; trashed?: boole
   });
 }
 
+/** List/item Manual order stamp only — never fall back to updatedAt/createdAt
+ *  or create/rename/sync would steal Manual order and lift newest sets to top. */
 function quizSetOrderTime(set: QuizSet) {
-  return Date.parse(set.orderUpdatedAt || '') || entitySyncTime(set);
+  return Date.parse(set.orderUpdatedAt || '') || 0;
 }
 
 function quizFolderOrderTime(folder: QuizFolder) {
-  return Date.parse(folder.orderUpdatedAt || '') || entitySyncTime(folder);
+  return Date.parse(folder.orderUpdatedAt || '') || 0;
 }
 
 function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: PermanentlyDeletedIds = emptyPermDeleted()): QuizSet {
@@ -579,7 +581,8 @@ function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: Permanen
   const remoteMembershipNewer = entitySyncTime(remote) >= entitySyncTime(local);
   const membershipAuthority = remoteMembershipNewer ? remote : local;
   const base = membershipAuthority;
-  const preferRemoteOrder = quizSetOrderTime(remote) >= quizSetOrderTime(local);
+  // Strict > so equal order stamps keep local item order (ties used to flip to remote).
+  const preferRemoteOrder = quizSetOrderTime(remote) > quizSetOrderTime(local);
   let items = mergeQuizzesForSync(
     local.items ?? [],
     remote.items ?? [],
@@ -684,10 +687,12 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: P
     const existing = map.get(set.id);
     map.set(set.id, existing ? pickBetterQuizSet(existing, set, tombstones) : set);
   }
-  // Prefer remote Manual set-list order when its order stamp is at least as new.
+  // Prefer remote Manual set-list order only when strictly newer. Ties keep
+  // `local` (callers pass the live array / authoritative list first) so a
+  // quizSetsById Object.values snapshot cannot prepend a just-created set.
   const localMax = Math.max(0, ...local.map((set) => quizSetOrderTime(set)));
   const remoteMax = Math.max(0, ...remote.map((set) => quizSetOrderTime(set)));
-  const orderSource = remoteMax >= localMax ? remote : local;
+  const orderSource = remoteMax > localMax ? remote : local;
   const ordered: QuizSet[] = [];
   const seen = new Set<string>();
   for (const set of orderSource) {
@@ -696,6 +701,8 @@ function mergeQuizSetsForSync(local: QuizSet[], remote: QuizSet[], tombstones: P
     ordered.push(merged);
     seen.add(merged.id);
   }
+  // Unknown ids keep Map insertion order: local first, then remote-only — so
+  // a brand-new set missing from orderSource lands at the bottom.
   for (const merged of map.values()) {
     if (seen.has(merged.id)) continue;
     ordered.push(merged);
@@ -726,7 +733,7 @@ function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[], tombston
   }
   const localMax = Math.max(0, ...local.map((folder) => quizFolderOrderTime(folder)));
   const remoteMax = Math.max(0, ...remote.map((folder) => quizFolderOrderTime(folder)));
-  const orderSource = remoteMax >= localMax ? remote : local;
+  const orderSource = remoteMax > localMax ? remote : local;
   const ordered: QuizFolder[] = [];
   const seen = new Set<string>();
   for (const folder of orderSource) {
@@ -2686,11 +2693,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       purgeQuizSetByIdCloud(quizSet.id);
       return;
     }
-    quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
-      quizSetsByIdCacheRef.current.filter((s) => s.id !== quizSet.id),
-      [{ ...quizSet, items: quizSet.items ?? [] }],
-      permDeletedRef.current,
-    );
+    quizSetsByIdCacheRef.current = (() => {
+      const row = { ...quizSet, items: quizSet.items ?? [] };
+      const idx = quizSetsByIdCacheRef.current.findIndex((s) => s.id === quizSet.id);
+      if (idx >= 0) {
+        const next = quizSetsByIdCacheRef.current.slice();
+        next[idx] = row;
+        return next;
+      }
+      return [...quizSetsByIdCacheRef.current, row];
+    })();
     const payload = JSON.parse(JSON.stringify({ ...quizSet, items: quizSet.items ?? [] }));
     // Same reliability gap as pushQuizFolderById above — retry over REST so a
     // transient SDK failure can never leave the trash flag only on the live
@@ -2741,11 +2753,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSetsByIdCacheRef.current = quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id);
       return;
     }
-    quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
-      quizSetsByIdCacheRef.current.filter((s) => s.id !== setVal.id),
-      [{ ...setVal, items: setVal.items ?? [] }],
-      permDeletedRef.current,
-    );
+    quizSetsByIdCacheRef.current = (() => {
+      const row = { ...setVal, items: setVal.items ?? [] };
+      const idx = quizSetsByIdCacheRef.current.findIndex((s) => s.id === setVal.id);
+      if (idx >= 0) {
+        const next = quizSetsByIdCacheRef.current.slice();
+        next[idx] = row;
+        return next;
+      }
+      return [...quizSetsByIdCacheRef.current, row];
+    })();
   };
 
   /**
@@ -3417,9 +3434,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
 
     // Keep ById cache aligned with the committed union (including soft-deletes).
+    // Prefer normalizedSets as the order authority (first arg) so a scrambled
+    // ById Object.values cache cannot win on equal orderUpdatedAt ties.
     quizSetsByIdCacheRef.current = mergeQuizSetsForSync(
-      quizSetsByIdCacheRef.current,
       normalizedSets,
+      quizSetsByIdCacheRef.current,
       tombstonesAtCommit,
     );
     quizFoldersByIdCacheRef.current = mergeById(quizFoldersByIdCacheRef.current, normalizedFolders);
@@ -5010,6 +5029,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       items: [],
       createdAt: stamp,
       updatedAt: stamp,
+      // Stamp list order so sync keeps this append; never fall back to createdAt.
+      orderUpdatedAt: stamp,
       color,
       colorInitialized: true,
     };
@@ -5131,8 +5152,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (folderId && quizFoldersRef.current.find((f) => f.id === folderId)?.system) return;
     if (set.folderId === folderId) return;
     const stamp = new Date().toISOString();
-    const updated: QuizSet = { ...set, folderId, updatedAt: stamp };
-    const next = [...quizSetsRef.current.filter((s) => s.id !== id), updated];
+    const updated: QuizSet = { ...set, folderId, updatedAt: stamp, orderUpdatedAt: stamp };
+    const without = quizSetsRef.current.filter((s) => s.id !== id);
+    // Append after the last set already in the target folder (or ungrouped),
+    // so "+ Add set" lands at the bottom of that folder's Manual list.
+    let insertAt = without.length;
+    for (let i = without.length - 1; i >= 0; i -= 1) {
+      const row = without[i];
+      if (row.system || row.trashed) continue;
+      const sameGroup = folderId ? row.folderId === folderId : !row.folderId;
+      if (sameGroup) {
+        insertAt = i + 1;
+        break;
+      }
+    }
+    const next = [...without.slice(0, insertAt), updated, ...without.slice(insertAt)];
     quizSetsRef.current = next;
     setQuizSets(next);
     pushQuizSetStructure(next, updated);
@@ -5147,6 +5181,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       name,
       createdAt: stamp,
       updatedAt: stamp,
+      orderUpdatedAt: stamp,
       color,
       colorInitialized: true,
     };
