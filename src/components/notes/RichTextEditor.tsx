@@ -36,11 +36,15 @@ import {
   extractListItemToRootParagraph,
   forceParagraphToContentMargin,
   getStuckInnerBlockInListItem,
+  blockHasListableContent,
+  caretFollowsLineBreakInBlock as caretFollowsLineBreakInBlockLib,
   insertEmptyListAfterBlock,
   insertParagraphAboveList,
+  isolateCaretLineForList,
   isCaretInBulletPrefixZone,
   mergeListWithNeighbors,
   normalizePseudoListsInHtmlString,
+  proseAnchorToKeepOutOfList,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
   shouldRemoveOrphanEmptyLists,
@@ -1438,23 +1442,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const isolateLineBlockForList = (range: Range, ed: HTMLElement): HTMLElement | null => {
     const block = resolveBlockAtRange(range, ed);
     if (!block || block === ed || block.tagName === 'LI' || block.closest('li')) return block;
-    if (!caretFollowsLineBreakInBlock(block, range)) return block;
-
-    const newBlock = document.createElement('div');
-    newBlock.setAttribute('dir', 'auto');
-    const tailRange = document.createRange();
-    tailRange.setStart(range.endContainer, range.endOffset);
-    tailRange.setEnd(block, block.childNodes.length);
-    const tail = tailRange.extractContents();
-    const tailText = tail.textContent?.replace(/\u200B/g, '').trim() ?? '';
-    if (tailText || tail.querySelector('br, img')) {
-      newBlock.appendChild(tail);
-    } else {
-      newBlock.innerHTML = '<br>';
-    }
-    block.parentNode?.insertBefore(newBlock, block.nextSibling);
-    placeCaretInBlock(newBlock, true);
-    return newBlock;
+    const isolated = isolateCaretLineForList(block, range);
+    if (isolated !== block) placeCaretInBlock(isolated, true);
+    return isolated;
   };
 
   const isNumberedPrefix = (match: RegExpMatchArray) => /\d+[.)]/.test(match[0]);
@@ -2832,15 +2822,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return;
     }
 
-    const savedBlock = listMenuBlockRef.current;
     listMenuBlockRef.current = null;
-    let activeBlock =
-      savedBlock?.isConnected &&
-      savedBlock !== ed &&
-      savedBlock.tagName !== 'LI' &&
-      !savedBlock.closest('li')
-        ? savedBlock
-        : isolateLineBlockForList(range, ed);
+    // Always resolve from the live caret range and isolate the visual line.
+    // Preferring listMenuBlockRef skipped isolation when Enter kept
+    // "rubrik<br>|" in one div, so the heading got wrapped into the list.
+    let activeBlock = isolateLineBlockForList(range, ed);
     if (!activeBlock || activeBlock === ed || activeBlock.tagName === 'LI' || activeBlock.closest('li')) {
       activeBlock = ensureBlockAtRange(ed, sel.getRangeAt(0));
     }
@@ -2867,9 +2853,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return group;
     })();
     // Non-empty prose line: keep the word as-is and start an empty list under it.
-    // Pseudo-bullet runs and empty lines still convert in place.
-    if (shouldStartListBelowBlock(activeBlock, blocksForList)) {
-      const li = insertEmptyListAfterBlock(activeBlock, ordered);
+    // Also hard-guard against wrapping any prose blocks when the caret is below them.
+    const proseAnchor =
+      shouldStartListBelowBlock(activeBlock, blocksForList)
+        ? activeBlock
+        : proseAnchorToKeepOutOfList(blocksForList);
+    if (proseAnchor && !blockHasListableContent(activeBlock)) {
+      // Caret is on an empty line under/near prose — convert only empty targets.
+      const emptyTargets = blocksForList.filter((b) => !blockHasListableContent(b));
+      if (emptyTargets.length > 0) {
+        convertBlocksToList(emptyTargets, ordered, activeBlock);
+        saveSel();
+        readCommandState();
+        emitHtml();
+        setListPalOpen(false);
+        return;
+      }
+    }
+    if (proseAnchor) {
+      const li = insertEmptyListAfterBlock(proseAnchor, ordered);
       placeCaretInBlock(li, true);
       saveSel();
       readCommandState();
@@ -3849,12 +3851,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return newBlock;
   };
 
-  const caretFollowsLineBreakInBlock = (block: HTMLElement, range: Range): boolean => {
-    const pre = document.createRange();
-    pre.selectNodeContents(block);
-    pre.setEnd(range.startContainer, range.startOffset);
-    return !!pre.cloneContents().querySelector('br');
-  };
+  const caretFollowsLineBreakInBlock = (block: HTMLElement, range: Range): boolean =>
+    caretFollowsLineBreakInBlockLib(block, range);
 
   const createLeftLineFromCaret = (block: HTMLElement, range: Range): HTMLElement => {
     const newBlock = document.createElement('div');

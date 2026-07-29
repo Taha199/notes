@@ -1395,6 +1395,66 @@ export function blockHasListableContent(block: HTMLElement): boolean {
   return !!text || !!block.querySelector('img');
 }
 
+/** True when the caret sits on a visual line below content in the same block (after a <br>). */
+export function caretFollowsLineBreakInBlock(block: HTMLElement, range: Range): boolean {
+  try {
+    if (!block.contains(range.startContainer) && block !== range.startContainer) return false;
+    const pre = document.createRange();
+    pre.selectNodeContents(block);
+    pre.setEnd(range.startContainer, range.startOffset);
+    if (pre.cloneContents().querySelector('br')) return true;
+    // Caret directly on/after a BR node (some browsers).
+    const node = range.startContainer;
+    if (node === block && range.startOffset > 0) {
+      const prev = block.childNodes[range.startOffset - 1];
+      if (prev instanceof HTMLElement && prev.tagName === 'BR') return true;
+      // Any earlier BR among previous siblings.
+      for (let i = 0; i < range.startOffset; i++) {
+        const child = block.childNodes[i];
+        if (child instanceof HTMLElement && child.tagName === 'BR') return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Split a multi-line block at the caret so list formatting only targets the
+ * caret's visual line. Returns the block that should receive the list action.
+ */
+export function isolateCaretLineForList(block: HTMLElement, range: Range): HTMLElement {
+  if (block.tagName === 'LI' || block.closest('li')) return block;
+  if (!caretFollowsLineBreakInBlock(block, range)) return block;
+
+  const newBlock = document.createElement('div');
+  newBlock.setAttribute('dir', 'auto');
+  const tailRange = document.createRange();
+  tailRange.setStart(range.endContainer, range.endOffset);
+  tailRange.setEnd(block, block.childNodes.length);
+  const tail = tailRange.extractContents();
+  const tailText = tail.textContent?.replace(/[\u200B\uFEFF]/g, '').trim() ?? '';
+  if (tailText || tail.querySelector('br, img')) {
+    newBlock.appendChild(tail);
+  } else {
+    newBlock.innerHTML = '<br>';
+  }
+  // Heading line often keeps a trailing <br> after the split — drop it.
+  if (
+    block.lastChild instanceof HTMLElement
+    && block.lastChild.tagName === 'BR'
+    && blockHasListableContent(block)
+  ) {
+    block.lastChild.remove();
+  }
+  if (!blockHasListableContent(block) && !block.querySelector('img, br')) {
+    block.innerHTML = '<br>';
+  }
+  block.parentNode?.insertBefore(newBlock, block.nextSibling);
+  return newBlock;
+}
+
 /**
  * Toolbar list toggle: start a fresh empty list *below* a non-empty prose line
  * instead of wrapping that line. Pseudo-bullet lines and multi-block groups
@@ -1408,6 +1468,19 @@ export function shouldStartListBelowBlock(
   if (block.tagName === 'LI' || block.closest('li, ul, ol')) return false;
   if (getPseudoListPrefix(block) || getGenericBulletPrefix(block)) return false;
   return blockHasListableContent(block);
+}
+
+/**
+ * Hard guard: toolbar must not wrap non-empty prose into <li> unless the line
+ * is already a pseudo-bullet. Returns the prose anchor to start a list under,
+ * or null when conversion of `blocks` is safe.
+ */
+export function proseAnchorToKeepOutOfList(blocks: HTMLElement[]): HTMLElement | null {
+  if (blocks.length === 0) return null;
+  if (blocks.some((b) => getPseudoListPrefix(b) || getGenericBulletPrefix(b))) return null;
+  const prose = blocks.filter((b) => blockHasListableContent(b));
+  if (prose.length === 0) return null;
+  return prose[prose.length - 1];
 }
 
 /** Insert an empty ul/ol after `block` and return the new list item. */

@@ -33,6 +33,8 @@ import {
   shouldRemoveOrphanEmptyLists,
   shouldStartListBelowBlock,
   insertEmptyListAfterBlock,
+  isolateCaretLineForList,
+  proseAnchorToKeepOutOfList,
   stripListPasteIndent,
 } from './listEditorBehavior';
 
@@ -624,6 +626,30 @@ describe('listEditorBehavior', () => {
     expect(ed.querySelector('ul')?.previousElementSibling).toBe(block);
     expect(li.parentElement?.tagName).toBe('UL');
     expect(isLiEmpty(li)).toBe(true);
+    ed.remove();
+  });
+
+  it('isolateCaretLineForList keeps rubrik out when caret is on the line below', () => {
+    const ed = editorHtml('<div>Rurik<br><br></div>');
+    const block = ed.querySelector('div')!;
+    // Caret after the first <br> (visual line under the heading).
+    const range = document.createRange();
+    range.setStart(block, 2);
+    range.collapse(true);
+    const line = isolateCaretLineForList(block, range);
+    expect(block.textContent?.replace(/\u200B/g, '').trim()).toBe('Rurik');
+    expect(line).not.toBe(block);
+    expect(line.textContent?.replace(/\u200B/g, '').trim()).toBe('');
+    expect(proseAnchorToKeepOutOfList([line])).toBeNull();
+    expect(shouldStartListBelowBlock(block, [block])).toBe(true);
+    ed.remove();
+  });
+
+  it('proseAnchorToKeepOutOfList ignores empty caret lines but flags prose', () => {
+    const ed = editorHtml('<div>Rurik</div><div><br></div>');
+    const [heading, empty] = [...ed.querySelectorAll('div')];
+    expect(proseAnchorToKeepOutOfList([empty])).toBeNull();
+    expect(proseAnchorToKeepOutOfList([heading, empty])).toBe(heading);
     ed.remove();
   });
 });
