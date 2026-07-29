@@ -1388,3 +1388,39 @@ export function deleteSelectionRangeContents(
 
   return del;
 }
+
+/** True when the block has real content (text or image) that should stay outside a new list. */
+export function blockHasListableContent(block: HTMLElement): boolean {
+  const text = (block.textContent ?? '').replace(/[\u200B\uFEFF]/g, '').trim();
+  return !!text || !!block.querySelector('img');
+}
+
+/**
+ * Toolbar list toggle: start a fresh empty list *below* a non-empty prose line
+ * instead of wrapping that line. Pseudo-bullet lines and multi-block groups
+ * still convert in place.
+ */
+export function shouldStartListBelowBlock(
+  block: HTMLElement,
+  blocksForList: HTMLElement[],
+): boolean {
+  if (blocksForList.length !== 1 || blocksForList[0] !== block) return false;
+  if (block.tagName === 'LI' || block.closest('li, ul, ol')) return false;
+  if (getPseudoListPrefix(block) || getGenericBulletPrefix(block)) return false;
+  return blockHasListableContent(block);
+}
+
+/** Insert an empty ul/ol after `block` and return the new list item. */
+export function insertEmptyListAfterBlock(
+  block: HTMLElement,
+  ordered: boolean,
+): HTMLLIElement {
+  const list = document.createElement(ordered ? 'ol' : 'ul');
+  list.setAttribute('dir', 'auto');
+  const li = document.createElement('li');
+  li.setAttribute('dir', 'auto');
+  li.innerHTML = '<br>';
+  list.appendChild(li);
+  block.parentNode?.insertBefore(list, block.nextSibling);
+  return li;
+}

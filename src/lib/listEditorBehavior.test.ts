@@ -31,6 +31,8 @@ import {
   removeListItemsInRangeDom,
   selectionSpansEntireListItems,
   shouldRemoveOrphanEmptyLists,
+  shouldStartListBelowBlock,
+  insertEmptyListAfterBlock,
   stripListPasteIndent,
 } from './listEditorBehavior';
 
@@ -590,6 +592,38 @@ describe('listEditorBehavior', () => {
     expect(isCaretInBulletPrefixZone(ed.querySelector('div')!, range)).toBe(true);
     const afterM = caretIn(text, 4);
     expect(isCaretInBulletPrefixZone(ed.querySelector('div')!, afterM)).toBe(false);
+    ed.remove();
+  });
+
+  it('shouldStartListBelowBlock is true for a non-empty prose line', () => {
+    const ed = editorHtml('<div>sdcsdcds</div>');
+    const block = ed.querySelector('div')!;
+    expect(shouldStartListBelowBlock(block, [block])).toBe(true);
+    ed.remove();
+  });
+
+  it('shouldStartListBelowBlock is false for empty or pseudo-bullet lines', () => {
+    const emptyEd = editorHtml('<div><br></div>');
+    const empty = emptyEd.querySelector('div')!;
+    expect(shouldStartListBelowBlock(empty, [empty])).toBe(false);
+    emptyEd.remove();
+
+    const bulletEd = editorHtml('<div>• already</div>');
+    const bullet = bulletEd.querySelector('div')!;
+    expect(shouldStartListBelowBlock(bullet, [bullet])).toBe(false);
+    bulletEd.remove();
+  });
+
+  it('insertEmptyListAfterBlock keeps the prose line and starts a list under it', () => {
+    const ed = editorHtml('<div>sdcsdcds</div>');
+    const block = ed.querySelector('div')!;
+    const li = insertEmptyListAfterBlock(block, false);
+    expect(ed.innerHTML).toContain('sdcsdcds');
+    expect(ed.querySelector('div')?.textContent).toBe('sdcsdcds');
+    expect(ed.querySelector('ul')).not.toBeNull();
+    expect(ed.querySelector('ul')?.previousElementSibling).toBe(block);
+    expect(li.parentElement?.tagName).toBe('UL');
+    expect(isLiEmpty(li)).toBe(true);
     ed.remove();
   });
 });

@@ -36,6 +36,7 @@ import {
   extractListItemToRootParagraph,
   forceParagraphToContentMargin,
   getStuckInnerBlockInListItem,
+  insertEmptyListAfterBlock,
   insertParagraphAboveList,
   isCaretInBulletPrefixZone,
   mergeListWithNeighbors,
@@ -43,6 +44,7 @@ import {
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
   shouldRemoveOrphanEmptyLists,
+  shouldStartListBelowBlock,
 } from '../../lib/listEditorBehavior';
 
 const COLORS = ['#534AB7', '#E24B4A', '#1D9E75', '#185FA5', '#BA7517', '#993556', '#0F6E56', '#3C3489', '#639922', '#2C2C2A', '#D85A30', '#888780'];
@@ -2864,6 +2866,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
       return group;
     })();
+    // Non-empty prose line: keep the word as-is and start an empty list under it.
+    // Pseudo-bullet runs and empty lines still convert in place.
+    if (shouldStartListBelowBlock(activeBlock, blocksForList)) {
+      const li = insertEmptyListAfterBlock(activeBlock, ordered);
+      placeCaretInBlock(li, true);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      setListPalOpen(false);
+      return;
+    }
     convertBlocksToList(blocksForList, ordered, activeBlock);
     saveSel();
     readCommandState();
