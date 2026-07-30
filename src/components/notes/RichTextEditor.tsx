@@ -1014,6 +1014,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const redoStackRef = useRef<EditorSnapshot[]>([]);
   const isRestoringUndoRef = useRef(false);
   const skipDuplicateBackspaceRef = useRef(false);
+  /** Prevents double Enter when Safari fires beforeinput + keydown for the same Return. */
+  const enterHandledRef = useRef(false);
   const EMIT_DEBOUNCE_MS = 280;
 
   const emitHtml = () => {
@@ -3921,10 +3923,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
-  const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+  /**
+   * Shared Enter handler for keydown + Safari/Mac beforeinput(insertParagraph).
+   * Returns true when the event must be prevented (list or custom paragraph insert).
+   */
+  const runEditorEnter = (): boolean => {
     const ed = editorRef.current;
-    if (!ed) return;
+    if (!ed) return false;
 
     try {
       // Pull embeds out of text blocks first — insertParagraph through a
@@ -3932,7 +3937,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       separateEmbedsFromTextBlocks(ed);
 
       const sel = window.getSelection();
-      if (!sel?.rangeCount) return;
+      if (!sel?.rangeCount) return false;
       let range = sel.getRangeAt(0);
 
       const lineBlock = getLineBlock(sel.anchorNode, ed);
@@ -3946,9 +3951,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
       const li = resolveListItemAtSelection(range, ed);
       if (li) {
-        e.preventDefault();
-        // Enter in a list only moves down / adds a list line — never exits back to
-        // the heading above. Leave the list with Backspace on an empty item.
+        // Enter in a list only moves down / adds a list line — never exits.
         if (isLiEffectivelyEmpty(li) || isCaretAtEffectiveEndOfLi(li, range)) {
           insertNewListItemAfter(li);
           finishNewLineEditing(ed, { inList: true });
@@ -3959,29 +3962,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           splitListItemAtCaret(li, range);
           finishNewLineEditing(ed, { inList: true });
         }
-        return;
+        return true;
       }
 
       const block = getLineBlock(sel.anchorNode, ed);
       if (block && continuePseudoListOnEnter(block, sel.getRangeAt(0))) {
-        e.preventDefault();
         finishNewLineEditing(ed);
-        return;
+        return true;
       }
 
       const orphanList = getListContainer(sel.anchorNode, ed);
       if (orphanList) {
-        e.preventDefault();
         const items = Array.from(orphanList.children).filter((n): n is HTMLLIElement => n.tagName === 'LI');
         const target = items[items.length - 1];
         if (target) {
           insertNewListItemAfter(target);
           finishNewLineEditing(ed, { inList: true });
+          return true;
         }
-        return;
       }
 
-      e.preventDefault();
+      // Heal: Safari sometimes already exited an empty list into a plain line under
+      // the heading — put the caret back into a new bullet on that list.
+      if (block && block.tagName !== 'LI' && !block.closest('li') && isEmptyTextLine(block)) {
+        const prev = block.previousElementSibling;
+        if (prev instanceof HTMLElement && LIST_TAGS.has(prev.tagName)) {
+          const list = prev as HTMLUListElement | HTMLOListElement;
+          const newLi = document.createElement('li');
+          newLi.setAttribute('dir', 'auto');
+          newLi.innerHTML = '<br>';
+          list.appendChild(newLi);
+          block.remove();
+          placeCaretInBlock(newLi, true);
+          finishNewLineEditing(ed, { inList: true });
+          return true;
+        }
+      }
 
       clearPendingFontMarker();
 
@@ -3998,26 +4014,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         const newBlock = document.createElement('div');
         newBlock.setAttribute('dir', 'auto');
         newBlock.innerHTML = '<br>';
-        const insertAfter =
-          liveBlock.classList.contains(NOTE_IMG_FRAME) || liveBlock.classList.contains(NOTE_YT_FRAME)
-            ? liveBlock
-            : liveBlock;
-        insertAfter.parentNode?.insertBefore(newBlock, insertAfter.nextSibling);
+        liveBlock.parentNode?.insertBefore(newBlock, liveBlock.nextSibling);
         placeCaretInBlock(newBlock, true);
         finishNewLineEditing(ed);
-        return;
+        return true;
       }
 
       if (liveBlock && ensureLeftMarginAfterList(liveBlock)) {
         placeCaretInBlock(liveBlock, true);
         finishNewLineEditing(ed);
-        return;
+        return true;
       }
 
       if (liveBlock && readBlockAlignment(liveBlock) !== 'left') {
         createLeftLineFromCaret(liveBlock, range);
         finishNewLineEditing(ed);
-        return;
+        return true;
       }
 
       document.execCommand('insertParagraph');
@@ -4030,9 +4042,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           emitHtml();
         }
       });
+      return true;
     } catch {
-      // Last resort: keep the app alive if Chromium throws on embed split.
-      e.preventDefault();
       try {
         const sel = window.getSelection();
         const anchor = sel?.anchorNode;
@@ -4050,6 +4061,20 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       } catch {
         emitHtml();
       }
+      return true;
+    }
+  };
+
+  const handleEditorEnter = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+    if (enterHandledRef.current) {
+      e.preventDefault();
+      return;
+    }
+    if (runEditorEnter()) {
+      e.preventDefault();
+      enterHandledRef.current = true;
+      requestAnimationFrame(() => { enterHandledRef.current = false; });
     }
   };
 
@@ -5726,6 +5751,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           const inputEvent = e.nativeEvent as InputEvent;
           const inputType = inputEvent.inputType;
           const nativeEvent = { isComposing: inputEvent.isComposing };
+          // Safari/Mac often applies Enter via beforeinput(insertParagraph) *before*
+          // keydown — that native path exits empty list items back to the heading.
+          if (
+            (inputType === 'insertParagraph' || inputType === 'insertLineBreak')
+            && !inputEvent.isComposing
+          ) {
+            // insertLineBreak is Shift+Enter in some engines; leave that to keydown.
+            if (inputType === 'insertLineBreak') return;
+            pushUndoCheckpoint();
+            if (runEditorEnter()) {
+              e.preventDefault();
+              enterHandledRef.current = true;
+              requestAnimationFrame(() => { enterHandledRef.current = false; });
+            }
+            return;
+          }
           if (
             !isRestoringUndoRef.current
             && !inputEvent.isComposing
