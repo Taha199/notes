@@ -261,6 +261,19 @@ describe('listEditorBehavior', () => {
     ed.remove();
   });
 
+  it('removeEmptyListItemSimple walks up one list line at a time under a heading', () => {
+    const ed = editorHtml('<div>Rubrik 3</div><ul><li><br></li><li><br></li><li><br></li></ul>');
+    const items = [...ed.querySelectorAll('li')] as HTMLLIElement[];
+    const toSecond = removeEmptyListItemSimple(items[2], () => {});
+    expect(toSecond).toBe(items[1]);
+    expect(ed.querySelector('div')?.textContent).toBe('Rubrik 3');
+    expect(ed.querySelectorAll('li').length).toBe(2);
+    const toFirst = removeEmptyListItemSimple(items[1], () => {});
+    expect(toFirst).toBe(items[0]);
+    expect(ed.querySelectorAll('li').length).toBe(1);
+    ed.remove();
+  });
+
   it('removeEmptyListItemSimple on trailing empty after content targets content li', () => {
     const ed = editorHtml('<ul><li>Content</li><li><br></li></ul>');
     const items = [...ed.querySelectorAll('li')] as HTMLLIElement[];

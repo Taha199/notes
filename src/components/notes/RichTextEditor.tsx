@@ -45,6 +45,7 @@ import {
   mergeListWithNeighbors,
   normalizePseudoListsInHtmlString,
   proseAnchorToKeepOutOfList,
+  removeEmptyListItemSimple,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
   shouldRemoveOrphanEmptyLists,
@@ -2104,7 +2105,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return null;
   };
 
-  /** Step 3: from an empty after-list margin paragraph, move caret to the intro line above the list. */
+  /** From an empty line after a list, move to the last list line (not the heading above the list). */
   const focusLineAboveAfterListParagraph = (block: HTMLElement): boolean => {
     if (!blockFollowsList(block)) return false;
     const blockEmpty = !block.textContent?.replace(/\u200B/g, '').trim() && !block.querySelector('img');
@@ -2113,17 +2114,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const listEl = findListBeforeBlock(block);
     if (!listEl) return false;
 
-    let target: HTMLElement | null = null;
-    let scan: Element | null = listEl.previousElementSibling;
-    while (scan instanceof HTMLElement) {
-      if (LIST_TAGS.has(scan.tagName)) break;
-      if (BLOCK_TAGS.has(scan.tagName) && scan.tagName !== 'LI') target = scan;
-      scan = scan.previousElementSibling;
-    }
-    if (!target) {
-      const lastLi = listEl.querySelector(':scope > li:last-child');
-      if (lastLi instanceof HTMLLIElement) target = lastLi;
-    }
+    // Immediate line above = last <li>, never jump to the heading before the list.
+    const lastLi = listEl.querySelector(':scope > li:last-child');
+    const target =
+      lastLi instanceof HTMLLIElement
+        ? lastLi
+        : (listEl.previousElementSibling instanceof HTMLElement
+          && BLOCK_TAGS.has(listEl.previousElementSibling.tagName)
+          && listEl.previousElementSibling.tagName !== 'LI'
+          ? listEl.previousElementSibling
+          : null);
     if (!target) return false;
 
     block.remove();
@@ -2133,7 +2133,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const backspaceEmptyListItem = (li: HTMLLIElement, ed: HTMLElement) => {
-    // One Backspace: current empty bullet → empty normal paragraph (split list, keep siblings).
     pendingListMarginExitRef.current = null;
     handleEmptyListItemBackspace(li, ed);
   };
@@ -2205,9 +2204,57 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     pendingListMarginExitRef.current = null;
     if (isNestedListItem(li)) {
       returnToParentListItem(li);
-    } else {
-      exitListItemToMargin(li, ed, true);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
     }
+
+    const list = li.parentElement;
+    const prevLi = li.previousElementSibling instanceof HTMLLIElement ? li.previousElementSibling : null;
+    const prevBlock =
+      list?.previousElementSibling instanceof HTMLElement ? list.previousElementSibling : null;
+
+    // Prefer the visual line above: previous bullet, or the block right above the list.
+    // Do NOT convert to a margin paragraph that later jumps onto the heading (Rubrik).
+    if (prevLi || (list && [...list.children].filter((c) => c.tagName === 'LI').length > 1)) {
+      const caretTarget = removeEmptyListItemSimple(li, (listEl) => cleanupEmptyListShell(listEl, ed));
+      if (list?.isConnected && LIST_TAGS.has(list.tagName)) {
+        mergeListWithNeighbors(list as HTMLUListElement | HTMLOListElement);
+      }
+      if (prevLi?.isConnected) {
+        placeCaretInBlock(prevLi, false);
+      } else if (
+        prevBlock?.isConnected
+        && !LIST_TAGS.has(prevBlock.tagName)
+        && BLOCK_TAGS.has(prevBlock.tagName)
+      ) {
+        placeCaretInBlock(prevBlock, false);
+      } else if (caretTarget?.isConnected) {
+        placeCaretInBlock(caretTarget, false);
+      }
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
+    // Sole empty bullet: remove the list and land on the line above it.
+    if (
+      prevBlock
+      && prevBlock.isConnected
+      && !LIST_TAGS.has(prevBlock.tagName)
+      && BLOCK_TAGS.has(prevBlock.tagName)
+    ) {
+      removeEmptyListItemSimple(li, (listEl) => cleanupEmptyListShell(listEl, ed));
+      placeCaretInBlock(prevBlock, false);
+      saveSel();
+      readCommandState();
+      emitHtml();
+      return;
+    }
+
+    exitListItemToMargin(li, ed, true);
     saveSel();
     readCommandState();
     emitHtml();
