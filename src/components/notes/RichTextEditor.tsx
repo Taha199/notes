@@ -45,7 +45,6 @@ import {
   mergeListWithNeighbors,
   normalizePseudoListsInHtmlString,
   proseAnchorToKeepOutOfList,
-  removeEmptyListItemSimple,
   removeListItemsInRangeDom,
   selectionSpansEntireListItems as selectionSpansEntireListItemsLib,
   shouldRemoveOrphanEmptyLists,
@@ -2204,57 +2203,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     pendingListMarginExitRef.current = null;
     if (isNestedListItem(li)) {
       returnToParentListItem(li);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return;
+    } else {
+      // Backspace 1: strip the bullet and land on a normal margin line (same as Rubrik).
+      // Backspace 2 (on that empty line): move to the line above.
+      exitListItemToMargin(li, ed, true);
     }
-
-    const list = li.parentElement;
-    const prevLi = li.previousElementSibling instanceof HTMLLIElement ? li.previousElementSibling : null;
-    const prevBlock =
-      list?.previousElementSibling instanceof HTMLElement ? list.previousElementSibling : null;
-
-    // Prefer the visual line above: previous bullet, or the block right above the list.
-    // Do NOT convert to a margin paragraph that later jumps onto the heading (Rubrik).
-    if (prevLi || (list && [...list.children].filter((c) => c.tagName === 'LI').length > 1)) {
-      const caretTarget = removeEmptyListItemSimple(li, (listEl) => cleanupEmptyListShell(listEl, ed));
-      if (list?.isConnected && LIST_TAGS.has(list.tagName)) {
-        mergeListWithNeighbors(list as HTMLUListElement | HTMLOListElement);
-      }
-      if (prevLi?.isConnected) {
-        placeCaretInBlock(prevLi, false);
-      } else if (
-        prevBlock?.isConnected
-        && !LIST_TAGS.has(prevBlock.tagName)
-        && BLOCK_TAGS.has(prevBlock.tagName)
-      ) {
-        placeCaretInBlock(prevBlock, false);
-      } else if (caretTarget?.isConnected) {
-        placeCaretInBlock(caretTarget, false);
-      }
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return;
-    }
-
-    // Sole empty bullet: remove the list and land on the line above it.
-    if (
-      prevBlock
-      && prevBlock.isConnected
-      && !LIST_TAGS.has(prevBlock.tagName)
-      && BLOCK_TAGS.has(prevBlock.tagName)
-    ) {
-      removeEmptyListItemSimple(li, (listEl) => cleanupEmptyListShell(listEl, ed));
-      placeCaretInBlock(prevBlock, false);
-      saveSel();
-      readCommandState();
-      emitHtml();
-      return;
-    }
-
-    exitListItemToMargin(li, ed, true);
     saveSel();
     readCommandState();
     emitHtml();
@@ -4249,12 +4202,27 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         emitHtml();
         return handled();
       }
-      // Empty normal line directly above a list: delete only that line; keep the list intact.
+      // Empty margin line after/between list fragments: Backspace 2 → line above
+      // (last bullet of the list before), never skip up onto the Rubrik heading
+      // while a list line is still the immediate neighbour above.
+      if (focusLineAboveAfterListParagraph(block)) {
+        e.preventDefault();
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return handled();
+      }
+      // Empty normal line directly above a list (under a heading): delete the line
+      // and move to the heading above — only when the previous sibling is NOT a list.
       if (isEmptyTextLine(block)) {
         const next = block.nextElementSibling;
-        if (next instanceof HTMLElement && LIST_TAGS.has(next.tagName)) {
+        const prev = block.previousElementSibling;
+        if (
+          next instanceof HTMLElement
+          && LIST_TAGS.has(next.tagName)
+          && !(prev instanceof HTMLElement && LIST_TAGS.has(prev.tagName))
+        ) {
           e.preventDefault();
-          const prev = block.previousElementSibling;
           block.remove();
           if (prev instanceof HTMLElement && BLOCK_TAGS.has(prev.tagName) && prev.tagName !== 'LI') {
             placeCaretInBlock(prev, false);
@@ -4267,13 +4235,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           emitHtml();
           return handled();
         }
-      }
-      if (focusLineAboveAfterListParagraph(block)) {
-        e.preventDefault();
-        saveSel();
-        readCommandState();
-        emitHtml();
-        return handled();
       }
       // Leftover paste/list indent (or after-list margin): clear to heading margin.
       if (blockHasLeftoverIndent(block, ed) || ensureLeftMarginAfterList(block)) {
