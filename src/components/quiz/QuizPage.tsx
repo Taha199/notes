@@ -794,10 +794,14 @@ export function QuizPage({
   };
 
   const selectQuizSet = (setId: string | null) => {
+    // Sync before paint/click so "+ Add" on the new set is never blocked by a
+    // stale activeFormsScopeRef from an unsaved draft on the previous set.
+    switchFormsScope(setId, selectedFolderIdRef.current);
     setSelectedSetId(setId);
   };
 
   const selectQuizFolder = (folderId: string | null, setId: string | null) => {
+    switchFormsScope(setId, folderId);
     setSelectedFolderId(folderId);
     setSelectedSetId(setId);
   };
@@ -997,30 +1001,37 @@ export function QuizPage({
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
-    const scopeKey = formsScopeKey(selectedSetIdRef.current, selectedFolderIdRef.current);
+    const setId = selectedSetIdRef.current;
+    const folderId = selectedFolderIdRef.current;
+    const scopeKey = formsScopeKey(setId, folderId);
     if (!scopeKey) return;
-    // First paint can race the scope effect — adopt the selection's scope once.
-    if (activeFormsScopeRef.current == null) activeFormsScopeRef.current = scopeKey;
+    // Selection can update before active scope (or after a stash race). Align
+    // first — never refuse "+ Add" because another set still owns activeFormsScopeRef.
+    if (scopeKey !== activeFormsScopeRef.current) {
+      switchFormsScope(setId, folderId);
+    }
     if (scopeKey !== activeFormsScopeRef.current) return;
 
-    if (initial?.itemId) {
-      if (openFormsRef.current.some((f) => f.itemId === initial.itemId)) return;
+    const appendScopedForm = (form: OpenQuestionForm) => {
       setOpenForms((prev) => {
-        const next = [
-          ...prev,
-          {
-            formId: `item-${initial.itemId}`,
-            scopeKey,
-            itemId: initial.itemId!,
-            question: initial.question ?? '',
-            answer: initial.answer ?? '',
-            saveStatus: 'saved' as const,
-            finalized: true,
-          },
-        ];
+        const scoped = prev.filter((f) => f.scopeKey === scopeKey);
+        const next = [...scoped, form];
         openFormsRef.current = next;
         formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
         return next;
+      });
+    };
+
+    if (initial?.itemId) {
+      if (openFormsRef.current.some((f) => f.itemId === initial.itemId && f.scopeKey === scopeKey)) return;
+      appendScopedForm({
+        formId: `item-${initial.itemId}`,
+        scopeKey,
+        itemId: initial.itemId!,
+        question: initial.question ?? '',
+        answer: initial.answer ?? '',
+        saveStatus: 'saved',
+        finalized: true,
       });
       return;
     }
@@ -1034,41 +1045,25 @@ export function QuizPage({
       createdAt: new Date().toISOString(),
       draft: true,
     };
-    if (selectedSetIdRef.current) {
-      setOpenForms((prev) => {
-        const next = [
-          ...prev,
-          {
-            formId: `new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            scopeKey,
-            itemId: null,
-            question: '',
-            answer: '',
-            saveStatus: 'empty' as const,
-          },
-        ];
-        openFormsRef.current = next;
-        formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
-        return next;
+    if (setId) {
+      appendScopedForm({
+        formId: `new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        scopeKey,
+        itemId: null,
+        question: '',
+        answer: '',
+        saveStatus: 'empty',
       });
       return;
     }
     const id = addQuiz(item);
-    setOpenForms((prev) => {
-      const next = [
-        ...prev,
-        {
-          formId: `item-${id}`,
-          scopeKey,
-          itemId: id,
-          question: '',
-          answer: '',
-          saveStatus: 'saved' as const,
-        },
-      ];
-      openFormsRef.current = next;
-      formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
-      return next;
+    appendScopedForm({
+      formId: `item-${id}`,
+      scopeKey,
+      itemId: id,
+      question: '',
+      answer: '',
+      saveStatus: 'saved',
     });
   };
 
