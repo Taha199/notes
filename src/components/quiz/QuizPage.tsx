@@ -22,6 +22,8 @@ import { hasRichContent } from '../../lib/richContent';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
+/** Unsaved open Q/A forms — survives QuizPage unmount (sidebar nav) within the tab. */
+const OPEN_FORMS_STASH_KEY = 'malacadhati_quiz_open_forms_v1';
 
 function loadQuizSelection(): { folderId: string | null; setId: string | null } {
   try {
@@ -348,6 +350,16 @@ function cloneOpenForms(forms: OpenQuestionForm[]): OpenQuestionForm[] {
   return forms.map((f) => ({ ...f }));
 }
 
+function cloneOpenFormsMap(
+  map: Record<string, OpenQuestionForm[]>,
+): Record<string, OpenQuestionForm[]> {
+  const out: Record<string, OpenQuestionForm[]> = {};
+  for (const [key, forms] of Object.entries(map)) {
+    out[key] = cloneOpenForms(forms);
+  }
+  return out;
+}
+
 type LocalFormMeta = {
   mcq: boolean;
   options: string[];
@@ -360,6 +372,97 @@ function formsScopeKey(setId: string | null, folderId: string | null): string | 
   if (setId) return setId;
   if (!folderId) return '__notes__';
   return null;
+}
+
+function sanitizeOpenForm(raw: unknown): OpenQuestionForm | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const f = raw as Partial<OpenQuestionForm>;
+  if (typeof f.formId !== 'string' || !f.formId) return null;
+  if (typeof f.scopeKey !== 'string' || !f.scopeKey) return null;
+  if (f.itemId != null && typeof f.itemId !== 'number') return null;
+  return {
+    formId: f.formId,
+    scopeKey: f.scopeKey,
+    itemId: f.itemId ?? null,
+    question: typeof f.question === 'string' ? f.question : '',
+    answer: typeof f.answer === 'string' ? f.answer : '',
+    saveStatus: f.saveStatus === 'syncing' || f.saveStatus === 'saved' || f.saveStatus === 'empty'
+      ? (f.saveStatus === 'syncing' ? 'saved' : f.saveStatus)
+      : 'empty',
+    finalized: f.finalized ? true : undefined,
+    mcq: typeof f.mcq === 'boolean' ? f.mcq : undefined,
+    options: Array.isArray(f.options) ? f.options.filter((o): o is string => typeof o === 'string') : undefined,
+    correctIndexes: Array.isArray(f.correctIndexes)
+      ? f.correctIndexes.filter((n): n is number => typeof n === 'number')
+      : undefined,
+    explanation: typeof f.explanation === 'string' ? f.explanation : undefined,
+  };
+}
+
+function loadDurableFormsByScope(): Record<string, OpenQuestionForm[]> {
+  try {
+    const raw = sessionStorage.getItem(OPEN_FORMS_STASH_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, OpenQuestionForm[]> = {};
+    for (const [scopeKey, forms] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!Array.isArray(forms)) continue;
+      const cleaned = forms
+        .map(sanitizeOpenForm)
+        .filter((f): f is OpenQuestionForm => !!f && f.scopeKey === scopeKey);
+      if (cleaned.length) out[scopeKey] = cleaned;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeDurableFormsByScope(map: Record<string, OpenQuestionForm[]>) {
+  const pruned: Record<string, OpenQuestionForm[]> = {};
+  for (const [key, forms] of Object.entries(map)) {
+    if (forms.length) pruned[key] = cloneOpenForms(forms);
+  }
+  // Module cache survives SPA route changes even if sessionStorage write fails.
+  durableFormsByScopeCache = pruned;
+  try {
+    if (Object.keys(pruned).length === 0) {
+      sessionStorage.removeItem(OPEN_FORMS_STASH_KEY);
+    } else {
+      sessionStorage.setItem(OPEN_FORMS_STASH_KEY, JSON.stringify(pruned));
+    }
+  } catch (err) {
+    console.error('[quiz open forms] sessionStorage write failed', err);
+  }
+}
+
+/** In-memory + sessionStorage stash keyed by scope (setId / `__notes__`). */
+let durableFormsByScopeCache: Record<string, OpenQuestionForm[]> = loadDurableFormsByScope();
+let durableFormsPersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function readDurableFormsByScope(): Record<string, OpenQuestionForm[]> {
+  return durableFormsByScopeCache;
+}
+
+function persistDurableFormsByScope(
+  map: Record<string, OpenQuestionForm[]>,
+  opts?: { immediate?: boolean },
+) {
+  durableFormsByScopeCache = map;
+  if (opts?.immediate) {
+    if (durableFormsPersistTimer) {
+      clearTimeout(durableFormsPersistTimer);
+      durableFormsPersistTimer = null;
+    }
+    writeDurableFormsByScope(map);
+    return;
+  }
+  if (durableFormsPersistTimer) clearTimeout(durableFormsPersistTimer);
+  durableFormsPersistTimer = setTimeout(() => {
+    durableFormsPersistTimer = null;
+    writeDurableFormsByScope(durableFormsByScopeCache);
+  }, 200);
 }
 
 interface EditPanelProps {
@@ -698,12 +801,15 @@ export function QuizPage({
     setItemSortMenuOpen(false);
   };
   // Multiple open question forms (new drafts + in-progress edits).
-  // Stashed per set/notes scope so switching sets restores in-progress editors
-  // without mid-typing cloud draft create (itemId stays null until Save).
+  // Stashed per set/notes scope (module + sessionStorage) so set switches AND
+  // leaving /quiz for Favourites etc. restore in-progress editors — without
+  // mid-typing cloud draft create (itemId stays null until Save).
   const [openForms, setOpenForms] = useState<OpenQuestionForm[]>([]);
   const openFormsRef = useRef(openForms);
   openFormsRef.current = openForms;
-  const formsByScopeRef = useRef<Record<string, OpenQuestionForm[]>>({});
+  const formsByScopeRef = useRef<Record<string, OpenQuestionForm[]>>(
+    cloneOpenFormsMap(readDurableFormsByScope()),
+  );
   const activeFormsScopeRef = useRef<string | null>(null);
   const quizzesRef = useRef(quizzes);
   quizzesRef.current = quizzes;
@@ -713,11 +819,24 @@ export function QuizPage({
   const livePushTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const currentFormsScopeKey = formsScopeKey(selectedSetId, selectedFolderId);
 
-  const stashActiveFormsScope = () => {
+  const putScopeForms = (
+    key: string,
+    forms: OpenQuestionForm[],
+    opts?: { immediate?: boolean },
+  ) => {
+    const scoped = cloneOpenForms(forms.filter((f) => f.scopeKey === key));
+    if (scoped.length) formsByScopeRef.current[key] = scoped;
+    else delete formsByScopeRef.current[key];
+    persistDurableFormsByScope({ ...formsByScopeRef.current }, opts);
+  };
+
+  const stashActiveFormsScope = (opts?: { immediate?: boolean }) => {
     const key = activeFormsScopeRef.current;
     if (key == null) return;
-    formsByScopeRef.current[key] = cloneOpenForms(
+    putScopeForms(
+      key,
       openFormsRef.current.filter((f) => f.scopeKey === key),
+      opts,
     );
   };
 
@@ -746,7 +865,7 @@ export function QuizPage({
     const nextKey = formsScopeKey(nextSetId, nextFolderId);
     const prevKey = activeFormsScopeRef.current;
 
-    stashActiveFormsScope();
+    stashActiveFormsScope({ immediate: true });
 
     autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
     autoSaveTimers.current.clear();
@@ -768,6 +887,11 @@ export function QuizPage({
     }
 
     activeFormsScopeRef.current = nextKey;
+    // Prefer durable stash (session/module) over the in-component ref after remount.
+    const fromDurable = readDurableFormsByScope()[nextKey];
+    if (fromDurable) {
+      formsByScopeRef.current[nextKey] = cloneOpenForms(fromDurable);
+    }
     const stashed = cloneOpenForms(formsByScopeRef.current[nextKey] ?? [])
       .filter((f) => f.scopeKey === nextKey)
       .map((f) => ({ ...f, scopeKey: nextKey }));
@@ -780,7 +904,7 @@ export function QuizPage({
         (f) => f.itemId != null && !stashedItemIds.has(f.itemId),
       ),
     ];
-    formsByScopeRef.current[nextKey] = cloneOpenForms(merged);
+    putScopeForms(nextKey, merged, { immediate: true });
     openFormsRef.current = merged;
     setOpenForms(merged);
   };
@@ -809,9 +933,7 @@ export function QuizPage({
       });
       openFormsRef.current = next;
       if (active != null) {
-        formsByScopeRef.current[active] = cloneOpenForms(
-          next.filter((f) => f.scopeKey === active),
-        );
+        putScopeForms(active, next.filter((f) => f.scopeKey === active));
       }
       return next;
     });
@@ -864,9 +986,7 @@ export function QuizPage({
       });
       openFormsRef.current = next;
       if (active != null) {
-        formsByScopeRef.current[active] = cloneOpenForms(
-          next.filter((f) => f.scopeKey === active),
-        );
+        putScopeForms(active, next.filter((f) => f.scopeKey === active));
       }
       return next;
     });
@@ -891,9 +1011,8 @@ export function QuizPage({
       openFormsRef.current = next;
       const active = activeFormsScopeRef.current;
       if (active != null) {
-        formsByScopeRef.current[active] = cloneOpenForms(
-          next.filter((f) => f.scopeKey === active),
-        );
+        // Save/Cancel must drop the draft from durable stash immediately.
+        putScopeForms(active, next.filter((f) => f.scopeKey === active), { immediate: true });
       }
       return next;
     });
@@ -1009,7 +1128,7 @@ export function QuizPage({
         const scoped = prev.filter((f) => f.scopeKey === scopeKey);
         const next = [...scoped, form];
         openFormsRef.current = next;
-        formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
+        putScopeForms(scopeKey, next, { immediate: true });
         return next;
       });
     };
@@ -1102,16 +1221,26 @@ export function QuizPage({
   }, [formSaveSigs, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const persistOpenDraftsLocally = () => {
+      // Keep unfinished new questions (itemId null) in session/module stash —
+      // never soft-create them in the cloud on nav-away.
+      stashActiveFormsScope({ immediate: true });
+    };
     const onHide = () => {
       if (document.visibilityState !== 'hidden') return;
+      persistOpenDraftsLocally();
       flushAllOpenForms();
     };
-    const onPageHide = () => flushAllOpenForms();
+    const onPageHide = () => {
+      persistOpenDraftsLocally();
+      flushAllOpenForms();
+    };
     window.addEventListener('pagehide', onPageHide);
     document.addEventListener('visibilitychange', onHide);
     return () => {
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onHide);
+      persistOpenDraftsLocally();
       flushAllOpenForms();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1211,7 +1340,7 @@ export function QuizPage({
       if (!additions.length) return prev;
       const next = [...prev, ...additions];
       openFormsRef.current = next;
-      formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
+      putScopeForms(scopeKey, next, { immediate: true });
       return next;
     });
   }, [allQuizSets, quizzes, selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1487,7 +1616,8 @@ export function QuizPage({
           openFormsRef.current = openFormsRef.current.map((f) => (
             f.formId === form.formId && f.scopeKey === form.scopeKey ? { ...f, ...meta } : f
           ));
-          formsByScopeRef.current[form.scopeKey] = cloneOpenForms(
+          putScopeForms(
+            form.scopeKey,
             openFormsRef.current.filter((f) => f.scopeKey === form.scopeKey),
           );
           updateForm(form.formId, meta);
