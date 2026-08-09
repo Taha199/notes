@@ -1882,8 +1882,11 @@ export function QuizPage({
           <div className="flex flex-col gap-2">
             {orderedItems.map((item, index) => renderItemOrForm(item, index))}
 
+            {/* Keep editors mounted for null-id "Add" forms AND soft cloud drafts.
+                Drafts are excluded from orderedItems/visibleQuizItems, so after
+                autosave assigns itemId the form would otherwise vanish mid-typing. */}
             {openForms
-              .filter((f) => f.itemId === null)
+              .filter((f) => f.itemId === null || !orderedItems.some((i) => i.id === f.itemId))
               .map((form, formIndex) => renderOpenForm(form, formIndex))}
 
             {/* Add question dashed button — opens another form without closing existing ones */}
