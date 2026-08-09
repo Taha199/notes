@@ -9,9 +9,9 @@ import {
   writeRtdb,
 } from './_lib/firebaseAdmin.js';
 
-/** xAI Grok — OpenAI-compatible chat completions. */
-const MODEL = process.env.XAI_MODEL?.trim() || 'grok-4.5';
-const XAI_CHAT_URL = 'https://api.x.ai/v1/chat/completions';
+/** Groq — OpenAI-compatible chat completions. */
+const MODEL = process.env.GROQ_MODEL?.trim() || process.env.XAI_MODEL?.trim() || 'llama-3.3-70b-versatile';
+const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 /** Hard caps to keep spend predictable. */
 const HARD_MAX_TOKENS = 1200;
@@ -47,6 +47,7 @@ function parseDataUrl(url) {
 
 function readApiKey() {
   return (
+    process.env.GROQ_API_KEY ||
     process.env.XAI_API_KEY ||
     process.env.GROK_API_KEY ||
     ''
@@ -54,8 +55,8 @@ function readApiKey() {
 }
 
 /**
- * Validate + trim OpenAI-style chat messages for the Grok API.
- * Keeps system / user / assistant roles (xAI accepts any order).
+ * Validate + trim OpenAI-style chat messages for the Groq API.
+ * Keeps system / user / assistant roles (provider accepts any order).
  */
 function normalizeMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -156,7 +157,7 @@ export default async function handler(request, response) {
   if (!apiKey) {
     return response.status(503).json({
       error: 'ai-not-configured',
-      message: 'XAI_API_KEY saknas på servern. Lägg till den i Vercel och gör Redeploy.',
+      message: 'GROQ_API_KEY saknas på servern. Lägg till den i Vercel och gör Redeploy.',
     });
   }
 
@@ -214,7 +215,7 @@ export default async function handler(request, response) {
     });
   }
 
-  const xaiBody = {
+  const groqBody = {
     model: MODEL,
     messages: converted.messages,
     max_tokens: maxTokens,
@@ -222,19 +223,19 @@ export default async function handler(request, response) {
     stream,
   };
 
-  const xaiRes = await fetch(XAI_CHAT_URL, {
+  const groqRes = await fetch(GROQ_CHAT_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(xaiBody),
+    body: JSON.stringify(groqBody),
   });
 
-  if (!xaiRes.ok) {
-    const err = await xaiRes.json().catch(() => ({}));
-    const message = err?.error?.message || err?.message || `Grok error ${xaiRes.status}`;
-    return response.status(xaiRes.status === 429 ? 429 : 502).json({ error: 'grok-error', message });
+  if (!groqRes.ok) {
+    const err = await groqRes.json().catch(() => ({}));
+    const message = err?.error?.message || err?.message || `Groq error ${groqRes.status}`;
+    return response.status(groqRes.status === 429 ? 429 : 502).json({ error: 'groq-error', message });
   }
 
   const nextQuotaBase = {
@@ -246,7 +247,7 @@ export default async function handler(request, response) {
   await saveQuota(accessToken, account.uid, nextQuotaBase);
 
   if (!stream) {
-    const data = await xaiRes.json();
+    const data = await groqRes.json();
     const text = String(data?.choices?.[0]?.message?.content ?? '').trim();
     const used = usageTotal(data?.usage);
     if (used > 0) {
@@ -263,7 +264,7 @@ export default async function handler(request, response) {
   response.setHeader('Cache-Control', 'no-cache, no-transform');
   response.setHeader('Connection', 'keep-alive');
 
-  const reader = xaiRes.body.getReader();
+  const reader = groqRes.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let usageTokens = 0;
