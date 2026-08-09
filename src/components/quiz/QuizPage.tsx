@@ -1492,118 +1492,126 @@ export function QuizPage({
         <div className="flex flex-1 overflow-hidden border-t border-app-border dark:border-white/10">
 
           {/* Left column: Folders */}
-          <div className="flex flex-shrink-0 flex-col overflow-y-auto py-1" style={{ width: folderColW }}>
-            {quizFolders.length === 0 && (
-              <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">{t.quizNoFolders}</p>
-            )}
-            {quizFolders.map((f) => (
-              <div key={f.id} className="group/fl relative">
-                {renamingFolderId === f.id ? (
-                  <div className="px-2 py-1.5">
-                    <input
-                      autoFocus
-                      value={folderRenameVal}
-                      onChange={(e) => setFolderRenameVal(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitFolderName(f.id, f.name);
-                        if (e.key === 'Escape') setRenamingFolderId(null);
-                      }}
-                      onBlur={() => commitFolderName(f.id, f.name)}
-                      className="w-full bg-transparent text-[11px] font-semibold text-app-text outline-none dark:text-gray-100"
-                    />
-                  </div>
-                ) : (
-                  <button
-                    draggable={!f.system}
-                    onDragStart={(e) => {
-                      if (f.system) return;
-                      dragFolderId.current = f.id;
-                      e.dataTransfer.effectAllowed = 'move';
-                      e.dataTransfer.setData('application/x-quiz-folder', f.id);
-                    }}
-                    onClick={() => selectFolder(f.id)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (!f.system) {
-                        setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY > window.innerHeight * 0.6 ? window.innerHeight - e.clientY : e.clientY, flip: e.clientY > window.innerHeight * 0.6 });
-                        setFolderColorPicker(false);
-                      }
-                    }}
-                    onDragOver={(e) => {
-                      const folderId = dragFolderId.current || e.dataTransfer.getData('application/x-quiz-folder');
-                      if (folderId) {
+          <div className="flex flex-shrink-0 flex-col" style={{ width: folderColW }}>
+            <div className="flex-1 overflow-y-auto py-1">
+              {quizFolders.length === 0 && (
+                <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">{t.quizNoFolders}</p>
+              )}
+              {quizFolders.map((f) => (
+                <div key={f.id} className="group/fl relative">
+                  {renamingFolderId === f.id ? (
+                    <div className="px-2 py-1.5">
+                      <input
+                        autoFocus
+                        value={folderRenameVal}
+                        onChange={(e) => setFolderRenameVal(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitFolderName(f.id, f.name);
+                          if (e.key === 'Escape') setRenamingFolderId(null);
+                        }}
+                        onBlur={() => commitFolderName(f.id, f.name)}
+                        className="w-full bg-transparent text-[11px] font-semibold text-app-text outline-none dark:text-gray-100"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      draggable={!f.system}
+                      onDragStart={(e) => {
                         if (f.system) return;
+                        dragFolderId.current = f.id;
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('application/x-quiz-folder', f.id);
+                      }}
+                      onClick={() => selectFolder(f.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!f.system) {
+                          setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY > window.innerHeight * 0.6 ? window.innerHeight - e.clientY : e.clientY, flip: e.clientY > window.innerHeight * 0.6 });
+                          setFolderColorPicker(false);
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        const folderId = dragFolderId.current || e.dataTransfer.getData('application/x-quiz-folder');
+                        if (folderId) {
+                          if (f.system) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          e.dataTransfer.dropEffect = 'move';
+                          setDragOverFolderSortId(f.id);
+                          return;
+                        }
+                        if (!dragSetId.current) return;
                         e.preventDefault();
                         e.stopPropagation();
                         e.dataTransfer.dropEffect = 'move';
-                        setDragOverFolderSortId(f.id);
-                        return;
-                      }
-                      if (!dragSetId.current) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      e.dataTransfer.dropEffect = 'move';
-                      setDragOverFolderId(f.id);
-                    }}
-                    onDragLeave={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                        setDragOverFolderId(f.id);
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                          setDragOverFolderId(null);
+                          setDragOverFolderSortId(null);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const folderId = dragFolderId.current || e.dataTransfer.getData('application/x-quiz-folder');
+                        if (folderId) {
+                          reorderQuizFolders(folderId, f.id);
+                          dragFolderId.current = null;
+                          setDragOverFolderSortId(null);
+                          return;
+                        }
+                        const setId = dragSetId.current || e.dataTransfer.getData('text/plain');
+                        if (setId) {
+                          setQuizSetFolder(setId, f.id);
+                          if (setSort !== 'manual') changeSort('manual');
+                          selectFolder(f.id);
+                        }
+                        dragSetId.current = null;
+                        setDragOverSetId(null);
                         setDragOverFolderId(null);
                         setDragOverFolderSortId(null);
-                      }
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const folderId = dragFolderId.current || e.dataTransfer.getData('application/x-quiz-folder');
-                      if (folderId) {
-                        reorderQuizFolders(folderId, f.id);
-                        dragFolderId.current = null;
-                        setDragOverFolderSortId(null);
-                        return;
-                      }
-                      const setId = dragSetId.current || e.dataTransfer.getData('text/plain');
-                      if (setId) {
-                        setQuizSetFolder(setId, f.id);
-                        if (setSort !== 'manual') changeSort('manual');
-                        selectFolder(f.id);
-                      }
-                      dragSetId.current = null;
-                      setDragOverSetId(null);
-                      setDragOverFolderId(null);
-                      setDragOverFolderSortId(null);
-                    }}
-                    onDragEnd={() => { dragFolderId.current = null; setDragOverFolderSortId(null); }}
-                    className={'relative w-full py-2.5 pl-3 pr-1 text-left transition-all ' +
-                      (dragOverFolderSortId === f.id
-                        ? 'bg-primary/10 ring-2 ring-inset ring-primary/70 dark:bg-primary/20'
-                        : dragOverFolderId === f.id
-                          ? 'bg-primary/20 ring-2 ring-inset ring-primary dark:bg-primary/30'
-                          : selectedFolderId === f.id
-                            ? 'bg-primary/10 dark:bg-primary/20'
-                            : 'hover:bg-white dark:hover:bg-white/5')}
-                  >
-                    <span className="absolute inset-y-0 left-0 w-[3px]" style={{ backgroundColor: f.color || '#9ca3af' }} />
-                    {!f.system && (
-                      <span className="absolute right-1 bottom-1 select-none text-[12px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover/fl:opacity-100">⠿</span>
-                    )}
-                    <AutoFitText
-                      text={f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
-                      maxSize={11}
-                      minSize={7}
-                      className={'block w-full font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}
-                    />
-                    <span className="block text-[9px] text-app-text-secondary/50">{t.quizSetsCount.replace('{n}', String(userSetsInFolder(f.id).length))}</span>
-                    {!f.system && (
-                      <span
-                        onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY > window.innerHeight * 0.6 ? window.innerHeight - e.clientY : e.clientY, flip: e.clientY > window.innerHeight * 0.6 }); setFolderColorPicker(false); }}
-                        className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded text-[10px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border group-hover/fl:opacity-100"
-                      >···</span>
-                    )}
-                  </button>
-                )}
-              </div>
-            ))}
+                      }}
+                      onDragEnd={() => { dragFolderId.current = null; setDragOverFolderSortId(null); }}
+                      className={'relative w-full py-2.5 pl-3 pr-1 text-left transition-all ' +
+                        (dragOverFolderSortId === f.id
+                          ? 'bg-primary/10 ring-2 ring-inset ring-primary/70 dark:bg-primary/20'
+                          : dragOverFolderId === f.id
+                            ? 'bg-primary/20 ring-2 ring-inset ring-primary dark:bg-primary/30'
+                            : selectedFolderId === f.id
+                              ? 'bg-primary/10 dark:bg-primary/20'
+                              : 'hover:bg-white dark:hover:bg-white/5')}
+                    >
+                      <span className="absolute inset-y-0 left-0 w-[3px]" style={{ backgroundColor: f.color || '#9ca3af' }} />
+                      {!f.system && (
+                        <span className="absolute right-1 bottom-1 select-none text-[12px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover/fl:opacity-100">⠿</span>
+                      )}
+                      <AutoFitText
+                        text={f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
+                        maxSize={11}
+                        minSize={7}
+                        className={'block w-full font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}
+                      />
+                      <span className="block text-[9px] text-app-text-secondary/50">{t.quizSetsCount.replace('{n}', String(userSetsInFolder(f.id).length))}</span>
+                      {!f.system && (
+                        <span
+                          onClick={(e) => { e.stopPropagation(); setFolderCtxMenu({ folderId: f.id, x: e.clientX, y: e.clientY > window.innerHeight * 0.6 ? window.innerHeight - e.clientY : e.clientY, flip: e.clientY > window.innerHeight * 0.6 }); setFolderColorPicker(false); }}
+                          className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded text-[10px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border group-hover/fl:opacity-100"
+                        >···</span>
+                      )}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={createFolder}
+              className="flex w-full flex-shrink-0 items-center justify-center gap-1 border-t border-app-border py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:border-white/10 dark:hover:bg-primary/10"
+            >
+              <span className="text-base leading-none">+</span> {t.quizFolder}
+            </button>
           </div>
 
           {/* Drag handle to resize folders column */}
@@ -1657,26 +1665,13 @@ export function QuizPage({
                 currentSets.map((s) => renderSetRow(s))
               )}
             </div>
+            <button
+              onClick={handleQuickCreateSet}
+              className="flex w-full flex-shrink-0 items-center justify-center gap-1 border-t border-app-border py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:border-white/10 dark:hover:bg-primary/10"
+            >
+              <span className="text-base leading-none">+</span> {t.quizAddSet}
+            </button>
           </div>
-          )}
-        </div>
-
-        {/* Bottom buttons — aligned with their column */}
-        <div className="flex border-t border-app-border dark:border-white/10">
-          <button
-            onClick={createFolder}
-            className={'flex items-center justify-center gap-1 py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:hover:bg-primary/10 ' +
-              (isNotesView ? 'flex-1' : 'w-[84px] flex-shrink-0 border-r border-app-border dark:border-white/10')}
-          >
-            <span className="text-base leading-none">+</span> {t.quizFolder}
-          </button>
-          {!isNotesView && (
-          <button
-            onClick={handleQuickCreateSet}
-            className="flex flex-1 items-center justify-center gap-1 py-2.5 text-[11px] font-semibold text-primary transition-all hover:bg-primary/5 dark:hover:bg-primary/10"
-          >
-            <span className="text-base leading-none">+</span> {t.quizAddSet}
-          </button>
           )}
         </div>
       </div>
