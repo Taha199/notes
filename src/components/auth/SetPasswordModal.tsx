@@ -28,7 +28,9 @@ export function SetPasswordModal({ onClose }: { onClose: () => void }) {
       setTimeout(onClose, 1200);
     } catch (err) {
       const code = (err as { code?: string }).code;
-      setError(code === 'auth/requires-recent-login' ? t.setpassErrRelogin : t.setpassErrGeneric);
+      if (code === 'auth/requires-recent-login') setError(t.setpassErrRelogin);
+      else if (code === 'auth/password-belongs-other-account') setError(t.authErrPasswordBelongsOther);
+      else setError(t.setpassErrGeneric);
     } finally {
       setLoading(false);
     }

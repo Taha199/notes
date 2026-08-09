@@ -263,6 +263,10 @@ export interface Translation {
   authErrInvalidCred: string;
   authErrGoogle: string;
   authErrNeedEmail: string;
+  authErrUseGoogleSignIn: string;
+  authErrUseGoogleThenSetPassword: string;
+  authErrAccountExistsUsePassword: string;
+  authErrPasswordBelongsOther: string;
   authResetSent: string;
   authErrSendFail: string;
   authErrEmailConfig: string;
@@ -642,7 +646,12 @@ export const LANGS: Record<Lang, Translation> = {
     authErrWrongPass: 'Incorrect password', authErrInUse: 'Email is already in use',
     authErrInvalidEmail: 'Invalid email format', authErrTooMany: 'Too many attempts, try again later',
     authErrInvalidCred: 'Incorrect email or password', authErrGoogle: 'An error occurred during Google sign-in',
-    authErrNeedEmail: 'Enter your email first', authResetSent: '✓ Password reset link sent',
+    authErrNeedEmail: 'Enter your email first',
+    authErrUseGoogleSignIn: 'This email is registered with Google. Sign in with Google — then you can add a password in Settings.',
+    authErrUseGoogleThenSetPassword: 'This email already has a Google account. Sign in with Google first, then add a password from the app (no new account is created).',
+    authErrAccountExistsUsePassword: 'This email already has a password login. Sign in with email and password instead.',
+    authErrPasswordBelongsOther: 'That password belongs to a different account with this email. Sign in with Google on this account, or use the other login — data is not moved.',
+    authResetSent: '✓ Password reset link sent',
     authErrSendFail: 'Could not send email, check the address',
     authErrEmailConfig: 'Email service is not configured. Contact support.',
     authErrRateLimited: 'Please wait a minute before requesting another email.',
@@ -1010,7 +1019,12 @@ export const LANGS: Record<Lang, Translation> = {
     authErrWrongPass: 'Felaktigt lösenord', authErrInUse: 'E-posten används redan',
     authErrInvalidEmail: 'Ogiltig e-postadress', authErrTooMany: 'För många försök, försök igen senare',
     authErrInvalidCred: 'Felaktig e-post eller lösenord', authErrGoogle: 'Ett fel uppstod vid Google-inloggning',
-    authErrNeedEmail: 'Ange din e-post först', authResetSent: '✓ Länk för återställning av lösenord skickad',
+    authErrNeedEmail: 'Ange din e-post först',
+    authErrUseGoogleSignIn: 'Den här e-posten är registrerad med Google. Logga in med Google — sedan kan du lägga till ett lösenord i Inställningar.',
+    authErrUseGoogleThenSetPassword: 'Den här e-posten har redan ett Google-konto. Logga in med Google först, och lägg sedan till ett lösenord i appen (inget nytt konto skapas).',
+    authErrAccountExistsUsePassword: 'Den här e-posten har redan lösenordsinloggning. Logga in med e-post och lösenord i stället.',
+    authErrPasswordBelongsOther: 'Det lösenordet tillhör ett annat konto med samma e-post. Logga in med Google här, eller använd den andra inloggningen — data flyttas inte.',
+    authResetSent: '✓ Länk för återställning av lösenord skickad',
     authErrSendFail: 'Kunde inte skicka e-post, kontrollera adressen',
     authErrEmailConfig: 'E-posttjänsten är inte konfigurerad. Kontakta support.',
     authErrRateLimited: 'Vänta en minut innan du begär ett nytt mejl.',

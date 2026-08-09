@@ -10,6 +10,7 @@ import {
   applyActionCode,
   deleteUser,
   linkWithCredential,
+  fetchSignInMethodsForEmail,
   updateProfile,
   type User,
 } from 'firebase/auth';
@@ -46,6 +47,32 @@ async function sendResetEmailDirect(email: string): Promise<void> {
     throw new Error(typeof err?.error === 'string' ? err.error : 'send-failed');
   }
 }
+
+function authError(code: string): Error & { code: string } {
+  const err = new Error(code) as Error & { code: string };
+  err.code = code;
+  return err;
+}
+
+function normalizeAuthEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/** Best-effort provider list (may be empty when email enumeration protection is on). */
+async function signInMethodsForEmail(email: string): Promise<string[]> {
+  try {
+    return await fetchSignInMethodsForEmail(auth, email);
+  } catch {
+    return [];
+  }
+}
+
+const PASSWORD_SIGNIN_FAIL = new Set([
+  'auth/user-not-found',
+  'auth/wrong-password',
+  'auth/invalid-credential',
+  'auth/invalid-login-credentials',
+]);
 
 interface AuthCtx {
   user: User | null;
@@ -198,34 +225,78 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profileLoading,
     profilePhotoURL,
     signIn: async (email, pass) => {
-      const cred = await signInWithEmailAndPassword(auth, email, pass);
-      // Unverified accounts are treated as "not registered" — resend a fresh
-      // verification email on every sign-in attempt until they verify.
-      if (!cred.user.emailVerified) {
-        await sendVerificationEmailDirect(email);
+      const normalized = normalizeAuthEmail(email);
+      try {
+        const cred = await signInWithEmailAndPassword(auth, normalized, pass);
+        // Unverified accounts are treated as "not registered" — resend a fresh
+        // verification email on every sign-in attempt until they verify.
+        if (!cred.user.emailVerified) {
+          await sendVerificationEmailDirect(normalized);
+        }
+      } catch (e) {
+        const code = (e as { code?: string })?.code ?? '';
+        if (PASSWORD_SIGNIN_FAIL.has(code)) {
+          const methods = await signInMethodsForEmail(normalized);
+          if (methods.includes('google.com') && !methods.includes('password')) {
+            // Same email already lives on a Google account — never invent a second one.
+            throw authError('auth/use-google-sign-in');
+          }
+        }
+        throw e;
       }
     },
     signUp: async (email, pass) => {
+      const normalized = normalizeAuthEmail(email);
+      const methods = await signInMethodsForEmail(normalized);
+
+      // Existing password account → sign in on this same UID (never create another).
+      if (methods.includes('password')) {
+        const cred = await signInWithEmailAndPassword(auth, normalized, pass);
+        if (!cred.user.emailVerified) {
+          await sendVerificationEmailDirect(normalized);
+        }
+        return;
+      }
+
+      // Email already registered via Google (or another provider) → refuse createUser.
+      // User must open that same account (Google), then link a password in Settings.
+      if (methods.some((m) => m && m !== 'password')) {
+        throw authError('auth/use-google-then-set-password');
+      }
+
       try {
-        await createUserWithEmailAndPassword(auth, email, pass);
-        await sendVerificationEmailDirect(email);
+        await createUserWithEmailAndPassword(auth, normalized, pass);
+        await sendVerificationEmailDirect(normalized);
       } catch (e) {
-        // Email belongs to an existing (likely unverified) account. If the
-        // password matches, sign in and resend verification so the user can
-        // retry — the account stays gated until verified.
         const code = (e as { code?: string })?.code;
         if (code === 'auth/email-already-in-use') {
-          const cred = await signInWithEmailAndPassword(auth, email, pass);
-          if (!cred.user.emailVerified) {
-            await sendVerificationEmailDirect(email);
+          // Critical: do NOT create a second Auth user. Try password on the
+          // existing UID; if that fails, the email belongs to Google-only.
+          try {
+            const cred = await signInWithEmailAndPassword(auth, normalized, pass);
+            if (!cred.user.emailVerified) {
+              await sendVerificationEmailDirect(normalized);
+            }
+            return;
+          } catch {
+            throw authError('auth/use-google-then-set-password');
           }
-          return;
         }
         throw e;
       }
     },
     signInGoogle: async () => {
-      await signInWithPopup(auth, googleProvider);
+      try {
+        await signInWithPopup(auth, googleProvider);
+      } catch (e) {
+        const code = (e as { code?: string })?.code;
+        // Password account already owns this email — sign in with email/password
+        // on that same UID (then optional Google link later). Never spawn a twin.
+        if (code === 'auth/account-exists-with-different-credential') {
+          throw authError('auth/account-exists-use-password');
+        }
+        throw e;
+      }
     },
     signOut: async () => {
       await fbSignOut(auth);
@@ -238,9 +309,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await fbConfirmPasswordReset(auth, code, newPass);
     },
     setPasswordForAccount: async (pass) => {
+      // Link password onto the *currently signed-in* UID (e.g. Google → also password).
+      // Never creates a new Auth user or touches another UID's RTDB data.
       if (!auth.currentUser?.email) throw new Error('no-email');
       const cred = EmailAuthProvider.credential(auth.currentUser.email, pass);
-      await linkWithCredential(auth.currentUser, cred);
+      try {
+        await linkWithCredential(auth.currentUser, cred);
+      } catch (e) {
+        const code = (e as { code?: string })?.code;
+        if (code === 'auth/provider-already-linked') {
+          // This UID already has password — treat as success after reload.
+        } else if (code === 'auth/credential-already-in-use' || code === 'auth/email-already-in-use') {
+          // Password/email is tied to a *different* UID — do not merge or overwrite.
+          throw authError('auth/password-belongs-other-account');
+        } else {
+          throw e;
+        }
+      }
       await auth.currentUser.reload();
       setUser({ ...auth.currentUser });
       setHasPassword(auth.currentUser.providerData.some((p) => p.providerId === 'password'));
