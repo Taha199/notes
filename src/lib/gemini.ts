@@ -212,14 +212,16 @@ export async function answerQuestion(
   const q = question.replace(/<[^>]*>/g, '').trim().slice(0, 1500);
   const long = style === 'long';
   const instruction = long
-    ? 'Besvara långt och avancerat på samma språk som frågan. Ge ett utförligt, djupgående svar med relevanta detaljer, nyanser och förklaringar där det behövs. Endast svaret.'
-    : 'Besvara kort och koncist på samma språk som frågan. Håll dig till det väsentliga utan onödig utfyllnad. Endast svaret.';
+    ? 'Besvara långt och avancerat på samma språk som frågan. Ge ett utförligt, djupgående svar med relevanta detaljer, nyanser och förklaringar där det behövs.'
+    : 'Besvara kort och koncist på samma språk som frågan. Håll dig till det väsentliga utan onödig utfyllnad.';
+  const formatRules =
+    'Formatering: använd tydliga stycken med blankrad mellan dem. Använd **fetstil** för rubriker/nyckeltermer och punktlistor med "- " (bindestreck + mellanslag) när det behövs. Använd INTE LaTeX, $-notation eller rå HTML — skriv kemi/matte med vanlig text och Unicode (t.ex. H⁺, OH⁻, log₁₀). Inga kodblock. Endast svaret.';
   return callAi({
     max_tokens: long ? MAX_ANSWER_TOKENS_LONG : MAX_ANSWER_TOKENS_SHORT,
     temperature: long ? 0.35 : 0.2,
     messages: [{
       role: 'user',
-      content: `${instruction}\n\nFråga: ${q}`,
+      content: `${instruction} ${formatRules}\n\nFråga: ${q}`,
     }],
   });
 }

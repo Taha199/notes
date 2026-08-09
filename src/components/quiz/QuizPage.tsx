@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo, memo } from 'rea
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { AppRichTextEditor } from '../notes/AppRichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
+import { mdToHtml } from '../../lib/quizHtml';
 import { useAuth } from '../../contexts/AuthContext';
 import { AiAnswerStyleToggle, useAiAnswerStyle } from './AiAnswerStyleToggle';
 import { StudyMode } from './StudyMode';
@@ -71,15 +72,6 @@ function normalizeQuizName(value: string) {
 // Content is valid if it has visible text OR an embedded image.
 // Shared with notes/drafts so image-only content counts everywhere.
 const hasContent = hasRichContent;
-
-function mdToHtml(content: string): string {
-  if (/<[a-z][\s\S]*>/i.test(content)) return content;
-  return content
-    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/\n/g, '<br>');
-}
 
 interface QuizItemRowProps {
   item: QuizItem;
@@ -424,7 +416,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     if (!plain) return;
     setAiLoading(true);
     try {
-      const res = await answerQuestion(plain, aiAnswerStyle);
+      const res = mdToHtml(await answerQuestion(plain, aiAnswerStyle));
       if (hasContent(answer)) setAiSuggestion(res);
       else onChangeA(res);
     } catch (e) {
@@ -613,7 +605,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
                 <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">🧠 {t.quizAiSuggestion}</span>
                 <button onClick={() => setAiSuggestion(null)} className="text-[12px] text-violet-500/70 hover:text-violet-700">✕</button>
               </div>
-              <div dir="auto" className="note-content px-3 py-2 text-[13px] leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-200" dangerouslySetInnerHTML={{ __html: mdToHtml(aiSuggestion) }} />
+              <div dir="auto" className="note-content px-3 py-2 text-[13px] leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-200" dangerouslySetInnerHTML={{ __html: aiSuggestion }} />
               <div className="flex justify-end gap-2 border-t border-violet-200 px-3 py-2 dark:border-violet-500/20">
                 <button onClick={() => setAiSuggestion(null)} className="rounded-lg border border-app-border px-3 py-1 text-[11px] text-app-text-secondary hover:bg-white/50 dark:border-white/10">{t.quizKeepCurrent}</button>
                 <button onClick={() => { onChangeA(aiSuggestion); setAiSuggestion(null); }} className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-700">↔ {t.quizReplaceAnswer}</button>

@@ -2,15 +2,7 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { QuizItem } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
-
-function mdToHtml(content: string): string {
-  if (/<[a-z][\s\S]*>/i.test(content)) return content;
-  return content
-    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/\n/g, '<br>');
-}
+import { mdToHtml } from '../../lib/quizHtml';
 
 function shuffleArr<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);

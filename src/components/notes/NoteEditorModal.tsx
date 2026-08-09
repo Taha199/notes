@@ -5,6 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { AppRichTextEditor } from './AppRichTextEditor';
 import { generateQuiz, generateOneQa, answerQuestion, type QuizResult } from '../../lib/gemini';
+import { mdToHtml } from '../../lib/quizHtml';
 import { extractPlainText, hasRichContent } from '../../lib/richContent';
 import { AiAnswerStyleToggle, useAiAnswerStyle } from '../quiz/AiAnswerStyleToggle';
 import type { Page } from '../../types';
@@ -74,16 +75,6 @@ function ResizableNoteSplit({
       </div>
     </div>
   );
-}
-
-function mdToHtml(content: string): string {
-  // Only convert if content looks like markdown (not already HTML)
-  if (/<[a-z][\s\S]*>/i.test(content)) return content;
-  return content
-    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/\n/g, '<br>');
 }
 
 interface NoteEditorModalProps {
