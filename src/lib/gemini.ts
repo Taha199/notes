@@ -1,5 +1,5 @@
 /**
- * AI client — calls authenticated /api/ai proxy (Gemini key stays on the server as GEMINI_API_KEY).
+ * AI client — calls authenticated /api/ai proxy (xAI Grok key stays on the server as XAI_API_KEY or GROK_API_KEY).
  */
 import type { AiAnswerStyle } from './aiAnswerStyle';
 import { getRtdbAuthToken } from './rtdb';

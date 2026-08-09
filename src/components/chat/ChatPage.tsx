@@ -370,7 +370,7 @@ export function ChatPage() {
                 </svg>
               </button>
             </div>
-            <p className="mt-1.5 text-center text-[10.5px] text-app-text-secondary/40 dark:text-gray-700">Powered by Gemini · responses may be inaccurate</p>
+            <p className="mt-1.5 text-center text-[10.5px] text-app-text-secondary/40 dark:text-gray-700">Powered by Grok · responses may be inaccurate</p>
           </div>
         </div>
       </div>
