@@ -29,18 +29,44 @@ function formatBytes(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
+/** Match the "online" label window — keep sort + label in sync. */
+const ONLINE_MS = 90_000;
+
+function isOnline(lastSeen: number, now = Date.now()): boolean {
+  return !!lastSeen && now - lastSeen < ONLINE_MS;
+}
+
 function timeAgo(ts: number, now = Date.now()): string {
   if (!ts) return '—';
   const diff = Math.max(0, now - ts);
   const sec = Math.floor(diff / 1000);
   // Client heartbeat writes lastSeen about every 15s while online.
-  if (sec < 90) return 'online';
+  if (sec < ONLINE_MS / 1000) return 'online';
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min} min sedan`;
   const h = Math.floor(min / 60);
   if (h < 24) return `${h} h sedan`;
   const d = Math.floor(h / 24);
   return `${d} d sedan`;
+}
+
+/**
+ * Online users stay pinned on top. Within online, order is stable (email/uid)
+ * so heartbeats do not reshuffle the table every few seconds. Offline users
+ * sort by lastSeen, then stable email/uid.
+ */
+function compareAdminRows(a: UserRow, b: UserRow, now: number): number {
+  const aOn = isOnline(a.lastSeen, now) ? 1 : 0;
+  const bOn = isOnline(b.lastSeen, now) ? 1 : 0;
+  if (aOn !== bOn) return bOn - aOn;
+  if (!aOn && a.lastSeen !== b.lastSeen) return b.lastSeen - a.lastSeen;
+  const byEmail = a.email.localeCompare(b.email);
+  if (byEmail !== 0) return byEmail;
+  return a.uid.localeCompare(b.uid);
+}
+
+function sortAdminRows(list: UserRow[], now = Date.now()): UserRow[] {
+  return [...list].sort((a, b) => compareAdminRows(a, b, now));
 }
 
 function mergePresenceIntoRows(
@@ -57,6 +83,25 @@ function mergePresenceIntoRows(
     if (lastSeen === row.lastSeen && ip === row.ip) return row;
     return { ...row, lastSeen, ip };
   });
+}
+
+/** Merge API rows into current list by uid (update fields, add/remove), then stable-sort. */
+function mergeStatsRows(prev: UserRow[], incoming: UserRow[], now: number): UserRow[] {
+  const nextByUid = new Map(incoming.map((row) => [row.uid, row]));
+  const merged: UserRow[] = [];
+  const seen = new Set<string>();
+  // Keep previous order seed for users that remain, then append newcomers.
+  for (const row of prev) {
+    const fresh = nextByUid.get(row.uid);
+    if (!fresh) continue;
+    seen.add(row.uid);
+    merged.push(fresh);
+  }
+  for (const row of incoming) {
+    if (seen.has(row.uid)) continue;
+    merged.push(row);
+  }
+  return sortAdminRows(merged, now);
 }
 
 function fallbackName(uid: string): string {
@@ -119,9 +164,13 @@ export function AdminPanel() {
         bytes: u.bytes ?? 0,
         storageLimitMB: u.storageLimitMB ?? 0,
       }));
-      // Prefer fresher live presence over API/auth lastLoginAt when merging storage stats.
-      setRows(mergePresenceIntoRows(list, presenceRef.current));
-      setNow(Date.now());
+      // Prefer fresher live presence; merge by uid + stable sort so the table does not flip.
+      const stamp = Date.now();
+      setRows((prev) => {
+        const withPresence = mergePresenceIntoRows(list, presenceRef.current);
+        return mergeStatsRows(prev, withPresence, stamp);
+      });
+      setNow(stamp);
       setLoadError(null);
     } catch (err) {
       console.error('admin-user-stats load failed', err);
@@ -141,26 +190,32 @@ export function AdminPanel() {
     void load();
   }, [authLoading, isAdmin, user, load]);
 
-  // Live presence from RTDB — updates Senast sedd without waiting for stats poll.
+  // Live presence from RTDB — updates Senast sedd; re-sort with online pinned, stable within group.
   useEffect(() => {
     if (authLoading || !isAdmin || !user) return;
     const unsub = onValue(dbRef(database, 'presence'), (snap) => {
       const val = (snap.val() ?? null) as Record<string, PresenceEntry> | null;
       presenceRef.current = val;
-      setRows((prev) => mergePresenceIntoRows(prev, val));
-      setNow(Date.now());
+      const stamp = Date.now();
+      setRows((prev) => sortAdminRows(mergePresenceIntoRows(prev, val), stamp));
+      setNow(stamp);
     });
     return () => unsub();
   }, [authLoading, isAdmin, user]);
 
-  // Poll LAGRING (~10s) + tick relative "online" labels (~5s) while visible.
+  // Auto-refresh storage/stats (~8s) + tick "online" labels (~5s) while the tab is visible.
   useEffect(() => {
     if (authLoading || !isAdmin || !user) return;
     const poll = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       void load({ silent: true });
-    }, 10_000);
-    const tick = window.setInterval(() => setNow(Date.now()), 5_000);
+    }, 8_000);
+    const tick = window.setInterval(() => {
+      const stamp = Date.now();
+      setNow(stamp);
+      // Re-apply online-first sort when someone drops out of the online window.
+      setRows((prev) => sortAdminRows(prev, stamp));
+    }, 5_000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') void load({ silent: true });
     };
@@ -280,13 +335,14 @@ export function AdminPanel() {
           <h1 className="text-lg font-bold text-app-text dark:text-gray-100">👑 Användarpanel</h1>
           <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
             {rows.length} användare · {formatBytes(totalBytes)} totalt
+            <span className="ml-2 text-app-text-secondary/70">· uppdateras automatiskt</span>
           </p>
         </div>
         <button
           onClick={() => void load()}
           className="rounded-xl border border-app-border px-4 py-2 text-sm font-medium text-app-text-secondary transition hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
         >
-          🔄 Uppdatera
+          🔄 Uppdatera nu
         </button>
       </div>
 
@@ -335,7 +391,7 @@ export function AdminPanel() {
                       </div>
                     </div>
                   </td>
-                  <td className={'px-4 py-3 ' + (now - row.lastSeen < 90_000 && row.lastSeen ? 'font-semibold text-emerald-600 dark:text-emerald-400' : 'text-app-text-secondary dark:text-gray-400')}>
+                  <td className={'px-4 py-3 ' + (isOnline(row.lastSeen, now) ? 'font-semibold text-emerald-600 dark:text-emerald-400' : 'text-app-text-secondary dark:text-gray-400')}>
                     {timeAgo(row.lastSeen, now)}
                   </td>
                   <td className="px-4 py-3 font-mono text-[12px] text-app-text-secondary dark:text-gray-400">{row.ip || '—'}</td>
