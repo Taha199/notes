@@ -355,12 +355,9 @@ interface EditPanelProps {
   onChangeA: (v: string) => void;
   onSave: (override?: SavePayload) => void;
   onCancel: () => void;
-  /** Soft cloud draft (MCQ fields / leave-flush). Does not finalize. */
-  onPersistDraft?: (payload: SavePayload) => void;
-  registerDraftFlush?: (flush: (() => SavePayload | null) | null) => void;
 }
 
-function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, questionNumber, onChangeQ, onChangeA, onSave, onCancel, onPersistDraft, registerDraftFlush }: EditPanelProps) {
+function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, questionNumber, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
   const { t } = useLanguage();
   const { hasAi } = useAuth();
   const { show } = useToast();
@@ -380,39 +377,6 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     : initialCorrect !== undefined ? new Set([initialCorrect]) : new Set([0]);
   const [correctSet, setCorrectSet] = useState<Set<number>>(initCorrectSet);
   const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');
-
-  const buildDraftPayload = (): SavePayload | null => {
-    const q = questionFlushRef.current?.() ?? latestQuestionRef.current;
-    const a = answerFlushRef.current?.() ?? latestAnswerRef.current;
-    const hasMcqBits = mcq && (options.some((o) => o.trim()) || hasContent(explanation));
-    if (!hasContent(q) && !hasContent(a) && !hasMcqBits) return null;
-    if (!mcq) return { question: q, answer: a };
-    return {
-      question: q,
-      answer: a,
-      options: options.map((o) => o.trim()),
-      correctIndexes: Array.from(correctSet).sort((x, y) => x - y),
-      explanation: hasContent(explanation) ? explanation : undefined,
-    };
-  };
-
-  useEffect(() => {
-    if (!registerDraftFlush) return;
-    registerDraftFlush(() => buildDraftPayload());
-    return () => registerDraftFlush(null);
-  });
-
-  // MCQ option/explanation edits live only in this panel — soft-push so leave/refresh keeps them.
-  useEffect(() => {
-    if (!mcq || !onPersistDraft) return;
-    if (!hasContent(question) && !options.some((o) => o.trim()) && !hasContent(explanation)) return;
-    const timer = window.setTimeout(() => {
-      const payload = buildDraftPayload();
-      if (payload) onPersistDraft(payload);
-    }, 450);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Q/A keystrokes already autosave via parent
-  }, [mcq, options, correctSet, explanation]);
 
   const handleAiAnswer = async () => {
     const plain = question.replace(/<[^>]*>/g, '').trim();
@@ -711,10 +675,8 @@ export function QuizPage({
   allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const livePushTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const formDraftFlushers = useRef<Map<string, () => SavePayload | null>>(new Map());
 
-  const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer' | 'saveStatus' | 'finalized'>>) => {
-    openFormsRef.current = openFormsRef.current.map((f) => (f.formId === formId ? { ...f, ...patch } : f));
+  const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
   };
 
@@ -747,15 +709,6 @@ export function QuizPage({
   };
 
   const updateFormContent = (formId: string, patch: Pick<OpenQuestionForm, 'question'> | Pick<OpenQuestionForm, 'answer'> | Pick<OpenQuestionForm, 'question' | 'answer'>) => {
-    // Keep ref in sync immediately so pagehide/flush sees the latest keystrokes.
-    openFormsRef.current = openFormsRef.current.map((f) => {
-      if (f.formId !== formId) return f;
-      const next = { ...f, ...patch };
-      if (f.itemId !== null) return next;
-      const complete = hasContent(next.question) && hasContent(next.answer);
-      if (!complete) return { ...next, saveStatus: 'empty' as const };
-      return next;
-    });
     setOpenForms((prev) =>
       prev.map((f) => {
         if (f.formId !== formId) return f;
@@ -766,8 +719,13 @@ export function QuizPage({
         return next;
       }),
     );
-    // Live push on the same tick as typing — do not wait for the autosave effect.
-    if (openFormsRef.current.find((f) => f.formId === formId)?.itemId != null) {
+    // Live push on the same tick as typing — do not wait for the 120ms autosave effect.
+    const form = openFormsRef.current.find((f) => f.formId === formId);
+    if (form?.itemId != null) {
+      // Ref still has previous content until re-render; merge patch for the push timer.
+      openFormsRef.current = openFormsRef.current.map((f) => (
+        f.formId === formId ? { ...f, ...patch } : f
+      ));
       scheduleLiveCloudPush(formId);
     }
   };
@@ -779,7 +737,6 @@ export function QuizPage({
     const live = livePushTimers.current.get(formId);
     if (live) clearTimeout(live);
     livePushTimers.current.delete(formId);
-    formDraftFlushers.current.delete(formId);
     setOpenForms((prev) => prev.filter((f) => f.formId !== formId));
   };
 
@@ -788,7 +745,6 @@ export function QuizPage({
     if (!form) return null;
     const q = override?.question ?? form.question;
     const a = override?.answer ?? form.answer;
-    const hasMcqBits = !!(override?.options?.some((o) => o.trim()) || (override?.explanation && hasContent(override.explanation)));
     const patch = {
       question: q,
       answer: a,
@@ -803,9 +759,9 @@ export function QuizPage({
     const setId = selectedSetIdRef.current;
 
     if (form.itemId === null) {
-      // Soft draft: persist after meaningful Q/A (or MCQ bits). Empty "Add" forms stay local-only.
-      if (!hasContent(q) && !hasContent(a) && !hasMcqBits) return null;
+      if (!hasContent(q) && !hasContent(a)) return null;
       if (setId) {
+        if (!finalize) return null;
         const id = addItemToSet(setId, {
           noteId: 0,
           noteTitle: '',
@@ -813,20 +769,13 @@ export function QuizPage({
           answer: a,
           date: new Date().toLocaleDateString(),
           createdAt: new Date().toISOString(),
-          draft: !finalize,
+          draft: false,
           options: patch.options,
           correctIndex: patch.correctIndex,
           correctIndexes: patch.correctIndexes,
           explanation: patch.explanation,
         });
-        if (id < 0) return null;
-        updateForm(formId, {
-          itemId: id,
-          question: q,
-          answer: a,
-          saveStatus: 'saved',
-          finalized: finalize || undefined,
-        });
+        updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved', finalized: true });
         return id;
       }
       const id = addQuiz({
@@ -842,7 +791,7 @@ export function QuizPage({
         correctIndexes: patch.correctIndexes,
         explanation: patch.explanation,
       });
-      updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved', finalized: finalize || undefined });
+      updateForm(formId, { itemId: id, saveStatus: 'saved', finalized: finalize || undefined });
       if (!finalize) return id;
       updateQuiz(id, { ...patch, draft: false }, true);
       return id;
@@ -869,18 +818,9 @@ export function QuizPage({
 
   const flushAllOpenForms = () => {
     for (const form of openFormsRef.current) {
-      const fromEditor = formDraftFlushers.current.get(form.formId)?.() ?? undefined;
-      if (form.itemId === null) {
-        const q = fromEditor?.question ?? form.question;
-        const a = fromEditor?.answer ?? form.answer;
-        const hasMcqBits = !!(fromEditor?.options?.some((o) => o.trim()) || (fromEditor?.explanation && hasContent(fromEditor.explanation)));
-        if (!hasContent(q) && !hasContent(a) && !hasMcqBits) continue;
-        // Leave/refresh: keep as draft so Cancel remains the explicit discard path.
-        flushForm(form.formId, fromEditor, false);
-        continue;
-      }
-      // Finalized cards stay finalized; in-progress drafts stay drafts.
-      flushForm(form.formId, fromEditor, !!form.finalized);
+      if (form.itemId === null) continue;
+      const complete = hasContent(form.question) && hasContent(form.answer);
+      flushForm(form.formId, undefined, !!form.finalized || complete);
     }
   };
 
@@ -890,13 +830,7 @@ export function QuizPage({
       clearTimeout(timer);
       autoSaveTimers.current.delete(formId);
     }
-    const live = livePushTimers.current.get(formId);
-    if (live) {
-      clearTimeout(live);
-      livePushTimers.current.delete(formId);
-    }
-    const fromEditor = override ?? formDraftFlushers.current.get(formId)?.() ?? undefined;
-    persistForm(formId, fromEditor, finalize);
+    persistForm(formId, override, finalize);
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
@@ -981,16 +915,14 @@ export function QuizPage({
 
   useEffect(() => {
     openForms.forEach((form) => {
-      // New set questions start with itemId=null; create a cloud draft once there is content.
-      if (form.itemId === null && !hasContent(form.question) && !hasContent(form.answer)) return;
+      if (form.itemId === null) return;
       const existing = autoSaveTimers.current.get(form.formId);
       if (existing) clearTimeout(existing);
-      const delay = form.itemId === null ? 450 : 120;
       autoSaveTimers.current.set(
         form.formId,
         setTimeout(() => {
           persistForm(form.formId);
-        }, delay),
+        }, 120),
       );
     });
   }, [formSaveSigs, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1401,11 +1333,6 @@ export function QuizPage({
         onChangeA={(v) => updateFormContent(form.formId, { answer: v })}
         onSave={(override) => handleSaveForm(form.formId, override)}
         onCancel={() => handleCancelForm(form.formId)}
-        onPersistDraft={(payload) => flushForm(form.formId, payload, false)}
-        registerDraftFlush={(flush) => {
-          if (flush) formDraftFlushers.current.set(form.formId, flush);
-          else formDraftFlushers.current.delete(form.formId);
-        }}
       />
       </div>
     );
@@ -1881,11 +1808,8 @@ export function QuizPage({
           <div className="flex flex-col gap-2">
             {orderedItems.map((item, index) => renderItemOrForm(item, index))}
 
-            {/* Keep editors mounted for null-id "Add" forms AND soft cloud drafts.
-                Drafts are excluded from orderedItems/visibleQuizItems, so after
-                autosave assigns itemId the form would otherwise vanish mid-typing. */}
             {openForms
-              .filter((f) => f.itemId === null || !orderedItems.some((i) => i.id === f.itemId))
+              .filter((f) => f.itemId === null)
               .map((form, formIndex) => renderOpenForm(form, formIndex))}
 
             {/* Add question dashed button — opens another form without closing existing ones */}
