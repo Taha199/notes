@@ -3,6 +3,7 @@ import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { AppRichTextEditor } from '../notes/AppRichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
 import { useAuth } from '../../contexts/AuthContext';
+import { AiAnswerStyleToggle, useAiAnswerStyle } from './AiAnswerStyleToggle';
 import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { AutoFitText } from '../common/AutoFitText';
@@ -370,6 +371,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   latestAnswerRef.current = answer;
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [aiAnswerStyle, setAiAnswerStyle] = useAiAnswerStyle();
   const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
   const [options, setOptions] = useState<string[]>(initialOptions && initialOptions.length ? initialOptions : ['', '']);
   const initCorrectSet = initialCorrects?.length
@@ -416,7 +418,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     if (!plain) return;
     setAiLoading(true);
     try {
-      const res = await answerQuestion(plain);
+      const res = await answerQuestion(plain, aiAnswerStyle);
       if (hasContent(answer)) setAiSuggestion(res);
       else onChangeA(res);
     } catch (e) {
@@ -582,7 +584,8 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             minHeight="140px"
           />
           {hasAi && (
-            <div className="flex shrink-0 justify-end border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
+              <AiAnswerStyleToggle value={aiAnswerStyle} onChange={setAiAnswerStyle} />
               <button
                 type="button"
                 onClick={handleAiAnswer}

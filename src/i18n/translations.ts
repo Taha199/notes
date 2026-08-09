@@ -460,6 +460,9 @@ export interface Translation {
   quizEditQaBadge: string;
   quizEditMcqBadge: string;
   quizAiAnswer: string;
+  quizAiStyleLabel: string;
+  quizAiStyleShort: string;
+  quizAiStyleLong: string;
   quizAiSuggestion: string;
   quizKeepCurrent: string;
   quizReplaceAnswer: string;
@@ -844,6 +847,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizEditQaBadge: '✏️ Q/A',
     quizEditMcqBadge: '☑ MCQ',
     quizAiAnswer: 'AI Answer',
+    quizAiStyleLabel: 'AI answer style',
+    quizAiStyleShort: 'Kort och koncist',
+    quizAiStyleLong: 'Långt och avancerat',
     quizAiSuggestion: 'AI suggestion',
     quizKeepCurrent: 'Keep current',
     quizReplaceAnswer: 'Replace answer',
@@ -1226,6 +1232,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizEditQaBadge: '✏️ Q/A',
     quizEditMcqBadge: '☑ MCQ',
     quizAiAnswer: 'AI-svar',
+    quizAiStyleLabel: 'AI-svarstil',
+    quizAiStyleShort: 'Kort och koncist',
+    quizAiStyleLong: 'Långt och avancerat',
     quizAiSuggestion: 'AI-förslag',
     quizKeepCurrent: 'Behåll nuvarande',
     quizReplaceAnswer: 'Ersätt svaret',

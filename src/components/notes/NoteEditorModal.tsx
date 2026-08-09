@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { AppRichTextEditor } from './AppRichTextEditor';
 import { generateQuiz, generateOneQa, answerQuestion, type QuizResult } from '../../lib/gemini';
 import { extractPlainText, hasRichContent } from '../../lib/richContent';
+import { AiAnswerStyleToggle, useAiAnswerStyle } from '../quiz/AiAnswerStyleToggle';
 import type { Page } from '../../types';
 
 // Images and embeds count as content — text-only checks silently blocked
@@ -142,6 +143,7 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
   const [editQ, setEditQ] = useState('');
   const [editA, setEditA] = useState('');
   const [aiAnswerLoading, setAiAnswerLoading] = useState(false);
+  const [aiAnswerStyle, setAiAnswerStyle] = useAiAnswerStyle();
   const [manualQuiz, setManualQuiz] = useState(false);
   const [manualQ, setManualQ] = useState('');
   const [manualA, setManualA] = useState('');
@@ -551,23 +553,26 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                         className={'flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] font-semibold transition-all ' + (mcqMode ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300' : 'border-app-border bg-white text-app-text-secondary hover:border-blue-300 hover:text-blue-700 dark:border-white/10 dark:bg-gray-800 dark:text-gray-400')}
                       >☑ {t.quizMcq}</button>
                       {!mcqMode && hasAi && (
-                        <button
-                          onClick={async () => {
-                            if (!hasContent(manualQ)) return;
-                            setManualAiLoading(true);
-                            try {
-                              setManualA(mdToHtml(await answerQuestion(manualQ.replace(/<[^>]*>/g, ''))));
-                            } catch (e) {
-                              show(e instanceof Error ? e.message : 'AI-svar misslyckades');
-                            } finally {
-                              setManualAiLoading(false);
-                            }
-                          }}
-                          disabled={manualAiLoading || !hasContent(manualQ)}
-                          className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
-                        >
-                          {manualAiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
-                        </button>
+                        <>
+                          <AiAnswerStyleToggle value={aiAnswerStyle} onChange={setAiAnswerStyle} />
+                          <button
+                            onClick={async () => {
+                              if (!hasContent(manualQ)) return;
+                              setManualAiLoading(true);
+                              try {
+                                setManualA(mdToHtml(await answerQuestion(manualQ.replace(/<[^>]*>/g, ''), aiAnswerStyle)));
+                              } catch (e) {
+                                show(e instanceof Error ? e.message : 'AI-svar misslyckades');
+                              } finally {
+                                setManualAiLoading(false);
+                              }
+                            }}
+                            disabled={manualAiLoading || !hasContent(manualQ)}
+                            className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                          >
+                            {manualAiLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
+                          </button>
+                        </>
                       )}
                       {!mcqMode && (
                         <button
@@ -681,23 +686,26 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-[10px] font-bold uppercase tracking-wider text-violet-700/70 dark:text-violet-400/70">{t.quizAnswerLabel}</label>
-                    <button
-                      onClick={async () => {
-                        if (!hasContent(aiQ)) return;
-                        setAiGenALoading(true);
-                        try {
-                          setAiA(mdToHtml(await answerQuestion(aiQ.replace(/<[^>]*>/g, ''))));
-                        } catch (e) {
-                          show(e instanceof Error ? e.message : 'AI-svar misslyckades');
-                        } finally {
-                          setAiGenALoading(false);
-                        }
-                      }}
-                      disabled={aiGenALoading || !hasContent(aiQ)}
-                      className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
-                    >
-                      {aiGenALoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
-                    </button>
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <AiAnswerStyleToggle value={aiAnswerStyle} onChange={setAiAnswerStyle} />
+                      <button
+                        onClick={async () => {
+                          if (!hasContent(aiQ)) return;
+                          setAiGenALoading(true);
+                          try {
+                            setAiA(mdToHtml(await answerQuestion(aiQ.replace(/<[^>]*>/g, ''), aiAnswerStyle)));
+                          } catch (e) {
+                            show(e instanceof Error ? e.message : 'AI-svar misslyckades');
+                          } finally {
+                            setAiGenALoading(false);
+                          }
+                        }}
+                        disabled={aiGenALoading || !hasContent(aiQ)}
+                        className="flex items-center gap-1 rounded-lg border border-violet-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-500/30 dark:bg-gray-800 dark:text-violet-300"
+                      >
+                        {aiGenALoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
+                      </button>
+                    </div>
                   </div>
                   <div className="flex max-h-[min(50dvh,28rem)] min-h-[110px] flex-col rounded-xl border border-app-border dark:border-white/10">
                     <div className="flex min-h-0 flex-1 flex-col">
@@ -782,24 +790,27 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
                           <div className="mb-1 flex items-center justify-between">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">{t.quizAnswerLabel}</label>
                             {hasAi && (
-                            <button
-                              onClick={async () => {
-                                const qText = editQ.replace(/<[^>]*>/g, '').trim();
-                                if (!qText) return;
-                                setAiAnswerLoading(true);
-                                try {
-                                  setEditA(mdToHtml(await answerQuestion(qText)));
-                                } catch (e) {
-                                  show(e instanceof Error ? e.message : 'AI-svar misslyckades');
-                                } finally {
-                                  setAiAnswerLoading(false);
-                                }
-                              }}
-                              disabled={aiAnswerLoading || !editQ.replace(/<[^>]*>/g, '').trim()}
-                              className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
-                            >
-                              {aiAnswerLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
-                            </button>
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
+                              <AiAnswerStyleToggle value={aiAnswerStyle} onChange={setAiAnswerStyle} />
+                              <button
+                                onClick={async () => {
+                                  const qText = editQ.replace(/<[^>]*>/g, '').trim();
+                                  if (!qText) return;
+                                  setAiAnswerLoading(true);
+                                  try {
+                                    setEditA(mdToHtml(await answerQuestion(qText, aiAnswerStyle)));
+                                  } catch (e) {
+                                    show(e instanceof Error ? e.message : 'AI-svar misslyckades');
+                                  } finally {
+                                    setAiAnswerLoading(false);
+                                  }
+                                }}
+                                disabled={aiAnswerLoading || !editQ.replace(/<[^>]*>/g, '').trim()}
+                                className="flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-all hover:bg-violet-100 disabled:opacity-40 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300"
+                              >
+                                {aiAnswerLoading ? <span className="animate-spin">⏳</span> : '🧠'} {t.quizAiAnswer}
+                              </button>
+                            </div>
                             )}
                           </div>
                           <div className="flex max-h-[min(50dvh,28rem)] min-h-[100px] flex-col rounded-xl border border-app-border bg-white focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-200/60 dark:border-white/10 dark:bg-gray-800">
