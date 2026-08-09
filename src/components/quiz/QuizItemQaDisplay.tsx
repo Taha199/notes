@@ -39,7 +39,7 @@ export function QuizItemQaDisplay({
 
   return (
     <div className="overflow-hidden rounded-xl border border-app-border bg-white dark:border-white/10 dark:bg-[#1e1e2e]">
-      <div className="grid min-w-0 grid-cols-1 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+      <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 flex-col items-start overflow-x-hidden px-4 py-3.5 sm:px-5 sm:py-4">
           <span className="mb-2 text-[9px] font-bold uppercase text-app-text-secondary/45">{t.quizQuestionLabel}</span>
           <StableNoteHtml
@@ -47,7 +47,7 @@ export function QuizItemQaDisplay({
             className={QUESTION_CLASS + HIGHLIGHT_CLASS}
           />
         </div>
-        <div className="flex min-w-0 flex-col items-start overflow-x-hidden border-t border-app-border bg-app-bg/55 px-4 py-3.5 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6 sm:py-4 sm:pr-5">
+        <div className="flex min-w-0 flex-col items-start overflow-x-hidden border-t border-app-border bg-app-bg/55 px-4 py-3.5 dark:border-white/10 dark:bg-white/[0.035] sm:px-6 sm:py-4 sm:pr-5">
           <span className="mb-2 text-[9px] font-bold uppercase text-primary/70">{t.quizAnswerLabel}</span>
           <StableNoteHtml
             html={renderHtml(item.answer, search, hitCounter, activeSearchHitIndex)}
