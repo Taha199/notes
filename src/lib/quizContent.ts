@@ -56,9 +56,10 @@ export function quizSetEqualForUI(a: QuizSet, b: QuizSet): boolean {
 
 export function quizSetsEqualForUI(a: QuizSet[], b: QuizSet[]): boolean {
   if (a.length !== b.length) return false;
-  const bById = new Map(b.map((set) => [set.id, set]));
-  return a.every((set) => {
-    const other = bById.get(set.id);
-    return other != null && quizSetEqualForUI(set, other);
-  });
+  // Manual set-list order is UI state — comparing by id map alone let cloud
+  // echoes rewrite refs/localStorage while React kept a stale sequence.
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].id !== b[i].id) return false;
+  }
+  return a.every((set, i) => quizSetEqualForUI(set, b[i]));
 }

@@ -553,14 +553,62 @@ function filterResurrectedTrash<T extends { id: string | number; trashed?: boole
   });
 }
 
-/** List/item Manual order stamp only — never fall back to updatedAt/createdAt
- *  or create/rename/sync would steal Manual order and lift newest sets to top. */
+/** In-set question Manual order stamp — never fall back to updatedAt/createdAt. */
 function quizSetOrderTime(set: QuizSet) {
   return Date.parse(set.orderUpdatedAt || '') || 0;
 }
 
+/** Set-list Manual order stamp — separate from in-set orderUpdatedAt. */
+function quizSetListOrderTime(set: QuizSet) {
+  return Date.parse(set.listOrderUpdatedAt || '') || 0;
+}
+
 function quizFolderOrderTime(folder: QuizFolder) {
   return Date.parse(folder.orderUpdatedAt || '') || 0;
+}
+
+/**
+ * Reorder drag→target in the SET LIST. When both rows share a folder (or are
+ * both ungrouped), reorder only inside that group so other folders stay put.
+ * Stamps listOrderUpdatedAt on every non-system set so this list order wins
+ * merge against unrelated in-set orderUpdatedAt bumps.
+ */
+function reorderQuizSetsList(sets: QuizSet[], dragId: string, targetId: string, stamp: string): QuizSet[] | null {
+  const drag = sets.find((s) => s.id === dragId);
+  const target = sets.find((s) => s.id === targetId);
+  if (!drag || !target || dragId === targetId) return null;
+  if (drag.system || target.system) return null;
+
+  const dragKey = drag.folderId || null;
+  const targetKey = target.folderId || null;
+  let next: QuizSet[];
+
+  if (dragKey === targetKey) {
+    const inGroup = (s: QuizSet) => {
+      if (s.system || s.trashed) return false;
+      return dragKey ? s.folderId === dragKey : !s.folderId;
+    };
+    const group = sets.filter(inGroup);
+    const from = group.findIndex((s) => s.id === dragId);
+    const to = group.findIndex((s) => s.id === targetId);
+    if (from < 0 || to < 0 || from === to) return null;
+    const nextGroup = [...group];
+    const [item] = nextGroup.splice(from, 1);
+    nextGroup.splice(to, 0, item);
+    let gi = 0;
+    next = sets.map((s) => (inGroup(s) ? nextGroup[gi++] : s));
+  } else {
+    const from = sets.findIndex((s) => s.id === dragId);
+    const to = sets.findIndex((s) => s.id === targetId);
+    if (from < 0 || to < 0 || from === to) return null;
+    next = [...sets];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+  }
+
+  // Bump list-order authority on every user set so max(listOrderUpdatedAt)
+  // reflects this rearrange — not a later question drag inside one set.
+  return next.map((s) => (s.system ? s : { ...s, listOrderUpdatedAt: stamp }));
 }
 
 function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: PermanentlyDeletedIds = emptyPermDeleted()): QuizSet {
@@ -605,7 +653,13 @@ function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: Permanen
   const orderUpdatedAt = preferRemoteOrder
     ? (remote.orderUpdatedAt ?? local.orderUpdatedAt)
     : (local.orderUpdatedAt ?? remote.orderUpdatedAt);
-  return orderUpdatedAt ? { ...base, items, orderUpdatedAt } : { ...base, items };
+  // List position stamp is independent of in-set question order.
+  const preferRemoteListOrder = quizSetListOrderTime(remote) > quizSetListOrderTime(local);
+  const listOrderUpdatedAt = preferRemoteListOrder
+    ? (remote.listOrderUpdatedAt ?? local.listOrderUpdatedAt)
+    : (local.listOrderUpdatedAt ?? remote.listOrderUpdatedAt);
+  const withItems = orderUpdatedAt ? { ...base, items, orderUpdatedAt } : { ...base, items };
+  return listOrderUpdatedAt ? { ...withItems, listOrderUpdatedAt } : withItems;
 }
 
 function pickBetterQuizFolder(local: QuizFolder, remote: QuizFolder): QuizFolder {
@@ -696,9 +750,10 @@ function mergeQuizSetsForSync(
     map.set(set.id, existing ? pickBetterQuizSet(existing, set, tombstones) : set);
   }
   // ById Object.values is membership-only — never let it scramble Manual order.
-  // Array↔array merges still prefer remote when its order stamp is strictly newer.
-  const localMax = Math.max(0, ...local.map((set) => quizSetOrderTime(set)));
-  const remoteMax = Math.max(0, ...remote.map((set) => quizSetOrderTime(set)));
+  // Array↔array merges prefer remote only when listOrderUpdatedAt is strictly
+  // newer — never max(orderUpdatedAt), which item drag/reorder also bumps.
+  const localMax = Math.max(0, ...local.map((set) => quizSetListOrderTime(set)));
+  const remoteMax = Math.max(0, ...remote.map((set) => quizSetListOrderTime(set)));
   const orderSource = opts?.preferLocalOrder
     ? local
     : (remoteMax > localMax ? remote : local);
@@ -5118,7 +5173,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       createdAt: stamp,
       updatedAt: stamp,
       // Stamp list order so sync keeps this append; never fall back to createdAt.
-      orderUpdatedAt: stamp,
+      listOrderUpdatedAt: stamp,
       color,
       colorInitialized: true,
       ...(targetFolderId ? { folderId: targetFolderId } : {}),
@@ -5195,20 +5250,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const reorderQuizSets = (dragId: string, targetId: string) => {
-    setQuizSets((prev) => {
-      const next = [...prev];
-      const from = next.findIndex((s) => s.id === dragId);
-      const to = next.findIndex((s) => s.id === targetId);
-      if (from < 0 || to < 0 || from === to) return prev;
-      if (next[from].system || next[to].system) return prev;
-      const stamp = nowStr();
-      const [item] = next.splice(from, 1);
-      // orderUpdatedAt only — never bump updatedAt or Manual order steals deletes.
-      next.splice(to, 0, { ...item, orderUpdatedAt: stamp });
-      persistSets(next, true, true);
-      scheduleInstantDataCloudSave({ quizSets: next });
-      return next;
-    });
+    const stamp = nowStr();
+    const next = reorderQuizSetsList(quizSetsRef.current, dragId, targetId, stamp);
+    if (!next) return;
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    // Dedicated quizSets[] write (same path as create/rename). Do not fan out
+    // ById puts for every stamped row — that would rewrite every set's items
+    // on each drag. Array order + listOrderUpdatedAt is enough for merge.
+    void pushQuizSetStructure(next);
   };
 
   const renameQuizSet = (id: string, name: string) => {
@@ -5242,7 +5292,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (folderId && quizFoldersRef.current.find((f) => f.id === folderId)?.system) return;
     if (set.folderId === folderId) return;
     const stamp = new Date().toISOString();
-    const updated: QuizSet = { ...set, folderId, updatedAt: stamp, orderUpdatedAt: stamp };
+    const updated: QuizSet = { ...set, folderId, updatedAt: stamp, listOrderUpdatedAt: stamp };
     const without = quizSetsRef.current.filter((s) => s.id !== id);
     // Append after the last set already in the target folder (or ungrouped),
     // so "+ Add set" lands at the bottom of that folder's Manual list.

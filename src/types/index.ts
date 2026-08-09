@@ -75,8 +75,14 @@ export interface QuizSet {
   items: QuizItem[];
   createdAt: string;
   updatedAt?: string;
-  /** Manual list/item order only — must not steal membership authority from updatedAt. */
+  /** Manual question order inside this set — must not steal membership authority from updatedAt. */
   orderUpdatedAt?: string;
+  /**
+   * Manual SET LIST order only (folder / ungrouped column).
+   * Must stay separate from orderUpdatedAt — item drag/reorder used to bump that
+   * stamp and let a stale quizSets[] array win Manual set positions on merge.
+   */
+  listOrderUpdatedAt?: string;
   color?: string;
   colorInitialized?: boolean;
   trashed?: boolean;
