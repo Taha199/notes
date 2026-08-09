@@ -339,6 +339,26 @@ interface OpenQuestionForm {
   // true when editing an already-saved question; drafts leave this falsy so
   // Cancel discards them even if they contain partial content.
   finalized?: boolean;
+  // Local-only editor extras (MCQ). Kept in React state per set — never
+  // soft-created in the cloud while typing.
+  mcq?: boolean;
+  options?: string[];
+  correctIndexes?: number[];
+  explanation?: string;
+}
+
+type LocalFormMeta = {
+  mcq: boolean;
+  options: string[];
+  correctIndexes: number[];
+  explanation: string;
+};
+
+/** Scope key for stashing open Q/A forms across set/folder navigation. */
+function formsScopeKey(setId: string | null, folderId: string | null): string | null {
+  if (setId) return setId;
+  if (!folderId) return '__notes__';
+  return null;
 }
 
 interface EditPanelProps {
@@ -348,6 +368,7 @@ interface EditPanelProps {
   initialCorrect?: number;
   initialCorrects?: number[];
   initialExplanation?: string;
+  initialMcq?: boolean;
   saveStatus?: 'empty' | 'syncing' | 'saved';
   persisted?: boolean;
   questionNumber?: number | null;
@@ -355,9 +376,11 @@ interface EditPanelProps {
   onChangeA: (v: string) => void;
   onSave: (override?: SavePayload) => void;
   onCancel: () => void;
+  /** Snapshot MCQ/local editor fields into the parent draft (no cloud). */
+  onLocalMetaChange?: (meta: LocalFormMeta) => void;
 }
 
-function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, questionNumber, onChangeQ, onChangeA, onSave, onCancel }: EditPanelProps) {
+function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, initialMcq, saveStatus = 'empty', persisted = false, questionNumber, onChangeQ, onChangeA, onSave, onCancel, onLocalMetaChange }: EditPanelProps) {
   const { t } = useLanguage();
   const { hasAi } = useAuth();
   const { show } = useToast();
@@ -370,13 +393,25 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [aiAnswerStyle, setAiAnswerStyle] = useAiAnswerStyle();
-  const [mcq, setMcq] = useState<boolean>(!!(initialOptions && initialOptions.length));
+  const [mcq, setMcq] = useState<boolean>(initialMcq ?? !!(initialOptions && initialOptions.length));
   const [options, setOptions] = useState<string[]>(initialOptions && initialOptions.length ? initialOptions : ['', '']);
   const initCorrectSet = initialCorrects?.length
     ? new Set(initialCorrects)
     : initialCorrect !== undefined ? new Set([initialCorrect]) : new Set([0]);
   const [correctSet, setCorrectSet] = useState<Set<number>>(initCorrectSet);
   const [explanation, setExplanation] = useState<string>(initialExplanation ?? '');
+  const onLocalMetaChangeRef = useRef(onLocalMetaChange);
+  onLocalMetaChangeRef.current = onLocalMetaChange;
+
+  // Keep parent draft meta in sync so set-switching can remount with MCQ state.
+  useEffect(() => {
+    onLocalMetaChangeRef.current?.({
+      mcq,
+      options,
+      correctIndexes: Array.from(correctSet).sort((a, b) => a - b),
+      explanation,
+    });
+  }, [mcq, options, correctSet, explanation]);
 
   const handleAiAnswer = async () => {
     const plain = question.replace(/<[^>]*>/g, '').trim();
@@ -662,13 +697,14 @@ export function QuizPage({
     localStorage.setItem(key, mode);
     setItemSortMenuOpen(false);
   };
-  // Multiple open question forms (new drafts + in-progress edits)
-  // Save/cancel/autosave mechanics restored to the known-good Jul-24 shape —
-  // later patches (closedFormIdsRef, finalizedDraftIdsRef) added complexity
-  // that caused a just-saved card to vanish again even without a refresh.
+  // Multiple open question forms (new drafts + in-progress edits).
+  // Stashed per set/notes scope so switching sets restores in-progress editors
+  // without mid-typing cloud draft create (itemId stays null until Save).
   const [openForms, setOpenForms] = useState<OpenQuestionForm[]>([]);
   const openFormsRef = useRef(openForms);
   openFormsRef.current = openForms;
+  const formsByScopeRef = useRef<Record<string, OpenQuestionForm[]>>({});
+  const activeFormsScopeRef = useRef<string | null>(null);
   const quizzesRef = useRef(quizzes);
   quizzesRef.current = quizzes;
   const allQuizSetsRef = useRef(allQuizSets);
@@ -676,7 +712,12 @@ export function QuizPage({
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const livePushTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const updateForm = (formId: string, patch: Partial<Pick<OpenQuestionForm, 'question' | 'answer' | 'itemId' | 'saveStatus' | 'finalized'>>) => {
+  // Keep the active scope's stash in sync with live openForms.
+  if (activeFormsScopeRef.current) {
+    formsByScopeRef.current[activeFormsScopeRef.current] = openForms;
+  }
+
+  const updateForm = (formId: string, patch: Partial<Omit<OpenQuestionForm, 'formId'>>) => {
     setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
   };
 
@@ -1026,26 +1067,53 @@ export function QuizPage({
 
     const notesView = !selectedFolderId && !selectedSetId;
     isNotesViewRef.current = notesView;
-    if (!selectedSetId && !notesView) {
+    const nextKey = formsScopeKey(selectedSetId, selectedFolderId);
+    const prevKey = activeFormsScopeRef.current;
+
+    // Stash the leaving scope's open forms (including local itemId:null drafts).
+    if (prevKey != null) {
+      formsByScopeRef.current[prevKey] = openFormsRef.current;
+    }
+
+    if (nextKey == null) {
+      // Empty folder view — hide editors but keep other sets' stashes intact.
+      activeFormsScopeRef.current = null;
+      openFormsRef.current = [];
       setOpenForms([]);
       return;
     }
 
+    if (prevKey === nextKey) return;
+
+    activeFormsScopeRef.current = nextKey;
     const items = selectedSetId
       ? (allQuizSets.find((s) => s.id === selectedSetId)?.items ?? [])
       : quizzes.filter((q) => !q.trashed);
+    const cloudDrafts = items
+      .filter((item) => item.draft)
+      .map((item) => ({
+        formId: `item-${item.id}`,
+        itemId: item.id as number | null,
+        question: item.question,
+        answer: item.answer,
+        saveStatus: 'saved' as const,
+        options: item.options,
+        correctIndexes: item.correctIndexes,
+        explanation: item.explanation,
+        mcq: !!(item.options && item.options.length),
+      }));
 
-    setOpenForms(
-      items
-        .filter((item) => item.draft)
-        .map((item) => ({
-          formId: `item-${item.id}`,
-          itemId: item.id,
-          question: item.question,
-          answer: item.answer,
-          saveStatus: 'saved' as const,
-        })),
+    const stashed = formsByScopeRef.current[nextKey] ?? [];
+    const stashedItemIds = new Set(
+      stashed.map((f) => f.itemId).filter((id): id is number => id != null),
     );
+    const merged = [
+      ...stashed,
+      ...cloudDrafts.filter((f) => f.itemId != null && !stashedItemIds.has(f.itemId)),
+    ];
+    formsByScopeRef.current[nextKey] = merged;
+    openFormsRef.current = merged;
+    setOpenForms(merged);
   }, [selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1065,6 +1133,10 @@ export function QuizPage({
           question: item.question,
           answer: item.answer,
           saveStatus: 'saved' as const,
+          options: item.options,
+          correctIndexes: item.correctIndexes,
+          explanation: item.explanation,
+          mcq: !!(item.options && item.options.length),
         }));
       return additions.length ? [...prev, ...additions] : prev;
     });
@@ -1325,14 +1397,25 @@ export function QuizPage({
         saveStatus={form.saveStatus}
         persisted={form.itemId !== null}
         questionNumber={showNumber}
-        initialOptions={item?.options}
+        initialMcq={form.mcq}
+        initialOptions={form.options ?? item?.options}
         initialCorrect={item?.correctIndex}
-        initialCorrects={item?.correctIndexes}
-        initialExplanation={item?.explanation}
+        initialCorrects={form.correctIndexes ?? item?.correctIndexes}
+        initialExplanation={form.explanation ?? item?.explanation}
         onChangeQ={(v) => updateFormContent(form.formId, { question: v })}
         onChangeA={(v) => updateFormContent(form.formId, { answer: v })}
         onSave={(override) => handleSaveForm(form.formId, override)}
         onCancel={() => handleCancelForm(form.formId)}
+        onLocalMetaChange={(meta) => {
+          // Ref immediately so a mid-switch stash sees MCQ fields.
+          openFormsRef.current = openFormsRef.current.map((f) => (
+            f.formId === form.formId ? { ...f, ...meta } : f
+          ));
+          if (activeFormsScopeRef.current) {
+            formsByScopeRef.current[activeFormsScopeRef.current] = openFormsRef.current;
+          }
+          updateForm(form.formId, meta);
+        }}
       />
       </div>
     );
