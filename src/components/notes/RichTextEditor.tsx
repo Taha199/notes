@@ -738,8 +738,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   /** Toolbar is ~38px tall; scale image so that space opens at the bottom for the overlay. */
   const NOTE_IMG_TOOLBAR_RESERVE_PX = 38;
-  /** Full bar: 9×28px buttons + 2 dividers + gaps + padding. Below this, collapse into overflow. */
-  const NOTE_IMG_TOOLBAR_FULL_MIN_PX = 292;
+  /** Full bar: 10×28px buttons + 2 dividers + gaps + padding. Below this, collapse into overflow. */
+  const NOTE_IMG_TOOLBAR_FULL_MIN_PX = 324;
 
   const clearImageSelectionChrome = (frame: HTMLElement | null) => {
     if (!frame) return;
@@ -6172,7 +6172,36 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => applyImageAlignment(hoveredImg.el, 'center')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleCenter}>{compact ? <><span className="w-4 text-center">⊞</span><span>{t.titleCenter}</span></> : '⊞'}</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => applyImageAlignment(hoveredImg.el, 'right')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleRight}>{compact ? <><span className="w-4 text-center">➡</span><span>{t.titleRight}</span></> : '➡'}</button>
             {compact ? <div className="my-1 border-t border-app-border/60 dark:border-white/12" /> : <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />}
-            <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => { const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, hoveredImg.frame); }); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleInsertLineAboveBlock}>{compact ? <><span className="w-4 text-center">↵</span><span>{t.titleInsertLineAboveBlock}</span></> : '↵'}</button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runOverflowAction(() => {
+                  const ed = editorRef.current;
+                  if (ed) insertEmptyLineAboveBlock(ed, hoveredImg.frame);
+                });
+              }}
+              className={compact ? `${imgMenuBtn} font-semibold text-primary dark:text-primary-200` : `${imgBtn} font-semibold text-primary dark:text-primary-200`}
+              title={t.titleInsertLineAboveBlock}
+            >
+              {compact ? <><span className="w-4 text-center">↵</span><span>{t.insertLineAboveBlock}</span></> : '↵↑'}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runOverflowAction(() => {
+                  const ed = editorRef.current;
+                  if (ed) insertEmptyLineBelowBlock(ed, hoveredImg.frame);
+                });
+              }}
+              className={compact ? `${imgMenuBtn} font-semibold text-primary dark:text-primary-200` : `${imgBtn} font-semibold text-primary dark:text-primary-200`}
+              title={t.titleInsertLineBelowBlock}
+            >
+              {compact ? <><span className="w-4 text-center">↵</span><span>{t.insertLineBelowBlock}</span></> : '↵↓'}
+            </button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => moveImageVertically(hoveredImg.el, 'up')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleMoveImageUp}>{compact ? <><span className="w-4 text-center">↑</span><span>{t.titleMoveImageUp}</span></> : '↑'}</button>
             <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); runOverflowAction(() => moveImageVertically(hoveredImg.el, 'down')); }} className={compact ? imgMenuBtn : imgBtn} title={t.titleMoveImageDown}>{compact ? <><span className="w-4 text-center">↓</span><span>{t.titleMoveImageDown}</span></> : '↓'}</button>
             {compact ? <div className="my-1 border-t border-app-border/60 dark:border-white/12" /> : <span className="mx-0.5 h-4 w-px flex-shrink-0 bg-app-border/60 dark:bg-white/12" />}
