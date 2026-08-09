@@ -350,6 +350,7 @@ interface EditPanelProps {
   initialExplanation?: string;
   saveStatus?: 'empty' | 'syncing' | 'saved';
   persisted?: boolean;
+  questionNumber?: number | null;
   onChangeQ: (v: string) => void;
   onChangeA: (v: string) => void;
   onSave: (override?: SavePayload) => void;
@@ -359,7 +360,7 @@ interface EditPanelProps {
   registerDraftFlush?: (flush: (() => SavePayload | null) | null) => void;
 }
 
-function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, onChangeQ, onChangeA, onSave, onCancel, onPersistDraft, registerDraftFlush }: EditPanelProps) {
+function EditPanel({ question, answer, initialOptions, initialCorrect, initialCorrects, initialExplanation, saveStatus = 'empty', persisted = false, questionNumber, onChangeQ, onChangeA, onSave, onCancel, onPersistDraft, registerDraftFlush }: EditPanelProps) {
   const { t } = useLanguage();
   const { hasAi } = useAuth();
   const { show } = useToast();
@@ -491,6 +492,11 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
     <div className="rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
       <div className="flex items-center justify-between border-b border-app-border px-4 py-2 dark:border-white/10">
         <div className="flex min-w-0 items-center gap-3">
+          {questionNumber != null && (
+            <span className="flex h-7 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
+              {questionNumber}
+            </span>
+          )}
           <span className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/50">{mcq ? t.quizEditMcqBadge : t.quizEditQaBadge}</span>
           <SaveStatusBadge
             status={
@@ -1380,19 +1386,13 @@ export function QuizPage({
       <div
         key={form.formId}
         id={form.itemId != null ? `quiz-item-${form.itemId}` : undefined}
-        className={showNumber ? 'flex items-start gap-2' : undefined}
       >
-        {showNumber != null && (
-          <span className="mt-4 flex h-7 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
-            {showNumber}
-          </span>
-        )}
-      <div className={showNumber ? 'min-w-0 flex-1' : undefined}>
       <EditPanel
         question={form.question}
         answer={form.answer}
         saveStatus={form.saveStatus}
         persisted={form.itemId !== null}
+        questionNumber={showNumber}
         initialOptions={item?.options}
         initialCorrect={item?.correctIndex}
         initialCorrects={item?.correctIndexes}
@@ -1407,7 +1407,6 @@ export function QuizPage({
           else formDraftFlushers.current.delete(form.formId);
         }}
       />
-      </div>
       </div>
     );
   };
