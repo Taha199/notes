@@ -45,6 +45,32 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        try {
+          var dark = localStorage.getItem('appTheme');
+          if (dark === 'dark' || (!dark && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+          }
+          var themes = {
+            violet: ['#6C63FF', '#5A52E0', '#F6F4FF'],
+            blue: ['#2563EB', '#1D4ED8', '#F0F5FF'],
+            green: ['#059669', '#047857', '#F0FDF6'],
+            teal: ['#0D9488', '#0F766E', '#F0FDFA'],
+            rose: ['#E11D48', '#BE123C', '#FFF1F2']
+          };
+          var id = localStorage.getItem('appColorTheme') || 'violet';
+          var t = themes[id] || themes.violet;
+          var root = document.documentElement;
+          root.style.setProperty('--color-primary', t[0]);
+          root.style.setProperty('--color-primary-dark', t[1]);
+          root.style.setProperty('--color-app-bg', t[2]);
+          root.dataset.colorTheme = themes[id] ? id : 'violet';
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', t[0]);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

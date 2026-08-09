@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useTheme, type ColorThemeId } from '../../contexts/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SetPasswordModal } from '../auth/SetPasswordModal';
 import { FB_DB_URL, ADMIN_EMAIL } from '../../lib/firebase';
@@ -31,7 +32,16 @@ function SectionCard({ title, children }: { title: string; children: React.React
 export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
+  const { dark, toggleDark, colorTheme, setColorTheme, colorThemes } = useTheme();
   const { show } = useToast();
+
+  const colorThemeLabels: Record<ColorThemeId, string> = {
+    violet: t.settingsColorThemeViolet,
+    blue: t.settingsColorThemeBlue,
+    green: t.settingsColorThemeGreen,
+    teal: t.settingsColorThemeTeal,
+    rose: t.settingsColorThemeRose,
+  };
   const [storageLimitMB, setStorageLimitMB] = useState(100);
   const [cloudUserData, setCloudUserData] = useState<Record<string, unknown> | null>(null);
 
@@ -244,6 +254,76 @@ export function SettingsPage() {
               readOnly
               className="w-full rounded-xl border border-app-border bg-gray-50 px-3.5 py-2 text-sm text-app-text-secondary outline-none dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
             />
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* Appearance */}
+      <SectionCard title={t.settingsAppearance}>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2.5">
+              <span className="text-lg" aria-hidden="true">{dark ? '☀️' : '🌙'}</span>
+              <p className="text-sm font-medium text-app-text dark:text-gray-100">
+                {dark ? t.settingsLightMode : t.settingsDarkMode}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={toggleDark}
+              aria-pressed={dark}
+              aria-label={dark ? t.settingsLightMode : t.settingsDarkMode}
+              className={
+                'relative h-8 w-14 flex-shrink-0 rounded-full transition-colors ' +
+                (dark ? 'bg-primary' : 'bg-app-border dark:bg-white/20')
+              }
+            >
+              <span
+                className={
+                  'absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-transform ' +
+                  (dark ? 'translate-x-7' : 'translate-x-1')
+                }
+              />
+            </button>
+          </div>
+          <div>
+            <p className="mb-2.5 text-[12px] font-medium text-app-text-secondary dark:text-gray-400">
+              {t.settingsColorTheme}
+            </p>
+            <div
+              className="flex flex-wrap gap-2.5"
+              role="radiogroup"
+              aria-label={t.settingsColorTheme}
+            >
+              {colorThemes.map((theme) => {
+                const active = colorTheme === theme.id;
+                const label = colorThemeLabels[theme.id];
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    aria-label={label}
+                    title={label}
+                    onClick={() => setColorTheme(theme.id)}
+                    className={
+                      'flex items-center gap-2 rounded-xl border px-3 py-2 text-[13px] font-medium transition-all ' +
+                      (active
+                        ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/25 dark:bg-primary/15'
+                        : 'border-app-border text-app-text hover:border-primary/40 hover:bg-primary/5 dark:border-white/10 dark:text-gray-200 dark:hover:bg-primary/10')
+                    }
+                  >
+                    <span
+                      className="h-4 w-4 flex-shrink-0 rounded-full shadow-sm ring-1 ring-black/10 dark:ring-white/20"
+                      style={{ background: theme.swatch }}
+                      aria-hidden="true"
+                    />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </SectionCard>

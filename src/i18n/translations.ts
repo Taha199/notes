@@ -297,6 +297,15 @@ export interface Translation {
   settingsProfilePhotoInvalidType: string;
   settingsSave: string;
   settingsSaved: string;
+  settingsAppearance: string;
+  settingsColorTheme: string;
+  settingsColorThemeViolet: string;
+  settingsColorThemeBlue: string;
+  settingsColorThemeGreen: string;
+  settingsColorThemeTeal: string;
+  settingsColorThemeRose: string;
+  settingsDarkMode: string;
+  settingsLightMode: string;
   settingsPassword: string;
   settingsPasswordSet: string;
   settingsNoPassword: string;
@@ -674,6 +683,15 @@ export const LANGS: Record<Lang, Translation> = {
     settingsProfilePhotoInvalidType: 'Use JPG, PNG, or WebP.',
     settingsSave: 'Save',
     settingsSaved: '✓ Saved',
+    settingsAppearance: 'Appearance',
+    settingsColorTheme: 'Color theme',
+    settingsColorThemeViolet: 'Violet',
+    settingsColorThemeBlue: 'Blue',
+    settingsColorThemeGreen: 'Green',
+    settingsColorThemeTeal: 'Teal',
+    settingsColorThemeRose: 'Rose',
+    settingsDarkMode: 'Dark mode',
+    settingsLightMode: 'Light mode',
     settingsPassword: 'Password',
     settingsPasswordSet: 'Password is set',
     settingsNoPassword: 'No password set',
@@ -1047,6 +1065,15 @@ export const LANGS: Record<Lang, Translation> = {
     settingsProfilePhotoInvalidType: 'Använd JPG, PNG eller WebP.',
     settingsSave: 'Spara',
     settingsSaved: '✓ Sparad',
+    settingsAppearance: 'Utseende',
+    settingsColorTheme: 'Färgtema',
+    settingsColorThemeViolet: 'Lila',
+    settingsColorThemeBlue: 'Blå',
+    settingsColorThemeGreen: 'Grön',
+    settingsColorThemeTeal: 'Turkos',
+    settingsColorThemeRose: 'Rosé',
+    settingsDarkMode: 'Mörkt läge',
+    settingsLightMode: 'Ljust läge',
     settingsPassword: 'Lösenord',
     settingsPasswordSet: 'Lösenord är aktiverat',
     settingsNoPassword: 'Inget lösenord inställt',

@@ -94,7 +94,7 @@ body {
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 12px 30px rgba(108, 99, 255, 0.24);
+  text-shadow: 0 12px 30px color-mix(in srgb, var(--color-primary) 24%, transparent);
 }
 
 .dark .brand-wordmark {
@@ -150,7 +150,7 @@ body {
 }
 
 .logo-plus-wrap {
-  filter: drop-shadow(0 6px 14px rgba(108, 99, 255, 0.22));
+  filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--color-primary) 22%, transparent));
 }
 
 .logo-plus-img {
@@ -449,7 +449,7 @@ body {
   width: 100%;
   margin: 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  background: rgba(108, 99, 255, 0.06);
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
   user-select: none;
   -webkit-user-select: none;
   cursor: default;
@@ -540,7 +540,7 @@ body {
 
 .note-content table.note-table th,
 [contenteditable] table.note-table th {
-  background: rgba(108, 99, 255, 0.08);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
   /* Do NOT set font-weight here — it makes queryCommandState('bold') stuck ON
      and execCommand cannot toggle bold off inside header cells. */
 }
@@ -554,13 +554,13 @@ body {
 
 .dark .note-content table.note-table th,
 .dark [contenteditable] table.note-table th {
-  background: rgba(108, 99, 255, 0.15);
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
 }
 
 .note-content .note-table-wrap--active,
 [contenteditable] .note-table-wrap--active {
-  border-color: rgba(108, 99, 255, 0.45);
-  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.2);
+  border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
 .note-search-hit {
@@ -597,13 +597,13 @@ body {
 .dark .note-content .note-table-toolbar-host,
 .dark [contenteditable] .note-table-toolbar-host {
   border-bottom-color: rgba(255, 255, 255, 0.1);
-  background: rgba(108, 99, 255, 0.14);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
 .dark .note-content .note-table-wrap--active,
 .dark [contenteditable] .note-table-wrap--active {
-  border-color: rgba(108, 99, 255, 0.55);
-  box-shadow: 0 0 0 2px rgba(108, 99, 255, 0.32);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 32%, transparent);
 }
 
 .otter-launcher-wrap {
