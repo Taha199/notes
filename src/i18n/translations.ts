@@ -164,6 +164,10 @@ export interface Translation {
   tableWidenCol: string;
   tableNarrowCol: string;
   tableDelete: string;
+  moveTableUp: string;
+  titleMoveTableUp: string;
+  moveTableDown: string;
+  titleMoveTableDown: string;
   insertLineAboveBlock: string;
   titleInsertLineAboveBlock: string;
   insertLineBelowBlock: string;
@@ -622,6 +626,8 @@ export const LANGS: Record<Lang, Translation> = {
     tableAddRowAbove: 'Row above', tableAddRowBelow: 'Row below', tableRemoveRow: 'Delete row',
     tableAddColBefore: 'Column left', tableAddColAfter: 'Column right', tableRemoveCol: 'Delete column',
     tableWidenCol: 'Widen column', tableNarrowCol: 'Narrow column', tableDelete: 'Delete table',
+    moveTableUp: 'Move table up', titleMoveTableUp: 'Move table up one line',
+    moveTableDown: 'Move table down', titleMoveTableDown: 'Move table down one line',
     insertLineAboveBlock: 'Line above', titleInsertLineAboveBlock: 'Add empty line above',
     insertLineBelowBlock: 'Line below', titleInsertLineBelowBlock: 'Add empty line below',
     titleRight: 'Align Right', titleLeft: 'Align Left', titleCenter: 'Align Center', titleMoveImageUp: 'Move image up', titleMoveImageDown: 'Move image down', titleClr: 'Clear Formatting', titleColor: 'Text Color', titleResizeImage: 'Drag to resize (keep ratio)', titleResizeWidth: 'Drag to change width', titleResizeHeight: 'Drag to change height',
@@ -1007,6 +1013,8 @@ export const LANGS: Record<Lang, Translation> = {
     tableAddRowAbove: 'Rad ovanför', tableAddRowBelow: 'Rad under', tableRemoveRow: 'Ta bort rad',
     tableAddColBefore: 'Kolumn vänster', tableAddColAfter: 'Kolumn höger', tableRemoveCol: 'Ta bort kolumn',
     tableWidenCol: 'Bredda kolumn', tableNarrowCol: 'Smalna kolumn', tableDelete: 'Ta bort tabell',
+    moveTableUp: 'Flytta upp tabell', titleMoveTableUp: 'Flytta tabellen upp en rad',
+    moveTableDown: 'Flytta ner tabell', titleMoveTableDown: 'Flytta tabellen ner en rad',
     insertLineAboveBlock: 'Tom rad ovanför', titleInsertLineAboveBlock: 'Lägg till tom rad ovanför',
     insertLineBelowBlock: 'Tom rad under', titleInsertLineBelowBlock: 'Lägg till tom rad under',
     titleRight: 'Höger', titleLeft: 'Vänster', titleCenter: 'Centrera', titleMoveImageUp: 'Flytta bild uppåt', titleMoveImageDown: 'Flytta bild nedåt', titleClr: 'Ta bort formatering', titleColor: 'Textfärg', titleResizeImage: 'Dra för att ändra storlek (behåll proportioner)', titleResizeWidth: 'Dra för att ändra bredd', titleResizeHeight: 'Dra för att ändra höjd',

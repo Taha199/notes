@@ -3412,6 +3412,60 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     });
   };
 
+  /** Swap the table wrap with the previous/next sibling block (same idea as image move). */
+  const moveTableVertically = (wrap: HTMLElement, direction: 'up' | 'down') => {
+    const ed = editorRef.current;
+    if (!ed || !wrap.isConnected || !ed.contains(wrap)) return;
+    const parent = wrap.parentElement;
+    if (!parent) return;
+    const siblings = Array.from(parent.children).filter((n): n is HTMLElement => n instanceof HTMLElement);
+    const idx = siblings.indexOf(wrap);
+    if (idx < 0) return;
+
+    const ctx = getWorkingTableContext(wrap);
+    const restore = ctx
+      ? { table: ctx.table, rowIndex: ctx.rowIndex, colIndex: ctx.colIndex }
+      : null;
+
+    if (direction === 'up') {
+      if (idx <= 0) {
+        // Already at top — create/focus a line above (parity with images).
+        insertEmptyLineAboveBlock(ed, wrap);
+        if (restore?.table.isConnected) {
+          const next = resolveTableContextAt(restore.table, restore.rowIndex, restore.colIndex, ed);
+          if (next) {
+            placeCaretInTableCell(next.cell);
+            showTableToolbar(next);
+          }
+        }
+        ed.focus({ preventScroll: true });
+        saveSel();
+        syncVisibleTableWraps();
+        return;
+      }
+      parent.insertBefore(wrap, siblings[idx - 1]);
+    } else if (idx < siblings.length - 1) {
+      parent.insertBefore(siblings[idx + 1], wrap);
+    } else {
+      const tail = document.createElement('div');
+      tail.setAttribute('dir', 'auto');
+      tail.innerHTML = '<br>';
+      parent.appendChild(tail);
+    }
+
+    if (restore?.table.isConnected) {
+      const next = resolveTableContextAt(restore.table, restore.rowIndex, restore.colIndex, ed);
+      if (next) {
+        placeCaretInTableCell(next.cell);
+        showTableToolbar(next);
+      }
+    }
+    ed.focus({ preventScroll: true });
+    saveSel();
+    emitHtml();
+    syncVisibleTableWraps();
+  };
+
   const isEmptyTextLine = (el: HTMLElement) => {
     const text = el.textContent?.replace(/\u200B/g, '').trim() ?? '';
     return !text && !el.querySelector('img, table, iframe, .note-table-wrap, .note-img-frame, .note-yt-frame');
@@ -6112,6 +6166,20 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                   onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineBelowBlock(ed, wrap); })}
                   className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
                 >↵ {t.insertLineBelowBlock}</span>
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  title={t.titleMoveTableUp}
+                  onMouseDown={(e) => onTableMenuDown(e, () => moveTableVertically(wrap, 'up'))}
+                  className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
+                >⤒ {t.moveTableUp}</span>
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  title={t.titleMoveTableDown}
+                  onMouseDown={(e) => onTableMenuDown(e, () => moveTableVertically(wrap, 'down'))}
+                  className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
+                >⤓ {t.moveTableDown}</span>
                 <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
                 <span role="button" tabIndex={-1} title={t.tableAddRowAbove} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'above'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↑ {t.tableAddRowAbove}</span>
                 <span role="button" tabIndex={-1} title={t.tableAddRowBelow} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'below'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↓ {t.tableAddRowBelow}</span>
