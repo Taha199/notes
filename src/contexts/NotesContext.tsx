@@ -5332,17 +5332,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const deleteQuizFolder = (id: string) => {
     if (id === RESTORED_FOLDER_ID || id === FAVORITES_FOLDER_ID) return;
     const trashAt = new Date().toISOString();
+    // Soft-delete the folder only. Sets keep folderId so they stay hidden with
+    // the trashed folder (QuizPage filters by trashedFolderIds) and come back
+    // on restore — clearing folderId used to orphan them as ungrouped sets.
     const nextFolders = quizFoldersRef.current.map((f) => (
       f.id === id ? { ...f, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : f
     ));
-    const movedSets = quizSetsRef.current.filter((s) => s.folderId === id);
-    const nextSets = quizSetsRef.current.map((s) => (
-      s.folderId === id ? { ...s, folderId: undefined, updatedAt: trashAt } : s
-    ));
     quizFoldersRef.current = nextFolders;
-    quizSetsRef.current = nextSets;
     setQuizFolders(nextFolders);
-    setQuizSets(nextSets);
     // Durable tombstone — see deleteQuizSet for why this must not depend on
     // the (larger, more failure-prone) array/ById writes below succeeding.
     quizFolderTombstonesRef.current = markTrashTombstone(
@@ -5355,8 +5352,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (uid) pushTrashTombstoneCloud(uid, 'folders', id, Date.parse(trashAt));
     const trashedFolder = nextFolders.find((f) => f.id === id);
     pushQuizFolderStructure(nextFolders, trashedFolder ? [trashedFolder] : []);
-    const movedNow = nextSets.filter((s) => movedSets.some((m) => m.id === s.id));
-    void pushQuizSetStructure(nextSets, movedNow);
   };
 
   const restoreQuizFolder = (id: string) => {

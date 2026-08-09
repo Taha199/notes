@@ -1070,7 +1070,7 @@ export function QuizPage({
   const [folderRenameVal, setFolderRenameVal] = useState('');
   const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number; flip?: boolean } | null>(null);
   const [folderColorPicker, setFolderColorPicker] = useState(false);
-  const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<{ id: string; name: string } | null>(null);
   const [moveMenuForSet, setMoveMenuForSet] = useState<string | null>(null);
   const [nameAlert, setNameAlert] = useState<'set' | 'folder' | null>(null);
 
@@ -1186,7 +1186,7 @@ export function QuizPage({
   // Context menu
   const [ctxMenu, setCtxMenu] = useState<{ setId: string; x: number; y: number; flip?: boolean } | null>(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
-  const [confirmDeleteSetId, setConfirmDeleteSetId] = useState<string | null>(null);
+  const [confirmDeleteSet, setConfirmDeleteSet] = useState<{ id: string; name: string } | null>(null);
 
   const openCtxMenu = (e: React.MouseEvent, setId: string) => {
     e.preventDefault();
@@ -1920,7 +1920,8 @@ export function QuizPage({
             <div className="my-1 h-px bg-app-border dark:bg-white/10" />
             <button
               onClick={() => {
-                setConfirmDeleteSetId(ctxMenu.setId);
+                const s = allQuizSets.find((x) => x.id === ctxMenu.setId);
+                setConfirmDeleteSet({ id: ctxMenu.setId, name: s?.name ?? '' });
                 closeCtxMenu();
               }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
@@ -1965,46 +1966,51 @@ export function QuizPage({
             )}
             <div className="my-1 h-px bg-app-border dark:bg-white/10" />
             <button
-              onClick={() => { setConfirmDeleteFolderId(folderCtxMenu.folderId); setFolderCtxMenu(null); }}
+              onClick={() => {
+                const f = allQuizFolders.find((x) => x.id === folderCtxMenu.folderId);
+                setConfirmDeleteFolder({ id: folderCtxMenu.folderId, name: f?.name ?? '' });
+                setFolderCtxMenu(null);
+              }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
             >{t.quizDeleteFolder}</button>
           </div>
         </>
       )}
 
-      {/* Delete folder confirmation */}
-      {confirmDeleteFolderId && (() => {
-        const f = quizFolders.find((x) => x.id === confirmDeleteFolderId);
-        return (
-          <ConfirmDialog
-            title={t.quizMoveFolderTrash}
-            message={t.quizMoveFolderTrashMsg.replace('{name}', f?.name ?? '')}
-            confirmLabel={t.quizMoveToTrash}
-            cancelLabel={t.setpassCancel}
-            onConfirm={() => { deleteQuizFolder(confirmDeleteFolderId); setSelectedFolderId(null); setSelectedSetId(null); setConfirmDeleteFolderId(null); }}
-            onCancel={() => setConfirmDeleteFolderId(null)}
-          />
-        );
-      })()}
+      {/* Delete folder confirmation — name captured on open so trash filter can't blank it */}
+      {confirmDeleteFolder && (
+        <ConfirmDialog
+          title={t.quizMoveFolderTrash}
+          message={t.quizMoveFolderTrashMsg.replace('{name}', confirmDeleteFolder.name)}
+          confirmLabel={t.quizMoveToTrash}
+          cancelLabel={t.setpassCancel}
+          onConfirm={() => {
+            const id = confirmDeleteFolder.id;
+            setConfirmDeleteFolder(null);
+            setSelectedFolderId((cur) => (cur === id ? null : cur));
+            setSelectedSetId(null);
+            deleteQuizFolder(id);
+          }}
+          onCancel={() => setConfirmDeleteFolder(null)}
+        />
+      )}
 
-      {/* Delete set confirmation */}
-      {confirmDeleteSetId && (() => {
-        const s = quizSets.find((x) => x.id === confirmDeleteSetId);
-        return (
-          <ConfirmDialog
-            title={t.quizMoveSetTrash}
-            message={t.quizMoveSetTrashMsg.replace('{name}', s?.name ?? '')}
-            confirmLabel={t.quizMoveToTrash}
-            cancelLabel={t.setpassCancel}
-            onConfirm={() => {
-              if (selectedSetId === confirmDeleteSetId) setSelectedSetId(null);
-              deleteQuizSet(confirmDeleteSetId);
-              setConfirmDeleteSetId(null);
-            }}
-            onCancel={() => setConfirmDeleteSetId(null)}
-          />
-        );
-      })()}
+      {/* Delete set confirmation — name captured on open so trash filter can't blank it */}
+      {confirmDeleteSet && (
+        <ConfirmDialog
+          title={t.quizMoveSetTrash}
+          message={t.quizMoveSetTrashMsg.replace('{name}', confirmDeleteSet.name)}
+          confirmLabel={t.quizMoveToTrash}
+          cancelLabel={t.setpassCancel}
+          onConfirm={() => {
+            const id = confirmDeleteSet.id;
+            setConfirmDeleteSet(null);
+            setSelectedSetId((cur) => (cur === id ? null : cur));
+            deleteQuizSet(id);
+          }}
+          onCancel={() => setConfirmDeleteSet(null)}
+        />
+      )}
     </div>
   );
 }
