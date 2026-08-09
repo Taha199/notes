@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, memo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, memo } from 'react';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { AppRichTextEditor } from '../notes/AppRichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
@@ -332,6 +332,8 @@ export interface SavePayload {
 
 interface OpenQuestionForm {
   formId: string;
+  /** Set id or `__notes__` — drafts never render/update under another scope. */
+  scopeKey: string;
   itemId: number | null;
   question: string;
   answer: string;
@@ -345,6 +347,10 @@ interface OpenQuestionForm {
   options?: string[];
   correctIndexes?: number[];
   explanation?: string;
+}
+
+function cloneOpenForms(forms: OpenQuestionForm[]): OpenQuestionForm[] {
+  return forms.map((f) => ({ ...f }));
 }
 
 type LocalFormMeta = {
@@ -667,6 +673,8 @@ export function QuizPage({
   const selectedSetIdRef = useRef<string | null>(selectedSetId);
   selectedSetIdRef.current = selectedSetId;
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => savedSelection.folderId);
+  const selectedFolderIdRef = useRef<string | null>(selectedFolderId);
+  selectedFolderIdRef.current = selectedFolderId;
   const dragSetId = useRef<string | null>(null);
   const dragFolderId = useRef<string | null>(null);
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
@@ -711,14 +719,106 @@ export function QuizPage({
   allQuizSetsRef.current = allQuizSets;
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const livePushTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const currentFormsScopeKey = formsScopeKey(selectedSetId, selectedFolderId);
 
-  // Keep the active scope's stash in sync with live openForms.
-  if (activeFormsScopeRef.current) {
-    formsByScopeRef.current[activeFormsScopeRef.current] = openForms;
-  }
+  const stashActiveFormsScope = () => {
+    const key = activeFormsScopeRef.current;
+    if (key == null) return;
+    formsByScopeRef.current[key] = cloneOpenForms(
+      openFormsRef.current.filter((f) => f.scopeKey === key),
+    );
+  };
 
-  const updateForm = (formId: string, patch: Partial<Omit<OpenQuestionForm, 'formId'>>) => {
-    setOpenForms((prev) => prev.map((f) => (f.formId === formId ? { ...f, ...patch } : f)));
+  const buildCloudDraftForms = (scopeKey: string, setId: string | null): OpenQuestionForm[] => {
+    const items = setId
+      ? (allQuizSetsRef.current.find((s) => s.id === setId)?.items ?? [])
+      : quizzesRef.current.filter((q) => !q.trashed);
+    return items
+      .filter((item) => item.draft)
+      .map((item) => ({
+        formId: `item-${item.id}`,
+        scopeKey,
+        itemId: item.id as number | null,
+        question: item.question,
+        answer: item.answer,
+        saveStatus: 'saved' as const,
+        options: item.options,
+        correctIndexes: item.correctIndexes,
+        explanation: item.explanation,
+        mcq: !!(item.options && item.options.length),
+      }));
+  };
+
+  /** Swap open forms onto a set/notes scope. Call in the same tick as selection changes. */
+  const switchFormsScope = (nextSetId: string | null, nextFolderId: string | null) => {
+    const nextKey = formsScopeKey(nextSetId, nextFolderId);
+    const prevKey = activeFormsScopeRef.current;
+
+    stashActiveFormsScope();
+
+    autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
+    autoSaveTimers.current.clear();
+
+    if (nextKey == null) {
+      activeFormsScopeRef.current = null;
+      openFormsRef.current = [];
+      setOpenForms([]);
+      return;
+    }
+
+    if (prevKey === nextKey) {
+      const filtered = openFormsRef.current.filter((f) => f.scopeKey === nextKey);
+      if (filtered.length !== openFormsRef.current.length) {
+        openFormsRef.current = filtered;
+        setOpenForms(filtered);
+      }
+      return;
+    }
+
+    activeFormsScopeRef.current = nextKey;
+    const stashed = cloneOpenForms(formsByScopeRef.current[nextKey] ?? [])
+      .filter((f) => f.scopeKey === nextKey)
+      .map((f) => ({ ...f, scopeKey: nextKey }));
+    const stashedItemIds = new Set(
+      stashed.map((f) => f.itemId).filter((id): id is number => id != null),
+    );
+    const merged = [
+      ...stashed,
+      ...buildCloudDraftForms(nextKey, nextSetId).filter(
+        (f) => f.itemId != null && !stashedItemIds.has(f.itemId),
+      ),
+    ];
+    formsByScopeRef.current[nextKey] = cloneOpenForms(merged);
+    openFormsRef.current = merged;
+    setOpenForms(merged);
+  };
+
+  const selectQuizSet = (setId: string | null) => {
+    setSelectedSetId(setId);
+  };
+
+  const selectQuizFolder = (folderId: string | null, setId: string | null) => {
+    setSelectedFolderId(folderId);
+    setSelectedSetId(setId);
+  };
+
+  const updateForm = (formId: string, patch: Partial<Omit<OpenQuestionForm, 'formId' | 'scopeKey'>>) => {
+    setOpenForms((prev) => {
+      const active = activeFormsScopeRef.current;
+      const next = prev.map((f) => {
+        if (f.formId !== formId) return f;
+        // Late RichTextEditor/onChange after a set switch must not mutate the new set.
+        if (active != null && f.scopeKey !== active) return f;
+        return { ...f, ...patch };
+      });
+      openFormsRef.current = next;
+      if (active != null) {
+        formsByScopeRef.current[active] = cloneOpenForms(
+          next.filter((f) => f.scopeKey === active),
+        );
+      }
+      return next;
+    });
   };
 
   /** Push question/answer to quizItemsById within ~50ms so the other device
@@ -750,20 +850,32 @@ export function QuizPage({
   };
 
   const updateFormContent = (formId: string, patch: Pick<OpenQuestionForm, 'question'> | Pick<OpenQuestionForm, 'answer'> | Pick<OpenQuestionForm, 'question' | 'answer'>) => {
-    setOpenForms((prev) =>
-      prev.map((f) => {
+    const existing = openFormsRef.current.find((f) => f.formId === formId);
+    if (!existing) return;
+    // Ignore late editor events from a form that belongs to another set.
+    if (existing.scopeKey !== activeFormsScopeRef.current) return;
+
+    setOpenForms((prev) => {
+      const active = activeFormsScopeRef.current;
+      const next = prev.map((f) => {
         if (f.formId !== formId) return f;
-        const next = { ...f, ...patch };
-        if (f.itemId !== null) return next;
-        const complete = hasContent(next.question) && hasContent(next.answer);
-        if (!complete) return { ...next, saveStatus: 'empty' as const };
-        return next;
-      }),
-    );
+        if (active != null && f.scopeKey !== active) return f;
+        const updated = { ...f, ...patch };
+        if (f.itemId !== null) return updated;
+        const complete = hasContent(updated.question) && hasContent(updated.answer);
+        if (!complete) return { ...updated, saveStatus: 'empty' as const };
+        return updated;
+      });
+      openFormsRef.current = next;
+      if (active != null) {
+        formsByScopeRef.current[active] = cloneOpenForms(
+          next.filter((f) => f.scopeKey === active),
+        );
+      }
+      return next;
+    });
     // Live push on the same tick as typing — do not wait for the 120ms autosave effect.
-    const form = openFormsRef.current.find((f) => f.formId === formId);
-    if (form?.itemId != null) {
-      // Ref still has previous content until re-render; merge patch for the push timer.
+    if (existing.itemId != null) {
       openFormsRef.current = openFormsRef.current.map((f) => (
         f.formId === formId ? { ...f, ...patch } : f
       ));
@@ -778,7 +890,17 @@ export function QuizPage({
     const live = livePushTimers.current.get(formId);
     if (live) clearTimeout(live);
     livePushTimers.current.delete(formId);
-    setOpenForms((prev) => prev.filter((f) => f.formId !== formId));
+    setOpenForms((prev) => {
+      const next = prev.filter((f) => f.formId !== formId);
+      openFormsRef.current = next;
+      const active = activeFormsScopeRef.current;
+      if (active != null) {
+        formsByScopeRef.current[active] = cloneOpenForms(
+          next.filter((f) => f.scopeKey === active),
+        );
+      }
+      return next;
+    });
   };
 
   const persistForm = (formId: string, override?: SavePayload, finalize = false): number | null => {
@@ -875,19 +997,31 @@ export function QuizPage({
   };
 
   const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
+    const scopeKey = formsScopeKey(selectedSetIdRef.current, selectedFolderIdRef.current);
+    if (!scopeKey) return;
+    // First paint can race the scope effect — adopt the selection's scope once.
+    if (activeFormsScopeRef.current == null) activeFormsScopeRef.current = scopeKey;
+    if (scopeKey !== activeFormsScopeRef.current) return;
+
     if (initial?.itemId) {
       if (openFormsRef.current.some((f) => f.itemId === initial.itemId)) return;
-      setOpenForms((prev) => [
-        ...prev,
-        {
-          formId: `item-${initial.itemId}`,
-          itemId: initial.itemId!,
-          question: initial.question ?? '',
-          answer: initial.answer ?? '',
-          saveStatus: 'saved',
-          finalized: true,
-        },
-      ]);
+      setOpenForms((prev) => {
+        const next = [
+          ...prev,
+          {
+            formId: `item-${initial.itemId}`,
+            scopeKey,
+            itemId: initial.itemId!,
+            question: initial.question ?? '',
+            answer: initial.answer ?? '',
+            saveStatus: 'saved' as const,
+            finalized: true,
+          },
+        ];
+        openFormsRef.current = next;
+        formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
+        return next;
+      });
       return;
     }
 
@@ -901,29 +1035,41 @@ export function QuizPage({
       draft: true,
     };
     if (selectedSetIdRef.current) {
-      setOpenForms((prev) => [
-        ...prev,
-        {
-          formId: `new-${Date.now()}`,
-          itemId: null,
-          question: '',
-          answer: '',
-          saveStatus: 'empty',
-        },
-      ]);
+      setOpenForms((prev) => {
+        const next = [
+          ...prev,
+          {
+            formId: `new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            scopeKey,
+            itemId: null,
+            question: '',
+            answer: '',
+            saveStatus: 'empty' as const,
+          },
+        ];
+        openFormsRef.current = next;
+        formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
+        return next;
+      });
       return;
     }
     const id = addQuiz(item);
-    setOpenForms((prev) => [
-      ...prev,
-      {
-        formId: `item-${id}`,
-        itemId: id,
-        question: '',
-        answer: '',
-        saveStatus: 'saved',
-      },
-    ]);
+    setOpenForms((prev) => {
+      const next = [
+        ...prev,
+        {
+          formId: `item-${id}`,
+          scopeKey,
+          itemId: id,
+          question: '',
+          answer: '',
+          saveStatus: 'saved' as const,
+        },
+      ];
+      openFormsRef.current = next;
+      formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
+      return next;
+    });
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
@@ -988,8 +1134,7 @@ export function QuizPage({
 
     const orphan = quizzes.find((q) => q.id === focusItemId && !q.trashed);
     if (orphan) {
-      setSelectedFolderId(null);
-      setSelectedSetId(null);
+      selectQuizFolder(null, null);
     } else {
       let foundSet: QuizSet | undefined;
       for (const set of allQuizSets) {
@@ -1000,8 +1145,7 @@ export function QuizPage({
         }
       }
       if (foundSet) {
-        setSelectedFolderId(foundSet.folderId ?? null);
-        setSelectedSetId(foundSet.id);
+        selectQuizFolder(foundSet.folderId ?? null, foundSet.id);
       }
     }
 
@@ -1052,95 +1196,38 @@ export function QuizPage({
       const folderSets = allQuizSets.filter(
         (set) => !set.trashed && set.folderId === selectedFolderId,
       );
-      if (folderSets.length > 0) setSelectedSetId(folderSets[0].id);
+      if (folderSets.length > 0) selectQuizSet(folderSets[0].id);
     }
     if (selectedSetId && !allQuizSets.some((set) => set.id === selectedSetId && !set.trashed)) {
-      setSelectedSetId(null);
+      selectQuizSet(null);
     }
   }, [loaded, selectedFolderId, selectedSetId, allQuizSets]);
 
   const isNotesViewRef = useRef(false);
-  useEffect(() => {
+  // Before paint: stash leaving set's drafts and load only the selected set's forms.
+  // useLayoutEffect avoids a painted frame where Schimke's draft appears under Infliximab.
+  useLayoutEffect(() => {
     if (!loaded) return;
-    autoSaveTimers.current.forEach((timer) => clearTimeout(timer));
-    autoSaveTimers.current.clear();
-
-    const notesView = !selectedFolderId && !selectedSetId;
-    isNotesViewRef.current = notesView;
-    const nextKey = formsScopeKey(selectedSetId, selectedFolderId);
-    const prevKey = activeFormsScopeRef.current;
-
-    // Stash the leaving scope's open forms (including local itemId:null drafts).
-    if (prevKey != null) {
-      formsByScopeRef.current[prevKey] = openFormsRef.current;
-    }
-
-    if (nextKey == null) {
-      // Empty folder view — hide editors but keep other sets' stashes intact.
-      activeFormsScopeRef.current = null;
-      openFormsRef.current = [];
-      setOpenForms([]);
-      return;
-    }
-
-    if (prevKey === nextKey) return;
-
-    activeFormsScopeRef.current = nextKey;
-    const items = selectedSetId
-      ? (allQuizSets.find((s) => s.id === selectedSetId)?.items ?? [])
-      : quizzes.filter((q) => !q.trashed);
-    const cloudDrafts = items
-      .filter((item) => item.draft)
-      .map((item) => ({
-        formId: `item-${item.id}`,
-        itemId: item.id as number | null,
-        question: item.question,
-        answer: item.answer,
-        saveStatus: 'saved' as const,
-        options: item.options,
-        correctIndexes: item.correctIndexes,
-        explanation: item.explanation,
-        mcq: !!(item.options && item.options.length),
-      }));
-
-    const stashed = formsByScopeRef.current[nextKey] ?? [];
-    const stashedItemIds = new Set(
-      stashed.map((f) => f.itemId).filter((id): id is number => id != null),
-    );
-    const merged = [
-      ...stashed,
-      ...cloudDrafts.filter((f) => f.itemId != null && !stashedItemIds.has(f.itemId)),
-    ];
-    formsByScopeRef.current[nextKey] = merged;
-    openFormsRef.current = merged;
-    setOpenForms(merged);
+    isNotesViewRef.current = !selectedFolderId && !selectedSetId;
+    switchFormsScope(selectedSetId, selectedFolderId);
   }, [selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!loaded) return;
+    const scopeKey = formsScopeKey(selectedSetId, selectedFolderId);
+    if (!scopeKey || scopeKey !== activeFormsScopeRef.current) return;
     if (!selectedSetId && !isNotesViewRef.current) return;
-    const items = selectedSetId
-      ? (allQuizSets.find((s) => s.id === selectedSetId)?.items ?? [])
-      : quizzes.filter((q) => !q.trashed);
-    const drafts = items.filter((item) => item.draft);
+    const drafts = buildCloudDraftForms(scopeKey, selectedSetId);
     setOpenForms((prev) => {
       const openIds = new Set(prev.map((f) => f.itemId));
-      const additions = drafts
-        .filter((d) => !openIds.has(d.id))
-        .map((item) => ({
-          formId: `item-${item.id}`,
-          itemId: item.id,
-          question: item.question,
-          answer: item.answer,
-          saveStatus: 'saved' as const,
-          options: item.options,
-          correctIndexes: item.correctIndexes,
-          explanation: item.explanation,
-          mcq: !!(item.options && item.options.length),
-        }));
-      return additions.length ? [...prev, ...additions] : prev;
+      const additions = drafts.filter((d) => d.itemId != null && !openIds.has(d.itemId));
+      if (!additions.length) return prev;
+      const next = [...prev, ...additions];
+      openFormsRef.current = next;
+      formsByScopeRef.current[scopeKey] = cloneOpenForms(next);
+      return next;
     });
-  }, [allQuizSets, quizzes, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allQuizSets, quizzes, selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Rename set
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
@@ -1223,7 +1310,7 @@ export function QuizPage({
     while (allQuizSets.some((set) => normalizeQuizName(set.name) === normalizeQuizName(`Nameless ${num}`))) num += 1;
     // Single-shot create with folderId; awaits ById so hard refresh cannot lose it.
     void addQuizSet(`Nameless ${num}`, selectedFolderId || undefined).then((s) => {
-      setSelectedSetId(s.id);
+      selectQuizSet(s.id);
     });
   };
 
@@ -1260,8 +1347,7 @@ export function QuizPage({
     const folder = addQuizFolder(name);
     setRenamingFolderId(folder.id);
     setFolderRenameVal(name);
-    setSelectedFolderId(folder.id);
-    setSelectedSetId(null);
+    selectQuizFolder(folder.id, null);
   };
 
   // Context menu
@@ -1375,12 +1461,15 @@ export function QuizPage({
   };
 
   const renderItemOrForm = (item: QuizItem, visualIndex: number) => {
-    const form = openForms.find((f) => f.itemId === item.id);
+    const form = openForms.find(
+      (f) => f.itemId === item.id && (!currentFormsScopeKey || f.scopeKey === currentFormsScopeKey),
+    );
     if (form) return renderOpenForm(form, visualIndex, visualIndex + 1);
     return renderItem(item, visualIndex);
   };
 
   const renderOpenForm = (form: OpenQuestionForm, formIndex = 0, questionNumber?: number) => {
+    if (currentFormsScopeKey && form.scopeKey !== currentFormsScopeKey) return null;
     const item = form.itemId
       ? (displayItems.find((i) => i.id === form.itemId)
         ?? selectedSet?.items?.find((i) => i.id === form.itemId))
@@ -1388,7 +1477,7 @@ export function QuizPage({
     const showNumber = questionNumber ?? (selectedSetId && form.itemId === null ? orderedItems.length + formIndex + 1 : null);
     return (
       <div
-        key={form.formId}
+        key={`${form.scopeKey}-${form.formId}`}
         id={form.itemId != null ? `quiz-item-${form.itemId}` : undefined}
       >
       <EditPanel
@@ -1407,13 +1496,13 @@ export function QuizPage({
         onSave={(override) => handleSaveForm(form.formId, override)}
         onCancel={() => handleCancelForm(form.formId)}
         onLocalMetaChange={(meta) => {
-          // Ref immediately so a mid-switch stash sees MCQ fields.
+          if (form.scopeKey !== activeFormsScopeRef.current) return;
           openFormsRef.current = openFormsRef.current.map((f) => (
-            f.formId === form.formId ? { ...f, ...meta } : f
+            f.formId === form.formId && f.scopeKey === form.scopeKey ? { ...f, ...meta } : f
           ));
-          if (activeFormsScopeRef.current) {
-            formsByScopeRef.current[activeFormsScopeRef.current] = openFormsRef.current;
-          }
+          formsByScopeRef.current[form.scopeKey] = cloneOpenForms(
+            openFormsRef.current.filter((f) => f.scopeKey === form.scopeKey),
+          );
           updateForm(form.formId, meta);
         }}
       />
@@ -1445,9 +1534,8 @@ export function QuizPage({
   const userSetsInFolder = (fid: string) => setsInFolder(fid).filter((s) => !s.system);
 
   const selectFolder = (folderId: string) => {
-    setSelectedFolderId(folderId);
     const folderSets = setsInFolder(folderId);
-    setSelectedSetId(folderSets[0]?.id ?? null);
+    selectQuizFolder(folderId, folderSets[0]?.id ?? null);
   };
 
   // Sets shown in the right panel depending on which folder is selected
@@ -1503,7 +1591,7 @@ export function QuizPage({
             <span className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm" style={{ backgroundColor: s.color || '#9ca3af' }} />
             <div className="flex w-full items-center">
               <span className="flex-shrink-0 select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100">{s.system === 'favorites' ? '⭐' : '⠿'}</span>
-              <button onClick={() => setSelectedSetId(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
+              <button onClick={() => selectQuizSet(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
                 <AutoFitText
                   text={s.name}
                   maxSize={13}
@@ -1564,7 +1652,7 @@ export function QuizPage({
 
         {/* Questions from Notes — full-width special row */}
         <button
-          onClick={() => { setSelectedSetId(null); setSelectedFolderId(null); }}
+          onClick={() => { selectQuizFolder(null, null); }}
           className={'mx-2 mb-1 flex items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-all ' +
             (isNotesView ? 'bg-primary/10 text-primary dark:bg-primary/20' : 'text-app-text hover:bg-white dark:text-gray-300 dark:hover:bg-white/5')}
         >
@@ -1892,7 +1980,7 @@ export function QuizPage({
             {orderedItems.map((item, index) => renderItemOrForm(item, index))}
 
             {openForms
-              .filter((f) => f.itemId === null)
+              .filter((f) => f.itemId === null && (!currentFormsScopeKey || f.scopeKey === currentFormsScopeKey))
               .map((form, formIndex) => renderOpenForm(form, formIndex))}
 
             {/* Add question dashed button — opens another form without closing existing ones */}
@@ -1941,7 +2029,7 @@ export function QuizPage({
             <button
               onClick={() => {
                 const s = quizSets.find((x) => x.id === ctxMenu.setId);
-                if (s) { setRenamingSetId(s.id); setRenameVal(s.name); setSelectedSetId(s.id); }
+                if (s) { setRenamingSetId(s.id); setRenameVal(s.name); selectQuizSet(s.id); }
                 closeCtxMenu();
               }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
@@ -2067,8 +2155,7 @@ export function QuizPage({
           onConfirm={() => {
             const id = confirmDeleteFolder.id;
             setConfirmDeleteFolder(null);
-            setSelectedFolderId((cur) => (cur === id ? null : cur));
-            setSelectedSetId(null);
+            selectQuizFolder(selectedFolderIdRef.current === id ? null : selectedFolderIdRef.current, null);
             deleteQuizFolder(id);
           }}
           onCancel={() => setConfirmDeleteFolder(null)}
@@ -2085,7 +2172,7 @@ export function QuizPage({
           onConfirm={() => {
             const id = confirmDeleteSet.id;
             setConfirmDeleteSet(null);
-            setSelectedSetId((cur) => (cur === id ? null : cur));
+            if (selectedSetIdRef.current === id) selectQuizSet(null);
             deleteQuizSet(id);
           }}
           onCancel={() => setConfirmDeleteSet(null)}
