@@ -124,8 +124,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
   return (
     <div id={`quiz-item-${item.id}`} className={'group overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e] ' + accent}>
       <div className="flex flex-col sm:flex-row sm:items-stretch">
-        {/* Number | stacked Q-above-A at full content width (matches EditPanel). */}
-        <div className={'grid min-w-0 flex-1 grid-cols-1 ' + (questionNumber ? 'sm:grid-cols-[52px_minmax(0,1fr)]' : '')}>
+        <div className={'grid min-w-0 flex-1 grid-cols-1 ' + (questionNumber ? 'sm:grid-cols-[52px_minmax(0,0.8fr)_minmax(0,1.2fr)]' : 'sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]')}>
           {questionNumber != null && (
             <div className="flex min-w-0 flex-row items-center justify-center gap-1.5 border-b border-app-border px-1.5 py-3 dark:border-white/10 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
               <span className="flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg bg-primary/10 text-[12px] font-bold tabular-nums text-primary">
@@ -154,48 +153,46 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
               )}
             </div>
           )}
-          <div className="flex min-w-0 flex-col">
-            <div className="flex min-w-0 flex-col items-start overflow-x-hidden px-5 py-4">
-              <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
-                {t.quizQuestionLabel}
-                {studyMore && (
-                  <span className={'rounded-full px-2 py-0.5 text-[8px] font-bold normal-case tracking-normal ' + (status === 'learning' ? 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400')}>
-                    {t.quizStudyMore}
-                  </span>
-                )}
-              </span>
+          <div className="flex min-w-0 flex-col items-start overflow-x-hidden px-5 py-4">
+            <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
+              {t.quizQuestionLabel}
+              {studyMore && (
+                <span className={'rounded-full px-2 py-0.5 text-[8px] font-bold normal-case tracking-normal ' + (status === 'learning' ? 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400')}>
+                  {t.quizStudyMore}
+                </span>
+              )}
+            </span>
+            <StableNoteHtml
+              html={mdToHtml(item.question)}
+              className="note-content block w-full max-w-full min-w-0 break-words whitespace-normal text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal"
+            />
+          </div>
+          <div className="flex min-w-0 flex-col items-start overflow-x-hidden border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:border-l sm:border-t-0 sm:px-6 sm:pr-5">
+            <span className="mb-2 text-[9px] font-bold uppercase text-primary/70">{t.quizAnswerLabel}</span>
+            <div className="relative w-full min-w-0 max-w-full overflow-x-hidden">
               <StableNoteHtml
-                html={mdToHtml(item.question)}
-                className="note-content block w-full max-w-full min-w-0 break-words whitespace-normal text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal"
+                html={mdToHtml(item.answer)}
+                className={'note-content block w-full max-w-full min-w-0 break-words whitespace-normal text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal [&_.note-img-frame]:my-3 [&_.note-img-frame]:cursor-zoom-in [&_.note-img-frame]:max-w-full [&_.note-yt-frame]:mx-auto [&>ul:first-child]:mt-0 [&>ol:first-child]:mt-0 [&_.note-img-frame_img]:my-0 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:max-h-none [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:cursor-zoom-in [&_.note-img-frame_img]:rounded-none [&_.note-img-frame_img]:border-0 [&_.note-img-frame_img]:bg-transparent [&_.note-img-frame_img]:object-contain [&_.note-img-frame_img]:p-0 [&_.note-img-frame_img]:shadow-none ' + (masked ? 'select-none blur-sm' : '')}
               />
-            </div>
-            <div className="flex min-w-0 flex-col items-start overflow-x-hidden border-t border-app-border bg-app-bg/55 px-5 py-4 dark:border-white/10 dark:bg-white/[0.035] sm:px-6 sm:pr-5">
-              <span className="mb-2 text-[9px] font-bold uppercase text-primary/70">{t.quizAnswerLabel}</span>
-              <div className="relative w-full min-w-0 max-w-full overflow-x-hidden">
-                <StableNoteHtml
-                  html={mdToHtml(item.answer)}
-                  className={'note-content block w-full max-w-full min-w-0 break-words whitespace-normal text-[14px] leading-[1.7] text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal [&_.note-img-frame]:my-3 [&_.note-img-frame]:cursor-zoom-in [&_.note-img-frame]:max-w-full [&_.note-yt-frame]:mx-auto [&>ul:first-child]:mt-0 [&>ol:first-child]:mt-0 [&_.note-img-frame_img]:my-0 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:max-h-none [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:cursor-zoom-in [&_.note-img-frame_img]:rounded-none [&_.note-img-frame_img]:border-0 [&_.note-img-frame_img]:bg-transparent [&_.note-img-frame_img]:object-contain [&_.note-img-frame_img]:p-0 [&_.note-img-frame_img]:shadow-none ' + (masked ? 'select-none blur-sm' : '')}
-                />
-                {masked && (
-                  <button
-                    onClick={() => setRevealed(true)}
-                    className="absolute inset-0 flex items-center justify-center rounded-lg bg-app-bg/40 text-[11px] font-semibold text-app-text-secondary backdrop-blur-[2px] transition hover:text-primary dark:bg-white/[0.02]"
-                  >
-                    {t.quizRevealAnswer}
-                  </button>
-                )}
-              </div>
-              {item.explanation && (
-                <div className="mt-3 w-full max-w-full overflow-x-hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
-                  <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">{t.quizExplanationLabel}</p>
-                  <div
-                    dir="auto"
-                    className="note-content break-words text-[13px] leading-relaxed text-amber-900 [overflow-wrap:anywhere] dark:text-amber-200"
-                    dangerouslySetInnerHTML={{ __html: mdToHtml(item.explanation) }}
-                  />
-                </div>
+              {masked && (
+                <button
+                  onClick={() => setRevealed(true)}
+                  className="absolute inset-0 flex items-center justify-center rounded-lg bg-app-bg/40 text-[11px] font-semibold text-app-text-secondary backdrop-blur-[2px] transition hover:text-primary dark:bg-white/[0.02]"
+                >
+                  {t.quizRevealAnswer}
+                </button>
               )}
             </div>
+            {item.explanation && (
+              <div className="mt-3 w-full max-w-full overflow-x-hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/20 dark:bg-amber-500/10">
+                <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">{t.quizExplanationLabel}</p>
+                <div
+                  dir="auto"
+                  className="note-content break-words text-[13px] leading-relaxed text-amber-900 [overflow-wrap:anywhere] dark:text-amber-200"
+                  dangerouslySetInnerHTML={{ __html: mdToHtml(item.explanation) }}
+                />
+              </div>
+            )}
           </div>
         </div>
         <div className="relative z-10 flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-2 border-t border-app-border bg-white px-3 py-2 dark:border-white/10 dark:bg-[#1e1e2e] sm:w-[68px] sm:flex-col sm:flex-nowrap sm:justify-center sm:gap-1.5 sm:border-l sm:border-t-0 sm:px-2 sm:py-3">
@@ -621,9 +618,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           ☑ {t.quizMcq}
         </button>
       </div>
-      {/* Stack Q above A at full card width so tables/text while editing use the
-          same reading width as the closed card content area (not half-width). */}
-      <div className="grid min-w-0 grid-cols-1 gap-3 p-4">
+      <div className="grid min-w-0 grid-cols-1 gap-3 p-4 md:grid-cols-2 md:items-stretch">
         {/* Avoid overflow-hidden: it creates a sticky scrollport so the formatting
             toolbar cannot stick while the quiz page scrolls. Round corners on
             first/last children instead. */}
@@ -636,6 +631,11 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
             placeholder={`${t.quizQuestionLabel}...`}
             minHeight="140px"
           />
+          {hasAi && !mcq && (
+            <div className="shrink-0 border-t border-app-border bg-app-bg/40 px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.02]">
+              <div className="h-7" aria-hidden="true" />
+            </div>
+          )}
         </div>
         {mcq ? (
           <div>
@@ -717,7 +717,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           )}
         </div>
         )}
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 md:col-span-2">
           <button type="button" onClick={onCancel} className="rounded-lg border border-app-border px-3 py-1.5 text-xs text-app-text-secondary hover:bg-app-border/40">{t.setpassCancel}</button>
           <button
             type="button"
