@@ -19,6 +19,7 @@ import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { quizPatchChangesContent } from '../../lib/quizContent';
 import { hasRichContent } from '../../lib/richContent';
+import { FilesLoadingIndicator } from '../files/FilesLoadingIndicator';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 /** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
@@ -1821,7 +1822,7 @@ export function QuizPage({
         >
           <span>🧠</span>
           <span className="flex-1 truncate">{t.quizQuestionsFromNotes}</span>
-          <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{quizzes.length}</span>
+          <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{loaded ? quizzes.length : '…'}</span>
         </button>
 
         {/* Two-column area */}
@@ -1993,7 +1994,11 @@ export function QuizPage({
             </div>
             {/* Sets list */}
             <div className="flex-1 overflow-y-auto px-1">
-              {currentSets.length === 0 ? (
+              {!loaded ? (
+                <div className="flex h-full min-h-[8rem] items-center justify-center px-2 py-6">
+                  <FilesLoadingIndicator text={t.quizLoadingQuestions} />
+                </div>
+              ) : currentSets.length === 0 ? (
                 <p className="py-4 text-center text-[11px] italic text-app-text-secondary/40">
                   {selectedFolderId ? t.quizFolderEmpty : t.quizNoUngroupedSets}
                 </p>
@@ -2016,6 +2021,12 @@ export function QuizPage({
       {/* Main content */}
       <div className="flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
+          {!loaded ? (
+            <div className="flex min-h-[16rem] flex-col items-center justify-center py-24">
+              <FilesLoadingIndicator text={t.quizLoadingQuestions} />
+            </div>
+          ) : (
+          <>
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
@@ -2155,6 +2166,8 @@ export function QuizPage({
               +
             </button>
           </div>
+          </>
+          )}
           </>
           )}
         </div>

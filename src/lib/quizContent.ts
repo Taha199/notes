@@ -36,11 +36,14 @@ export function quizPatchChangesContent(
 
 export function quizzesEqualForUI(a: QuizItem[], b: QuizItem[]): boolean {
   if (a.length !== b.length) return false;
-  const bById = new Map(b.map((item) => [item.id, item]));
-  return a.every((item) => {
-    const other = bById.get(item.id);
-    return other != null && quizItemContentEquals(item, other);
-  });
+  // Manual in-set order is UI state — comparing by id map alone let cloud
+  // echoes rewrite localStorage while React kept a stale sequence (same bug
+  // as set-list order before quizSetsEqualForUI checked positions).
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].id !== b[i].id) return false;
+    if (!quizItemContentEquals(a[i], b[i])) return false;
+  }
+  return true;
 }
 
 export function quizSetEqualForUI(a: QuizSet, b: QuizSet): boolean {

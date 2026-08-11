@@ -1973,12 +1973,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // quota can't hold them). Load it in parallel with the first paint from the
     // raw localStorage snapshot, then fold journal entries in before cloud merge.
     let local = readLocalNotesDataRaw();
-    // Seed refs immediately for merges, but do NOT paint quizSets/quizzes from the
-    // localStorage shell yet — items[] there is often a stale subset while the
-    // full questions live in IndexedDB quizItems (classic 9→11 refresh flash).
+    // Seed refs immediately for merges, but do NOT paint quizSets/quizzes until
+    // the full IDB + cloud ById/array hydrate finishes (classic 9→11 flash came
+    // from painting an incomplete shell, then jumping when cloud reattached items).
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
-    // Same-session remount: prefer the last full in-memory lists over a short LS shell.
+    // Same-session remount: keep the richer in-memory lists in refs for merges,
+    // but still wait for loaded before React paints (QuizPage gates on loaded).
     if (
       quizListsBootCache
       && countLiveQuizItems(quizListsBootCache.sets) >= countLiveQuizItems(local.sets)
@@ -1987,8 +1988,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizzesRef.current = quizListsBootCache.quizzes;
       quizSetsRef.current = quizListsBootCache.sets;
       local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
-      setQuizzes(quizListsBootCache.quizzes);
-      setQuizSets(quizListsBootCache.sets);
     }
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
@@ -2033,14 +2032,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizzesRef.current = local.quizzes;
         quizSetsRef.current = local.sets;
       }
-      // First quiz paint only after IDB items are folded in — never the bare LS shell
-      // (that incomplete items[] is what caused the 9→11 count flicker on refresh).
-      // Never replace a richer same-session cache with a shorter IDB/LS fold.
+      // Keep refs + durable LS warm, but do NOT setState yet — cloud ById/array
+      // may still attach more live questions. QuizPage waits on `loaded`.
       const cacheLive = quizListsBootCache ? countLiveQuizItems(quizListsBootCache.sets) : 0;
       const nextLive = countLiveQuizItems(local.sets);
       if (local.sets.length && nextLive >= cacheLive) {
-        if (local.quizzes.length) setQuizzes(local.quizzes);
-        setQuizSets(local.sets);
         rememberQuizListsBootCache(local.quizzes, local.sets);
         safeSetItem('malacadhati_quiz_sets', JSON.stringify(local.sets));
         writeQuizSetsShellJournal(local.sets);
@@ -2048,8 +2044,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizzesRef.current = quizListsBootCache.quizzes;
         quizSetsRef.current = quizListsBootCache.sets;
         local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
-      } else if (local.quizzes.length) {
-        setQuizzes(local.quizzes);
       }
     })();
     const storedCloudSyncAt = Number(localStorage.getItem(CLOUD_SYNCED_AT_KEY));
@@ -2168,21 +2162,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           setNotes(mergedNotes);
           local = { ...local, notes: mergedNotes };
         }
-        // Keep refs current for the final boot merge. Only paint when ById is
-        // strictly richer than what durableReady already showed — avoids a
-        // second mid-flight count jump (and never paints a shorter list).
+        // Keep refs current for the final boot merge — no mid-flight quiz paint
+        // (partial ById attach used to flash 9 then jump to 11).
         if (cloudQuizItemsById.length) {
           const applied = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, cloudQuizItemsById);
-          const richer = countLiveQuizItems(applied.sets) > countLiveQuizItems(quizSetsRef.current)
-            || applied.quizzes.length > quizzesRef.current.length;
           quizzesRef.current = applied.quizzes;
           quizSetsRef.current = applied.sets;
           local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
-          if (richer) {
-            setQuizzes(applied.quizzes);
-            setQuizSets(applied.sets);
-            rememberQuizListsBootCache(applied.quizzes, applied.sets);
-          }
+          rememberQuizListsBootCache(applied.quizzes, applied.sets);
         }
         if (cloudSetsById.length) {
           quizSetsByIdCacheRef.current = cloudSetsById;
@@ -2190,14 +2177,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             unionQuizSetsFromById(quizSetsRef.current, cloudSetsById, permDeletedRef.current),
             quizSetTombstonesRef.current,
           );
-          const richer = countLiveQuizItems(mergedSets) > countLiveQuizItems(quizSetsRef.current)
-            || mergedSets.length > quizSetsRef.current.length;
           quizSetsRef.current = mergedSets;
           local = { ...local, sets: mergedSets };
-          if (richer) {
-            setQuizSets(mergedSets);
-            rememberQuizListsBootCache(quizzesRef.current, mergedSets);
-          }
+          rememberQuizListsBootCache(quizzesRef.current, mergedSets);
         }
         if (cloudFoldersById.length) {
           quizFoldersByIdCacheRef.current = cloudFoldersById;
@@ -6056,6 +6038,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!changed) return prev;
       persistSets(next, true, true);
       scheduleInstantDataCloudSave({ quizSets: next });
+      // Durable ById + IndexedDB must carry Manual item order — giant array alone
+      // is what lost order on refresh when ById/IDB shells won the merge.
+      const updated = next.find((s) => s.id === setId);
+      if (updated) void pushQuizSetById(updated);
       return next;
     });
   };
@@ -6095,6 +6081,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!changed) return prev;
       persistSets(next, true, true);
       scheduleInstantDataCloudSave({ quizSets: next });
+      const updated = next.find((s) => s.id === setId);
+      if (updated) void pushQuizSetById(updated);
       return next;
     });
   };
@@ -6135,6 +6123,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!changed) return prev;
       persistSets(next, true, true);
       scheduleInstantDataCloudSave({ quizSets: next });
+      // Push the full reordered set (never a shorter items[]) so ById/IDB honor
+      // Manual order on the next refresh merge — same durability path as create.
+      const updated = next.find((s) => s.id === setId);
+      if (updated) void pushQuizSetById(updated);
       return next;
     });
   };

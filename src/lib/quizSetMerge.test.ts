@@ -128,6 +128,32 @@ describe('pickBetterQuizSet item union', () => {
     expect(merged.orderUpdatedAt).toBe('2024-01-04T00:00:00.000Z');
     expect(merged.listOrderUpdatedAt).toBe('2024-01-05T00:00:00.000Z');
   });
+
+  it('keeps Manual in-set item order from the side with newer orderUpdatedAt', () => {
+    const a = item(1, 'first', '2024-01-01T00:00:00.000Z');
+    const b = item(2, 'second', '2024-01-01T00:00:00.000Z');
+    const c = item(3, 'third', '2024-01-01T00:00:00.000Z');
+    const local = set({
+      id: 'koag',
+      name: 'Koag',
+      items: [c, a, b],
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-02T00:00:00.000Z',
+      orderUpdatedAt: '2024-08-11T21:00:00.000Z',
+    });
+    const remote = set({
+      id: 'koag',
+      name: 'Koag',
+      items: [a, b, c],
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-08-11T20:00:00.000Z',
+      orderUpdatedAt: '2024-01-01T00:00:00.000Z',
+    });
+
+    const merged = pickBetterQuizSet(local, remote);
+    expect(merged.items.map((i) => i.id)).toEqual([3, 1, 2]);
+    expect(merged.orderUpdatedAt).toBe('2024-08-11T21:00:00.000Z');
+  });
 });
 
 describe('applyDurableQuizItems keep-more-data', () => {
