@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { applyDurableQuizItems, type StoredQuizItem } from './itemsStore';
-import { countLiveQuizItems, pickBetterQuizSet } from './quizSetMerge';
+import {
+  countLiveQuizItems,
+  decideQuizListsUiPaint,
+  pickBetterQuizSet,
+  quizSetsMembershipGrew,
+} from './quizSetMerge';
+import { quizSetsEqualForUI, quizzesEqualForUI } from './quizContent';
 import type { QuizItem, QuizSet } from '../types';
 
 function item(id: number, question: string, updatedAt: string, extra?: Partial<QuizItem>): QuizItem {
@@ -179,5 +185,93 @@ describe('applyDurableQuizItems keep-more-data', () => {
 
     const { sets: next } = applyDurableQuizItems([], sets, durable);
     expect(next[0].items.filter((i) => !i.trashed)).toHaveLength(10);
+  });
+});
+
+describe('quiz UI paint gate after timeout local-9', () => {
+  const nine = Array.from({ length: 9 }, (_, i) => item(i + 1, `Q${i + 1}`, '2026-08-11T10:00:00.000Z'));
+  const eleven = Array.from({ length: 11 }, (_, i) =>
+    item(i + 1, `Q${i + 1}-cloud`, '2026-08-11T12:00:00.000Z'),
+  );
+  const paintedSets = [
+    set({
+      id: 'koag',
+      name: 'Koagulationsstatus',
+      items: nine,
+      createdAt: '2026-08-01T00:00:00.000Z',
+    }),
+  ];
+  const richerSets = [
+    set({
+      id: 'koag',
+      name: 'Koagulationsstatus',
+      items: eleven,
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-11T12:00:00.000Z',
+    }),
+  ];
+
+  it('detects membership growth 9→11', () => {
+    expect(quizSetsMembershipGrew(paintedSets, richerSets)).toBe(true);
+    expect(countLiveQuizItems(richerSets)).toBe(11);
+  });
+
+  it('paints richer cloud after timeout revealed local-9 (ById catch-up)', () => {
+    const decision = decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: true,
+      seenAuthoritativeById: false,
+      isAuthoritativeByIdMerge: true,
+      paintedSets,
+      nextSets: richerSets,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI,
+    });
+    expect(decision.paint).toBe(true);
+    expect(['byid-catchup', 'membership-grew']).toContain(decision.reason);
+  });
+
+  it('still paints membership growth after authoritative ById (no stick at 9)', () => {
+    const decision = decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: false,
+      seenAuthoritativeById: true,
+      isAuthoritativeByIdMerge: false,
+      paintedSets,
+      nextSets: richerSets,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI,
+    });
+    expect(decision.paint).toBe(true);
+    expect(decision.reason).toBe('membership-grew');
+  });
+
+  it('skips same-id HTML flip after authoritative reveal when membership is unchanged', () => {
+    const sameIdsNewHtml = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: nine.map((q) => ({ ...q, question: `${q.question} edited`, updatedAt: '2026-08-11T13:00:00.000Z' })),
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }),
+    ];
+    const decision = decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: false,
+      seenAuthoritativeById: true,
+      isAuthoritativeByIdMerge: false,
+      paintedSets,
+      nextSets: sameIdsNewHtml,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI,
+    });
+    expect(decision.paint).toBe(false);
+    expect(decision.reason).toBe('skip');
   });
 });

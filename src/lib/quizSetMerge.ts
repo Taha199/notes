@@ -142,3 +142,71 @@ export function countLiveQuizItems(sets: QuizSet[]): number {
     0,
   );
 }
+
+/** True when `next` gained any live item id (global or per-set) vs `prev`. */
+export function quizSetsMembershipGrew(prev: QuizSet[], next: QuizSet[]): boolean {
+  if (countLiveQuizItems(next) > countLiveQuizItems(prev)) return true;
+  const prevById = new Map(prev.map((set) => [set.id, set]));
+  for (const set of next) {
+    const prior = prevById.get(set.id);
+    const nextLive = new Set(
+      (set.items ?? []).filter((item) => item && !item.trashed).map((item) => item.id),
+    );
+    if (!prior) {
+      if (nextLive.size > 0) return true;
+      continue;
+    }
+    const prevLive = new Set(
+      (prior.items ?? []).filter((item) => item && !item.trashed).map((item) => item.id),
+    );
+    for (const id of nextLive) {
+      if (!prevLive.has(id)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Decide whether merged quiz lists must reach React after a hydrate step.
+ *
+ * Membership growth (9→11) always paints. Same-id HTML flips are allowed on the
+ * first authoritative ById catch-up after a timeout reveal, but skipped once an
+ * authoritative body snapshot was already shown — without blocking later adds.
+ */
+export function decideQuizListsUiPaint(opts: {
+  contentReady: boolean;
+  revealedViaTimeout: boolean;
+  seenAuthoritativeById: boolean;
+  isAuthoritativeByIdMerge: boolean;
+  /** Last lists actually passed to setQuizSets / setQuizzes (not just refs). */
+  paintedSets: QuizSet[];
+  nextSets: QuizSet[];
+  paintedQuizzes: QuizItem[];
+  nextQuizzes: QuizItem[];
+  setsEqualForUI: (a: QuizSet[], b: QuizSet[]) => boolean;
+  quizzesEqualForUI: (a: QuizItem[], b: QuizItem[]) => boolean;
+}): { paint: boolean; reason: 'first-reveal' | 'byid-catchup' | 'membership-grew' | 'content-changed' | 'skip' } {
+  const membershipGrew = quizSetsMembershipGrew(opts.paintedSets, opts.nextSets)
+    || opts.nextQuizzes.length > opts.paintedQuizzes.length;
+  const contentChanged = !opts.setsEqualForUI(opts.paintedSets, opts.nextSets)
+    || !opts.quizzesEqualForUI(opts.paintedQuizzes, opts.nextQuizzes);
+
+  if (!opts.contentReady) {
+    return { paint: true, reason: 'first-reveal' };
+  }
+  // Timeout showed incomplete local (classic 9) — first ById must still land.
+  if (opts.revealedViaTimeout && !opts.seenAuthoritativeById && opts.isAuthoritativeByIdMerge) {
+    return { paint: true, reason: 'byid-catchup' };
+  }
+  if (membershipGrew) {
+    return { paint: true, reason: 'membership-grew' };
+  }
+  // After an authoritative body reveal, skip same-id HTML flips from later echoes.
+  if (opts.seenAuthoritativeById) {
+    return { paint: false, reason: 'skip' };
+  }
+  if (contentChanged) {
+    return { paint: true, reason: 'content-changed' };
+  }
+  return { paint: false, reason: 'skip' };
+}
