@@ -9,14 +9,18 @@ import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import {
   adoptByIdMembershipWhenRicher,
+  bumpMaxKnownLiveBySet,
   countLiveItemsInSet,
   countLiveQuizItems,
+  enforceMaxKnownLiveMembership,
+  isQuizSetsLocalWriteSafe,
   mergeQuizItemsUnion,
   pickBetterQuizSet as pickBetterQuizSetCore,
   pickNewerQuizItem as pickNewerQuizItemCore,
   preferRicherQuizSetsMembership,
   quizItemSyncTime,
   quizSetsMembershipGrew,
+  quizSetsMembershipShrunk,
   unionQuizSetsForCommit,
 } from '../lib/quizSetMerge';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
@@ -1869,6 +1873,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [draftsLoading, setDraftsLoading] = useState(false);
   const loadedRef = useRef(false);
   const quizLocalReadyRef = useRef(false);
+  /** Last quiz lists actually committed to React — shrink checks use this, not refs alone. */
+  const lastPaintedQuizSetsRef = useRef<QuizSet[]>([]);
+  /** Monotonic max live item count per set id — never paint/write below this. */
+  const maxKnownLiveBySetRef = useRef<Map<string, number>>(new Map());
   const cloudLoadSucceededRef = useRef(false);
   const draftsReadyRef = useRef(false);
   const draftPullDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1980,6 +1988,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     loadedRef.current = false;
     quizLocalReadyRef.current = false;
+    lastPaintedQuizSetsRef.current = [];
+    maxKnownLiveBySetRef.current = new Map();
     cloudLoadSucceededRef.current = false;
     draftsReadyRef.current = false;
     setDraftsReady(false);
@@ -2001,22 +2011,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // quota can't hold them). Load it in parallel with the first paint from the
     // raw localStorage snapshot, then fold journal entries in before cloud merge.
     let local = readLocalNotesDataRaw();
-    // Notes-like local-first: paint LS immediately (boot cache wins when richer).
-    // Cloud/ById merge only grows membership — never shrinks live set/item ids.
+    // Seed refs for merges, but do NOT paint the LS shell yet — items[] there is
+    // often a stale subset (classic 11→9→4) while full questions live in IDB/ById.
+    quizzesRef.current = local.quizzes;
+    quizSetsRef.current = local.sets;
+    bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
+    // Same-session remount: prefer last full in-memory lists over a short LS shell.
     if (
       quizListsBootCache
       && countLiveQuizItems(quizListsBootCache.sets) >= countLiveQuizItems(local.sets)
-      && quizListsBootCache.sets.length >= local.sets.length
       && quizListsBootCache.sets.length > 0
     ) {
       local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
-    }
-    quizzesRef.current = local.quizzes;
-    quizSetsRef.current = local.sets;
-    if (local.quizzes.length) setQuizzes(local.quizzes);
-    if (local.sets.length) setQuizSets(local.sets);
-    if (local.quizzes.length || local.sets.length) {
-      rememberQuizListsBootCache(local.quizzes, local.sets);
+      quizzesRef.current = quizListsBootCache.quizzes;
+      quizSetsRef.current = quizListsBootCache.sets;
+      bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, quizListsBootCache.sets);
+      setQuizzes(quizListsBootCache.quizzes);
+      setQuizSets(quizListsBootCache.sets);
+      lastPaintedQuizSetsRef.current = quizListsBootCache.sets;
+      quizLocalReadyRef.current = true;
+      setQuizLocalReady(true);
     }
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
@@ -2026,30 +2040,43 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizzesRef.current = local.quizzes;
       quizSetsRef.current = local.sets;
       setNotes(local.notes);
-      if (local.quizzes.length) setQuizzes(local.quizzes);
-      if (local.sets.length) setQuizSets(local.sets);
+      // Quiz lists wait for durableReady so we never flash an incomplete items[].
       return edits;
     });
 
     // Radical durability: IndexedDB + notesById / quizSetsById are the source of
-    // truth for recently-saved items. Fold them in before cloud merge so a
-    // cancelled giant-array write cannot hide a just-created set.
+    // truth for recently-saved items. Fold them in before first quiz paint /
+    // cloud merge so a cancelled giant-array write cannot hide a just-created set.
     const markQuizLocalReady = () => {
       if (cancelled || quizLocalReadyRef.current) return;
       quizLocalReadyRef.current = true;
       setQuizLocalReady(true);
     };
-    /** Single commit path: union into refs, setState, safe LS — like notes. */
+    /** Single commit path: union into refs, setState, safe LS — never shrink below max-known. */
     const commitQuizListsLocal = (
       nextQuizzes: QuizItem[],
       nextSets: QuizSet[],
-      opts?: { persistLocal?: boolean },
+      opts?: { persistLocal?: boolean; forcePaint?: boolean },
     ) => {
       if (cancelled) return;
-      const sets = unionQuizSetsForCommit(
+      const painted = lastPaintedQuizSetsRef.current.length
+        ? lastPaintedQuizSetsRef.current
+        : quizSetsRef.current;
+      let sets = unionQuizSetsForCommit(
         nextSets,
+        painted,
         quizSetsRef.current,
         quizSetsByIdCacheRef.current,
+      );
+      bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, sets);
+      bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, quizSetsByIdCacheRef.current);
+      bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, painted);
+      sets = enforceMaxKnownLiveMembership(
+        sets,
+        maxKnownLiveBySetRef.current,
+        painted,
+        quizSetsByIdCacheRef.current,
+        quizSetsRef.current,
       );
       quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
         quizSetsByIdCacheRef.current,
@@ -2059,11 +2086,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const prevS = quizSetsRef.current;
       quizzesRef.current = nextQuizzes;
       quizSetsRef.current = sets;
-      if (!quizzesEqualForUI(nextQuizzes, prevQ)) setQuizzes(nextQuizzes);
-      if (!quizSetsEqualForUI(sets, prevS)) setQuizSets(sets);
-      rememberQuizListsBootCache(nextQuizzes, sets);
-      if (opts?.persistLocal !== false) {
-        // Unioned sets never shrink live membership vs refs/ById — safe to write.
+      const shrunk = quizSetsMembershipShrunk(painted, sets)
+        && !quizSetsMembershipGrew(painted, sets);
+      if (opts?.forcePaint || !shrunk) {
+        if (!quizzesEqualForUI(nextQuizzes, prevQ)) setQuizzes(nextQuizzes);
+        if (!quizSetsEqualForUI(sets, prevS)) setQuizSets(sets);
+        lastPaintedQuizSetsRef.current = sets;
+        rememberQuizListsBootCache(nextQuizzes, sets);
+      }
+      if (
+        opts?.persistLocal !== false
+        && isQuizSetsLocalWriteSafe(sets, maxKnownLiveBySetRef.current, painted)
+      ) {
         safeSetItem('malacadhati_quiz_sets', JSON.stringify(sets));
         writeQuizSetsShellJournal(sets);
         safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
@@ -2100,7 +2134,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       // Re-paint from IDB-enriched local (may grow item bodies / set shells).
       if (local.quizzes.length || local.sets.length) {
         commitQuizListsLocal(local.quizzes, local.sets, {
+          // Online: paint IDB union but don't poison LS until ById catch-up.
           persistLocal: typeof navigator !== 'undefined' ? navigator.onLine === false : false,
+          forcePaint: true,
         });
       }
       markQuizLocalReady();
@@ -2238,6 +2274,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             cloudSetsById,
             quizSetsRef.current,
           );
+          bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, quizSetsByIdCacheRef.current);
           const mergedSets = applyTrashTombstones(
             preferRicherQuizSetsMembership(
               quizSetsRef.current,
@@ -2553,9 +2590,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         const liveNormalized = countLiveQuizItems(quizSetsRef.current);
         const liveCloud = countLiveQuizItems(cloudSets);
-        // Never heal-push a shorter items[] snapshot over richer cloud/local.
+        const maxKnownLive = [...maxKnownLiveBySetRef.current.values()].reduce((a, b) => a + b, 0);
+        // Never heal-push a shorter items[] snapshot over richer cloud/local/known.
         const safeToPushQuizSets = liveNormalized >= liveCloud
-          && !quizSetsMembershipGrew(quizSetsRef.current, cloudSets);
+          && liveNormalized >= maxKnownLive;
         const needsMembershipHeal = quizSetsRemoteMembershipIncomplete(quizSetsRef.current, cloudSets)
           || quizSetsMissingFromRemote(quizSetsRef.current, cloudSets);
         const needsRepair = notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
@@ -2707,13 +2745,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   /**
    * Single remote commit path for quiz sets (notes-like).
-   * Union with refs + ById cache, then setState — never skip paints, never shrink.
+   * Union with refs + ById + last painted + max-known floor — never paint/write a shrink.
    */
   const commitQuizSetsFromRemote = (incoming: QuizSet[]) => {
-    const next = unionQuizSetsForCommit(
+    const painted = lastPaintedQuizSetsRef.current.length
+      ? lastPaintedQuizSetsRef.current
+      : quizSetsRef.current;
+    let next = unionQuizSetsForCommit(
       incoming,
+      painted,
       quizSetsRef.current,
       quizSetsByIdCacheRef.current,
+    );
+    next = adoptByIdMembershipWhenRicher(next, quizSetsByIdCacheRef.current);
+    bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, next);
+    bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, quizSetsByIdCacheRef.current);
+    bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, painted);
+    next = enforceMaxKnownLiveMembership(
+      next,
+      maxKnownLiveBySetRef.current,
+      painted,
+      quizSetsByIdCacheRef.current,
+      quizSetsRef.current,
     );
     quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
       quizSetsByIdCacheRef.current,
@@ -2721,12 +2774,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
     const prev = quizSetsRef.current;
     quizSetsRef.current = next;
-    if (!quizSetsEqualForUI(next, prev)) {
+    const shrunk = quizSetsMembershipShrunk(painted, next)
+      && !quizSetsMembershipGrew(painted, next);
+    if (!shrunk && !quizSetsEqualForUI(next, prev)) {
       setQuizSets(next);
+      lastPaintedQuizSetsRef.current = next;
       rememberQuizListsBootCache(quizzesRef.current, next);
+    } else if (!shrunk) {
+      lastPaintedQuizSetsRef.current = next;
     }
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
-    writeQuizSetsShellJournal(next);
+    if (isQuizSetsLocalWriteSafe(next, maxKnownLiveBySetRef.current, painted)) {
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+      writeQuizSetsShellJournal(next);
+    }
     return next;
   };
 
@@ -2741,13 +2801,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // recovery/backup paths rely on this PUT as their sole delivery mechanism, so
   // they keep skipDirectPut=false.
   const persistSets = (nextSets: QuizSet[], forceCloud = false, skipDirectPut = false) => {
-    const safeSets = unionQuizSetsForCommit(
+    const painted = lastPaintedQuizSetsRef.current;
+    let safeSets = unionQuizSetsForCommit(
       nextSets,
+      painted,
       quizSetsRef.current,
       quizSetsByIdCacheRef.current,
     );
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(safeSets));
-    writeQuizSetsShellJournal(safeSets);
+    bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, safeSets);
+    safeSets = enforceMaxKnownLiveMembership(
+      safeSets,
+      maxKnownLiveBySetRef.current,
+      painted,
+      quizSetsByIdCacheRef.current,
+      quizSetsRef.current,
+    );
+    if (isQuizSetsLocalWriteSafe(safeSets, maxKnownLiveBySetRef.current, painted)) {
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(safeSets));
+      writeQuizSetsShellJournal(safeSets);
+    }
     quizSetsRef.current = safeSets;
     // Never force a full-user PATCH here — that raced with empty notes and wiped the cloud.
     persist({ quizSets: safeSets }, false);
@@ -2756,6 +2828,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       // data that must still reach cloud, or the delete resurrects on refresh.
       if (!hasAnyUserQuizSetRows(safeSets) && everHadSetsRef.current) {
         recoveryLog('skipped quizSets PUT wipe');
+        return;
+      }
+      const maxKnownLive = [...maxKnownLiveBySetRef.current.values()].reduce((a, b) => a + b, 0);
+      if (
+        countLiveQuizItems(safeSets) < maxKnownLive
+        || !isQuizSetsLocalWriteSafe(safeSets, maxKnownLiveBySetRef.current, painted)
+      ) {
+        recoveryLog('skipped quizSets cloud write below max-known membership', {
+          live: countLiveQuizItems(safeSets),
+          maxKnownLive,
+        });
         return;
       }
       if (countUserQuizSets(safeSets) > 0) everHadSetsRef.current = true;
@@ -2956,7 +3039,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return [...quizSetsByIdCacheRef.current, row];
     })();
     // IndexedDB always; ById cloud even before loadedRef so create-then-refresh survives.
-    const cached = quizSetsByIdCacheRef.current.find((s) => s.id === quizSet.id) ?? quizSet;
+    let cached = quizSetsByIdCacheRef.current.find((s) => s.id === quizSet.id) ?? quizSet;
+    bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, [cached]);
+    cached = enforceMaxKnownLiveMembership(
+      [cached],
+      maxKnownLiveBySetRef.current,
+      quizSetsByIdCacheRef.current,
+      quizSetsRef.current,
+      lastPaintedQuizSetsRef.current,
+    )[0] ?? cached;
+    // Never overwrite cloud/IDB ById with a membership below the session high-water mark.
+    if (countLiveItemsInSet(cached) < (maxKnownLiveBySetRef.current.get(cached.id) ?? 0)) {
+      recoveryLog('skipped quizSetsById push below max-known', {
+        id: cached.id,
+        live: countLiveItemsInSet(cached),
+        maxKnown: maxKnownLiveBySetRef.current.get(cached.id),
+      });
+      return false;
+    }
     return persistQuizSetDurable(uid, cached);
   };
 
@@ -3838,11 +3938,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (safe.quizSets !== undefined) safe.quizSets = quizSetsRef.current;
     if (safe.quizFolders !== undefined) safe.quizFolders = quizFoldersRef.current;
     if (safe.quizSets) {
-      // Never push a shorter items[] over the live ref union (already unioned into ref).
+      // Never push a shorter items[] heal over max-known / last-painted membership.
       const livePush = countLiveQuizItems(safe.quizSets);
       const liveRef = countLiveQuizItems(quizSetsRef.current);
-      if (livePush < liveRef) {
-        recoveryLog('skipped instant quizSets short membership heal', { livePush, liveRef });
+      const livePainted = countLiveQuizItems(
+        lastPaintedQuizSetsRef.current.length ? lastPaintedQuizSetsRef.current : safe.quizSets,
+      );
+      const maxKnown = [...maxKnownLiveBySetRef.current.values()].reduce((a, b) => a + b, 0);
+      if (livePush < liveRef || livePush < livePainted || livePush < maxKnown) {
+        recoveryLog('skipped instant quizSets short membership heal', {
+          livePush,
+          liveRef,
+          livePainted,
+          maxKnown,
+        });
         delete safe.quizSets;
       }
     }

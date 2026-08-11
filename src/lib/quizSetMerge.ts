@@ -265,15 +265,76 @@ export function adoptByIdMembershipWhenRicher(
 }
 
 /**
- * Notes-like commit helper: union incoming with known richer sources, then
- * callers always setState. Never drop live set/item ids present on either side.
+ * Monotonic high-water mark of live items per set id. Only grows.
+ * Survives short shells arriving later in the same session.
+ */
+export function bumpMaxKnownLiveBySet(
+  maxKnown: Map<string, number>,
+  sets: QuizSet[],
+): void {
+  for (const set of sets) {
+    if (!set?.id) continue;
+    const live = countLiveItemsInSet(set);
+    const prev = maxKnown.get(set.id) ?? 0;
+    if (live > prev) maxKnown.set(set.id, live);
+  }
+}
+
+/**
+ * If any set fell below its max-known live count, restore membership from
+ * recovery sources (painted / ById / ref / IDB). Never invents items — only
+ * reattaches ones still present on a durable source.
+ */
+export function enforceMaxKnownLiveMembership(
+  sets: QuizSet[],
+  maxKnown: Map<string, number>,
+  ...recoverySources: QuizSet[][]
+): QuizSet[] {
+  return sets.map((set) => {
+    const known = maxKnown.get(set.id) ?? 0;
+    if (countLiveItemsInSet(set) >= known) return set;
+    const recoveries = recoverySources.map((src) => {
+      const row = src.find((s) => s.id === set.id);
+      return row ? [row] : [];
+    });
+    return preferRicherQuizSetsMembership([set], ...recoveries)[0] ?? set;
+  });
+}
+
+/** True when writing `sets` would not poison LS / cloud below max-known or last painted. */
+export function isQuizSetsLocalWriteSafe(
+  sets: QuizSet[],
+  maxKnown: Map<string, number>,
+  lastPainted: QuizSet[] = [],
+): boolean {
+  for (const [id, maxLive] of maxKnown.entries()) {
+    const row = sets.find((s) => s.id === id);
+    if (row && countLiveItemsInSet(row) < maxLive) return false;
+  }
+  if (
+    lastPainted.length
+    && quizSetsMembershipShrunk(lastPainted, sets)
+    && !quizSetsMembershipGrew(lastPainted, sets)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Notes-like commit helper: union incoming with known richer sources.
+ * Membership = max across all sides; short shells cannot hide richer ById/local.
  */
 export function unionQuizSetsForCommit(
   incoming: QuizSet[],
   ...richerSources: QuizSet[][]
 ): QuizSet[] {
+  const allSources = [incoming, ...richerSources].filter((src) => src.length > 0);
+  if (!allSources.length) return incoming;
   const unioned = preferRicherQuizSetsMembership(incoming, ...richerSources);
-  const byIdSources = richerSources.filter((src) => src.length > 0);
-  if (!byIdSources.length) return unioned;
-  return adoptByIdMembershipWhenRicher(unioned, preferRicherQuizSetsMembership([], ...byIdSources));
+  // Adopt the richest membership among ALL sources (array + ById + local + IDB).
+  // Critical: do not treat only "secondary" args as ById — a short incoming
+  // array must still yield to a richer secondary, and vice versa.
+  const richest = preferRicherQuizSetsMembership([], ...allSources);
+  return adoptByIdMembershipWhenRicher(unioned, richest);
 }

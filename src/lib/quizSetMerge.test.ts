@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { applyDurableQuizItems, type StoredQuizItem } from './itemsStore';
 import {
   adoptByIdMembershipWhenRicher,
+  bumpMaxKnownLiveBySet,
   countLiveQuizItems,
+  enforceMaxKnownLiveMembership,
+  isQuizSetsLocalWriteSafe,
   pickBetterQuizSet,
   preferRicherQuizSetsMembership,
   quizSetsMembershipGrew,
@@ -216,6 +219,43 @@ describe('notes-like union commit (no paint gates)', () => {
     const merged = unionQuizSetsForCommit(localNine, byIdEleven);
     expect(merged[0].items.filter((i) => !i.trashed)).toHaveLength(11);
     expect(countLiveQuizItems(merged)).toBe(11);
+  });
+
+  it('sources with 11, 9, and 4 → result 11 (Koagulationsstatus regression)', () => {
+    const four = Array.from({ length: 4 }, (_, i) =>
+      item(i + 1, `Q${i + 1}-short`, '2026-08-12T00:20:00.000Z'),
+    );
+    const shellFour = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: four,
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-12T00:28:00.000Z',
+      }),
+    ];
+    const merged = unionQuizSetsForCommit(shellFour, localNine, byIdEleven);
+    expect(merged[0].items.filter((i) => !i.trashed)).toHaveLength(11);
+    expect(countLiveQuizItems(merged)).toBe(11);
+    expect(quizSetsMembershipShrunk(byIdEleven, merged)).toBe(false);
+  });
+
+  it('max-known floor blocks short LS write after richer paint', () => {
+    const maxKnown = new Map<string, number>();
+    bumpMaxKnownLiveBySet(maxKnown, byIdEleven);
+    expect(maxKnown.get('koag')).toBe(11);
+    const short = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: nine.slice(0, 4),
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-12T00:28:00.000Z',
+      }),
+    ];
+    expect(isQuizSetsLocalWriteSafe(short, maxKnown, byIdEleven)).toBe(false);
+    const restored = enforceMaxKnownLiveMembership(short, maxKnown, byIdEleven, localNine);
+    expect(restored[0].items.filter((i) => !i.trashed)).toHaveLength(11);
   });
 
   it('short array cannot shrink richer local/ById', () => {
