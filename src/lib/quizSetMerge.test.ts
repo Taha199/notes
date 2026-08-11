@@ -10,6 +10,7 @@ import {
   preferRicherQuizSetsMembership,
   quizSetsMembershipGrew,
   quizSetsMembershipShrunk,
+  shouldHydrateQuizSetsUi,
   unionQuizSetsForCommit,
 } from './quizSetMerge';
 import type { QuizItem, QuizSet } from '../types';
@@ -319,5 +320,19 @@ describe('notes-like union commit (no paint gates)', () => {
     ]);
     expect(afterById.map((s) => s.id).sort()).toEqual(['abl', 'serum']);
     expect(quizSetsMembershipGrew(painted, afterById)).toBe(true);
+  });
+
+  it('empty local shell never blocks cloud/ById set-list hydrate (0-set emergency)', () => {
+    const cloudSets = [
+      set({ id: 'abl', name: 'ABL', items: [item(1, 'q', '2026-01-01T00:00:00.000Z')], createdAt: '2026-01-01T00:00:00.000Z' }),
+      set({ id: 'koag', name: 'Koagulationsstatus', items: [], createdAt: '2026-01-01T00:00:00.000Z' }),
+      set({ id: 'serum', name: 'Serum & Plasma', items: [], createdAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    const merged = unionQuizSetsForCommit([], cloudSets);
+    expect(merged.map((s) => s.id).sort()).toEqual(['abl', 'koag', 'serum']);
+    // Refs already equal next, but painted UI is [] → must hydrate React.
+    expect(shouldHydrateQuizSetsUi([], merged)).toBe(true);
+    expect(shouldHydrateQuizSetsUi([], [])).toBe(false);
+    expect(shouldHydrateQuizSetsUi(merged, merged.slice(0, 1))).toBe(false);
   });
 });

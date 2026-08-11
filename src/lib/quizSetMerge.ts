@@ -322,8 +322,39 @@ export function isQuizSetsLocalWriteSafe(
 }
 
 /**
+ * Whether React must receive `next` for the set list.
+ *
+ * CRITICAL: compare against last *painted UI*, never against refs. Boot paths
+ * often pre-update quizSetsRef before commit; comparing equal-to-refs then
+ * skips setQuizSets and leaves the UI stuck at [] while folders still render
+ * (classic "0 set" emergency). Empty painted UI must always accept non-empty
+ * cloud/ById/IDB — empty local is zero membership, not authority.
+ */
+export function shouldHydrateQuizSetsUi(
+  painted: QuizSet[],
+  next: QuizSet[],
+): boolean {
+  if (!next.length) return false;
+  // Empty painted UI must always accept non-empty cloud/ById/IDB.
+  if (!painted.length) return true;
+  if (quizSetsMembershipGrew(painted, next)) return true;
+  const paintedLiveSets = liveUserQuizSetIds(painted).size;
+  const nextLiveSets = liveUserQuizSetIds(next).size;
+  // Losing live set ids (or live items on a shared id) without any growth = no paint.
+  if (
+    (nextLiveSets < paintedLiveSets || quizSetsMembershipShrunk(painted, next))
+    && !quizSetsMembershipGrew(painted, next)
+  ) {
+    return false;
+  }
+  // Same or reordered membership — caller may still equalForUI-gate setState.
+  return true;
+}
+
+/**
  * Notes-like commit helper: union incoming with known richer sources.
  * Membership = max across all sides; short shells cannot hide richer ById/local.
+ * Empty incoming never suppresses non-empty richer sources (set-list or items).
  */
 export function unionQuizSetsForCommit(
   incoming: QuizSet[],
@@ -331,7 +362,14 @@ export function unionQuizSetsForCommit(
 ): QuizSet[] {
   const allSources = [incoming, ...richerSources].filter((src) => src.length > 0);
   if (!allSources.length) return incoming;
-  const unioned = preferRicherQuizSetsMembership(incoming, ...richerSources);
+  // Empty local/incoming is not authority — order from the richest non-empty
+  // source so cloud/ById set-list membership always lands when LS is [].
+  const primary = incoming.length > 0
+    ? incoming
+    : (allSources.reduce((best, src) => (
+      liveUserQuizSetIds(src).size > liveUserQuizSetIds(best).size ? src : best
+    ), allSources[0]));
+  const unioned = preferRicherQuizSetsMembership(primary, ...allSources);
   // Adopt the richest membership among ALL sources (array + ById + local + IDB).
   // Critical: do not treat only "secondary" args as ById — a short incoming
   // array must still yield to a richer secondary, and vice versa.

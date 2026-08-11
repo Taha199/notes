@@ -19,8 +19,7 @@ import {
   pickNewerQuizItem as pickNewerQuizItemCore,
   preferRicherQuizSetsMembership,
   quizItemSyncTime,
-  quizSetsMembershipGrew,
-  quizSetsMembershipShrunk,
+  shouldHydrateQuizSetsUi,
   unionQuizSetsForCommit,
 } from '../lib/quizSetMerge';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
@@ -2011,15 +2010,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // quota can't hold them). Load it in parallel with the first paint from the
     // raw localStorage snapshot, then fold journal entries in before cloud merge.
     let local = readLocalNotesDataRaw();
-    // Seed refs for merges, but do NOT paint the LS shell yet — items[] there is
-    // often a stale subset (classic 11→9→4) while full questions live in IDB/ById.
+    // Seed refs. Paint set-list shells when LS/boot-cache has rows so folders
+    // never show "0 set" while ById/IDB enrich items. Empty LS must NOT paint
+    // or claim authority — cloud/ById hydrate below will fill the UI.
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
     bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
     // Same-session remount: prefer last full in-memory lists over a short LS shell.
     if (
       quizListsBootCache
-      && countLiveQuizItems(quizListsBootCache.sets) >= countLiveQuizItems(local.sets)
+      && (
+        countLiveQuizItems(quizListsBootCache.sets) >= countLiveQuizItems(local.sets)
+        || liveUserQuizSetIds(quizListsBootCache.sets).size >= liveUserQuizSetIds(local.sets).size
+      )
       && quizListsBootCache.sets.length > 0
     ) {
       local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
@@ -2031,6 +2034,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastPaintedQuizSetsRef.current = quizListsBootCache.sets;
       quizLocalReadyRef.current = true;
       setQuizLocalReady(true);
+    } else if (local.sets.length > 0) {
+      // Structure-first paint: set ids/folders visible immediately from LS.
+      setQuizSets(local.sets);
+      lastPaintedQuizSetsRef.current = local.sets;
+      if (local.quizzes.length) setQuizzes(local.quizzes);
     }
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
@@ -2059,9 +2067,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       opts?: { persistLocal?: boolean; forcePaint?: boolean },
     ) => {
       if (cancelled) return;
-      const painted = lastPaintedQuizSetsRef.current.length
-        ? lastPaintedQuizSetsRef.current
-        : quizSetsRef.current;
+      // UI baseline = last painted React lists only. Refs are often pre-updated
+      // before this commit; using them as baseline skipped setQuizSets and left [].
+      const painted = lastPaintedQuizSetsRef.current;
       let sets = unionQuizSetsForCommit(
         nextSets,
         painted,
@@ -2083,20 +2091,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         sets,
       );
       const prevQ = quizzesRef.current;
-      const prevS = quizSetsRef.current;
       quizzesRef.current = nextQuizzes;
       quizSetsRef.current = sets;
-      const shrunk = quizSetsMembershipShrunk(painted, sets)
-        && !quizSetsMembershipGrew(painted, sets);
-      if (opts?.forcePaint || !shrunk) {
+      const hydrateUi = opts?.forcePaint || shouldHydrateQuizSetsUi(painted, sets);
+      if (hydrateUi) {
         if (!quizzesEqualForUI(nextQuizzes, prevQ)) setQuizzes(nextQuizzes);
-        if (!quizSetsEqualForUI(sets, prevS)) setQuizSets(sets);
+        // Always setQuizSets on hydrate — equal-to-refs must not block empty UI.
+        if (!quizSetsEqualForUI(sets, painted) || painted.length === 0) {
+          setQuizSets(sets);
+        }
         lastPaintedQuizSetsRef.current = sets;
         rememberQuizListsBootCache(nextQuizzes, sets);
       }
       if (
         opts?.persistLocal !== false
         && isQuizSetsLocalWriteSafe(sets, maxKnownLiveBySetRef.current, painted)
+        // Never poison LS with an empty shell when we have ever had / know sets.
+        && (countUserQuizSets(sets) > 0 || !everHadSetsRef.current)
       ) {
         safeSetItem('malacadhati_quiz_sets', JSON.stringify(sets));
         writeQuizSetsShellJournal(sets);
@@ -2582,8 +2593,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           const applied = applyDurableQuizItems(quizzes, normalizedSets, [...cloudQuizItemsById, ...idbQuizzesFinal]);
           quizzes = applied.quizzes;
           normalizedSets = applied.sets;
-          // Always commit the unioned result (notes-like) — no paint-skip gates.
-          commitQuizListsLocal(quizzes, normalizedSets);
+          // Always commit the unioned result (notes-like) — force UI hydrate when
+          // painted is still empty so refs-equal cannot leave "0 set" forever.
+          commitQuizListsLocal(quizzes, normalizedSets, {
+            forcePaint: lastPaintedQuizSetsRef.current.length === 0 && normalizedSets.length > 0,
+          });
         }
         setQuizFolders(normalizedFolders);
         safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
@@ -2746,11 +2760,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   /**
    * Single remote commit path for quiz sets (notes-like).
    * Union with refs + ById + last painted + max-known floor — never paint/write a shrink.
+   * Empty local/painted never blocks a non-empty cloud/ById hydrate into React.
    */
   const commitQuizSetsFromRemote = (incoming: QuizSet[]) => {
-    const painted = lastPaintedQuizSetsRef.current.length
-      ? lastPaintedQuizSetsRef.current
-      : quizSetsRef.current;
+    const painted = lastPaintedQuizSetsRef.current;
     let next = unionQuizSetsForCommit(
       incoming,
       painted,
@@ -2772,18 +2785,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSetsByIdCacheRef.current,
       next,
     );
-    const prev = quizSetsRef.current;
     quizSetsRef.current = next;
-    const shrunk = quizSetsMembershipShrunk(painted, next)
-      && !quizSetsMembershipGrew(painted, next);
-    if (!shrunk && !quizSetsEqualForUI(next, prev)) {
-      setQuizSets(next);
+    // Hydrate UI from last *painted* baseline — not refs (often already equal).
+    if (shouldHydrateQuizSetsUi(painted, next) || (painted.length === 0 && next.length > 0)) {
+      if (!quizSetsEqualForUI(next, painted) || painted.length === 0) {
+        setQuizSets(next);
+      }
       lastPaintedQuizSetsRef.current = next;
       rememberQuizListsBootCache(quizzesRef.current, next);
-    } else if (!shrunk) {
-      lastPaintedQuizSetsRef.current = next;
     }
-    if (isQuizSetsLocalWriteSafe(next, maxKnownLiveBySetRef.current, painted)) {
+    if (
+      isQuizSetsLocalWriteSafe(next, maxKnownLiveBySetRef.current, painted)
+      && (countUserQuizSets(next) > 0 || !everHadSetsRef.current)
+    ) {
       safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
       writeQuizSetsShellJournal(next);
     }
@@ -4395,7 +4409,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       safeSetItem('malacadhati_chats', JSON.stringify(mergedChats));
       changed = true;
     }
-    if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current) || healQuizSets) {
+    // Always commit when UI is empty/under-hydrated even if refs already match
+    // (ById fold may have updated refs without setQuizSets — classic 0-set bug).
+    if (
+      JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)
+      || healQuizSets
+      || shouldHydrateQuizSetsUi(lastPaintedQuizSetsRef.current, normalizedSets)
+      || (lastPaintedQuizSetsRef.current.length === 0 && normalizedSets.length > 0)
+    ) {
       commitQuizSetsFromRemote(normalizedSets);
       changed = true;
     }
@@ -4413,11 +4434,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     if (changed) recoveryLog('applied remote cloud snapshot');
     // Publish union upward when cloud array was missing live sets/folders — never shrink.
+    // NEVER heal-push an empty quizSets[] (would wipe cloud). Empty local is not authority.
     if (healQuizSets || healQuizFolders) {
       const heal: { quizSets?: QuizSet[]; quizFolders?: QuizFolder[] } = {};
-      if (healQuizSets) heal.quizSets = quizSetsRef.current;
+      if (
+        healQuizSets
+        && hasAnyUserQuizSetRows(quizSetsRef.current)
+        && countUserQuizSets(quizSetsRef.current) > 0
+      ) {
+        heal.quizSets = quizSetsRef.current;
+      } else if (healQuizSets) {
+        recoveryLog('skipped empty quizSets heal-push over cloud');
+      }
       if (healQuizFolders) heal.quizFolders = quizFoldersRef.current;
-      queueMicrotask(() => scheduleInstantDataCloudSave(heal));
+      if (heal.quizSets || heal.quizFolders) {
+        queueMicrotask(() => scheduleInstantDataCloudSave(heal));
+      }
     }
   };
 
