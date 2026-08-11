@@ -7,6 +7,13 @@ import { setTokenSink } from '../lib/gemini';
 import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
+import {
+  countLiveQuizItems,
+  mergeQuizItemsUnion,
+  pickBetterQuizSet as pickBetterQuizSetCore,
+  pickNewerQuizItem as pickNewerQuizItemCore,
+  quizItemSyncTime,
+} from '../lib/quizSetMerge';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import {
   applyDurableQuizItems,
@@ -86,17 +93,11 @@ function noteSyncKey(note: Note) {
 }
 
 function quizSyncTime(item: QuizItem) {
-  return Date.parse(item.updatedAt || item.createdAt || '') || 0;
+  return quizItemSyncTime(item);
 }
 
 function pickNewerQuizItem(a: QuizItem, b: QuizItem) {
-  if (!!a.trashed !== !!b.trashed) {
-    const trashed = a.trashed ? a : b;
-    const live = a.trashed ? b : a;
-    // Soft-delete wins unless a restore/edit is strictly newer.
-    return quizSyncTime(live) > quizSyncTime(trashed) ? live : trashed;
-  }
-  return quizSyncTime(b) >= quizSyncTime(a) ? b : a;
+  return pickNewerQuizItemCore(a, b);
 }
 
 function noteContentLength(note: Note) {
@@ -469,39 +470,11 @@ function mergeQuizzesForSync(
   tombstones: PermanentlyDeletedIds = emptyPermDeleted(),
   orderFrom?: 'local' | 'remote',
 ) {
-  const dead = new Set(tombstones.quizzes);
-  const remoteIds = new Set(remote.map((item) => item.id));
-  const map = new Map<number, QuizItem>();
-  for (const item of local) {
-    if (dead.has(item.id)) continue;
-    if (!remoteIds.has(item.id) && item.trashed) continue;
-    map.set(item.id, item);
-  }
-  for (const item of remote) {
-    if (dead.has(item.id)) continue;
-    const existing = map.get(item.id);
-    map.set(item.id, existing ? pickNewerQuizItem(existing, item) : item);
-  }
-  // Preserve the authority device's manual order (Map insertion order alone
-  // always kept local-first, so mobile/desktop Manual order never matched).
-  const localMax = Math.max(0, ...local.map((item) => quizSyncTime(item)));
-  const remoteMax = Math.max(0, ...remote.map((item) => quizSyncTime(item)));
-  const resolvedOrder = orderFrom ?? (remoteMax >= localMax ? 'remote' : 'local');
-  const orderSource = resolvedOrder === 'remote' ? remote : local;
-  const ordered: QuizItem[] = [];
-  const seen = new Set<number>();
-  for (const item of orderSource) {
-    const merged = map.get(item.id);
-    if (!merged || seen.has(merged.id)) continue;
-    ordered.push(merged);
-    seen.add(merged.id);
-  }
-  for (const merged of map.values()) {
-    if (seen.has(merged.id)) continue;
-    ordered.push(merged);
-    seen.add(merged.id);
-  }
-  return ordered;
+  // Notes-style ById union — never drop live items missing from one side.
+  return mergeQuizItemsUnion(local, remote, {
+    permanentlyDeletedIds: tombstones.quizzes,
+    orderFrom,
+  });
 }
 
 function readTrashEmptiedAt(): number {
@@ -612,54 +585,12 @@ function reorderQuizSetsList(sets: QuizSet[], dragId: string, targetId: string, 
 }
 
 function pickBetterQuizSet(local: QuizSet, remote: QuizSet, tombstones: PermanentlyDeletedIds = emptyPermDeleted()): QuizSet {
-  if (!!local.trashed !== !!remote.trashed) {
-    // Never let a fabricated empty trash stub (ById onChildRemoved) beat a live named set.
-    if (remote.trashed && !String(remote.name || '').trim() && String(local.name || '').trim() && !local.trashed) {
-      return local;
-    }
-    if (local.trashed && !String(local.name || '').trim() && String(remote.name || '').trim() && !remote.trashed) {
-      return remote;
-    }
-    // Soft-delete wins unless the live side is a strictly newer edit/restore —
-    // otherwise a stale live copy (incomplete cloud array, lost merge race)
-    // could permanently override a delete that just hasn't reached that side yet.
-    const trashedSide = local.trashed ? local : remote;
-    const liveSide = local.trashed ? remote : local;
-    return entitySyncTime(liveSide) > entitySyncTime(trashedSide) ? liveSide : trashedSide;
-  }
-  // Membership/content authority is updatedAt — Manual reorder uses orderUpdatedAt
-  // so dragging on one device cannot revive questions deleted on another.
-  const remoteMembershipNewer = entitySyncTime(remote) >= entitySyncTime(local);
-  const membershipAuthority = remoteMembershipNewer ? remote : local;
-  const base = membershipAuthority;
-  // Strict > so equal order stamps keep local item order (ties used to flip to remote).
-  const preferRemoteOrder = quizSetOrderTime(remote) > quizSetOrderTime(local);
-  let items = mergeQuizzesForSync(
-    local.items ?? [],
-    remote.items ?? [],
-    tombstones,
-    preferRemoteOrder ? 'remote' : 'local',
-  );
-  // Newer membership side is authoritative for which live ids belong in the set.
-  // Keep only: ids present on the authority, soft-deleted rows, or concurrent
-  // adds stamped strictly after the authority set.
-  const authorityIds = new Set((membershipAuthority.items ?? []).map((i) => i.id));
-  const authorityAt = entitySyncTime(membershipAuthority);
-  items = items.filter((i) => {
-    if (authorityIds.has(i.id)) return true;
-    if (i.trashed) return true;
-    return quizSyncTime(i) > authorityAt;
+  // Union items by id (notes ById style). A newer parent updatedAt with a
+  // shorter/partial items[] must never drop questions — only item tombstones do.
+  return pickBetterQuizSetCore(local, remote, {
+    quizzes: tombstones.quizzes,
+    quizSets: tombstones.quizSets,
   });
-  const orderUpdatedAt = preferRemoteOrder
-    ? (remote.orderUpdatedAt ?? local.orderUpdatedAt)
-    : (local.orderUpdatedAt ?? remote.orderUpdatedAt);
-  // List position stamp is independent of in-set question order.
-  const preferRemoteListOrder = quizSetListOrderTime(remote) > quizSetListOrderTime(local);
-  const listOrderUpdatedAt = preferRemoteListOrder
-    ? (remote.listOrderUpdatedAt ?? local.listOrderUpdatedAt)
-    : (local.listOrderUpdatedAt ?? remote.listOrderUpdatedAt);
-  const withItems = orderUpdatedAt ? { ...base, items, orderUpdatedAt } : { ...base, items };
-  return listOrderUpdatedAt ? { ...withItems, listOrderUpdatedAt } : withItems;
 }
 
 function pickBetterQuizFolder(local: QuizFolder, remote: QuizFolder): QuizFolder {
@@ -2435,6 +2366,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           rawSets = mergeById(rawSets, liveSets);
           repairQuizStructure = true;
         }
+        // Fuller merged membership must heal incomplete cloud quizSets[] (classic 10→3).
+        if (countLiveQuizItems(rawSets) > countLiveQuizItems(cloudSets)) {
+          repairQuizStructure = true;
+        }
         if (quizzes.length === 0) {
           const fromSets = rawSets.flatMap((set) => set.items ?? []).filter((item) => item && !item.trashed);
           if (fromSets.length > 0) {
@@ -2848,13 +2783,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const idx = quizSetsByIdCacheRef.current.findIndex((s) => s.id === quizSet.id);
       if (idx >= 0) {
         const next = quizSetsByIdCacheRef.current.slice();
-        next[idx] = row;
+        // Never let an outgoing partial row blank richer cache membership.
+        next[idx] = pickBetterQuizSet(quizSetsByIdCacheRef.current[idx], row, permDeletedRef.current);
         return next;
       }
       return [...quizSetsByIdCacheRef.current, row];
     })();
     // IndexedDB always; ById cloud even before loadedRef so create-then-refresh survives.
-    return persistQuizSetDurable(uid, quizSet);
+    const cached = quizSetsByIdCacheRef.current.find((s) => s.id === quizSet.id) ?? quizSet;
+    return persistQuizSetDurable(uid, cached);
   };
 
   const rememberRemoteFolderInCache = (folder: QuizFolder) => {
@@ -2898,7 +2835,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const idx = quizSetsByIdCacheRef.current.findIndex((s) => s.id === setVal.id);
       if (idx >= 0) {
         const next = quizSetsByIdCacheRef.current.slice();
-        next[idx] = row;
+        // Union-merge into cache — a partial/newer ById echo must not blank items.
+        next[idx] = pickBetterQuizSet(quizSetsByIdCacheRef.current[idx], row, permDeletedRef.current);
         return next;
       }
       return [...quizSetsByIdCacheRef.current, row];

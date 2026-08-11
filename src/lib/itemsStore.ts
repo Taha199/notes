@@ -522,8 +522,8 @@ export function applyDurableQuizItems(
         };
       }
       if (setId && set.id === setId) {
-        const setAt = syncTime({ updatedAt: set.updatedAt, createdAt: set.createdAt });
-        if (syncTime(bare) <= setAt) return set;
+        // Keep-more-data: a newer set shell (rename / partial array) must never
+        // block re-attaching a live durable item that is missing from items[].
         matchedInSet = true;
         return { ...set, items: [...set.items, bare] };
       }

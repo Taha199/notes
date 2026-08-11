@@ -75,6 +75,8 @@ export interface QuizSet {
   items: QuizItem[];
   createdAt: string;
   updatedAt?: string;
+  /** Optional persist stamp used by merge LWW when updatedAt is missing. */
+  savedAt?: string;
   /** Manual question order inside this set — must not steal membership authority from updatedAt. */
   orderUpdatedAt?: string;
   /**
