@@ -346,6 +346,84 @@ export function quizSetsMembershipGrew(prev: QuizSet[], next: QuizSet[]): boolea
 }
 
 /**
+ * Order, membership, trash, or set metadata changed — not question/answer HTML alone.
+ * Used so post-ById hydrates can still land Manual order / soft-deletes without
+ * allowing classic same-id old→new body FOUC from weaker array echoes.
+ */
+export function quizListsStructuralUiChanged(prev: QuizSet[], next: QuizSet[]): boolean {
+  if (quizSetsMembershipGrew(prev, next) || quizSetsMembershipShrunk(prev, next)) return true;
+  if (prev.length !== next.length) return true;
+  for (let i = 0; i < prev.length; i += 1) {
+    const a = prev[i];
+    const b = next[i];
+    if (!a || !b) return true;
+    if (a.id !== b.id) return true;
+    if (a.name !== b.name) return true;
+    if (a.folderId !== b.folderId) return true;
+    if (!!a.trashed !== !!b.trashed) return true;
+    if (a.color !== b.color) return true;
+    const aItems = a.items ?? [];
+    const bItems = b.items ?? [];
+    if (aItems.length !== bItems.length) return true;
+    for (let j = 0; j < aItems.length; j += 1) {
+      if (aItems[j]?.id !== bItems[j]?.id) return true;
+      if (!!aItems[j]?.trashed !== !!bItems[j]?.trashed) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Decide whether merged quiz lists must reach React after a hydrate step.
+ *
+ * Membership growth (9→11) always paints. Same-id HTML flips are allowed on the
+ * first authoritative ById catch-up after a timeout reveal, but skipped once an
+ * authoritative body snapshot was already shown — without blocking later adds,
+ * soft-deletes, or Manual order.
+ */
+export function decideQuizListsUiPaint(opts: {
+  contentReady: boolean;
+  revealedViaTimeout: boolean;
+  seenAuthoritativeById: boolean;
+  isAuthoritativeByIdMerge: boolean;
+  /** Last lists actually passed to setQuizSets / setQuizzes (not just refs). */
+  paintedSets: QuizSet[];
+  nextSets: QuizSet[];
+  paintedQuizzes: QuizItem[];
+  nextQuizzes: QuizItem[];
+  setsEqualForUI: (a: QuizSet[], b: QuizSet[]) => boolean;
+  quizzesEqualForUI: (a: QuizItem[], b: QuizItem[]) => boolean;
+}): { paint: boolean; reason: 'first-reveal' | 'byid-catchup' | 'membership-grew' | 'content-changed' | 'skip' } {
+  const membershipGrew = quizSetsMembershipGrew(opts.paintedSets, opts.nextSets)
+    || opts.nextQuizzes.length > opts.paintedQuizzes.length;
+  const contentChanged = !opts.setsEqualForUI(opts.paintedSets, opts.nextSets)
+    || !opts.quizzesEqualForUI(opts.paintedQuizzes, opts.nextQuizzes);
+
+  if (!opts.contentReady) {
+    return { paint: true, reason: 'first-reveal' };
+  }
+  // Timeout showed incomplete local (classic 9) — first ById must still land.
+  if (opts.revealedViaTimeout && !opts.seenAuthoritativeById && opts.isAuthoritativeByIdMerge) {
+    return { paint: true, reason: 'byid-catchup' };
+  }
+  if (membershipGrew) {
+    return { paint: true, reason: 'membership-grew' };
+  }
+  // After an authoritative body reveal, skip same-id HTML flips from later echoes
+  // but still allow order / trash / metadata structural UI updates.
+  if (opts.seenAuthoritativeById) {
+    if (quizListsStructuralUiChanged(opts.paintedSets, opts.nextSets)) {
+      return { paint: true, reason: 'content-changed' };
+    }
+    return { paint: false, reason: 'skip' };
+  }
+  if (contentChanged) {
+    return { paint: true, reason: 'content-changed' };
+  }
+  return { paint: false, reason: 'skip' };
+}
+
+/**
  * True when any shared set id in `next` lost live item ids present in `prev`
  * (classic incomplete array/IDB shell overwriting richer ById).
  */

@@ -14,10 +14,13 @@ import {
   quizSetsMembershipGrew,
   quizSetsMembershipShrunk,
   quizSetsSoftTrashExplainsShrink,
+  decideQuizListsUiPaint,
+  quizListsStructuralUiChanged,
   shouldHydrateQuizSetsUi,
   unionQuizSetsForCommit,
 } from './quizSetMerge';
 import type { QuizItem, QuizSet } from '../types';
+import { quizzesEqualForUI, quizSetsEqualForUI } from './quizContent';
 
 function item(id: number, question: string, updatedAt: string, extra?: Partial<QuizItem>): QuizItem {
   return {
@@ -449,6 +452,133 @@ describe('notes-like union commit (no paint gates)', () => {
     expect(shouldHydrateQuizSetsUi([], merged)).toBe(true);
     expect(shouldHydrateQuizSetsUi([], [])).toBe(false);
     expect(shouldHydrateQuizSetsUi(merged, merged.slice(0, 1))).toBe(false);
+  });
+
+  it('decideQuizListsUiPaint skips same-id HTML flips after authoritative ById', () => {
+    const painted = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: [item(1, '<p>old</p>', '2026-01-01T00:00:00.000Z')],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const newerHtml = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: [item(1, '<p>new</p>', '2026-01-02T00:00:00.000Z')],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const decision = decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: false,
+      seenAuthoritativeById: true,
+      isAuthoritativeByIdMerge: false,
+      paintedSets: painted,
+      nextSets: newerHtml,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI: quizzesEqualForUI,
+    });
+    expect(decision).toEqual({ paint: false, reason: 'skip' });
+    expect(quizListsStructuralUiChanged(painted, newerHtml)).toBe(false);
+  });
+
+  it('decideQuizListsUiPaint still allows soft-delete and Manual order after ById', () => {
+    const painted = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: [
+          item(1, '<p>a</p>', '2026-01-01T00:00:00.000Z'),
+          item(2, '<p>b</p>', '2026-01-01T00:00:00.000Z'),
+        ],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const deleted = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: [
+          { ...item(1, '<p>a</p>', '2026-01-01T00:00:00.000Z'), trashed: true },
+          item(2, '<p>b</p>', '2026-01-01T00:00:00.000Z'),
+        ],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const reordered = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: [
+          item(2, '<p>b</p>', '2026-01-01T00:00:00.000Z'),
+          item(1, '<p>a</p>', '2026-01-01T00:00:00.000Z'),
+        ],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    expect(quizListsStructuralUiChanged(painted, deleted)).toBe(true);
+    expect(quizListsStructuralUiChanged(painted, reordered)).toBe(true);
+    expect(decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: false,
+      seenAuthoritativeById: true,
+      isAuthoritativeByIdMerge: false,
+      paintedSets: painted,
+      nextSets: deleted,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI: quizzesEqualForUI,
+    }).paint).toBe(true);
+    expect(decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: false,
+      seenAuthoritativeById: true,
+      isAuthoritativeByIdMerge: false,
+      paintedSets: painted,
+      nextSets: reordered,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI: quizzesEqualForUI,
+    }).paint).toBe(true);
+  });
+
+  it('decideQuizListsUiPaint allows ById catch-up after timeout reveal', () => {
+    const localNine = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: Array.from({ length: 9 }, (_, i) => item(i + 1, `<p>q${i}</p>`, '2026-01-01T00:00:00.000Z')),
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const byIdEleven = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: Array.from({ length: 11 }, (_, i) => item(i + 1, `<p>cloud${i}</p>`, '2026-01-02T00:00:00.000Z')),
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const decision = decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: true,
+      seenAuthoritativeById: false,
+      isAuthoritativeByIdMerge: true,
+      paintedSets: localNine,
+      nextSets: byIdEleven,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI: quizzesEqualForUI,
+    });
+    expect(decision).toEqual({ paint: true, reason: 'byid-catchup' });
   });
 });
 

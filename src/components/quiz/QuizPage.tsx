@@ -17,6 +17,7 @@ import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
 import { countVisibleQuizItems, quizItemCreatedAtMs, visibleQuizItems } from '../../lib/quizSort';
 import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
+import { FilesLoadingIndicator } from '../files/FilesLoadingIndicator';
 import { quizPatchChangesContent } from '../../lib/quizContent';
 import { hasRichContent } from '../../lib/richContent';
 
@@ -792,7 +793,7 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -1299,7 +1300,7 @@ export function QuizPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!quizLocalReady || focusItemId == null) return;
+    if (!quizContentReady || focusItemId == null) return;
 
     const orphan = quizzes.find((q) => q.id === focusItemId && !q.trashed);
     if (orphan) {
@@ -1349,7 +1350,7 @@ export function QuizPage({
       window.clearTimeout(scrollTimer);
       window.clearTimeout(retryTimer);
     };
-  }, [focusItemId, quizLocalReady, allQuizSets, quizzes, onFocusHandled]);
+  }, [focusItemId, quizContentReady, allQuizSets, quizzes, onFocusHandled]);
 
   useEffect(() => {
     saveQuizSelection(selectedFolderId, selectedSetId);
@@ -2029,11 +2030,18 @@ export function QuizPage({
       </div>
       )}
 
-      {/* Main content — local-first; cloud merge continues in background.
+      {/* Main content — sets sidebar stays local-first; question bodies wait for
+          first authoritative merge (quizContentReady) so old HTML never flips.
           On narrow folder browse (no set yet), hide main so the set list is readable. */}
       {!(isNarrow && sidebarOpen && selectedFolderId && !selectedSetId && !isNotesView) && (
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
+          {!quizContentReady ? (
+            <div className="flex min-h-[16rem] flex-col items-center justify-center py-24">
+              <FilesLoadingIndicator text={t.quizLoadingQuestions} />
+            </div>
+          ) : (
+          <>
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
             {isNarrow && selectedSetId && (
@@ -2182,6 +2190,8 @@ export function QuizPage({
               +
             </button>
           </div>
+          </>
+          )}
           </>
           )}
         </div>
