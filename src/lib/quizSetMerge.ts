@@ -135,11 +135,20 @@ export function pickBetterQuizSet(
   return listOrderUpdatedAt ? { ...withItems, listOrderUpdatedAt } : withItems;
 }
 
+/** Live (non-trashed) item count for one set. */
+export function countLiveItemsInSet(set: QuizSet | undefined | null): number {
+  if (!set) return 0;
+  return (set.items ?? []).filter((item) => item && !item.trashed).length;
+}
+
 /** Live (non-trashed) item count — used to detect incomplete cloud snapshots. */
 export function countLiveQuizItems(sets: QuizSet[]): number {
-  return sets.reduce(
-    (sum, set) => sum + (set.items ?? []).filter((item) => item && !item.trashed).length,
-    0,
+  return sets.reduce((sum, set) => sum + countLiveItemsInSet(set), 0);
+}
+
+function liveItemIds(set: QuizSet | undefined | null): Set<number> {
+  return new Set(
+    (set?.items ?? []).filter((item) => item && !item.trashed).map((item) => item.id),
   );
 }
 
@@ -149,16 +158,12 @@ export function quizSetsMembershipGrew(prev: QuizSet[], next: QuizSet[]): boolea
   const prevById = new Map(prev.map((set) => [set.id, set]));
   for (const set of next) {
     const prior = prevById.get(set.id);
-    const nextLive = new Set(
-      (set.items ?? []).filter((item) => item && !item.trashed).map((item) => item.id),
-    );
+    const nextLive = liveItemIds(set);
     if (!prior) {
       if (nextLive.size > 0) return true;
       continue;
     }
-    const prevLive = new Set(
-      (prior.items ?? []).filter((item) => item && !item.trashed).map((item) => item.id),
-    );
+    const prevLive = liveItemIds(prior);
     for (const id of nextLive) {
       if (!prevLive.has(id)) return true;
     }
@@ -167,10 +172,95 @@ export function quizSetsMembershipGrew(prev: QuizSet[], next: QuizSet[]): boolea
 }
 
 /**
+ * True when any shared set id in `next` lost live item ids present in `prev`
+ * (classic incomplete array/IDB shell overwriting richer ById).
+ */
+export function quizSetsMembershipShrunk(prev: QuizSet[], next: QuizSet[]): boolean {
+  const nextById = new Map(next.map((set) => [set.id, set]));
+  for (const set of prev) {
+    const later = nextById.get(set.id);
+    if (!later) continue;
+    const prevLive = liveItemIds(set);
+    const nextLive = liveItemIds(later);
+    if (nextLive.size < prevLive.size) return true;
+    for (const id of prevLive) {
+      if (!nextLive.has(id)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Union item membership across sources for every set id.
+ * Metadata/order come from `primary` (array / latest merge); never drop live
+ * items that only exist on a secondary source (ById / lastPainted / IDB).
+ */
+export function preferRicherQuizSetsMembership(
+  primary: QuizSet[],
+  ...richerSources: QuizSet[][]
+): QuizSet[] {
+  const byId = new Map<string, QuizSet>();
+  for (const set of primary) {
+    if (!set?.id) continue;
+    byId.set(set.id, { ...set, items: set.items ?? [] });
+  }
+  for (const source of richerSources) {
+    for (const set of source) {
+      if (!set?.id) continue;
+      const existing = byId.get(set.id);
+      byId.set(
+        set.id,
+        existing
+          ? pickBetterQuizSet(existing, { ...set, items: set.items ?? [] })
+          : { ...set, items: set.items ?? [] },
+      );
+    }
+  }
+  const ordered: QuizSet[] = [];
+  const seen = new Set<string>();
+  for (const set of primary) {
+    const merged = byId.get(set.id);
+    if (!merged || seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  for (const merged of byId.values()) {
+    if (seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  return ordered;
+}
+
+/**
+ * When giant `quizSets[]` has fewer live items than ById for the same id,
+ * ignore array membership for that set (keep array meta/order authority via
+ * pickBetterQuizSet base) — notes-style ById authority for bodies+membership.
+ */
+export function adoptByIdMembershipWhenRicher(
+  arraySets: QuizSet[],
+  byIdSets: QuizSet[],
+): QuizSet[] {
+  if (!byIdSets.length) return arraySets;
+  const byIdMap = new Map(byIdSets.map((set) => [set.id, set]));
+  return arraySets.map((set) => {
+    const byId = byIdMap.get(set.id);
+    if (!byId) return set;
+    if (countLiveItemsInSet(byId) <= countLiveItemsInSet(set)) {
+      // Still union in case ById holds different ids at equal count.
+      return pickBetterQuizSet(set, byId);
+    }
+    // Prefer ById membership; keep array meta when newer via pickBetterQuizSet.
+    return pickBetterQuizSet(byId, set);
+  });
+}
+
+/**
  * Decide whether merged quiz lists must reach React after a hydrate step.
  *
- * Membership growth (9→11) always paints. Same-id HTML flips are allowed on the
- * first authoritative ById catch-up after a timeout reveal, but skipped once an
+ * Membership growth (9→11) always paints. Strict subsets over a richer
+ * lastPainted never paint. Same-id HTML flips are allowed on the first
+ * authoritative ById catch-up after a timeout reveal, but skipped once an
  * authoritative body snapshot was already shown — without blocking later adds.
  */
 export function decideQuizListsUiPaint(opts: {
@@ -188,10 +278,16 @@ export function decideQuizListsUiPaint(opts: {
 }): { paint: boolean; reason: 'first-reveal' | 'byid-catchup' | 'membership-grew' | 'content-changed' | 'skip' } {
   const membershipGrew = quizSetsMembershipGrew(opts.paintedSets, opts.nextSets)
     || opts.nextQuizzes.length > opts.paintedQuizzes.length;
+  const membershipShrunk = quizSetsMembershipShrunk(opts.paintedSets, opts.nextSets);
   const contentChanged = !opts.setsEqualForUI(opts.paintedSets, opts.nextSets)
     || !opts.quizzesEqualForUI(opts.paintedQuizzes, opts.nextQuizzes);
 
   if (!opts.contentReady) {
+    // First reveal must not lock in a strict subset when richer membership
+    // was already painted (structure paint / remount cache).
+    if (membershipShrunk && !membershipGrew) {
+      return { paint: false, reason: 'skip' };
+    }
     return { paint: true, reason: 'first-reveal' };
   }
   // Timeout showed incomplete local (classic 9) — first ById must still land.
@@ -200,6 +296,10 @@ export function decideQuizListsUiPaint(opts: {
   }
   if (membershipGrew) {
     return { paint: true, reason: 'membership-grew' };
+  }
+  // Never paint a strict subset over richer lastPainted (array echo of 9).
+  if (membershipShrunk) {
+    return { paint: false, reason: 'skip' };
   }
   // After an authoritative body reveal, skip same-id HTML flips from later echoes.
   if (opts.seenAuthoritativeById) {

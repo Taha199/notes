@@ -8,12 +8,17 @@ import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import {
+  adoptByIdMembershipWhenRicher,
+  countLiveItemsInSet,
   countLiveQuizItems,
   decideQuizListsUiPaint,
   mergeQuizItemsUnion,
   pickBetterQuizSet as pickBetterQuizSetCore,
   pickNewerQuizItem as pickNewerQuizItemCore,
+  preferRicherQuizSetsMembership,
   quizItemSyncTime,
+  quizSetsMembershipGrew,
+  quizSetsMembershipShrunk,
 } from '../lib/quizSetMerge';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import {
@@ -633,6 +638,18 @@ function liveUserQuizSetIds(sets: QuizSet[]): Set<string> {
 function quizSetsMissingFromRemote(merged: QuizSet[], remote: QuizSet[]): boolean {
   const remoteLive = liveUserQuizSetIds(remote);
   return [...liveUserQuizSetIds(merged)].some((id) => !remoteLive.has(id));
+}
+
+/** True when merged has more live items on any shared set than the remote array. */
+function quizSetsRemoteMembershipIncomplete(merged: QuizSet[], remote: QuizSet[]): boolean {
+  const remoteById = new Map(remote.map((set) => [set.id, set]));
+  for (const set of merged) {
+    if (!set?.id || set.trashed || set.system) continue;
+    const remoteSet = remoteById.get(set.id);
+    if (!remoteSet) continue;
+    if (countLiveItemsInSet(set) > countLiveItemsInSet(remoteSet)) return true;
+  }
+  return false;
 }
 
 function chatSyncTime(chat: ChatConversation) {
@@ -1860,11 +1877,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const loadedRef = useRef(false);
   const quizLocalReadyRef = useRef(false);
   const quizContentReadyRef = useRef(false);
-  /** Max wait for cloud ById before revealing best-effort local question bodies. */
-  const QUIZ_CONTENT_READY_TIMEOUT_MS = 2500;
+  /** Offline / fallback: reveal best-effort local bodies if ById never arrives. */
+  const QUIZ_CONTENT_READY_TIMEOUT_OFFLINE_MS = 2500;
+  /** Online safety net only — prefer waiting for ById so incomplete IDB-9 never sticks. */
+  const QUIZ_CONTENT_READY_TIMEOUT_ONLINE_MS = 20_000;
   /** Last quiz lists actually committed to React — membership grow checks use this, not refs alone. */
   const lastPaintedQuizSetsRef = useRef<QuizSet[]>([]);
   const lastPaintedQuizzesRef = useRef<QuizItem[]>([]);
+  /** Monotonic max live item count per set id — never paint/write below this. */
+  const maxKnownLiveBySetRef = useRef<Map<string, number>>(new Map());
   /** Timeout revealed cards before ById — first ById/array catch-up must still paint. */
   const quizRevealedViaTimeoutRef = useRef(false);
   /** First cloud quizItemsById / setsById merge that authored question bodies. */
@@ -1986,6 +2007,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizAuthoritativeByIdSeenRef.current = false;
     lastPaintedQuizSetsRef.current = [];
     lastPaintedQuizzesRef.current = [];
+    maxKnownLiveBySetRef.current = new Map();
     cloudLoadSucceededRef.current = false;
     draftsReadyRef.current = false;
     setDraftsReady(false);
@@ -2056,6 +2078,52 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizLocalReadyRef.current = true;
       setQuizLocalReady(true);
     };
+    const rememberMaxKnownLive = (sets: QuizSet[]) => {
+      for (const set of sets) {
+        if (!set?.id) continue;
+        const live = countLiveItemsInSet(set);
+        const prev = maxKnownLiveBySetRef.current.get(set.id) ?? 0;
+        if (live > prev) maxKnownLiveBySetRef.current.set(set.id, live);
+      }
+    };
+    const enrichSetsAgainstKnown = (incoming: QuizSet[], ...extra: QuizSet[][]) => {
+      const enriched = preferRicherQuizSetsMembership(
+        incoming,
+        lastPaintedQuizSetsRef.current,
+        quizSetsRef.current,
+        quizSetsByIdCacheRef.current,
+        ...extra,
+      );
+      return enriched.map((set) => {
+        const known = maxKnownLiveBySetRef.current.get(set.id) ?? 0;
+        if (countLiveItemsInSet(set) >= known) return set;
+        const painted = lastPaintedQuizSetsRef.current.find((s) => s.id === set.id);
+        const cached = quizSetsByIdCacheRef.current.find((s) => s.id === set.id);
+        const refSet = quizSetsRef.current.find((s) => s.id === set.id);
+        return preferRicherQuizSetsMembership(
+          [set],
+          painted ? [painted] : [],
+          cached ? [cached] : [],
+          refSet ? [refSet] : [],
+        )[0] ?? set;
+      });
+    };
+    const persistQuizSetsLocalIfSafe = (sets: QuizSet[]) => {
+      // Never poison localStorage with a strict subset of max-known membership.
+      for (const [id, maxLive] of maxKnownLiveBySetRef.current.entries()) {
+        const row = sets.find((s) => s.id === id);
+        if (row && countLiveItemsInSet(row) < maxLive) return;
+      }
+      if (
+        lastPaintedQuizSetsRef.current.length
+        && quizSetsMembershipShrunk(lastPaintedQuizSetsRef.current, sets)
+        && !quizSetsMembershipGrew(lastPaintedQuizSetsRef.current, sets)
+      ) {
+        return;
+      }
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(sets));
+      writeQuizSetsShellJournal(sets);
+    };
     const markQuizContentReady = (via: 'byid' | 'timeout' | 'fallback' | 'cache' = 'fallback') => {
       if (cancelled) return;
       if (via === 'timeout' && !quizContentReadyRef.current) {
@@ -2075,35 +2143,36 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
     const armQuizContentReadyTimeout = () => {
       if (cancelled || quizContentReadyRef.current || quizContentReadyTimer) return;
+      const online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+      // Online: wait for ById (long safety net only). Offline: reveal local soon.
+      const delay = online ? QUIZ_CONTENT_READY_TIMEOUT_ONLINE_MS : QUIZ_CONTENT_READY_TIMEOUT_OFFLINE_MS;
       quizContentReadyTimer = setTimeout(() => {
         quizContentReadyTimer = null;
-        // Best-effort local bodies — prefer cloud ById when it arrives within the window.
         markQuizContentReady('timeout');
-      }, QUIZ_CONTENT_READY_TIMEOUT_MS);
+      }, delay);
     };
     const paintQuizLists = (
       nextQuizzes: QuizItem[],
       nextSets: QuizSet[],
       opts?: { isAuthoritativeByIdMerge?: boolean; force?: boolean },
     ) => {
-      // Never let a shorter merge blank a richer list already shown (or in refs).
       const paintedSets = lastPaintedQuizSetsRef.current.length
         ? lastPaintedQuizSetsRef.current
         : quizSetsRef.current;
       const paintedQuizzes = lastPaintedQuizzesRef.current.length
         ? lastPaintedQuizzesRef.current
         : quizzesRef.current;
-      let setsToPaint = nextSets;
+      // Always take max union for display — never paint a strict subset over richer known.
+      let setsToPaint = enrichSetsAgainstKnown(nextSets);
       if (
-        countLiveQuizItems(nextSets) < countLiveQuizItems(paintedSets)
-        || countLiveQuizItems(nextSets) < countLiveQuizItems(quizSetsRef.current)
+        countLiveQuizItems(setsToPaint) < countLiveQuizItems(paintedSets)
+        || quizSetsMembershipShrunk(paintedSets, setsToPaint)
       ) {
-        setsToPaint = unionQuizSetsFromById(
-          unionQuizSetsFromById(paintedSets, quizSetsRef.current, permDeletedRef.current),
-          nextSets,
-          permDeletedRef.current,
+        setsToPaint = enrichSetsAgainstKnown(
+          preferRicherQuizSetsMembership(paintedSets, setsToPaint, quizSetsRef.current),
         );
       }
+      rememberMaxKnownLive(setsToPaint);
       quizzesRef.current = nextQuizzes;
       quizSetsRef.current = setsToPaint;
       const decision = opts?.force
@@ -2126,6 +2195,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       lastPaintedQuizzesRef.current = nextQuizzes;
       lastPaintedQuizSetsRef.current = setsToPaint;
       rememberQuizListsBootCache(nextQuizzes, setsToPaint);
+      persistQuizSetsLocalIfSafe(setsToPaint);
       return decision;
     };
     const durableReady = (async () => {
@@ -2158,30 +2228,35 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
       // Structure paint after IDB (sidebar counts) — never the bare LS shell.
       // Question card HTML stays gated on quizContentReady until first cloud ById
-      // merge (or timeout) so stale IDB bodies cannot flash before newer cloud HTML.
+      // merge (or offline timeout) so stale IDB bodies cannot flash before newer cloud HTML.
       // If same-session cache already revealed bodies, never replace equal-count
       // IDB rows (same membership, older HTML would FOUC).
       const cacheLive = quizListsBootCache ? countLiveQuizItems(quizListsBootCache.sets) : 0;
       const nextLive = countLiveQuizItems(local.sets);
+      rememberMaxKnownLive(local.sets);
+      if (quizListsBootCache) rememberMaxKnownLive(quizListsBootCache.sets);
+      const online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
       if (quizContentReadyRef.current && quizListsBootCache) {
         if (nextLive > cacheLive) {
           paintQuizLists(local.quizzes, local.sets, { force: true });
-          safeSetItem('malacadhati_quiz_sets', JSON.stringify(local.sets));
-          writeQuizSetsShellJournal(local.sets);
         } else {
           quizzesRef.current = quizListsBootCache.quizzes;
           quizSetsRef.current = quizListsBootCache.sets;
           local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
         }
       } else if (local.sets.length && nextLive >= cacheLive) {
-        // Structure for sidebar — cards still wait on quizContentReady.
+        // When online, still show structure but enrich against known richer sources
+        // and never write incomplete membership to localStorage (poisoned 9 forever).
+        const enriched = enrichSetsAgainstKnown(local.sets);
+        rememberMaxKnownLive(enriched);
         if (local.quizzes.length) setQuizzes(local.quizzes);
-        setQuizSets(local.sets);
+        setQuizSets(enriched);
         lastPaintedQuizzesRef.current = local.quizzes;
-        lastPaintedQuizSetsRef.current = local.sets;
-        rememberQuizListsBootCache(local.quizzes, local.sets);
-        safeSetItem('malacadhati_quiz_sets', JSON.stringify(local.sets));
-        writeQuizSetsShellJournal(local.sets);
+        lastPaintedQuizSetsRef.current = enriched;
+        quizSetsRef.current = enriched;
+        rememberQuizListsBootCache(local.quizzes, enriched);
+        // Only persist local when offline (best we have) or membership matches max known.
+        if (!online) persistQuizSetsLocalIfSafe(enriched);
       } else if (quizListsBootCache && cacheLive > nextLive) {
         quizzesRef.current = quizListsBootCache.quizzes;
         quizSetsRef.current = quizListsBootCache.sets;
@@ -2190,6 +2265,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setQuizSets(quizListsBootCache.sets);
         lastPaintedQuizzesRef.current = quizListsBootCache.quizzes;
         lastPaintedQuizSetsRef.current = quizListsBootCache.sets;
+        rememberMaxKnownLive(quizListsBootCache.sets);
       } else if (local.quizzes.length) {
         setQuizzes(local.quizzes);
         lastPaintedQuizzesRef.current = local.quizzes;
@@ -2327,15 +2403,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizzesRef.current = applied.quizzes;
           quizSetsRef.current = applied.sets;
           local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
+          rememberMaxKnownLive(applied.sets);
         }
         if (cloudSetsById.length) {
-          quizSetsByIdCacheRef.current = cloudSetsById;
+          // Union into cache — never replace wholesale with a shorter ById shell.
+          quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
+            quizSetsByIdCacheRef.current,
+            cloudSetsById,
+            quizSetsRef.current,
+          );
           const mergedSets = applyTrashTombstones(
-            unionQuizSetsFromById(quizSetsRef.current, cloudSetsById, permDeletedRef.current),
+            preferRicherQuizSetsMembership(
+              quizSetsRef.current,
+              cloudSetsById,
+              quizSetsByIdCacheRef.current,
+            ),
             quizSetTombstonesRef.current,
           );
           quizSetsRef.current = mergedSets;
           local = { ...local, sets: mergedSets };
+          rememberMaxKnownLive(mergedSets);
         }
         if (cloudFoldersById.length) {
           quizFoldersByIdCacheRef.current = cloudFoldersById;
@@ -2407,11 +2494,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             void remove(dbRef(database, `users/${user.uid}/quizFoldersById/${row.id}`)).catch(() => {});
           }
         }
-        quizSetsByIdCacheRef.current = cloudSetsById.filter((row) => (
-          row?.id
-          && !deadSetIds.has(row.id)
-          && !(row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)
-        ));
+        quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
+          quizSetsByIdCacheRef.current,
+          cloudSetsById.filter((row) => (
+            row?.id
+            && !deadSetIds.has(row.id)
+            && !(row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)
+          )),
+          quizSetsRef.current,
+        );
         quizFoldersByIdCacheRef.current = cloudFoldersById.filter((row) => (
           row?.id
           && !deadFolderIds.has(row.id)
@@ -2551,10 +2642,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         let rawSets: QuizSet[] = filterResurrectedTrash(
           mergeQuizSetsForSync(
             liveSets,
-            unionQuizSetsFromById(
+            // Prefer ById membership when giant array is a stale shorter shell.
+            adoptByIdMembershipWhenRicher(
               mergeQuizSetsForSync(cloudSets, dedicatedSets, tombstones),
               cloudSetsById,
-              tombstones,
             ),
             tombstones,
           ),
@@ -2565,7 +2656,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         // quizSets[] cannot drop a set that already landed in quizSetsById /
         // IndexedDB (create-then-refresh). Membership-only — never Manual order.
         if (cloudSetsById.length) {
-          rawSets = unionQuizSetsFromById(rawSets, cloudSetsById, tombstones);
+          rawSets = preferRicherQuizSetsMembership(rawSets, cloudSetsById, quizSetsByIdCacheRef.current);
         }
         {
           const idbSetsFinal = await getAllQuizSetsLocal();
@@ -2655,7 +2746,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           }
         }
         rememberQuizListsBootCache(quizzesRef.current, quizSetsRef.current);
-        safeSetItem('malacadhati_quiz_sets', JSON.stringify(quizSetsRef.current));
+        persistQuizSetsLocalIfSafe(quizSetsRef.current);
         setQuizFolders(normalizedFolders);
         safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
         markQuizContentReady(quizAuthoritativeByIdSeenRef.current ? 'byid' : 'fallback');
@@ -2665,9 +2756,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         );
         const liveNormalized = countLiveQuizItems(quizSetsRef.current);
         const liveCloud = countLiveQuizItems(cloudSets);
-        // Never heal-push a shorter items[] snapshot over richer cloud/local.
-        const safeToPushQuizSets = liveNormalized >= liveCloud && liveNormalized >= livePainted;
+        const maxKnownLive = [...maxKnownLiveBySetRef.current.values()].reduce((a, b) => a + b, 0);
+        // Never heal-push a shorter items[] snapshot over richer cloud/local/known.
+        const safeToPushQuizSets = liveNormalized >= liveCloud
+          && liveNormalized >= livePainted
+          && liveNormalized >= maxKnownLive;
+        const needsMembershipHeal = quizSetsRemoteMembershipIncomplete(quizSetsRef.current, cloudSets)
+          || quizSetsMissingFromRemote(quizSetsRef.current, cloudSets);
         const needsRepair = notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
+          || needsMembershipHeal
           || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0)
           || (cloudFoldersEmpty && dedicatedFoldersEmpty && liveFolders.length > 0);
         recoveryLog('load complete', {
@@ -2815,6 +2912,74 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
+  /**
+   * Commit quiz sets to React + local cache without ever painting/writing a
+   * strict membership subset over richer lastPainted / ById / max-known.
+   */
+  const commitQuizSetsFromRemote = (incoming: QuizSet[], opts?: { forcePaint?: boolean }) => {
+    const painted = lastPaintedQuizSetsRef.current.length
+      ? lastPaintedQuizSetsRef.current
+      : quizSetsRef.current;
+    let next = preferRicherQuizSetsMembership(
+      incoming,
+      painted,
+      quizSetsRef.current,
+      quizSetsByIdCacheRef.current,
+    );
+    next = adoptByIdMembershipWhenRicher(next, quizSetsByIdCacheRef.current);
+    for (const set of next) {
+      if (!set?.id) continue;
+      const live = countLiveItemsInSet(set);
+      const prev = maxKnownLiveBySetRef.current.get(set.id) ?? 0;
+      if (live > prev) maxKnownLiveBySetRef.current.set(set.id, live);
+    }
+    // Restore any set that fell below max-known from painted/ById/ref.
+    next = next.map((set) => {
+      const known = maxKnownLiveBySetRef.current.get(set.id) ?? 0;
+      if (countLiveItemsInSet(set) >= known) return set;
+      const fromPainted = painted.find((s) => s.id === set.id);
+      const fromCache = quizSetsByIdCacheRef.current.find((s) => s.id === set.id);
+      const fromRef = quizSetsRef.current.find((s) => s.id === set.id);
+      return preferRicherQuizSetsMembership(
+        [set],
+        fromPainted ? [fromPainted] : [],
+        fromCache ? [fromCache] : [],
+        fromRef ? [fromRef] : [],
+      )[0] ?? set;
+    });
+    const prev = quizSetsRef.current;
+    quizSetsRef.current = next;
+    quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
+      quizSetsByIdCacheRef.current,
+      next,
+    );
+    const shrunk = quizSetsMembershipShrunk(painted, next)
+      && !quizSetsMembershipGrew(painted, next);
+    if (shrunk && !opts?.forcePaint) {
+      // Keep richer UI; still refresh refs with union above.
+      return next;
+    }
+    if (opts?.forcePaint || !quizSetsEqualForUI(next, prev)) {
+      setQuizSets(next);
+      lastPaintedQuizSetsRef.current = next;
+      rememberQuizListsBootCache(quizzesRef.current, next);
+    }
+    // Never poison LS with incomplete membership.
+    let safeLocal = true;
+    for (const [id, maxLive] of maxKnownLiveBySetRef.current.entries()) {
+      const row = next.find((s) => s.id === id);
+      if (row && countLiveItemsInSet(row) < maxLive) {
+        safeLocal = false;
+        break;
+      }
+    }
+    if (safeLocal) {
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+      writeQuizSetsShellJournal(next);
+    }
+    return next;
+  };
+
   // `skipDirectPut` avoids double-writing /quizSets: most forceCloud callers
   // also call scheduleInstantDataCloudSave right after with this same snapshot.
   // Firing both a raw REST PUT here AND the SDK update() there is a duplicate,
@@ -2826,31 +2991,43 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // recovery/backup paths rely on this PUT as their sole delivery mechanism, so
   // they keep skipDirectPut=false.
   const persistSets = (nextSets: QuizSet[], forceCloud = false, skipDirectPut = false) => {
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
-    writeQuizSetsShellJournal(nextSets);
-    quizSetsRef.current = nextSets;
+    const safeSets = preferRicherQuizSetsMembership(
+      nextSets,
+      lastPaintedQuizSetsRef.current,
+      quizSetsRef.current,
+      quizSetsByIdCacheRef.current,
+    );
+    for (const set of safeSets) {
+      if (!set?.id) continue;
+      const live = countLiveItemsInSet(set);
+      const prev = maxKnownLiveBySetRef.current.get(set.id) ?? 0;
+      if (live > prev) maxKnownLiveBySetRef.current.set(set.id, live);
+    }
+    safeSetItem('malacadhati_quiz_sets', JSON.stringify(safeSets));
+    writeQuizSetsShellJournal(safeSets);
+    quizSetsRef.current = safeSets;
     // Never force a full-user PATCH here — that raced with empty notes and wiped the cloud.
-    persist({ quizSets: nextSets }, false);
+    persist({ quizSets: safeSets }, false);
     if (user && loadedRef.current && forceCloud) {
       // Only skip when the array is truly empty — a soft-deleted row is real
       // data that must still reach cloud, or the delete resurrects on refresh.
-      if (!hasAnyUserQuizSetRows(nextSets) && everHadSetsRef.current) {
+      if (!hasAnyUserQuizSetRows(safeSets) && everHadSetsRef.current) {
         recoveryLog('skipped quizSets PUT wipe');
         return;
       }
-      if (countUserQuizSets(nextSets) > 0) everHadSetsRef.current = true;
+      if (countUserQuizSets(safeSets) > 0) everHadSetsRef.current = true;
       // skipDirectPut callers already pushQuizSetById for the changed row — avoid a
       // multi-MB quizSetsById map rewrite that delayed live create/delete on mobile.
       if (skipDirectPut) return;
-      void update(dbRef(database, `users/${user.uid}/quizSetsById`), setsToFirebaseMap(nextSets)).catch(() => {});
-      markPushedData({ quizSets: nextSets });
+      void update(dbRef(database, `users/${user.uid}/quizSetsById`), setsToFirebaseMap(safeSets)).catch(() => {});
+      markPushedData({ quizSets: safeSets });
       beginTrackedSave();
-      void set(dbRef(database, `users/${user.uid}/quizSets`), nextSets)
+      void set(dbRef(database, `users/${user.uid}/quizSets`), safeSets)
         .catch((err) => {
           console.error('[cloud-save] quizSets set failed', err);
           return rtdbFetch(`/users/${user.uid}/quizSets`, {
             method: 'PUT',
-            body: JSON.stringify(nextSets),
+            body: JSON.stringify(safeSets),
             headers: { 'Content-Type': 'application/json' },
           });
         })
@@ -3252,9 +3429,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       : [...prev, merged];
     const colors = quizFoldersRef.current.map((f) => f.color).filter((c): c is string => !!c);
     const next = initializeQuizColors(ensureFavoritesSet(nextList), colors);
-    quizSetsRef.current = next;
-    if (!quizSetsEqualForUI(next, prev)) setQuizSets(next);
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+    commitQuizSetsFromRemote(next);
   };
 
   const flushPendingRemoteById = () => {
@@ -3699,13 +3874,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizSetsRef.current,
         quizSetTombstonesRef.current,
       );
-      // Always re-union ById cache — array LWW must never hide a live set.
+      // Always re-union ById cache — array LWW must never hide a live set / richer items.
       if (quizSetsByIdCacheRef.current.length) {
-        merged = unionQuizSetsFromById(merged, quizSetsByIdCacheRef.current, tombstones);
+        merged = preferRicherQuizSetsMembership(
+          adoptByIdMembershipWhenRicher(merged, quizSetsByIdCacheRef.current),
+          quizSetsByIdCacheRef.current,
+          lastPaintedQuizSetsRef.current,
+        );
       }
       merged = applyTrashTombstones(merged, quizSetTombstonesRef.current, nowStr());
       const json = JSON.stringify(merged);
-      const needsCloudHeal = quizSetsMissingFromRemote(merged, remoteSets);
+      const needsCloudHeal = quizSetsMissingFromRemote(merged, remoteSets)
+        || quizSetsRemoteMembershipIncomplete(merged, remoteSets);
       if ((!shouldSkipRemoteEcho('quizSets', json) && json !== JSON.stringify(quizSetsRef.current)) || needsCloudHeal) {
         nextSets = merged;
         changed = true;
@@ -3759,16 +3939,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     // Keep ById cache aligned with the committed union (including soft-deletes).
     // Prefer normalizedSets as the order authority — ById never dictates Manual order.
-    quizSetsByIdCacheRef.current = unionQuizSetsFromById(
+    quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
       normalizedSets,
       quizSetsByIdCacheRef.current,
-      tombstonesAtCommit,
     );
     quizFoldersByIdCacheRef.current = mergeById(quizFoldersByIdCacheRef.current, normalizedFolders);
 
     const shouldReconcileQuizSets = patch.quizSets !== undefined && (
       JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)
       || quizSetsMissingFromRemote(normalizedSets, firebaseToArray<QuizSet>(patch.quizSets as QuizSet[] | Record<string, QuizSet>))
+      || quizSetsRemoteMembershipIncomplete(normalizedSets, firebaseToArray<QuizSet>(patch.quizSets as QuizSet[] | Record<string, QuizSet>))
     );
     const shouldReconcileQuizzes = patch.quizzes !== undefined
       && JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current);
@@ -3795,10 +3975,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (!quizzesEqualForUI(nextQuizzes, prevQuizzes)) setQuizzes(nextQuizzes);
       }
       if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
-        const prevSets = quizSetsRef.current;
-        quizSetsRef.current = normalizedSets;
-        safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
-        if (!quizSetsEqualForUI(normalizedSets, prevSets)) setQuizSets(normalizedSets);
+        commitQuizSetsFromRemote(normalizedSets);
       }
       if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
         quizFoldersRef.current = normalizedFolders;
@@ -3918,6 +4095,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // create/delete must not overwrite the cloud array with a stale snapshot.
     if (safe.quizSets !== undefined) safe.quizSets = quizSetsRef.current;
     if (safe.quizFolders !== undefined) safe.quizFolders = quizFoldersRef.current;
+    if (safe.quizSets) {
+      // Never push a shorter items[] heal over max-known / last-painted membership.
+      const livePush = countLiveQuizItems(safe.quizSets);
+      const livePainted = countLiveQuizItems(
+        lastPaintedQuizSetsRef.current.length ? lastPaintedQuizSetsRef.current : safe.quizSets,
+      );
+      const maxKnown = [...maxKnownLiveBySetRef.current.values()].reduce((a, b) => a + b, 0);
+      if (livePush < livePainted || livePush < maxKnown) {
+        recoveryLog('skipped instant quizSets short membership heal', { livePush, livePainted, maxKnown });
+        delete safe.quizSets;
+      }
+    }
     if (safe.notes && safe.notes.length === 0 && everHadNotesRef.current) {
       recoveryLog('skipped instant notes wipe');
       delete safe.notes;
@@ -4303,7 +4492,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSetTombstonesRef.current,
     );
     if (quizSetsByIdCacheRef.current.length) {
-      mergedSets = unionQuizSetsFromById(mergedSets, quizSetsByIdCacheRef.current, tombstones);
+      mergedSets = preferRicherQuizSetsMembership(
+        adoptByIdMembershipWhenRicher(mergedSets, quizSetsByIdCacheRef.current),
+        quizSetsByIdCacheRef.current,
+        lastPaintedQuizSetsRef.current,
+      );
     }
     let mergedFolders = filterResurrectedTrash(
       mergeFoldersForSync(quizFoldersRef.current, remoteFolders, tombstones),
@@ -4318,7 +4511,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const trashStamp = nowStr();
     mergedSets = applyTrashTombstones(mergedSets, quizSetTombstonesRef.current, trashStamp);
     mergedFolders = applyTrashTombstones(mergedFolders, quizFolderTombstonesRef.current, trashStamp);
-    const healQuizSets = quizSetsMissingFromRemote(mergedSets, remoteSets);
+    const healQuizSets = quizSetsMissingFromRemote(mergedSets, remoteSets)
+      || quizSetsRemoteMembershipIncomplete(mergedSets, remoteSets);
     const remoteFolderLive = new Set(remoteFolders.filter((f) => !f.trashed && !f.system).map((f) => f.id));
     const healQuizFolders = mergedFolders.some((f) => !f.trashed && !f.system && !remoteFolderLive.has(f.id));
     const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
@@ -4355,9 +4549,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       changed = true;
     }
     if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current) || healQuizSets) {
-      quizSetsRef.current = normalizedSets;
-      setQuizSets(normalizedSets);
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+      commitQuizSetsFromRemote(normalizedSets);
       changed = true;
     }
     if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current) || healQuizFolders) {
@@ -4780,10 +4972,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           if (!quizzesEqualForUI(applied.quizzes, prev)) setQuizzes(applied.quizzes);
         }
         if (setsChanged) {
-          const prev = quizSetsRef.current;
-          quizSetsRef.current = applied.sets;
-          safeSetItem('malacadhati_quiz_sets', JSON.stringify(applied.sets));
-          if (!quizSetsEqualForUI(applied.sets, prev)) setQuizSets(applied.sets);
+          commitQuizSetsFromRemote(applied.sets);
         }
       } finally {
         isApplyingRemoteRef.current = false;

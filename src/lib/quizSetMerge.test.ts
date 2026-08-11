@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { applyDurableQuizItems, type StoredQuizItem } from './itemsStore';
 import {
+  adoptByIdMembershipWhenRicher,
   countLiveQuizItems,
   decideQuizListsUiPaint,
   pickBetterQuizSet,
+  preferRicherQuizSetsMembership,
   quizSetsMembershipGrew,
+  quizSetsMembershipShrunk,
 } from './quizSetMerge';
 import { quizSetsEqualForUI, quizzesEqualForUI } from './quizContent';
 import type { QuizItem, QuizSet } from '../types';
@@ -273,5 +276,77 @@ describe('quiz UI paint gate after timeout local-9', () => {
     });
     expect(decision.paint).toBe(false);
     expect(decision.reason).toBe('skip');
+  });
+
+  it('never paints strict subset 11→9 over richer lastPainted (array echo)', () => {
+    expect(quizSetsMembershipShrunk(richerSets, paintedSets)).toBe(true);
+    const decision = decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: false,
+      seenAuthoritativeById: true,
+      isAuthoritativeByIdMerge: false,
+      paintedSets: richerSets,
+      nextSets: paintedSets,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI,
+    });
+    expect(decision.paint).toBe(false);
+    expect(decision.reason).toBe('skip');
+  });
+});
+
+describe('local/array 9 + ById 11 → always 11', () => {
+  const nine = Array.from({ length: 9 }, (_, i) => item(i + 1, `Q${i + 1}`, '2026-08-11T10:00:00.000Z'));
+  const eleven = Array.from({ length: 11 }, (_, i) =>
+    item(i + 1, `Q${i + 1}-byid`, '2026-08-11T12:00:00.000Z'),
+  );
+  const localNine = [
+    set({
+      id: 'koag',
+      name: 'Koagulationsstatus',
+      items: nine,
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-11T22:00:00.000Z',
+    }),
+  ];
+  const byIdEleven = [
+    set({
+      id: 'koag',
+      name: 'Koagulationsstatus',
+      items: eleven,
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-11T11:00:00.000Z',
+    }),
+  ];
+
+  it('preferRicherQuizSetsMembership keeps 11 from ById over newer array-9', () => {
+    const merged = preferRicherQuizSetsMembership(localNine, byIdEleven);
+    expect(merged[0].items.filter((i) => !i.trashed)).toHaveLength(11);
+    expect(countLiveQuizItems(merged)).toBe(11);
+  });
+
+  it('adoptByIdMembershipWhenRicher ignores shorter array membership', () => {
+    const merged = adoptByIdMembershipWhenRicher(localNine, byIdEleven);
+    expect(merged[0].items.filter((i) => !i.trashed)).toHaveLength(11);
+  });
+
+  it('after timeout reveal of 9, later ById 11 must paint', () => {
+    const decision = decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: true,
+      seenAuthoritativeById: false,
+      isAuthoritativeByIdMerge: true,
+      paintedSets: localNine,
+      nextSets: preferRicherQuizSetsMembership(localNine, byIdEleven),
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI,
+    });
+    expect(decision.paint).toBe(true);
+    expect(['byid-catchup', 'membership-grew']).toContain(decision.reason);
+    expect(quizSetsMembershipGrew(localNine, byIdEleven)).toBe(true);
   });
 });
