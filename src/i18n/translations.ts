@@ -426,6 +426,8 @@ export interface Translation {
   quizShowAnswers: string;
   quizHideAnswersShort: string;
   quizShowAnswersShort: string;
+  quizHideAnswer: string;
+  quizShowAnswer: string;
   quizSortQuestions: string;
   quizFlashcards: string;
   quizDownloadPdf: string;
@@ -815,6 +817,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizShowAnswers: 'Show answers',
     quizHideAnswersShort: 'Hide',
     quizShowAnswersShort: 'Show',
+    quizHideAnswer: 'Hide answer',
+    quizShowAnswer: 'Show answer',
     quizSortQuestions: 'Sort questions',
     quizFlashcards: '🃏 Flashcards',
     quizDownloadPdf: '📄 Download PDF',
@@ -1202,6 +1206,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizShowAnswers: 'Visa svar',
     quizHideAnswersShort: 'Dölj',
     quizShowAnswersShort: 'Visa',
+    quizHideAnswer: 'Dölj svar',
+    quizShowAnswer: 'Visa svar',
     quizSortQuestions: 'Sortera frågor',
     quizFlashcards: '🃏 Flashcards',
     quizDownloadPdf: '📄 Ladda ner PDF',

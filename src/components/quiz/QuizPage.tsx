@@ -21,6 +21,8 @@ import { quizPatchChangesContent } from '../../lib/quizContent';
 import { hasRichContent } from '../../lib/richContent';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
+/** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
+const HIDDEN_ANSWERS_KEY = 'malacadhati_quiz_hidden_answers';
 const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
 /** Unsaved open Q/A forms — survives QuizPage unmount (sidebar nav) within the tab. */
 const OPEN_FORMS_STASH_KEY = 'malacadhati_quiz_open_forms_v1';
@@ -67,6 +69,24 @@ function saveProgress(all: Record<string, Record<number, 'known' | 'learning'>>)
   localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
 }
 
+function loadHiddenAnswers(): Record<number, true> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HIDDEN_ANSWERS_KEY) || '{}');
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const out: Record<number, true> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (v) out[Number(k)] = true;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveHiddenAnswers(map: Record<number, true>) {
+  localStorage.setItem(HIDDEN_ANSWERS_KEY, JSON.stringify(map));
+}
+
 function normalizeQuizName(value: string) {
   return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
@@ -88,6 +108,9 @@ interface QuizItemRowProps {
   folders?: QuizFolder[];
   onMoveToSet?: (setId: string) => void;
   hideAnswers?: boolean;
+  /** Per-item hide preference (independent of set-level hide). */
+  answerHidden?: boolean;
+  onToggleHideAnswer?: (id: number) => void;
   onSetStatus?: (id: number, status: 'known' | 'learning' | null) => void;
   canReorder?: boolean;
   questionNumber?: number;
@@ -95,7 +118,7 @@ interface QuizItemRowProps {
   onMoveToPosition?: (targetPosition: number) => void;
 }
 
-const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition }: QuizItemRowProps) {
+const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition }: QuizItemRowProps) {
   const { t } = useLanguage();
   const [moveOpen, setMoveOpen] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
@@ -110,10 +133,10 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
     onMoveToPosition?.(n);
     setTargetPos('');
   };
-  // Re-hide a revealed card whenever the global toggle flips
-  useEffect(() => { setRevealed(false); }, [hideAnswers]);
+  // Re-hide a revealed card whenever global or per-item hide flips
+  useEffect(() => { setRevealed(false); }, [hideAnswers, answerHidden]);
   const status = progressMap?.[item.id];
-  const masked = !!hideAnswers && !revealed;
+  const masked = (!!hideAnswers || !!answerHidden) && !revealed;
   // Mark which cards need more studying: known = done (green), everything else = study more.
   const accent = status === 'known'
     ? 'border-l-4 border-l-emerald-400'
@@ -211,6 +234,15 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
               >☑️</button>
             )
           )}
+          {onToggleHideAnswer && (
+            <button
+              onClick={() => onToggleHideAnswer(item.id)}
+              className={'text-base transition-colors ' + (answerHidden || hideAnswers ? 'text-primary' : 'text-app-text-secondary/40 hover:text-primary')}
+              title={answerHidden ? t.quizShowAnswer : t.quizHideAnswer}
+              aria-label={answerHidden ? t.quizShowAnswer : t.quizHideAnswer}
+              aria-pressed={!!answerHidden}
+            >{answerHidden ? '👁️' : '🙈'}</button>
+          )}
           <button onClick={() => onToggleFav(item)} className={'text-base transition-colors ' + ((favs.has(item.id) || item.favOf != null) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title={t.quizFavorite}>★</button>
           <button
             onClick={() => onSpeak(item.id)}
@@ -301,6 +333,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
   && prev.item.answer === next.item.answer
   && prev.item.explanation === next.item.explanation
   && prev.hideAnswers === next.hideAnswers
+  && prev.answerHidden === next.answerHidden
   && prev.speakingId === next.speakingId
   && prev.favs.has(prev.item.id) === next.favs.has(next.item.id)
   && prev.progressMap?.[prev.item.id] === next.progressMap?.[next.item.id]
@@ -791,6 +824,17 @@ export function QuizPage({
   const [studyDeck, setStudyDeck] = useState<QuizItem[] | null>(null);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
   const [hideAnswers, setHideAnswers] = useState(false);
+  // Per-question hide (local preference map by item id — does not sync/wipe Q&A)
+  const [hiddenAnswers, setHiddenAnswers] = useState<Record<number, true>>(loadHiddenAnswers);
+  const toggleHideAnswer = (id: number) => {
+    setHiddenAnswers((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      saveHiddenAnswers(next);
+      return next;
+    });
+  };
   // Question list ordering: manual / oldest-first / studied vs not studied
   const [itemSort, setItemSort] = useState<ItemSort>(() => loadItemSort(false));
   const [itemSortMenuOpen, setItemSortMenuOpen] = useState(false);
@@ -1560,6 +1604,8 @@ export function QuizPage({
         onToggleFav={toggleFav}
         progressMap={currentProgress}
         hideAnswers={hideAnswers}
+        answerHidden={!!hiddenAnswers[item.id]}
+        onToggleHideAnswer={toggleHideAnswer}
         onSetStatus={setItemStatus}
         sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId && !s.system)}
         folders={quizFolders}
