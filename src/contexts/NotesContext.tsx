@@ -2036,9 +2036,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setQuizLocalReady(true);
     } else if (local.sets.length > 0) {
       // Structure-first paint: set ids/folders visible immediately from LS.
+      // Mark local-ready now — do not wait on IDB item bodies / cloud.
       setQuizSets(local.sets);
       lastPaintedQuizSetsRef.current = local.sets;
       if (local.quizzes.length) setQuizzes(local.quizzes);
+      quizLocalReadyRef.current = true;
+      setQuizLocalReady(true);
     }
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
@@ -2048,13 +2051,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizzesRef.current = local.quizzes;
       quizSetsRef.current = local.sets;
       setNotes(local.notes);
-      // Quiz lists wait for durableReady so we never flash an incomplete items[].
+      // Set shells already painted from LS when present; item bodies enrich via durable.
       return edits;
     });
 
     // Radical durability: IndexedDB + notesById / quizSetsById are the source of
-    // truth for recently-saved items. Fold them in before first quiz paint /
-    // cloud merge so a cancelled giant-array write cannot hide a just-created set.
+    // truth for recently-saved items. Fold set shells in for first paint ASAP;
+    // heavy quiz-item bodies enrich in the background so folders never sit on "0 set".
     const markQuizLocalReady = () => {
       if (cancelled || quizLocalReadyRef.current) return;
       quizLocalReadyRef.current = true;
@@ -2114,11 +2117,29 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
       }
     };
+    // Phase 1 (fast): set shells only — tiny IDB store; unblocks "0 set" immediately.
+    const durableSetsReady = (async () => {
+      const idbSets = await getAllQuizSetsLocal();
+      if (cancelled) return;
+      if (idbSets.length) {
+        local = {
+          ...local,
+          sets: unionQuizSetsFromById(local.sets, idbSets, permDeletedRef.current),
+        };
+        quizSetsRef.current = local.sets;
+        commitQuizListsLocal(local.quizzes, local.sets, {
+          persistLocal: typeof navigator !== 'undefined' ? navigator.onLine === false : false,
+          forcePaint: true,
+        });
+      }
+      if (local.sets.length > 0) markQuizLocalReady();
+    })();
+    // Phase 2: notes + quiz item bodies (can be large HTML) — enrich after structure paint.
     const durableReady = (async () => {
-      const [idbNotes, idbQuizzes, idbSets] = await Promise.all([
+      await durableSetsReady;
+      const [idbNotes, idbQuizzes] = await Promise.all([
         getAllNotesLocal(),
         getAllQuizItemsLocal(),
-        getAllQuizSetsLocal(),
       ]);
       if (cancelled) return;
       if (idbNotes.length) {
@@ -2128,13 +2149,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         };
         notesRef.current = local.notes;
         setNotes(local.notes);
-      }
-      if (idbSets.length) {
-        local = {
-          ...local,
-          sets: unionQuizSetsFromById(local.sets, idbSets, permDeletedRef.current),
-        };
-        quizSetsRef.current = local.sets;
       }
       if (idbQuizzes.length) {
         const applied = applyDurableQuizItems(local.quizzes, local.sets, idbQuizzes);
@@ -2242,42 +2256,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
     void bootstrapDraftsFromCloud();
 
+    // Start structure ById immediately (parallel with IDB item bodies) so empty LS
+    // still hydrates set shells without waiting on giant quizItemsById.
+    const cloudStructurePromise = Promise.all([
+      fetchQuizSetsByIdCloud(user.uid),
+      fetchQuizFoldersByIdCloud(user.uid),
+    ]);
+    const cloudBodiesPromise = Promise.all([
+      fetchNotesByIdCloud(user.uid),
+      fetchQuizItemsByIdCloud(user.uid),
+    ]);
+
     (async () => {
       try {
-        // Ensure journaled + IndexedDB notes are in live refs before merging cloud.
-        await Promise.all([journalReady, durableReady]);
+        // Structure path: journal + IDB set shells only — not heavy item bodies.
+        await Promise.all([journalReady, durableSetsReady]);
         if (cancelled) return;
 
-        // Single-item cloud mirrors — survive even when giant array writes
-        // were cancelled mid-flight by a refresh (or lost an LWW race).
-        const [cloudNotesById, cloudQuizItemsById, cloudSetsById, cloudFoldersById] = await Promise.all([
-          fetchNotesByIdCloud(user.uid),
-          fetchQuizItemsByIdCloud(user.uid),
-          fetchQuizSetsByIdCloud(user.uid),
-          fetchQuizFoldersByIdCloud(user.uid),
-        ]);
+        const [cloudSetsById, cloudFoldersById] = await cloudStructurePromise;
         if (cancelled) return;
         // Kick off in parallel with everything below — awaited right before the
         // final boot merge so the network round trip never adds to boot latency.
         const trashTombstonesPromise = fetchCloudTrashTombstones(user.uid);
-        if (cloudNotesById.length) {
-          const mergedNotes = stripPermDeletedNotes(
-            mergeByIdNewer(notesRef.current, cloudNotesById),
-            permDeletedRef.current,
-          );
-          notesRef.current = mergedNotes;
-          setNotes(mergedNotes);
-          local = { ...local, notes: mergedNotes };
-        }
-        // Fold cloud ById into refs, then commit (union only — never shrink).
-        const prevQuizzesForById = quizzesRef.current;
-        const prevSetsForById = quizSetsRef.current;
-        if (cloudQuizItemsById.length) {
-          const applied = applyDurableQuizItems(prevQuizzesForById, prevSetsForById, cloudQuizItemsById);
-          quizzesRef.current = applied.quizzes;
-          quizSetsRef.current = applied.sets;
-          local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
-        }
         if (cloudSetsById.length) {
           // Union into cache — never replace wholesale with a shorter ById shell.
           quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
@@ -2306,6 +2306,38 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizFoldersRef.current = mergedFolders;
           setQuizFolders(mergedFolders);
           local = { ...local, folders: mergedFolders };
+        }
+        // Paint set/folder shells now — empty UI must accept non-empty ById (emergency).
+        commitQuizListsLocal(quizzesRef.current, quizSetsRef.current, {
+          forcePaint: lastPaintedQuizSetsRef.current.length === 0 && quizSetsRef.current.length > 0,
+        });
+        if (quizSetsRef.current.length > 0) markQuizLocalReady();
+
+        // Item/note bodies: local IDB + cloud ById in parallel — enrich without clearing shells.
+        const [, [cloudNotesById, cloudQuizItemsById]] = await Promise.all([
+          durableReady,
+          cloudBodiesPromise,
+        ]);
+        if (cancelled) return;
+        if (cloudNotesById.length) {
+          const mergedNotes = stripPermDeletedNotes(
+            mergeByIdNewer(notesRef.current, cloudNotesById),
+            permDeletedRef.current,
+          );
+          notesRef.current = mergedNotes;
+          setNotes(mergedNotes);
+          local = { ...local, notes: mergedNotes };
+        }
+        // Fold cloud ById items into refs, then commit (union only — never shrink).
+        if (cloudQuizItemsById.length) {
+          const applied = applyDurableQuizItems(
+            quizzesRef.current,
+            quizSetsRef.current,
+            cloudQuizItemsById,
+          );
+          quizzesRef.current = applied.quizzes;
+          quizSetsRef.current = applied.sets;
+          local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
         }
         commitQuizListsLocal(quizzesRef.current, quizSetsRef.current);
 
