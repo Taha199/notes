@@ -1877,16 +1877,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const loadedRef = useRef(false);
   const quizLocalReadyRef = useRef(false);
   const quizContentReadyRef = useRef(false);
-  /** Offline / fallback: reveal best-effort local bodies if ById never arrives. */
-  const QUIZ_CONTENT_READY_TIMEOUT_OFFLINE_MS = 2500;
-  /** Online safety net only — prefer waiting for ById so incomplete IDB-9 never sticks. */
-  const QUIZ_CONTENT_READY_TIMEOUT_ONLINE_MS = 20_000;
   /** Last quiz lists actually committed to React — membership grow checks use this, not refs alone. */
   const lastPaintedQuizSetsRef = useRef<QuizSet[]>([]);
   const lastPaintedQuizzesRef = useRef<QuizItem[]>([]);
   /** Monotonic max live item count per set id — never paint/write below this. */
   const maxKnownLiveBySetRef = useRef<Map<string, number>>(new Map());
-  /** Timeout revealed cards before ById — first ById/array catch-up must still paint. */
+  /** Local-first reveal before ById — first ById/array catch-up must still paint. */
   const quizRevealedViaTimeoutRef = useRef(false);
   /** First cloud quizItemsById / setsById merge that authored question bodies. */
   const quizAuthoritativeByIdSeenRef = useRef(false);
@@ -1999,7 +1995,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // Load from cloud when user changes
   useEffect(() => {
     let cancelled = false;
-    let quizContentReadyTimer: ReturnType<typeof setTimeout> | null = null;
     loadedRef.current = false;
     quizLocalReadyRef.current = false;
     quizContentReadyRef.current = false;
@@ -2134,22 +2129,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizRevealedViaTimeoutRef.current = false;
       }
       if (quizContentReadyRef.current) return;
-      if (quizContentReadyTimer) {
-        clearTimeout(quizContentReadyTimer);
-        quizContentReadyTimer = null;
-      }
       quizContentReadyRef.current = true;
       setQuizContentReady(true);
-    };
-    const armQuizContentReadyTimeout = () => {
-      if (cancelled || quizContentReadyRef.current || quizContentReadyTimer) return;
-      const online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
-      // Online: wait for ById (long safety net only). Offline: reveal local soon.
-      const delay = online ? QUIZ_CONTENT_READY_TIMEOUT_ONLINE_MS : QUIZ_CONTENT_READY_TIMEOUT_OFFLINE_MS;
-      quizContentReadyTimer = setTimeout(() => {
-        quizContentReadyTimer = null;
-        markQuizContentReady('timeout');
-      }, delay);
     };
     const paintQuizLists = (
       nextQuizzes: QuizItem[],
@@ -2226,11 +2207,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizzesRef.current = local.quizzes;
         quizSetsRef.current = local.sets;
       }
-      // Structure paint after IDB (sidebar counts) — never the bare LS shell.
-      // Question card HTML stays gated on quizContentReady until first cloud ById
-      // merge (or offline timeout) so stale IDB bodies cannot flash before newer cloud HTML.
-      // If same-session cache already revealed bodies, never replace equal-count
-      // IDB rows (same membership, older HTML would FOUC).
+      // Structure + question cards paint from local IDB immediately (local-first).
+      // Membership-aware paintQuizLists / commitQuizSetsFromRemote still block
+      // shorter remote snapshots from overwriting richer local/ById membership.
+      // Mark content ready as 'timeout' so first ById can still catch up 9→11.
       const cacheLive = quizListsBootCache ? countLiveQuizItems(quizListsBootCache.sets) : 0;
       const nextLive = countLiveQuizItems(local.sets);
       rememberMaxKnownLive(local.sets);
@@ -2245,33 +2225,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
         }
       } else if (local.sets.length && nextLive >= cacheLive) {
-        // When online, still show structure but enrich against known richer sources
-        // and never write incomplete membership to localStorage (poisoned 9 forever).
         const enriched = enrichSetsAgainstKnown(local.sets);
         rememberMaxKnownLive(enriched);
-        if (local.quizzes.length) setQuizzes(local.quizzes);
-        setQuizSets(enriched);
-        lastPaintedQuizzesRef.current = local.quizzes;
-        lastPaintedQuizSetsRef.current = enriched;
-        quizSetsRef.current = enriched;
-        rememberQuizListsBootCache(local.quizzes, enriched);
+        paintQuizLists(local.quizzes, enriched, { force: true });
         // Only persist local when offline (best we have) or membership matches max known.
         if (!online) persistQuizSetsLocalIfSafe(enriched);
       } else if (quizListsBootCache && cacheLive > nextLive) {
         quizzesRef.current = quizListsBootCache.quizzes;
         quizSetsRef.current = quizListsBootCache.sets;
         local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
-        setQuizzes(quizListsBootCache.quizzes);
-        setQuizSets(quizListsBootCache.sets);
-        lastPaintedQuizzesRef.current = quizListsBootCache.quizzes;
-        lastPaintedQuizSetsRef.current = quizListsBootCache.sets;
+        paintQuizLists(quizListsBootCache.quizzes, quizListsBootCache.sets, { force: true });
         rememberMaxKnownLive(quizListsBootCache.sets);
-      } else if (local.quizzes.length) {
-        setQuizzes(local.quizzes);
-        lastPaintedQuizzesRef.current = local.quizzes;
+      } else if (local.quizzes.length || local.sets.length) {
+        paintQuizLists(local.quizzes, enrichSetsAgainstKnown(local.sets), { force: true });
       }
       markQuizLocalReady();
-      armQuizContentReadyTimeout();
+      // Reveal cards immediately from local — do not wait on cloud ById for UI.
+      // 'timeout' keeps the post-reveal ById catch-up path for membership growth.
+      markQuizContentReady('timeout');
     })();
     const storedCloudSyncAt = Number(localStorage.getItem(CLOUD_SYNCED_AT_KEY));
     if (storedCloudSyncAt > 0) setCloudSyncedAt(storedCloudSyncAt);
@@ -2908,7 +2879,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     })();
     return () => {
       cancelled = true;
-      if (quizContentReadyTimer) clearTimeout(quizContentReadyTimer);
     };
   }, [user]);
 

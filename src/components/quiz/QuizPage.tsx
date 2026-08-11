@@ -19,7 +19,6 @@ import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { quizPatchChangesContent } from '../../lib/quizContent';
 import { hasRichContent } from '../../lib/richContent';
-import { FilesLoadingIndicator } from '../files/FilesLoadingIndicator';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 /** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
@@ -793,7 +792,7 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -1291,7 +1290,7 @@ export function QuizPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!quizContentReady || focusItemId == null) return;
+    if (!quizLocalReady || focusItemId == null) return;
 
     const orphan = quizzes.find((q) => q.id === focusItemId && !q.trashed);
     if (orphan) {
@@ -1341,7 +1340,7 @@ export function QuizPage({
       window.clearTimeout(scrollTimer);
       window.clearTimeout(retryTimer);
     };
-  }, [focusItemId, quizContentReady, allQuizSets, quizzes, onFocusHandled]);
+  }, [focusItemId, quizLocalReady, allQuizSets, quizzes, onFocusHandled]);
 
   useEffect(() => {
     saveQuizSelection(selectedFolderId, selectedSetId);
@@ -1992,13 +1991,9 @@ export function QuizPage({
                 </>
               )}
             </div>
-            {/* Sets list */}
+            {/* Sets list — paint local immediately; no cloud-fetch placeholder */}
             <div className="flex-1 overflow-y-auto px-1">
-              {!quizLocalReady ? (
-                <div className="flex h-full min-h-[8rem] items-center justify-center px-2 py-6">
-                  <FilesLoadingIndicator text={t.quizLoadingQuestions} />
-                </div>
-              ) : currentSets.length === 0 ? (
+              {currentSets.length === 0 ? (
                 <p className="py-4 text-center text-[11px] italic text-app-text-secondary/40">
                   {selectedFolderId ? t.quizFolderEmpty : t.quizNoUngroupedSets}
                 </p>
@@ -2018,15 +2013,9 @@ export function QuizPage({
       </div>
       )}
 
-      {/* Main content */}
+      {/* Main content — local-first; cloud merge continues in background */}
       <div className="flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
-          {!quizContentReady ? (
-            <div className="flex min-h-[16rem] flex-col items-center justify-center py-24">
-              <FilesLoadingIndicator text={t.quizLoadingQuestions} />
-            </div>
-          ) : (
-          <>
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
@@ -2166,8 +2155,6 @@ export function QuizPage({
               +
             </button>
           </div>
-          </>
-          )}
           </>
           )}
         </div>
