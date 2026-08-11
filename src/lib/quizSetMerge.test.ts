@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyDurableQuizItems, type StoredQuizItem } from './itemsStore';
 import {
   adoptByIdMembershipWhenRicher,
+  applyQuizItemTrashTombstonesToSets,
   bumpMaxKnownLiveBySet,
   countLiveQuizItems,
   enforceMaxKnownLiveMembership,
@@ -10,6 +11,7 @@ import {
   preferRicherQuizSetsMembership,
   quizSetsMembershipGrew,
   quizSetsMembershipShrunk,
+  quizSetsSoftTrashExplainsShrink,
   shouldHydrateQuizSetsUi,
   unionQuizSetsForCommit,
 } from './quizSetMerge';
@@ -334,5 +336,135 @@ describe('notes-like union commit (no paint gates)', () => {
     expect(shouldHydrateQuizSetsUi([], merged)).toBe(true);
     expect(shouldHydrateQuizSetsUi([], [])).toBe(false);
     expect(shouldHydrateQuizSetsUi(merged, merged.slice(0, 1))).toBe(false);
+  });
+});
+
+describe('soft-deleted quiz items survive richer ById union', () => {
+  it('tombstone keeps deleted questions trashed after union with live ById shell', () => {
+    const liveById = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [
+          item(12, 'تجربة ٢', '2026-08-12T00:30:20.000Z'),
+          item(13, 'تجربة ٣', '2026-08-12T01:15:42.000Z'),
+          item(14, 'keep', '2026-08-12T00:00:00.000Z'),
+        ],
+        createdAt: '2026-08-12T00:00:00.000Z',
+        updatedAt: '2026-08-12T01:00:00.000Z',
+      }),
+    ];
+    const afterDelete = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [
+          item(12, 'تجربة ٢', '2026-08-12T01:20:00.000Z', {
+            trashed: true,
+            deletedAt: '2026-08-12T01:20:00.000Z',
+          }),
+          item(13, 'تجربة ٣', '2026-08-12T01:20:00.000Z', {
+            trashed: true,
+            deletedAt: '2026-08-12T01:20:00.000Z',
+          }),
+          item(14, 'keep', '2026-08-12T00:00:00.000Z'),
+        ],
+        createdAt: '2026-08-12T00:00:00.000Z',
+        updatedAt: '2026-08-12T01:20:00.000Z',
+      }),
+    ];
+    const tombstones = {
+      '12': Date.parse('2026-08-12T01:20:00.000Z'),
+      '13': Date.parse('2026-08-12T01:20:00.000Z'),
+    };
+
+    const unioned = unionQuizSetsForCommit(afterDelete, liveById);
+    const honored = applyQuizItemTrashTombstonesToSets(unioned, tombstones);
+    expect(honored[0].items.filter((i) => !i.trashed).map((i) => i.id)).toEqual([14]);
+    expect(honored[0].items.find((i) => i.id === 12)?.trashed).toBe(true);
+    expect(honored[0].items.find((i) => i.id === 13)?.trashed).toBe(true);
+    expect(countLiveQuizItems(honored)).toBe(1);
+  });
+
+  it('pickBetterQuizSet honors softTrashQuizItems against newer-looking live copy', () => {
+    const local = set({
+      id: 's1',
+      name: 'Set',
+      items: [
+        item(2, 'gone', '2026-08-12T01:20:00.000Z', { trashed: true, deletedAt: '2026-08-12T01:20:00.000Z' }),
+        item(1, 'keep', '2026-08-12T00:00:00.000Z'),
+      ],
+      createdAt: '2026-08-12T00:00:00.000Z',
+      updatedAt: '2026-08-12T01:20:00.000Z',
+    });
+    const remote = set({
+      id: 's1',
+      name: 'Set',
+      items: [
+        item(2, 'gone-live', '2026-08-12T00:30:00.000Z'),
+        item(1, 'keep', '2026-08-12T00:00:00.000Z'),
+      ],
+      createdAt: '2026-08-12T00:00:00.000Z',
+      updatedAt: '2026-08-12T01:00:00.000Z',
+    });
+    const merged = pickBetterQuizSet(local, remote, { softTrashQuizItems: [2] });
+    expect(merged.items.find((i) => i.id === 2)?.trashed).toBe(true);
+    expect(merged.items.filter((i) => !i.trashed)).toHaveLength(1);
+  });
+
+  it('allows local write when live count drops only via soft-trash tombstones', () => {
+    const painted = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [
+          item(1, 'a', '2026-08-12T00:00:00.000Z'),
+          item(2, 'b', '2026-08-12T00:00:00.000Z'),
+        ],
+        createdAt: '2026-08-12T00:00:00.000Z',
+      }),
+    ];
+    const afterTrash = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [
+          item(1, 'a', '2026-08-12T00:00:00.000Z'),
+          item(2, 'b', '2026-08-12T01:00:00.000Z', { trashed: true, deletedAt: '2026-08-12T01:00:00.000Z' }),
+        ],
+        createdAt: '2026-08-12T00:00:00.000Z',
+        updatedAt: '2026-08-12T01:00:00.000Z',
+      }),
+    ];
+    const maxKnown = new Map<string, number>([['s1', 2]]);
+    expect(quizSetsSoftTrashExplainsShrink(painted, afterTrash)).toBe(true);
+    expect(isQuizSetsLocalWriteSafe(afterTrash, maxKnown, painted)).toBe(true);
+    expect(quizSetsMembershipShrunk(painted, afterTrash)).toBe(true);
+  });
+
+  it('still blocks incomplete shells that omit ids entirely', () => {
+    const painted = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [
+          item(1, 'a', '2026-08-12T00:00:00.000Z'),
+          item(2, 'b', '2026-08-12T00:00:00.000Z'),
+        ],
+        createdAt: '2026-08-12T00:00:00.000Z',
+      }),
+    ];
+    const shortShell = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [item(1, 'a', '2026-08-12T00:00:00.000Z')],
+        createdAt: '2026-08-12T00:00:00.000Z',
+        updatedAt: '2026-08-12T02:00:00.000Z',
+      }),
+    ];
+    const maxKnown = new Map<string, number>([['s1', 2]]);
+    expect(quizSetsSoftTrashExplainsShrink(painted, shortShell)).toBe(false);
+    expect(isQuizSetsLocalWriteSafe(shortShell, maxKnown, painted)).toBe(false);
   });
 });

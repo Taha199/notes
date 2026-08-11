@@ -34,6 +34,49 @@ export function pickNewerQuizItem(a: QuizItem, b: QuizItem): QuizItem {
 }
 
 /**
+ * Force `trashed: true` onto quiz items with an active soft-delete tombstone.
+ * Mirrors set/folder quizTrash markers so union-keep / richer ById shells cannot
+ * resurrect a question the user already deleted.
+ * Tombstone timestamps are ms; a strictly newer live updatedAt (restore/edit) wins.
+ */
+export function applyQuizItemTrashTombstones(
+  items: QuizItem[],
+  tombstones: Record<string, number>,
+  opts?: { emptiedAt?: number; deletedAt?: string },
+): QuizItem[] {
+  if (!items.length || !tombstones || !Object.keys(tombstones).length) return items;
+  const emptiedAt = opts?.emptiedAt ?? 0;
+  let changed = false;
+  const next = items.map((item) => {
+    const at = tombstones[String(item.id)];
+    if (at === undefined || item.trashed) return item;
+    if (emptiedAt && at <= emptiedAt) return item;
+    if (at < quizItemSyncTime(item)) return item;
+    changed = true;
+    if (item.deletedAt || !opts?.deletedAt) return { ...item, trashed: true };
+    return { ...item, trashed: true, deletedAt: opts.deletedAt };
+  });
+  return changed ? next : items;
+}
+
+/** Apply item soft-trash tombstones inside every set's items[]. */
+export function applyQuizItemTrashTombstonesToSets(
+  sets: QuizSet[],
+  tombstones: Record<string, number>,
+  opts?: { emptiedAt?: number; deletedAt?: string },
+): QuizSet[] {
+  if (!sets.length || !tombstones || !Object.keys(tombstones).length) return sets;
+  let changed = false;
+  const next = sets.map((set) => {
+    const items = applyQuizItemTrashTombstones(set.items ?? [], tombstones, opts);
+    if (items === (set.items ?? [])) return set;
+    changed = true;
+    return { ...set, items };
+  });
+  return changed ? next : sets;
+}
+
+/**
  * Union quiz items by id (notes-style). Order comes from the authority side;
  * missing ids from the other side are appended — never dropped.
  */
@@ -42,26 +85,37 @@ export function mergeQuizItemsUnion(
   remote: QuizItem[],
   opts?: {
     permanentlyDeletedIds?: Iterable<number>;
+    /** Soft-trash markers — keep local-only trashed rows so merge cannot drop the tombstone. */
+    softTrashTombstoneIds?: Iterable<number | string>;
     orderFrom?: 'local' | 'remote';
   },
 ): QuizItem[] {
   const dead = new Set(opts?.permanentlyDeletedIds ?? []);
+  const softTrash = new Set(
+    [...(opts?.softTrashTombstoneIds ?? [])].map((id) => Number(id)).filter((id) => Number.isFinite(id)),
+  );
   const remoteIds = new Set(remote.map((item) => item.id));
   const map = new Map<number, QuizItem>();
   for (const item of local) {
     if (dead.has(item.id)) continue;
     // Local-only trashed row omitted from remote: drop (ghost after Empty Trash
     // style cleanup is handled by callers). Keep pending soft-deletes that still
-    // need to sync — only skip when remote already lacks a non-trashed twin and
-    // this row is trashed AND we are not trying to propagate deletes... Notes
-    // skip local-only trashed when missing from remote; match that.
-    if (!remoteIds.has(item.id) && item.trashed) continue;
+    // need to sync — and always keep rows with an active soft-trash tombstone.
+    if (!remoteIds.has(item.id) && item.trashed && !softTrash.has(item.id)) continue;
     map.set(item.id, item);
   }
   for (const item of remote) {
     if (dead.has(item.id)) continue;
     const existing = map.get(item.id);
-    map.set(item.id, existing ? pickNewerQuizItem(existing, item) : item);
+    let merged = existing ? pickNewerQuizItem(existing, item) : item;
+    // Soft-trash tombstone always beats a stale live copy from a richer shell.
+    if (softTrash.has(merged.id) && !merged.trashed) {
+      const trashedSide = existing?.trashed ? existing : (item.trashed ? item : null);
+      merged = trashedSide
+        ? pickNewerQuizItem(trashedSide, { ...merged, trashed: true })
+        : { ...merged, trashed: true };
+    }
+    map.set(item.id, merged);
   }
   const localMax = Math.max(0, ...local.map((item) => quizItemSyncTime(item)));
   const remoteMax = Math.max(0, ...remote.map((item) => quizItemSyncTime(item)));
@@ -86,6 +140,8 @@ export function mergeQuizItemsUnion(
 export type QuizSetMergeTombstones = {
   quizzes?: Iterable<number>;
   quizSets?: Iterable<string>;
+  /** Soft-trash item ids (quizTrash/items) — must not reappear as live. */
+  softTrashQuizItems?: Iterable<number | string>;
 };
 
 /**
@@ -121,6 +177,7 @@ export function pickBetterQuizSet(
     remote.items ?? [],
     {
       permanentlyDeletedIds: tombstones.quizzes,
+      softTrashTombstoneIds: tombstones.softTrashQuizItems,
       orderFrom: preferRemoteOrder ? 'remote' : 'local',
     },
   );
@@ -301,6 +358,28 @@ export function enforceMaxKnownLiveMembership(
   });
 }
 
+/**
+ * True when every live id lost from `prev` → `next` still exists on `next` as
+ * `trashed` (intentional soft-delete). Incomplete shells that omit ids fail.
+ */
+export function quizSetsSoftTrashExplainsShrink(prev: QuizSet[], next: QuizSet[]): boolean {
+  const nextById = new Map(next.map((set) => [set.id, set]));
+  let sawShrink = false;
+  for (const set of prev) {
+    const later = nextById.get(set.id);
+    if (!later) continue;
+    const prevLive = liveItemIds(set);
+    const nextLive = liveItemIds(later);
+    for (const id of prevLive) {
+      if (nextLive.has(id)) continue;
+      sawShrink = true;
+      const row = (later.items ?? []).find((item) => item.id === id);
+      if (!row?.trashed) return false;
+    }
+  }
+  return sawShrink;
+}
+
 /** True when writing `sets` would not poison LS / cloud below max-known or last painted. */
 export function isQuizSetsLocalWriteSafe(
   sets: QuizSet[],
@@ -309,14 +388,21 @@ export function isQuizSetsLocalWriteSafe(
 ): boolean {
   for (const [id, maxLive] of maxKnown.entries()) {
     const row = sets.find((s) => s.id === id);
-    if (row && countLiveItemsInSet(row) < maxLive) return false;
+    if (row && countLiveItemsInSet(row) < maxLive) {
+      // Soft-delete inside the set is allowed to land below a stale max-known
+      // floor when the lost live ids are present as trashed tombstones.
+      if (!lastPainted.length || !quizSetsSoftTrashExplainsShrink(lastPainted, sets)) {
+        return false;
+      }
+      continue;
+    }
   }
   if (
     lastPainted.length
     && quizSetsMembershipShrunk(lastPainted, sets)
     && !quizSetsMembershipGrew(lastPainted, sets)
   ) {
-    return false;
+    return quizSetsSoftTrashExplainsShrink(lastPainted, sets);
   }
   return true;
 }
