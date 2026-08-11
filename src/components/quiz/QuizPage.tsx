@@ -803,6 +803,15 @@ export function QuizPage({
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => savedSelection.folderId);
   const selectedFolderIdRef = useRef<string | null>(selectedFolderId);
   selectedFolderIdRef.current = selectedFolderId;
+  const [isNarrow, setIsNarrow] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = () => setIsNarrow(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
   const dragSetId = useRef<string | null>(null);
   const dragFolderId = useRef<string | null>(null);
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
@@ -1352,16 +1361,20 @@ export function QuizPage({
 
   useEffect(() => {
     if (!quizLocalReady) return;
+    if (selectedSetId && !allQuizSets.some((set) => set.id === selectedSetId && !set.trashed)) {
+      selectQuizSet(null);
+      return;
+    }
+    // On narrow phones, keep folder→sets browsing; don't auto-jump into a set
+    // (that used to collapse the nav and hide the rest of Prover's sets).
+    if (isNarrow) return;
     if (selectedFolderId && !selectedSetId) {
       const folderSets = allQuizSets.filter(
         (set) => !set.trashed && set.folderId === selectedFolderId,
       );
       if (folderSets.length > 0) selectQuizSet(folderSets[0].id);
     }
-    if (selectedSetId && !allQuizSets.some((set) => set.id === selectedSetId && !set.trashed)) {
-      selectQuizSet(null);
-    }
-  }, [quizLocalReady, selectedFolderId, selectedSetId, allQuizSets]);
+  }, [quizLocalReady, selectedFolderId, selectedSetId, allQuizSets, isNarrow]);
 
   const isNotesViewRef = useRef(false);
   // Before paint: stash leaving set's drafts and load only the selected set's forms.
@@ -1786,9 +1799,9 @@ export function QuizPage({
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full min-w-0 overflow-hidden">
       {/* Collapsed: thin strip with a reopen button */}
-      {!sidebarOpen && (
+      {!sidebarOpen && !(isNarrow && selectedSetId) && (
         <div className="flex flex-shrink-0 flex-col items-center border-r border-app-border bg-app-bg px-1.5 pt-3 dark:border-white/10 dark:bg-gray-950">
           <button
             onClick={toggleSidebar}
@@ -1800,9 +1813,12 @@ export function QuizPage({
         </div>
       )}
 
-      {/* Sidebar — two-column: Folders | Sets */}
-      {sidebarOpen && (
-      <div className="flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950" style={{ width: isNotesView ? folderColW : folderColW + 184 }}>
+      {/* Sidebar — two-column: Folders | Sets. On narrow + set open, hide so questions get full width. */}
+      {sidebarOpen && !(isNarrow && selectedSetId) && (
+      <div
+        className={'flex flex-shrink-0 flex-col border-r border-app-border bg-app-bg dark:border-white/10 dark:bg-gray-950 ' + (isNarrow ? 'w-full min-w-0' : '')}
+        style={isNarrow ? undefined : { width: isNotesView ? folderColW : folderColW + 184 }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60 dark:text-gray-500">{t.quizTitle}</p>
@@ -2013,11 +2029,22 @@ export function QuizPage({
       </div>
       )}
 
-      {/* Main content — local-first; cloud merge continues in background */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Main content — local-first; cloud merge continues in background.
+          On narrow folder browse (no set yet), hide main so the set list is readable. */}
+      {!(isNarrow && sidebarOpen && selectedFolderId && !selectedSetId && !isNotesView) && (
+      <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
+            {isNarrow && selectedSetId && (
+              <button
+                type="button"
+                onClick={() => selectQuizSet(null)}
+                className="flex h-8 items-center gap-1 rounded-lg px-2 text-[12px] font-semibold text-primary hover:bg-primary/10"
+              >
+                ← {t.quizSetsLabel}
+              </button>
+            )}
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
               {selectedSet
                 ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`
@@ -2159,6 +2186,7 @@ export function QuizPage({
           )}
         </div>
       </div>
+      )}
 
       {/* Study mode overlay */}
       {studyMode && (studyDeck ?? studyItems).length > 0 && (

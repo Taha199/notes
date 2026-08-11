@@ -3,13 +3,12 @@ import { applyDurableQuizItems, type StoredQuizItem } from './itemsStore';
 import {
   adoptByIdMembershipWhenRicher,
   countLiveQuizItems,
-  decideQuizListsUiPaint,
   pickBetterQuizSet,
   preferRicherQuizSetsMembership,
   quizSetsMembershipGrew,
   quizSetsMembershipShrunk,
+  unionQuizSetsForCommit,
 } from './quizSetMerge';
-import { quizSetsEqualForUI, quizzesEqualForUI } from './quizContent';
 import type { QuizItem, QuizSet } from '../types';
 
 function item(id: number, question: string, updatedAt: string, extra?: Partial<QuizItem>): QuizItem {
@@ -43,7 +42,6 @@ describe('pickBetterQuizSet item union', () => {
       createdAt: '2024-08-11T09:00:00.000Z',
       updatedAt: '2024-08-11T10:00:00.000Z',
     });
-    // Work device renamed / re-saved a stale 3-item snapshot with a newer stamp.
     const remote = set({
       id: 'koag',
       name: 'Koagulationsstatus',
@@ -177,7 +175,6 @@ describe('applyDurableQuizItems keep-more-data', () => {
           item(3, 'Q3', '2024-08-11T10:00:00.000Z'),
         ],
         createdAt: '2024-08-11T09:00:00.000Z',
-        // Newer than the durable items — old gate blocked re-attach here.
         updatedAt: '2026-08-11T20:00:00.000Z',
       }),
     ];
@@ -191,116 +188,10 @@ describe('applyDurableQuizItems keep-more-data', () => {
   });
 });
 
-describe('quiz UI paint gate after timeout local-9', () => {
+describe('notes-like union commit (no paint gates)', () => {
   const nine = Array.from({ length: 9 }, (_, i) => item(i + 1, `Q${i + 1}`, '2026-08-11T10:00:00.000Z'));
   const eleven = Array.from({ length: 11 }, (_, i) =>
     item(i + 1, `Q${i + 1}-cloud`, '2026-08-11T12:00:00.000Z'),
-  );
-  const paintedSets = [
-    set({
-      id: 'koag',
-      name: 'Koagulationsstatus',
-      items: nine,
-      createdAt: '2026-08-01T00:00:00.000Z',
-    }),
-  ];
-  const richerSets = [
-    set({
-      id: 'koag',
-      name: 'Koagulationsstatus',
-      items: eleven,
-      createdAt: '2026-08-01T00:00:00.000Z',
-      updatedAt: '2026-08-11T12:00:00.000Z',
-    }),
-  ];
-
-  it('detects membership growth 9→11', () => {
-    expect(quizSetsMembershipGrew(paintedSets, richerSets)).toBe(true);
-    expect(countLiveQuizItems(richerSets)).toBe(11);
-  });
-
-  it('paints richer cloud after timeout revealed local-9 (ById catch-up)', () => {
-    const decision = decideQuizListsUiPaint({
-      contentReady: true,
-      revealedViaTimeout: true,
-      seenAuthoritativeById: false,
-      isAuthoritativeByIdMerge: true,
-      paintedSets,
-      nextSets: richerSets,
-      paintedQuizzes: [],
-      nextQuizzes: [],
-      setsEqualForUI: quizSetsEqualForUI,
-      quizzesEqualForUI,
-    });
-    expect(decision.paint).toBe(true);
-    expect(['byid-catchup', 'membership-grew']).toContain(decision.reason);
-  });
-
-  it('still paints membership growth after authoritative ById (no stick at 9)', () => {
-    const decision = decideQuizListsUiPaint({
-      contentReady: true,
-      revealedViaTimeout: false,
-      seenAuthoritativeById: true,
-      isAuthoritativeByIdMerge: false,
-      paintedSets,
-      nextSets: richerSets,
-      paintedQuizzes: [],
-      nextQuizzes: [],
-      setsEqualForUI: quizSetsEqualForUI,
-      quizzesEqualForUI,
-    });
-    expect(decision.paint).toBe(true);
-    expect(decision.reason).toBe('membership-grew');
-  });
-
-  it('skips same-id HTML flip after authoritative reveal when membership is unchanged', () => {
-    const sameIdsNewHtml = [
-      set({
-        id: 'koag',
-        name: 'Koagulationsstatus',
-        items: nine.map((q) => ({ ...q, question: `${q.question} edited`, updatedAt: '2026-08-11T13:00:00.000Z' })),
-        createdAt: '2026-08-01T00:00:00.000Z',
-      }),
-    ];
-    const decision = decideQuizListsUiPaint({
-      contentReady: true,
-      revealedViaTimeout: false,
-      seenAuthoritativeById: true,
-      isAuthoritativeByIdMerge: false,
-      paintedSets,
-      nextSets: sameIdsNewHtml,
-      paintedQuizzes: [],
-      nextQuizzes: [],
-      setsEqualForUI: quizSetsEqualForUI,
-      quizzesEqualForUI,
-    });
-    expect(decision.paint).toBe(false);
-    expect(decision.reason).toBe('skip');
-  });
-
-  it('never paints strict subset 11→9 over richer lastPainted (array echo)', () => {
-    expect(quizSetsMembershipShrunk(richerSets, paintedSets)).toBe(true);
-    const decision = decideQuizListsUiPaint({
-      contentReady: true,
-      revealedViaTimeout: false,
-      seenAuthoritativeById: true,
-      isAuthoritativeByIdMerge: false,
-      paintedSets: richerSets,
-      nextSets: paintedSets,
-      paintedQuizzes: [],
-      nextQuizzes: [],
-      setsEqualForUI: quizSetsEqualForUI,
-      quizzesEqualForUI,
-    });
-    expect(decision.paint).toBe(false);
-    expect(decision.reason).toBe('skip');
-  });
-});
-
-describe('local/array 9 + ById 11 → always 11', () => {
-  const nine = Array.from({ length: 9 }, (_, i) => item(i + 1, `Q${i + 1}`, '2026-08-11T10:00:00.000Z'));
-  const eleven = Array.from({ length: 11 }, (_, i) =>
-    item(i + 1, `Q${i + 1}-byid`, '2026-08-11T12:00:00.000Z'),
   );
   const localNine = [
     set({
@@ -321,10 +212,30 @@ describe('local/array 9 + ById 11 → always 11', () => {
     }),
   ];
 
-  it('preferRicherQuizSetsMembership keeps 11 from ById over newer array-9', () => {
-    const merged = preferRicherQuizSetsMembership(localNine, byIdEleven);
+  it('union 9+11 → 11', () => {
+    const merged = unionQuizSetsForCommit(localNine, byIdEleven);
     expect(merged[0].items.filter((i) => !i.trashed)).toHaveLength(11);
     expect(countLiveQuizItems(merged)).toBe(11);
+  });
+
+  it('short array cannot shrink richer local/ById', () => {
+    const shortRemote = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: nine.slice(0, 3),
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-12T00:00:00.000Z',
+      }),
+    ];
+    const merged = unionQuizSetsForCommit(shortRemote, localNine, byIdEleven);
+    expect(merged[0].items.filter((i) => !i.trashed)).toHaveLength(11);
+    expect(quizSetsMembershipShrunk(byIdEleven, merged)).toBe(false);
+  });
+
+  it('preferRicher keeps 11 from ById over newer array-9', () => {
+    const merged = preferRicherQuizSetsMembership(localNine, byIdEleven);
+    expect(merged[0].items.filter((i) => !i.trashed)).toHaveLength(11);
   });
 
   it('adoptByIdMembershipWhenRicher ignores shorter array membership', () => {
@@ -332,21 +243,41 @@ describe('local/array 9 + ById 11 → always 11', () => {
     expect(merged[0].items.filter((i) => !i.trashed)).toHaveLength(11);
   });
 
-  it('after timeout reveal of 9, later ById 11 must paint', () => {
-    const decision = decideQuizListsUiPaint({
-      contentReady: true,
-      revealedViaTimeout: true,
-      seenAuthoritativeById: false,
-      isAuthoritativeByIdMerge: true,
-      paintedSets: localNine,
-      nextSets: preferRicherQuizSetsMembership(localNine, byIdEleven),
-      paintedQuizzes: [],
-      nextQuizzes: [],
-      setsEqualForUI: quizSetsEqualForUI,
-      quizzesEqualForUI,
-    });
-    expect(decision.paint).toBe(true);
-    expect(['byid-catchup', 'membership-grew']).toContain(decision.reason);
+  it('detects membership growth 9→11', () => {
     expect(quizSetsMembershipGrew(localNine, byIdEleven)).toBe(true);
+  });
+
+  it('detects new set ids even with empty items shells (mobile Prover case)', () => {
+    const mobileTwo = [
+      set({ id: 'abl', name: 'ABL', items: [item(1, 'q', '2026-01-01T00:00:00.000Z')], createdAt: '2026-01-01T00:00:00.000Z' }),
+      set({ id: 'tb', name: 'Tuberkulos', items: [], createdAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    const cloudFull = [
+      ...mobileTwo,
+      set({ id: 'serum', name: 'Serum & Plasma', items: [], createdAt: '2026-01-01T00:00:00.000Z' }),
+      set({ id: 'koag', name: 'Koagulationsstatus', items: [], createdAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    expect(quizSetsMembershipGrew(mobileTwo, cloudFull)).toBe(true);
+    const committed = unionQuizSetsForCommit(mobileTwo, cloudFull);
+    expect(committed.map((s) => s.id).sort()).toEqual(['abl', 'koag', 'serum', 'tb']);
+  });
+
+  it('local-first paint path: incomplete LS then ById enrich always grows', () => {
+    const lsPartial = [
+      set({ id: 'abl', name: 'ABL', items: [item(1, 'q', '2026-01-01T00:00:00.000Z')], createdAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    const painted = unionQuizSetsForCommit(lsPartial);
+    expect(painted).toHaveLength(1);
+    const afterById = unionQuizSetsForCommit(painted, [
+      set({ id: 'abl', name: 'ABL', items: [item(1, 'q', '2026-01-01T00:00:00.000Z')], createdAt: '2026-01-01T00:00:00.000Z' }),
+      set({
+        id: 'serum',
+        name: 'Serum & Plasma',
+        items: [item(2, 'q2', '2026-01-01T00:00:00.000Z')],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ]);
+    expect(afterById.map((s) => s.id).sort()).toEqual(['abl', 'serum']);
+    expect(quizSetsMembershipGrew(painted, afterById)).toBe(true);
   });
 });

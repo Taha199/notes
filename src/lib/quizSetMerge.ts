@@ -152,9 +152,18 @@ function liveItemIds(set: QuizSet | undefined | null): Set<number> {
   );
 }
 
-/** True when `next` gained any live item id (global or per-set) vs `prev`. */
+/** Live (non-trashed, non-system) set ids — set-list growth, not just items. */
+export function liveUserQuizSetIds(sets: QuizSet[]): Set<string> {
+  return new Set(sets.filter((set) => set?.id && !set.trashed && !set.system).map((set) => set.id));
+}
+
+/** True when `next` gained any live set id or live item id vs `prev`. */
 export function quizSetsMembershipGrew(prev: QuizSet[], next: QuizSet[]): boolean {
   if (countLiveQuizItems(next) > countLiveQuizItems(prev)) return true;
+  const prevSetIds = liveUserQuizSetIds(prev);
+  for (const id of liveUserQuizSetIds(next)) {
+    if (!prevSetIds.has(id)) return true;
+  }
   const prevById = new Map(prev.map((set) => [set.id, set]));
   for (const set of next) {
     const prior = prevById.get(set.id);
@@ -256,57 +265,15 @@ export function adoptByIdMembershipWhenRicher(
 }
 
 /**
- * Decide whether merged quiz lists must reach React after a hydrate step.
- *
- * Membership growth (9→11) always paints. Strict subsets over a richer
- * lastPainted never paint. Same-id HTML flips are allowed on the first
- * authoritative ById catch-up after a timeout reveal, but skipped once an
- * authoritative body snapshot was already shown — without blocking later adds.
+ * Notes-like commit helper: union incoming with known richer sources, then
+ * callers always setState. Never drop live set/item ids present on either side.
  */
-export function decideQuizListsUiPaint(opts: {
-  contentReady: boolean;
-  revealedViaTimeout: boolean;
-  seenAuthoritativeById: boolean;
-  isAuthoritativeByIdMerge: boolean;
-  /** Last lists actually passed to setQuizSets / setQuizzes (not just refs). */
-  paintedSets: QuizSet[];
-  nextSets: QuizSet[];
-  paintedQuizzes: QuizItem[];
-  nextQuizzes: QuizItem[];
-  setsEqualForUI: (a: QuizSet[], b: QuizSet[]) => boolean;
-  quizzesEqualForUI: (a: QuizItem[], b: QuizItem[]) => boolean;
-}): { paint: boolean; reason: 'first-reveal' | 'byid-catchup' | 'membership-grew' | 'content-changed' | 'skip' } {
-  const membershipGrew = quizSetsMembershipGrew(opts.paintedSets, opts.nextSets)
-    || opts.nextQuizzes.length > opts.paintedQuizzes.length;
-  const membershipShrunk = quizSetsMembershipShrunk(opts.paintedSets, opts.nextSets);
-  const contentChanged = !opts.setsEqualForUI(opts.paintedSets, opts.nextSets)
-    || !opts.quizzesEqualForUI(opts.paintedQuizzes, opts.nextQuizzes);
-
-  if (!opts.contentReady) {
-    // First reveal must not lock in a strict subset when richer membership
-    // was already painted (structure paint / remount cache).
-    if (membershipShrunk && !membershipGrew) {
-      return { paint: false, reason: 'skip' };
-    }
-    return { paint: true, reason: 'first-reveal' };
-  }
-  // Timeout showed incomplete local (classic 9) — first ById must still land.
-  if (opts.revealedViaTimeout && !opts.seenAuthoritativeById && opts.isAuthoritativeByIdMerge) {
-    return { paint: true, reason: 'byid-catchup' };
-  }
-  if (membershipGrew) {
-    return { paint: true, reason: 'membership-grew' };
-  }
-  // Never paint a strict subset over richer lastPainted (array echo of 9).
-  if (membershipShrunk) {
-    return { paint: false, reason: 'skip' };
-  }
-  // After an authoritative body reveal, skip same-id HTML flips from later echoes.
-  if (opts.seenAuthoritativeById) {
-    return { paint: false, reason: 'skip' };
-  }
-  if (contentChanged) {
-    return { paint: true, reason: 'content-changed' };
-  }
-  return { paint: false, reason: 'skip' };
+export function unionQuizSetsForCommit(
+  incoming: QuizSet[],
+  ...richerSources: QuizSet[][]
+): QuizSet[] {
+  const unioned = preferRicherQuizSetsMembership(incoming, ...richerSources);
+  const byIdSources = richerSources.filter((src) => src.length > 0);
+  if (!byIdSources.length) return unioned;
+  return adoptByIdMembershipWhenRicher(unioned, preferRicherQuizSetsMembership([], ...byIdSources));
 }
