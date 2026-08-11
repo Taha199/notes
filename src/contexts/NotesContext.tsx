@@ -787,6 +787,11 @@ interface NotesCtx {
    * hydrate — does NOT wait for the full cloud round-trip (`loaded`).
    */
   quizLocalReady: boolean;
+  /**
+   * Question card HTML is safe to paint after the first cloud quizItemsById
+   * merge (or a short timeout / same-session boot cache). Prevents old→new FOUC.
+   */
+  quizContentReady: boolean;
   /** Drafts are usable (read/write/cloud) before the full account load finishes. */
   draftsReady: boolean;
   /** Fetching draft bundle from cloud (other devices). */
@@ -1848,10 +1853,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [cloudSyncedAt, setCloudSyncedAt] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [quizLocalReady, setQuizLocalReady] = useState(false);
+  const [quizContentReady, setQuizContentReady] = useState(false);
   const [draftsReady, setDraftsReady] = useState(false);
   const [draftsLoading, setDraftsLoading] = useState(false);
   const loadedRef = useRef(false);
   const quizLocalReadyRef = useRef(false);
+  const quizContentReadyRef = useRef(false);
+  /** Max wait for cloud ById before revealing best-effort local question bodies. */
+  const QUIZ_CONTENT_READY_TIMEOUT_MS = 2500;
   const cloudLoadSucceededRef = useRef(false);
   const draftsReadyRef = useRef(false);
   const draftPullDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1961,22 +1970,27 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // Load from cloud when user changes
   useEffect(() => {
     let cancelled = false;
+    let quizContentReadyTimer: ReturnType<typeof setTimeout> | null = null;
     loadedRef.current = false;
     quizLocalReadyRef.current = false;
+    quizContentReadyRef.current = false;
     cloudLoadSucceededRef.current = false;
     draftsReadyRef.current = false;
     setDraftsReady(false);
     setDraftsLoading(false);
     setLoaded(false);
     setQuizLocalReady(false);
+    setQuizContentReady(false);
     if (!user) {
       setNotes([]);
       setDrafts([]);
       setCloudSyncedAt(null);
       loadedRef.current = true;
       quizLocalReadyRef.current = true;
+      quizContentReadyRef.current = true;
       setLoaded(true);
       setQuizLocalReady(true);
+      setQuizContentReady(true);
       return;
     }
     syncAccountLocalStorage(user.uid);
@@ -1990,6 +2004,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
     // Same-session remount: prefer the last full in-memory lists over a short LS shell.
+    // That cache already survived a prior ById merge in this SPA lifetime — safe for
+    // both structure and question bodies (no old→new FOUC within the tab).
     if (
       quizListsBootCache
       && countLiveQuizItems(quizListsBootCache.sets) >= countLiveQuizItems(local.sets)
@@ -2001,7 +2017,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setQuizzes(quizListsBootCache.quizzes);
       setQuizSets(quizListsBootCache.sets);
       quizLocalReadyRef.current = true;
+      quizContentReadyRef.current = true;
       setQuizLocalReady(true);
+      setQuizContentReady(true);
     }
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
@@ -2022,6 +2040,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (cancelled || quizLocalReadyRef.current) return;
       quizLocalReadyRef.current = true;
       setQuizLocalReady(true);
+    };
+    const markQuizContentReady = () => {
+      if (cancelled || quizContentReadyRef.current) return;
+      if (quizContentReadyTimer) {
+        clearTimeout(quizContentReadyTimer);
+        quizContentReadyTimer = null;
+      }
+      quizContentReadyRef.current = true;
+      setQuizContentReady(true);
+    };
+    const armQuizContentReadyTimeout = () => {
+      if (cancelled || quizContentReadyRef.current || quizContentReadyTimer) return;
+      quizContentReadyTimer = setTimeout(() => {
+        quizContentReadyTimer = null;
+        // Best-effort local bodies — prefer cloud ById when it arrives within the window.
+        markQuizContentReady();
+      }, QUIZ_CONTENT_READY_TIMEOUT_MS);
     };
     const durableReady = (async () => {
       const [idbNotes, idbQuizzes, idbSets] = await Promise.all([
@@ -2051,13 +2086,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizzesRef.current = local.quizzes;
         quizSetsRef.current = local.sets;
       }
-      // First quiz paint after IDB items are folded in — never the bare LS shell
-      // (that incomplete items[] is what caused the 9→11 count flicker on refresh).
-      // Do NOT wait for cloud: QuizPage uses quizLocalReady for first paint.
-      // Never replace a richer same-session cache with a shorter IDB/LS fold.
+      // Structure paint after IDB (sidebar counts) — never the bare LS shell.
+      // Question card HTML stays gated on quizContentReady until first cloud ById
+      // merge (or timeout) so stale IDB bodies cannot flash before newer cloud HTML.
+      // If same-session cache already revealed bodies, never replace equal-count
+      // IDB rows (same membership, older HTML would FOUC).
       const cacheLive = quizListsBootCache ? countLiveQuizItems(quizListsBootCache.sets) : 0;
       const nextLive = countLiveQuizItems(local.sets);
-      if (local.sets.length && nextLive >= cacheLive) {
+      if (quizContentReadyRef.current && quizListsBootCache) {
+        if (nextLive > cacheLive) {
+          if (local.quizzes.length) setQuizzes(local.quizzes);
+          setQuizSets(local.sets);
+          rememberQuizListsBootCache(local.quizzes, local.sets);
+          safeSetItem('malacadhati_quiz_sets', JSON.stringify(local.sets));
+          writeQuizSetsShellJournal(local.sets);
+        } else {
+          quizzesRef.current = quizListsBootCache.quizzes;
+          quizSetsRef.current = quizListsBootCache.sets;
+          local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
+        }
+      } else if (local.sets.length && nextLive >= cacheLive) {
         if (local.quizzes.length) setQuizzes(local.quizzes);
         setQuizSets(local.sets);
         rememberQuizListsBootCache(local.quizzes, local.sets);
@@ -2073,6 +2121,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         setQuizzes(local.quizzes);
       }
       markQuizLocalReady();
+      armQuizContentReadyTimeout();
     })();
     const storedCloudSyncAt = Number(localStorage.getItem(CLOUD_SYNCED_AT_KEY));
     if (storedCloudSyncAt > 0) setCloudSyncedAt(storedCloudSyncAt);
@@ -2100,6 +2149,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       // durableReady already ran — local.sets include IDB items; safe to paint.
       applyLocalCache({ includeQuiz: true });
       markQuizLocalReady();
+      markQuizContentReady();
       const { drafts, counter } = resolveDraftsFromSources(null, local.drafts, pendingDeletedDraftIdsRef.current);
       draftCounter.current = counter;
       setDrafts(drafts);
@@ -2191,21 +2241,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           setNotes(mergedNotes);
           local = { ...local, notes: mergedNotes };
         }
-        // Keep refs current for the final boot merge. Only paint when ById is
-        // strictly richer than what durableReady already showed — avoids a
-        // second mid-flight count jump (and never paints a shorter list).
+        // Fold cloud ById into refs first, then paint once. First paint of question
+        // bodies must be this merged snapshot (not stale IDB alone) so cards never
+        // flip old→new HTML on load. After reveal, only paint richer membership or
+        // actual LWW content changes (never a shorter list).
+        const prevQuizzesForById = quizzesRef.current;
+        const prevSetsForById = quizSetsRef.current;
         if (cloudQuizItemsById.length) {
-          const applied = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, cloudQuizItemsById);
-          const richer = countLiveQuizItems(applied.sets) > countLiveQuizItems(quizSetsRef.current)
-            || applied.quizzes.length > quizzesRef.current.length;
+          const applied = applyDurableQuizItems(prevQuizzesForById, prevSetsForById, cloudQuizItemsById);
           quizzesRef.current = applied.quizzes;
           quizSetsRef.current = applied.sets;
           local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
-          if (richer) {
-            setQuizzes(applied.quizzes);
-            setQuizSets(applied.sets);
-            rememberQuizListsBootCache(applied.quizzes, applied.sets);
-          }
         }
         if (cloudSetsById.length) {
           quizSetsByIdCacheRef.current = cloudSetsById;
@@ -2213,14 +2259,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             unionQuizSetsFromById(quizSetsRef.current, cloudSetsById, permDeletedRef.current),
             quizSetTombstonesRef.current,
           );
-          const richer = countLiveQuizItems(mergedSets) > countLiveQuizItems(quizSetsRef.current)
-            || mergedSets.length > quizSetsRef.current.length;
           quizSetsRef.current = mergedSets;
           local = { ...local, sets: mergedSets };
-          if (richer) {
-            setQuizSets(mergedSets);
-            rememberQuizListsBootCache(quizzesRef.current, mergedSets);
-          }
         }
         if (cloudFoldersById.length) {
           quizFoldersByIdCacheRef.current = cloudFoldersById;
@@ -2231,6 +2271,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizFoldersRef.current = mergedFolders;
           setQuizFolders(mergedFolders);
           local = { ...local, folders: mergedFolders };
+        }
+        {
+          const nextQuizzes = quizzesRef.current;
+          const nextSets = quizSetsRef.current;
+          const richer = countLiveQuizItems(nextSets) > countLiveQuizItems(prevSetsForById)
+            || nextQuizzes.length > prevQuizzesForById.length
+            || nextSets.length > prevSetsForById.length;
+          const contentChanged = !quizSetsEqualForUI(prevSetsForById, nextSets)
+            || !quizzesEqualForUI(prevQuizzesForById, nextQuizzes);
+          if (!quizContentReadyRef.current) {
+            // Authoritative first content paint — reveal cards with merged bodies.
+            if (nextQuizzes.length) setQuizzes(nextQuizzes);
+            if (nextSets.length) setQuizSets(nextSets);
+            rememberQuizListsBootCache(nextQuizzes, nextSets);
+            markQuizContentReady();
+          } else if (richer || contentChanged) {
+            if (nextQuizzes.length) setQuizzes(nextQuizzes);
+            if (nextSets.length) setQuizSets(nextSets);
+            rememberQuizListsBootCache(nextQuizzes, nextSets);
+          }
         }
 
         const cloud = await fetchCloudSyncBundle(user.uid);
@@ -2511,17 +2571,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         {
           const idbQuizzesFinal = await getAllQuizItemsLocal();
           const applied = applyDurableQuizItems(quizzes, normalizedSets, [...cloudQuizItemsById, ...idbQuizzesFinal]);
+          const prevQuizzes = quizzesRef.current;
+          const prevSets = quizSetsRef.current;
           quizzes = applied.quizzes;
           normalizedSets = applied.sets;
           quizzesRef.current = quizzes;
-          setQuizzes(quizzes);
+          quizSetsRef.current = normalizedSets;
+          // Skip no-op React updates so already-shown cards do not remount/flip.
+          if (!quizzesEqualForUI(prevQuizzes, quizzes)) setQuizzes(quizzes);
+          if (!quizSetsEqualForUI(prevSets, normalizedSets)) setQuizSets(normalizedSets);
         }
-        setQuizSets(normalizedSets);
-        quizSetsRef.current = normalizedSets;
         rememberQuizListsBootCache(quizzes, normalizedSets);
         safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
         setQuizFolders(normalizedFolders);
         safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+        markQuizContentReady();
 
         const needsRepair = notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
           || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0)
@@ -2635,6 +2699,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           setLoaded(true);
           quizLocalReadyRef.current = true;
           setQuizLocalReady(true);
+          markQuizContentReady();
           if (user) {
             if (cloudLoadSucceededRef.current) {
               setCloudStatus('saved');
@@ -2661,6 +2726,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     })();
     return () => {
       cancelled = true;
+      if (quizContentReadyTimer) clearTimeout(quizContentReadyTimer);
     };
   }, [user]);
 
@@ -6351,6 +6417,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         cloudSyncedAt,
         loaded,
         quizLocalReady,
+        quizContentReady,
         draftsReady,
         draftsLoading,
         addQuiz,

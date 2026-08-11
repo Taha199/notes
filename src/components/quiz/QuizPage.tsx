@@ -793,7 +793,7 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -1291,7 +1291,7 @@ export function QuizPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!quizLocalReady || focusItemId == null) return;
+    if (!quizContentReady || focusItemId == null) return;
 
     const orphan = quizzes.find((q) => q.id === focusItemId && !q.trashed);
     if (orphan) {
@@ -1341,7 +1341,7 @@ export function QuizPage({
       window.clearTimeout(scrollTimer);
       window.clearTimeout(retryTimer);
     };
-  }, [focusItemId, quizLocalReady, allQuizSets, quizzes, onFocusHandled]);
+  }, [focusItemId, quizContentReady, allQuizSets, quizzes, onFocusHandled]);
 
   useEffect(() => {
     saveQuizSelection(selectedFolderId, selectedSetId);
@@ -2021,7 +2021,7 @@ export function QuizPage({
       {/* Main content */}
       <div className="flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
-          {!quizLocalReady ? (
+          {!quizContentReady ? (
             <div className="flex min-h-[16rem] flex-col items-center justify-center py-24">
               <FilesLoadingIndicator text={t.quizLoadingQuestions} />
             </div>
