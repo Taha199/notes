@@ -878,6 +878,25 @@ const DELETED_DRAFT_IDS_KEY = 'malacadhati_deleted_draft_ids';
 
 const QUIZ_SETS_SHELL_KEY = 'malacadhati_quiz_sets_shells';
 
+/**
+ * In-memory last-known quiz lists for this JS session (survives React remount,
+ * not a full tab reload). Used so refresh/hydration never paints a shorter
+ * localStorage shell over a fuller list we already showed.
+ */
+let quizListsBootCache: { quizzes: QuizItem[]; sets: QuizSet[] } | null = null;
+
+function rememberQuizListsBootCache(quizzes: QuizItem[], sets: QuizSet[]) {
+  const prev = quizListsBootCache;
+  if (
+    prev
+    && countLiveQuizItems(prev.sets) > countLiveQuizItems(sets)
+    && prev.sets.length >= sets.length
+  ) {
+    return;
+  }
+  quizListsBootCache = { quizzes, sets };
+}
+
 const LOCAL_DATA_KEYS = [
   'malacadhati',
   'malacadhati_drafts',
@@ -927,6 +946,7 @@ function insertQuizSetInFolderOrder(sets: QuizSet[], newSet: QuizSet): QuizSet[]
 
 function clearLocalNotesData() {
   for (const key of LOCAL_DATA_KEYS) localStorage.removeItem(key);
+  quizListsBootCache = null;
 }
 
 /** Clear cached notes when a different account signs in (keys are not uid-scoped). */
@@ -1953,6 +1973,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // quota can't hold them). Load it in parallel with the first paint from the
     // raw localStorage snapshot, then fold journal entries in before cloud merge.
     let local = readLocalNotesDataRaw();
+    // Seed refs immediately for merges, but do NOT paint quizSets/quizzes from the
+    // localStorage shell yet — items[] there is often a stale subset while the
+    // full questions live in IndexedDB quizItems (classic 9→11 refresh flash).
+    quizzesRef.current = local.quizzes;
+    quizSetsRef.current = local.sets;
+    // Same-session remount: prefer the last full in-memory lists over a short LS shell.
+    if (
+      quizListsBootCache
+      && countLiveQuizItems(quizListsBootCache.sets) >= countLiveQuizItems(local.sets)
+      && quizListsBootCache.sets.length > 0
+    ) {
+      quizzesRef.current = quizListsBootCache.quizzes;
+      quizSetsRef.current = quizListsBootCache.sets;
+      local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
+      setQuizzes(quizListsBootCache.quizzes);
+      setQuizSets(quizListsBootCache.sets);
+    }
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
       local = applyRecentEditsToData(local, edits);
@@ -1961,13 +1998,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizzesRef.current = local.quizzes;
       quizSetsRef.current = local.sets;
       setNotes(local.notes);
-      setQuizzes(local.quizzes);
-      setQuizSets(local.sets);
+      // Quiz lists wait for durableReady so we never flash an incomplete items[].
       return edits;
     });
 
     // Radical durability: IndexedDB + notesById / quizSetsById are the source of
-    // truth for recently-saved items. Fold them in before first paint settles /
+    // truth for recently-saved items. Fold them in before first quiz paint /
     // cloud merge so a cancelled giant-array write cannot hide a just-created set.
     const durableReady = (async () => {
       const [idbNotes, idbQuizzes, idbSets] = await Promise.all([
@@ -1990,28 +2026,46 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           sets: unionQuizSetsFromById(local.sets, idbSets, permDeletedRef.current),
         };
         quizSetsRef.current = local.sets;
-        setQuizSets(local.sets);
       }
       if (idbQuizzes.length) {
         const applied = applyDurableQuizItems(local.quizzes, local.sets, idbQuizzes);
         local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
         quizzesRef.current = local.quizzes;
         quizSetsRef.current = local.sets;
-        setQuizzes(local.quizzes);
+      }
+      // First quiz paint only after IDB items are folded in — never the bare LS shell
+      // (that incomplete items[] is what caused the 9→11 count flicker on refresh).
+      // Never replace a richer same-session cache with a shorter IDB/LS fold.
+      const cacheLive = quizListsBootCache ? countLiveQuizItems(quizListsBootCache.sets) : 0;
+      const nextLive = countLiveQuizItems(local.sets);
+      if (local.sets.length && nextLive >= cacheLive) {
+        if (local.quizzes.length) setQuizzes(local.quizzes);
         setQuizSets(local.sets);
+        rememberQuizListsBootCache(local.quizzes, local.sets);
+        safeSetItem('malacadhati_quiz_sets', JSON.stringify(local.sets));
+        writeQuizSetsShellJournal(local.sets);
+      } else if (quizListsBootCache && cacheLive > nextLive) {
+        quizzesRef.current = quizListsBootCache.quizzes;
+        quizSetsRef.current = quizListsBootCache.sets;
+        local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
+      } else if (local.quizzes.length) {
+        setQuizzes(local.quizzes);
       }
     })();
     const storedCloudSyncAt = Number(localStorage.getItem(CLOUD_SYNCED_AT_KEY));
     if (storedCloudSyncAt > 0) setCloudSyncedAt(storedCloudSyncAt);
 
-    const applyLocalCache = () => {
+    const applyLocalCache = (opts?: { includeQuiz?: boolean }) => {
+      const includeQuiz = opts?.includeQuiz !== false;
       if (local.notes.length) setNotes(local.notes);
-      if (local.quizzes.length) setQuizzes(local.quizzes);
       if (local.chats.length) setChats(local.chats);
       if (local.folders.length) {
         setQuizFolders(ensureRestoredFolder(initializeQuizColors(local.folders)));
       }
-      if (local.sets.length) setQuizSets(local.sets);
+      if (includeQuiz) {
+        if (local.quizzes.length) setQuizzes(local.quizzes);
+        if (local.sets.length) setQuizSets(local.sets);
+      }
       if (local.drafts.length) {
         const stamped = stampDrafts(local.drafts).filter((d) => !pendingDeletedDraftIdsRef.current.has(d.id));
         setDrafts(stamped);
@@ -2021,13 +2075,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
 
     const applyLocalFallback = () => {
-      applyLocalCache();
+      // durableReady already ran — local.sets include IDB items; safe to paint.
+      applyLocalCache({ includeQuiz: true });
       const { drafts, counter } = resolveDraftsFromSources(null, local.drafts, pendingDeletedDraftIdsRef.current);
       draftCounter.current = counter;
       setDrafts(drafts);
     };
 
-    applyLocalCache();
+    // Notes/folders/drafts can paint from LS immediately; quiz waits on durableReady.
+    applyLocalCache({ includeQuiz: false });
 
     const ensureSeedDraft = () => {
       if (draftsRef.current.length) return;
@@ -2112,13 +2168,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           setNotes(mergedNotes);
           local = { ...local, notes: mergedNotes };
         }
+        // Keep refs current for the final boot merge. Only paint when ById is
+        // strictly richer than what durableReady already showed — avoids a
+        // second mid-flight count jump (and never paints a shorter list).
         if (cloudQuizItemsById.length) {
           const applied = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, cloudQuizItemsById);
+          const richer = countLiveQuizItems(applied.sets) > countLiveQuizItems(quizSetsRef.current)
+            || applied.quizzes.length > quizzesRef.current.length;
           quizzesRef.current = applied.quizzes;
           quizSetsRef.current = applied.sets;
-          setQuizzes(applied.quizzes);
-          setQuizSets(applied.sets);
           local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
+          if (richer) {
+            setQuizzes(applied.quizzes);
+            setQuizSets(applied.sets);
+            rememberQuizListsBootCache(applied.quizzes, applied.sets);
+          }
         }
         if (cloudSetsById.length) {
           quizSetsByIdCacheRef.current = cloudSetsById;
@@ -2126,9 +2190,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             unionQuizSetsFromById(quizSetsRef.current, cloudSetsById, permDeletedRef.current),
             quizSetTombstonesRef.current,
           );
+          const richer = countLiveQuizItems(mergedSets) > countLiveQuizItems(quizSetsRef.current)
+            || mergedSets.length > quizSetsRef.current.length;
           quizSetsRef.current = mergedSets;
-          setQuizSets(mergedSets);
           local = { ...local, sets: mergedSets };
+          if (richer) {
+            setQuizSets(mergedSets);
+            rememberQuizListsBootCache(quizzesRef.current, mergedSets);
+          }
         }
         if (cloudFoldersById.length) {
           quizFoldersByIdCacheRef.current = cloudFoldersById;
@@ -2426,6 +2495,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
         setQuizSets(normalizedSets);
         quizSetsRef.current = normalizedSets;
+        rememberQuizListsBootCache(quizzes, normalizedSets);
         safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
         setQuizFolders(normalizedFolders);
         safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
