@@ -793,7 +793,7 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, loaded, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -1291,7 +1291,7 @@ export function QuizPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!loaded || focusItemId == null) return;
+    if (!quizLocalReady || focusItemId == null) return;
 
     const orphan = quizzes.find((q) => q.id === focusItemId && !q.trashed);
     if (orphan) {
@@ -1341,7 +1341,7 @@ export function QuizPage({
       window.clearTimeout(scrollTimer);
       window.clearTimeout(retryTimer);
     };
-  }, [focusItemId, loaded, allQuizSets, quizzes, onFocusHandled]);
+  }, [focusItemId, quizLocalReady, allQuizSets, quizzes, onFocusHandled]);
 
   useEffect(() => {
     saveQuizSelection(selectedFolderId, selectedSetId);
@@ -1352,7 +1352,7 @@ export function QuizPage({
   }, [selectedSetId]);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!quizLocalReady) return;
     if (selectedFolderId && !selectedSetId) {
       const folderSets = allQuizSets.filter(
         (set) => !set.trashed && set.folderId === selectedFolderId,
@@ -1362,19 +1362,19 @@ export function QuizPage({
     if (selectedSetId && !allQuizSets.some((set) => set.id === selectedSetId && !set.trashed)) {
       selectQuizSet(null);
     }
-  }, [loaded, selectedFolderId, selectedSetId, allQuizSets]);
+  }, [quizLocalReady, selectedFolderId, selectedSetId, allQuizSets]);
 
   const isNotesViewRef = useRef(false);
   // Before paint: stash leaving set's drafts and load only the selected set's forms.
   // useLayoutEffect avoids a painted frame where Schimke's draft appears under Infliximab.
   useLayoutEffect(() => {
-    if (!loaded) return;
+    if (!quizLocalReady) return;
     isNotesViewRef.current = !selectedFolderId && !selectedSetId;
     switchFormsScope(selectedSetId, selectedFolderId);
-  }, [selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedSetId, selectedFolderId, quizLocalReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!quizLocalReady) return;
     const scopeKey = formsScopeKey(selectedSetId, selectedFolderId);
     if (!scopeKey || scopeKey !== activeFormsScopeRef.current) return;
     if (!selectedSetId && !isNotesViewRef.current) return;
@@ -1388,7 +1388,7 @@ export function QuizPage({
       putScopeForms(scopeKey, next, { immediate: true });
       return next;
     });
-  }, [allQuizSets, quizzes, selectedSetId, selectedFolderId, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allQuizSets, quizzes, selectedSetId, selectedFolderId, quizLocalReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Rename set
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
@@ -1822,7 +1822,7 @@ export function QuizPage({
         >
           <span>🧠</span>
           <span className="flex-1 truncate">{t.quizQuestionsFromNotes}</span>
-          <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{loaded ? quizzes.length : '…'}</span>
+          <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{quizLocalReady ? quizzes.length : '…'}</span>
         </button>
 
         {/* Two-column area */}
@@ -1994,7 +1994,7 @@ export function QuizPage({
             </div>
             {/* Sets list */}
             <div className="flex-1 overflow-y-auto px-1">
-              {!loaded ? (
+              {!quizLocalReady ? (
                 <div className="flex h-full min-h-[8rem] items-center justify-center px-2 py-6">
                   <FilesLoadingIndicator text={t.quizLoadingQuestions} />
                 </div>
@@ -2021,7 +2021,7 @@ export function QuizPage({
       {/* Main content */}
       <div className="flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">
-          {!loaded ? (
+          {!quizLocalReady ? (
             <div className="flex min-h-[16rem] flex-col items-center justify-center py-24">
               <FilesLoadingIndicator text={t.quizLoadingQuestions} />
             </div>
