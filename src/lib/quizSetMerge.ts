@@ -15,12 +15,90 @@ export function quizSetSyncTime(set: { updatedAt?: string; createdAt?: string; s
   return Date.parse(set.updatedAt || set.savedAt || set.createdAt || '') || 0;
 }
 
-function quizSetOrderTime(set: QuizSet) {
+export function quizSetOrderTime(set: QuizSet) {
   return Date.parse(set.orderUpdatedAt || '') || 0;
 }
 
-function quizSetListOrderTime(set: QuizSet) {
+export function quizSetListOrderTime(set: QuizSet) {
   return Date.parse(set.listOrderUpdatedAt || '') || 0;
+}
+
+/** Item ids in Manual order — from itemsOrder stamp or live items[]. */
+export function quizSetItemsOrderIds(set: QuizSet): number[] {
+  if (set.itemsOrder?.length) return set.itemsOrder.slice();
+  return (set.items ?? []).map((item) => item.id);
+}
+
+/** Re-sequence items by an id list; unknown ids append in prior relative order. */
+export function applyQuizItemsOrder(items: QuizItem[], orderIds?: number[] | null): QuizItem[] {
+  if (!orderIds?.length || !items.length) return items;
+  const map = new Map(items.map((item) => [item.id, item]));
+  const ordered: QuizItem[] = [];
+  const seen = new Set<number>();
+  for (const id of orderIds) {
+    const item = map.get(id);
+    if (!item || seen.has(id)) continue;
+    ordered.push(item);
+    seen.add(id);
+  }
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    ordered.push(item);
+    seen.add(item.id);
+  }
+  return ordered;
+}
+
+function setHasItemSequence(set: QuizSet): boolean {
+  return (set.itemsOrder?.length ?? 0) > 0 || (set.items?.length ?? 0) > 0;
+}
+
+/** Prefer real Q/A bodies over empty shells when order stamps tie. */
+function itemSequenceAuthorityScore(set: QuizSet): number {
+  const items = set.items ?? [];
+  const withContent = items.filter(
+    (item) => String(item.question || '').trim() || String(item.answer || '').trim(),
+  ).length;
+  const orderLen = Math.max(items.length, set.itemsOrder?.length ?? 0);
+  return withContent * 1_000_000 + orderLen;
+}
+
+/**
+ * Reorder a membership-unioned set list using the source with the newest
+ * max(listOrderUpdatedAt). Ties keep the earliest source (callers pass primary first).
+ * Never falls back to createdAt/id — unstamped sources leave `membership` order as-is.
+ */
+export function orderQuizSetsByListAuthority(
+  membership: QuizSet[],
+  ...sources: QuizSet[][]
+): QuizSet[] {
+  if (!membership.length) return membership;
+  const map = new Map(membership.map((set) => [set.id, set]));
+  let bestSource: QuizSet[] | null = null;
+  let bestTime = 0;
+  for (const src of sources) {
+    if (!src?.length) continue;
+    const t = Math.max(0, ...src.map((set) => quizSetListOrderTime(set)));
+    if (t > bestTime) {
+      bestTime = t;
+      bestSource = src;
+    }
+  }
+  if (!bestSource || bestTime <= 0) return membership;
+  const ordered: QuizSet[] = [];
+  const seen = new Set<string>();
+  for (const set of bestSource) {
+    const merged = map.get(set.id);
+    if (!merged || seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  for (const merged of membership) {
+    if (seen.has(merged.id)) continue;
+    ordered.push(merged);
+    seen.add(merged.id);
+  }
+  return ordered;
 }
 
 export function pickNewerQuizItem(a: QuizItem, b: QuizItem): QuizItem {
@@ -171,15 +249,39 @@ export function pickBetterQuizSet(
   // listOrderUpdatedAt. Neither may decide item membership.
   const remoteMetaNewer = quizSetSyncTime(remote) >= quizSetSyncTime(local);
   const base = remoteMetaNewer ? remote : local;
-  const preferRemoteOrder = quizSetOrderTime(remote) > quizSetOrderTime(local);
-  const items = mergeQuizItemsUnion(
-    local.items ?? [],
-    remote.items ?? [],
-    {
-      permanentlyDeletedIds: tombstones.quizzes,
-      softTrashTombstoneIds: tombstones.softTrashQuizItems,
-      orderFrom: preferRemoteOrder ? 'remote' : 'local',
-    },
+  const localOrderTime = quizSetOrderTime(local);
+  const remoteOrderTime = quizSetOrderTime(remote);
+  let preferRemoteOrder = remoteOrderTime > localOrderTime;
+  // Structure / IDB shells often keep a stamp but have items:[] (or only
+  // itemsOrder). Never let an empty sequence clobber a side that still has one.
+  if (preferRemoteOrder && !setHasItemSequence(remote) && setHasItemSequence(local)) {
+    preferRemoteOrder = false;
+  } else if (!preferRemoteOrder && !setHasItemSequence(local) && setHasItemSequence(remote)) {
+    preferRemoteOrder = true;
+  } else if (localOrderTime === remoteOrderTime && localOrderTime > 0) {
+    // Equal Manual stamps: an explicit itemsOrder beats a scrambled items[]
+    // rebuilt from durable Object.values / IDB (classic refresh reshuffle).
+    const localExplicit = (local.itemsOrder?.length ?? 0) > 0;
+    const remoteExplicit = (remote.itemsOrder?.length ?? 0) > 0;
+    if (localExplicit !== remoteExplicit) {
+      preferRemoteOrder = remoteExplicit;
+    } else {
+      // Both or neither explicit — prefer content-bearing sequences.
+      preferRemoteOrder = itemSequenceAuthorityScore(remote) > itemSequenceAuthorityScore(local);
+    }
+  }
+  const orderIds = preferRemoteOrder ? quizSetItemsOrderIds(remote) : quizSetItemsOrderIds(local);
+  const items = applyQuizItemsOrder(
+    mergeQuizItemsUnion(
+      local.items ?? [],
+      remote.items ?? [],
+      {
+        permanentlyDeletedIds: tombstones.quizzes,
+        softTrashTombstoneIds: tombstones.softTrashQuizItems,
+        orderFrom: preferRemoteOrder ? 'remote' : 'local',
+      },
+    ),
+    orderIds,
   );
   const orderUpdatedAt = preferRemoteOrder
     ? (remote.orderUpdatedAt ?? local.orderUpdatedAt)
@@ -188,8 +290,14 @@ export function pickBetterQuizSet(
   const listOrderUpdatedAt = preferRemoteListOrder
     ? (remote.listOrderUpdatedAt ?? local.listOrderUpdatedAt)
     : (local.listOrderUpdatedAt ?? remote.listOrderUpdatedAt);
+  const itemsOrder = orderIds.length
+    ? orderIds
+    : (preferRemoteOrder
+      ? (remote.itemsOrder ?? local.itemsOrder)
+      : (local.itemsOrder ?? remote.itemsOrder));
   const withItems = orderUpdatedAt ? { ...base, items, orderUpdatedAt } : { ...base, items };
-  return listOrderUpdatedAt ? { ...withItems, listOrderUpdatedAt } : withItems;
+  const withList = listOrderUpdatedAt ? { ...withItems, listOrderUpdatedAt } : withItems;
+  return itemsOrder?.length ? { ...withList, itemsOrder } : withList;
 }
 
 /** Live (non-trashed) item count for one set. */
@@ -258,8 +366,9 @@ export function quizSetsMembershipShrunk(prev: QuizSet[], next: QuizSet[]): bool
 
 /**
  * Union item membership across sources for every set id.
- * Metadata/order come from `primary` (array / latest merge); never drop live
- * items that only exist on a secondary source (ById / lastPainted / IDB).
+ * Per-set metadata/items come from pickBetterQuizSet; the array sequence is
+ * then re-ordered by max(listOrderUpdatedAt) across sources so ById
+ * Object.values / structure-first shells cannot permanently lock Manual order.
  */
 export function preferRicherQuizSetsMembership(
   primary: QuizSet[],
@@ -295,7 +404,7 @@ export function preferRicherQuizSetsMembership(
     ordered.push(merged);
     seen.add(merged.id);
   }
-  return ordered;
+  return orderQuizSetsByListAuthority(ordered, primary, ...richerSources);
 }
 
 /**
@@ -448,8 +557,9 @@ export function unionQuizSetsForCommit(
 ): QuizSet[] {
   const allSources = [incoming, ...richerSources].filter((src) => src.length > 0);
   if (!allSources.length) return incoming;
-  // Empty local/incoming is not authority — order from the richest non-empty
-  // source so cloud/ById set-list membership always lands when LS is [].
+  // Empty local/incoming is not authority — membership seed from the richest
+  // non-empty source so cloud/ById set-list membership always lands when LS is [].
+  // Final array order still comes from max(listOrderUpdatedAt) across sources.
   const primary = incoming.length > 0
     ? incoming
     : (allSources.reduce((best, src) => (
@@ -460,5 +570,6 @@ export function unionQuizSetsForCommit(
   // Critical: do not treat only "secondary" args as ById — a short incoming
   // array must still yield to a richer secondary, and vice versa.
   const richest = preferRicherQuizSetsMembership([], ...allSources);
-  return adoptByIdMembershipWhenRicher(unioned, richest);
+  const adopted = adoptByIdMembershipWhenRicher(unioned, richest);
+  return orderQuizSetsByListAuthority(adopted, incoming, ...richerSources, unioned, richest);
 }

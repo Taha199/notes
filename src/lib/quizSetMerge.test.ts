@@ -3,10 +3,12 @@ import { applyDurableQuizItems, type StoredQuizItem } from './itemsStore';
 import {
   adoptByIdMembershipWhenRicher,
   applyQuizItemTrashTombstonesToSets,
+  applyQuizItemsOrder,
   bumpMaxKnownLiveBySet,
   countLiveQuizItems,
   enforceMaxKnownLiveMembership,
   isQuizSetsLocalWriteSafe,
+  orderQuizSetsByListAuthority,
   pickBetterQuizSet,
   preferRicherQuizSetsMembership,
   quizSetsMembershipGrew,
@@ -166,6 +168,117 @@ describe('pickBetterQuizSet item union', () => {
     const merged = pickBetterQuizSet(local, remote);
     expect(merged.items.map((i) => i.id)).toEqual([3, 1, 2]);
     expect(merged.orderUpdatedAt).toBe('2024-08-11T21:00:00.000Z');
+    expect(merged.itemsOrder).toEqual([3, 1, 2]);
+  });
+
+  it('applies itemsOrder from a stamped empty shell over scrambled durable bodies', () => {
+    const a = item(1, 'first', '2024-01-01T00:00:00.000Z');
+    const b = item(2, 'second', '2024-01-01T00:00:00.000Z');
+    const c = item(3, 'third', '2024-01-01T00:00:00.000Z');
+    // IDB shell after reorder: items stripped, but itemsOrder + orderUpdatedAt kept.
+    const shell = set({
+      id: 'koag',
+      name: 'Koag',
+      items: [],
+      createdAt: '2024-01-01T00:00:00.000Z',
+      orderUpdatedAt: '2024-08-11T21:00:00.000Z',
+      itemsOrder: [3, 1, 2],
+    });
+    // Bodies reattached in Object.values / store order (wrong) — no itemsOrder yet.
+    const reattached = set({
+      id: 'koag',
+      name: 'Koag',
+      items: [a, b, c],
+      createdAt: '2024-01-01T00:00:00.000Z',
+      orderUpdatedAt: '2024-08-11T21:00:00.000Z',
+    });
+    const merged = pickBetterQuizSet(shell, reattached);
+    expect(merged.items.map((i) => i.id)).toEqual([3, 1, 2]);
+    expect(merged.itemsOrder).toEqual([3, 1, 2]);
+    expect(applyQuizItemsOrder([a, b, c], [3, 1, 2]).map((i) => i.id)).toEqual([3, 1, 2]);
+  });
+
+  it('does not let an empty stamped shell without itemsOrder beat a full sequence', () => {
+    const a = item(1, 'first', '2024-01-01T00:00:00.000Z');
+    const b = item(2, 'second', '2024-01-01T00:00:00.000Z');
+    const full = set({
+      id: 'koag',
+      name: 'Koag',
+      items: [b, a],
+      createdAt: '2024-01-01T00:00:00.000Z',
+      orderUpdatedAt: '2024-01-01T00:00:00.000Z',
+    });
+    const emptyNewer = set({
+      id: 'koag',
+      name: 'Koag',
+      items: [],
+      createdAt: '2024-01-01T00:00:00.000Z',
+      orderUpdatedAt: '2024-08-11T21:00:00.000Z',
+    });
+    const merged = pickBetterQuizSet(full, emptyNewer);
+    expect(merged.items.map((i) => i.id)).toEqual([2, 1]);
+  });
+});
+
+describe('Manual set-list order across union / ById shells', () => {
+  const stamp = (id: string, name: string, listAt: string) =>
+    set({
+      id,
+      name,
+      items: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      listOrderUpdatedAt: listAt,
+    });
+
+  it('orderQuizSetsByListAuthority prefers newer listOrderUpdatedAt source', () => {
+    const manual = [
+      stamp('serum', 'Serum & Plasma', '2026-08-12T01:00:00.000Z'),
+      stamp('abl', 'ABL', '2026-08-12T01:00:00.000Z'),
+      stamp('koag', 'Koagulationsstatus', '2026-08-12T01:00:00.000Z'),
+    ];
+    const byIdScrambled = [
+      stamp('koag', 'Koagulationsstatus', '2026-01-01T00:00:00.000Z'),
+      stamp('abl', 'ABL', '2026-01-01T00:00:00.000Z'),
+      stamp('serum', 'Serum & Plasma', '2026-01-01T00:00:00.000Z'),
+    ];
+    const ordered = orderQuizSetsByListAuthority(byIdScrambled, byIdScrambled, manual);
+    expect(ordered.map((s) => s.id)).toEqual(['serum', 'abl', 'koag']);
+  });
+
+  it('unionQuizSetsForCommit does not lock ById Object.values order over Manual array', () => {
+    const manual = [
+      stamp('serum', 'Serum & Plasma', '2026-08-12T01:00:00.000Z'),
+      stamp('abl', 'ABL', '2026-08-12T01:00:00.000Z'),
+      stamp('tb', 'Tuberkulos', '2026-08-12T01:00:00.000Z'),
+      stamp('neuro', 'Neuroborrelios', '2026-08-12T01:00:00.000Z'),
+      stamp('koag', 'Koagulationsstatus', '2026-08-12T01:00:00.000Z'),
+    ];
+    // Structure-first ById paint (Object.values) — wrong order, older stamps.
+    const byId = [
+      stamp('abl', 'ABL', '2026-01-01T00:00:00.000Z'),
+      stamp('koag', 'Koagulationsstatus', '2026-01-01T00:00:00.000Z'),
+      stamp('neuro', 'Neuroborrelios', '2026-01-01T00:00:00.000Z'),
+      stamp('serum', 'Serum & Plasma', '2026-01-01T00:00:00.000Z'),
+      stamp('tb', 'Tuberkulos', '2026-01-01T00:00:00.000Z'),
+    ];
+    // Classic regression: painted ById first, then array arrives as secondary.
+    const afterByIdPaint = unionQuizSetsForCommit(byId);
+    expect(afterByIdPaint.map((s) => s.id)).toEqual(byId.map((s) => s.id));
+    const afterArray = unionQuizSetsForCommit(afterByIdPaint, manual);
+    expect(afterArray.map((s) => s.id)).toEqual(manual.map((s) => s.id));
+  });
+
+  it('preferRicher reorders when secondary has newer listOrderUpdatedAt', () => {
+    const painted = [
+      stamp('koag', 'Koagulationsstatus', '2026-01-01T00:00:00.000Z'),
+      stamp('serum', 'Serum & Plasma', '2026-01-01T00:00:00.000Z'),
+    ];
+    const cloud = [
+      stamp('serum', 'Serum & Plasma', '2026-08-12T01:30:00.000Z'),
+      stamp('koag', 'Koagulationsstatus', '2026-08-12T01:30:00.000Z'),
+    ];
+    const merged = preferRicherQuizSetsMembership(painted, cloud);
+    expect(merged.map((s) => s.id)).toEqual(['serum', 'koag']);
   });
 });
 

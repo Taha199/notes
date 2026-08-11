@@ -80,6 +80,11 @@ export interface QuizSet {
   /** Manual question order inside this set — must not steal membership authority from updatedAt. */
   orderUpdatedAt?: string;
   /**
+   * Durable Manual item-id sequence. Survives IndexedDB / shell journal rows that
+   * strip items[] HTML — merge re-applies this after durable bodies reattach.
+   */
+  itemsOrder?: number[];
+  /**
    * Manual SET LIST order only (folder / ungrouped column).
    * Must stay separate from orderUpdatedAt — item drag/reorder used to bump that
    * stamp and let a stale quizSets[] array win Manual set positions on merge.

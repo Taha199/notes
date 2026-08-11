@@ -22,6 +22,7 @@
 import { ref as dbRef, remove, set, update } from 'firebase/database';
 import type { Note, QuizFolder, QuizItem, QuizSet } from '../types';
 import { database } from './firebase';
+import { applyQuizItemsOrder } from './quizSetMerge';
 import { rtdbFetch } from './rtdb';
 
 function stripUndefined<T>(value: T): T {
@@ -357,7 +358,14 @@ export async function fetchQuizItemsByIdCloud(uid: string): Promise<StoredQuizIt
 
 /** Slim set shell for IndexedDB — membership/metadata only (items live in quizItems). */
 function quizSetShell(set: QuizSet): QuizSet {
-  return stripUndefined({ ...set, items: [] });
+  const itemsOrder = (set.items ?? []).length
+    ? (set.items ?? []).map((item) => item.id)
+    : (set.itemsOrder ?? []);
+  return stripUndefined({
+    ...set,
+    items: [],
+    ...(itemsOrder.length ? { itemsOrder } : {}),
+  });
 }
 
 export async function putQuizSetLocal(set: QuizSet): Promise<void> {
@@ -547,5 +555,13 @@ export function applyDurableQuizItems(
       }
     }
   }
+  // IDB/cloud item bodies arrive in store / Object.values order. Re-apply any
+  // durable Manual itemsOrder stamped on the set shell so refresh cannot scramble.
+  nextSets = nextSets.map((set) => {
+    if (!set.itemsOrder?.length || !(set.items ?? []).length) return set;
+    const ordered = applyQuizItemsOrder(set.items ?? [], set.itemsOrder);
+    if (ordered === set.items) return set;
+    return { ...set, items: ordered };
+  });
   return { quizzes: nextQuizzes, sets: nextSets };
 }

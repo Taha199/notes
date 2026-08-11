@@ -972,7 +972,16 @@ const LOCAL_DATA_KEYS = [
 
 /** Tiny membership journal — survives when the full quizSets[] localStorage write hits QuotaExceeded. */
 function writeQuizSetsShellJournal(sets: QuizSet[]) {
-  const shells = sets.map((set) => ({ ...set, items: [] as QuizItem[] }));
+  const shells = sets.map((set) => {
+    const itemsOrder = (set.items ?? []).length
+      ? (set.items ?? []).map((item) => item.id)
+      : (set.itemsOrder ?? []);
+    return {
+      ...set,
+      items: [] as QuizItem[],
+      ...(itemsOrder.length ? { itemsOrder } : {}),
+    };
+  });
   safeSetItem(QUIZ_SETS_SHELL_KEY, JSON.stringify(shells));
 }
 
@@ -6565,7 +6574,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (swapIdx < 0 || swapIdx >= items.length) return s;
         [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
         changed = true;
-        return { ...s, items, orderUpdatedAt: stamp };
+        return { ...s, items, orderUpdatedAt: stamp, itemsOrder: items.map((i) => i.id) };
       });
       if (!changed) return prev;
       persistSets(next, true, true);
@@ -6608,7 +6617,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const [item] = items.splice(from, 1);
         items.splice(to, 0, item);
         changed = true;
-        return { ...s, items, orderUpdatedAt: stamp };
+        return { ...s, items, orderUpdatedAt: stamp, itemsOrder: items.map((i) => i.id) };
       });
       if (!changed) return prev;
       persistSets(next, true, true);
@@ -6650,7 +6659,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const items = orderItemsByIds(s.items, itemIds);
         if (items.map((i) => i.id).join() === s.items.map((i) => i.id).join()) return s;
         changed = true;
-        return { ...s, items, orderUpdatedAt: stamp };
+        return { ...s, items, orderUpdatedAt: stamp, itemsOrder: items.map((i) => i.id) };
       });
       if (!changed) return prev;
       persistSets(next, true, true);
