@@ -59,9 +59,6 @@ export function ArabicKeyboardPage() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5" dir="rtl">
       <div className="rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-900/70">
-        <p className="text-[13px] leading-relaxed text-app-text-secondary dark:text-gray-400">
-          {t.arabicKbHint}
-        </p>
         <textarea
           ref={areaRef}
           data-arabic-local="true"
@@ -81,7 +78,7 @@ export function ArabicKeyboardPage() {
           }}
           rows={7}
           placeholder={t.arabicKbPlaceholder}
-          className="mt-3 w-full resize-y rounded-xl border border-app-border bg-app-bg px-3 py-3 text-right text-lg leading-8 text-app-text outline-none placeholder:text-app-text-secondary/50 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
+          className="w-full resize-y rounded-xl border border-app-border bg-app-bg px-3 py-3 text-right text-lg leading-8 text-app-text outline-none placeholder:text-app-text-secondary/50 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
           dir="rtl"
           lang="ar"
           spellCheck={false}

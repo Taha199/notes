@@ -6,7 +6,7 @@ import { useArabicInput } from '../../contexts/ArabicInputContext';
 import { normalizeSearch } from '../../lib/noteSearch';
 
 const ICONS: Record<Page, string> = {
-  home: '🏠', fav: '★', todo: '📅', unread: '📖', read: '✓', library: '📚', files: '📎', arabicKb: 'ك', archive: '🗄', trash: '🗑', quiz: '🧠', download: '💻', settings: '⚙️', admin: '👑',
+  home: '🏠', fav: '★', todo: '📅', unread: '📖', read: '✓', library: '📚', files: '📎', arabicKb: '⌨️', archive: '🗄', trash: '🗑', quiz: '🧠', download: '💻', settings: '⚙️', admin: '👑',
 };
 
 const navBtn = 'flex h-7 w-7 items-center justify-center rounded-lg border border-app-border text-app-text-secondary transition-colors hover:bg-app-bg hover:text-app-text disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';

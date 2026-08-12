@@ -52,11 +52,11 @@ export function Sidebar({
     { page: 'quiz', icon: '🧠', label: 'Quiz' },
     { page: 'unread', icon: '📖', label: t.navUnread, badge: counts.unread, badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
     { page: 'read', icon: '✓', label: t.navRead, badge: counts.read, badgeClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' },
-    { page: 'library', icon: '📚', label: t.navLibrary, badge: counts.home, badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
     { page: 'files', icon: '📎', label: t.navFiles },
-    { page: 'arabicKb', icon: 'ك', label: t.navArabicKb },
+    { page: 'arabicKb', icon: '⌨️', label: t.navArabicKb },
   ];
   const items2: { page: Page; icon: string; label: string; badge?: number; badgeClass?: string }[] = [
+    { page: 'library', icon: '📚', label: t.navLibrary, badge: counts.home, badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
     { page: 'archive', icon: '🗄', label: t.navArchive, badge: counts.archive, badgeClass: 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400' },
     { page: 'trash', icon: '🗑', label: t.navTrash, badge: counts.trash, badgeClass: 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400' },
     { page: 'settings', icon: '⚙️', label: t.settingsTitle },
