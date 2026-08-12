@@ -79,6 +79,8 @@ import {
   readQuizTrashTombstonesIdb,
   readTrashEmptiedAt,
   readTrashTombstones,
+  readSidebarCounts,
+  writeSidebarCounts,
   writeTinyDurableValue,
   writeTrashEmptiedAt,
   writeTrashTombstones,
@@ -86,7 +88,9 @@ import {
   QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
   QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
   QUIZ_SET_TRASH_TOMBSTONE_KEY,
+  SIDEBAR_COUNTS_KEY,
   TRASH_EMPTIED_AT_KEY,
+  type SidebarCounts,
   type TrashTombstones,
 } from '../lib/quizTrashTombstones';
 
@@ -888,6 +892,8 @@ interface NotesCtx {
   trashedQuizzes: QuizItem[];
   quizSets: QuizSet[];
   quizFolders: QuizFolder[];
+  /** Instant sidebar badges — durable last-session truth, never waits on cloud. */
+  sidebarCounts: SidebarCounts;
   chats: ChatConversation[];
   saveChats: (chats: ChatConversation[]) => void;
   cloudStatus: CloudStatus;
@@ -1077,6 +1083,7 @@ const LOCAL_DATA_KEYS = [
   QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
   TRASH_EMPTIED_AT_KEY,
   PERM_DELETED_KEY,
+  SIDEBAR_COUNTS_KEY,
 ] as const;
 
 /** Tiny membership journal — survives when the full quizSets[] localStorage write hits QuotaExceeded. */
@@ -1178,6 +1185,37 @@ function readLocalNotesDataRaw() {
 /** Sync read used by recovery helpers; journal is applied separately on boot. */
 function readLocalNotesData() {
   return applyRecentEditsToData(readLocalNotesDataRaw());
+}
+
+/** Sync boot notes for first React paint — sidebar counts must not wait on useEffect. */
+function readBootNotesForPaint(): Note[] {
+  const emptiedAt = readTrashEmptiedAt();
+  return stripPermDeletedNotes(readLocalNotesDataRaw().notes, readPermDeleted()).filter((note) => (
+    !(note.trashed && emptiedAt && entitySyncTime(note) <= emptiedAt)
+  ));
+}
+
+function computeSidebarCounts(
+  notes: Note[],
+  quizzes: QuizItem[],
+  sets: QuizSet[],
+  folders: QuizFolder[],
+  tombstones: PermanentlyDeletedIds = readPermDeleted(),
+): SidebarCounts {
+  const deadNotes = new Set(tombstones.notes.map(Number).filter(Number.isFinite));
+  const deadQuizzes = new Set(tombstones.quizzes.map(Number).filter(Number.isFinite));
+  const liveNotes = notes.filter((n) => !deadNotes.has(Number(n.id)));
+  return {
+    home: liveNotes.filter((n) => !n.archived && !n.trashed).length,
+    unread: liveNotes.filter((n) => !n.read && !n.archived && !n.trashed).length,
+    read: liveNotes.filter((n) => n.read && !n.archived && !n.trashed).length,
+    fav: liveNotes.filter((n) => n.fav && !n.trashed).length,
+    archive: liveNotes.filter((n) => n.archived && !n.trashed).length,
+    trashNotes: liveNotes.filter((n) => n.trashed).length,
+    trashQuizzes: quizzes.filter((q) => !!q.trashed && !deadQuizzes.has(Number(q.id))).length,
+    trashSets: sets.filter((s) => s.trashed).length,
+    trashFolders: folders.filter((f) => f.trashed).length,
+  };
 }
 
 function readDeletedDraftIds(): Set<string> {
@@ -2030,11 +2068,50 @@ function nextId() {
 export function NotesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
-  const [notes, setNotes] = useState<Note[]>([]);
+  const [notes, setNotes] = useState<Note[]>(() => readBootNotesForPaint());
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
   const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
-  const [quizFolders, setQuizFolders] = useState<QuizFolder[]>(ensureRestoredFolder([]));
+  const [quizFolders, setQuizFolders] = useState<QuizFolder[]>(() => {
+    try {
+      const raw = readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? [];
+      return ensureRestoredFolder(firebaseToArray<QuizFolder>(raw));
+    } catch {
+      return ensureRestoredFolder([]);
+    }
+  });
+  const [sidebarCounts, setSidebarCounts] = useState<SidebarCounts>(() => {
+    const bootNotes = readBootNotesForPaint();
+    let bootSets: QuizSet[] = [];
+    let bootQuizzes: QuizItem[] = [];
+    let bootFolders: QuizFolder[] = [];
+    try {
+      const local = readLocalNotesDataRaw();
+      bootSets = local.sets;
+      bootQuizzes = local.quizzes;
+      bootFolders = local.folders;
+    } catch { /* ignore */ }
+    const computed = computeSidebarCounts(bootNotes, bootQuizzes, bootSets, bootFolders);
+    const cached = readSidebarCounts();
+    if (!cached) {
+      writeSidebarCounts(computed);
+      return computed;
+    }
+    // First pixel: never under-report vs last session (incomplete LS vs IDB).
+    const merged: SidebarCounts = {
+      home: Math.max(cached.home, computed.home),
+      unread: Math.max(cached.unread, computed.unread),
+      read: Math.max(cached.read, computed.read),
+      fav: Math.max(cached.fav, computed.fav),
+      archive: Math.max(cached.archive, computed.archive),
+      trashNotes: Math.max(cached.trashNotes, computed.trashNotes),
+      trashQuizzes: Math.max(cached.trashQuizzes, computed.trashQuizzes),
+      trashSets: Math.max(cached.trashSets, computed.trashSets),
+      trashFolders: Math.max(cached.trashFolders, computed.trashFolders),
+    };
+    writeSidebarCounts(merged);
+    return merged;
+  });
   const [chats, setChats] = useState<ChatConversation[]>([]);
   const [tokenUsage, setTokenUsage] = useState<number>(0);
   const draftCounter = useRef(0);
@@ -2162,6 +2239,43 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   draftsRef.current = drafts;
   tokenUsageRef.current = tokenUsage;
 
+  // Durable sidebar badges: never wait on cloud. Until `loaded`, never shrink a
+  // last-session count just because LS is incomplete (IDB/cloud still merging).
+  useEffect(() => {
+    if (!user) return;
+    const next = computeSidebarCounts(notes, quizzes, quizSets, quizFolders, permDeletedRef.current);
+    setSidebarCounts((prev) => {
+      const merged: SidebarCounts = loaded
+        ? next
+        : {
+            home: Math.max(prev.home, next.home),
+            unread: Math.max(prev.unread, next.unread),
+            read: Math.max(prev.read, next.read),
+            fav: Math.max(prev.fav, next.fav),
+            archive: Math.max(prev.archive, next.archive),
+            trashNotes: Math.max(prev.trashNotes, next.trashNotes),
+            trashQuizzes: Math.max(prev.trashQuizzes, next.trashQuizzes),
+            trashSets: Math.max(prev.trashSets, next.trashSets),
+            trashFolders: Math.max(prev.trashFolders, next.trashFolders),
+          };
+      if (
+        prev.home === merged.home
+        && prev.unread === merged.unread
+        && prev.read === merged.read
+        && prev.fav === merged.fav
+        && prev.archive === merged.archive
+        && prev.trashNotes === merged.trashNotes
+        && prev.trashQuizzes === merged.trashQuizzes
+        && prev.trashSets === merged.trashSets
+        && prev.trashFolders === merged.trashFolders
+      ) {
+        return prev;
+      }
+      writeSidebarCounts(merged);
+      return merged;
+    });
+  }, [notes, quizzes, quizSets, quizFolders, loaded, user]);
+
   const nowStr = () =>
     new Date().toLocaleString(t.dateLocale, {
       day: 'numeric',
@@ -2248,6 +2362,34 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return true;
       }),
     };
+    // Paint notes + durable badges immediately from local — do not wait on journal/cloud.
+    notesRef.current = local.notes;
+    setNotes(local.notes);
+    {
+      const computed = computeSidebarCounts(
+        local.notes,
+        local.quizzes,
+        local.sets,
+        local.folders,
+        permDeletedRef.current,
+      );
+      const cached = readSidebarCounts();
+      const merged: SidebarCounts = cached
+        ? {
+            home: Math.max(cached.home, computed.home),
+            unread: Math.max(cached.unread, computed.unread),
+            read: Math.max(cached.read, computed.read),
+            fav: Math.max(cached.fav, computed.fav),
+            archive: Math.max(cached.archive, computed.archive),
+            trashNotes: Math.max(cached.trashNotes, computed.trashNotes),
+            trashQuizzes: Math.max(cached.trashQuizzes, computed.trashQuizzes),
+            trashSets: Math.max(cached.trashSets, computed.trashSets),
+            trashFolders: Math.max(cached.trashFolders, computed.trashFolders),
+          }
+        : computed;
+      writeSidebarCounts(merged);
+      setSidebarCounts(merged);
+    }
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
     bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
@@ -7521,6 +7663,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         )),
         quizSets,
         quizFolders,
+        sidebarCounts,
         cloudStatus,
         cloudSyncedAt,
         loaded,

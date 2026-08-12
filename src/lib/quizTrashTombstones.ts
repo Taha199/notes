@@ -18,6 +18,7 @@ export const QUIZ_FOLDER_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_folder_trash_to
 export const QUIZ_ITEM_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_item_trash_tombstones';
 export const TRASH_EMPTIED_AT_KEY = 'malacadhati_trash_emptied_at';
 export const PERM_DELETED_KEY = 'malacadhati_perm_deleted';
+export const SIDEBAR_COUNTS_KEY = 'malacadhati_sidebar_counts';
 const LAST_GOOD_LS_KEY = 'malacadhati_quiz_sets_complete_cache';
 
 export type TrashTombstones = Record<string, number>;
@@ -72,6 +73,52 @@ export function writeTinyDurableValue(key: string, value: string): boolean {
   const ok = writeLs(key, value);
   void persistAllTombstonesIdb();
   return ok;
+}
+
+export type SidebarCounts = {
+  home: number;
+  unread: number;
+  read: number;
+  fav: number;
+  archive: number;
+  trashNotes: number;
+  trashQuizzes: number;
+  trashSets: number;
+  trashFolders: number;
+};
+
+export function emptySidebarCounts(): SidebarCounts {
+  return {
+    home: 0,
+    unread: 0,
+    read: 0,
+    fav: 0,
+    archive: 0,
+    trashNotes: 0,
+    trashQuizzes: 0,
+    trashSets: 0,
+    trashFolders: 0,
+  };
+}
+
+export function readSidebarCounts(): SidebarCounts | null {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_COUNTS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SidebarCounts>;
+    const base = emptySidebarCounts();
+    for (const key of Object.keys(base) as (keyof SidebarCounts)[]) {
+      const n = Number(parsed[key]);
+      if (Number.isFinite(n) && n >= 0) base[key] = Math.floor(n);
+    }
+    return base;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSidebarCounts(counts: SidebarCounts): void {
+  writeTinyDurableValue(SIDEBAR_COUNTS_KEY, JSON.stringify(counts));
 }
 
 export function readTrashEmptiedAt(): number {
