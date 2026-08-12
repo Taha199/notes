@@ -14,6 +14,7 @@ import { ImageLightbox } from './components/common/ImageLightbox';
 import { FloatingOtterSearch } from './components/common/FloatingOtterSearch';
 import { Dashboard } from './components/Dashboard';
 import { ArabicInputHost } from './components/keyboard/ArabicInputHost';
+import { hasNotesPrefetchSettled, prefetchAllNotesLocal } from './lib/itemsStore';
 
 function getUrlAction(): { mode: string | null; oobCode: string | null } {
   const p = new URLSearchParams(window.location.search);
@@ -28,6 +29,7 @@ function Root() {
   const { user, loading, applyVerifyCode, blocked, signOut } = useAuth();
   const [{ mode, oobCode }] = useState(getUrlAction);
   const [verifying, setVerifying] = useState(mode === 'verifyEmail' && !!oobCode);
+  const [localNotesReady, setLocalNotesReady] = useState(() => hasNotesPrefetchSettled());
 
   useEffect(() => {
     if (mode === 'verifyEmail' && oobCode) {
@@ -38,6 +40,11 @@ function Root() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (localNotesReady) return;
+    void prefetchAllNotesLocal().finally(() => setLocalNotesReady(true));
+  }, [localNotesReady]);
 
   if (verifying) return <BootLoader />;
 
@@ -77,6 +84,8 @@ function Root() {
       </div>
     );
   }
+
+  if (!localNotesReady) return <BootLoader />;
 
   return (
     <NotesProvider>

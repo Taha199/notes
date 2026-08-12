@@ -147,12 +147,18 @@ export async function getAllNotesLocal(): Promise<Note[]> {
 /** Started at module load so first React paint can include image notes from IDB. */
 let notesPrefetchPromise: Promise<Note[]> | null = null;
 let notesPrefetchValue: Note[] | null = null;
+let notesPrefetchSettled = false;
 
 export function prefetchAllNotesLocal(): Promise<Note[]> {
   if (!notesPrefetchPromise) {
     notesPrefetchPromise = getAllNotesLocal().then((notes) => {
       notesPrefetchValue = notes;
+      notesPrefetchSettled = true;
       return notes;
+    }).catch(() => {
+      notesPrefetchValue = [];
+      notesPrefetchSettled = true;
+      return [] as Note[];
     });
   }
   return notesPrefetchPromise;
@@ -160,6 +166,10 @@ export function prefetchAllNotesLocal(): Promise<Note[]> {
 
 export function peekPrefetchedNotes(): Note[] {
   return notesPrefetchValue ?? [];
+}
+
+export function hasNotesPrefetchSettled(): boolean {
+  return notesPrefetchSettled;
 }
 
 if (typeof indexedDB !== 'undefined') {

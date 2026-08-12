@@ -181,6 +181,15 @@ function notesMetaEqual(a: Note[], b: Note[]): boolean {
   return true;
 }
 
+function notesIdSetEqual(a: Note[], b: Note[]): boolean {
+  if (a.length !== b.length) return false;
+  const ids = new Set(a.map((n) => Number(n.id)));
+  for (const note of b) {
+    if (!ids.has(Number(note.id))) return false;
+  }
+  return true;
+}
+
 function mergeNotesPreferRicher(...lists: Note[][]): Note[] {
   const map = new Map<number, Note>();
   for (const list of lists) {
@@ -2427,7 +2436,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     local = { ...local, notes: bootMergedNotes };
     notesRef.current = bootMergedNotes;
-    setNotes(bootMergedNotes);
+    // First paint already happened from useState(readBootNotesForPaint) after IDB
+    // prefetch — do not setNotes again here (that was the old→new drip).
     if (bootMergedNotes.length) {
       rememberNotesBootCache(bootMergedNotes);
       writeNotesListCache(bootMergedNotes);
@@ -2460,26 +2470,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
 
-    const commitNotes = (snapshot: Note[]) => {
+    const commitNotes = (snapshot: Note[], opts?: { paint?: boolean }) => {
       if (cancelled) return;
       const mergedNotes = sortNotesByCreatedDesc(
         stripPermDeletedNotes(snapshot, permDeletedRef.current).filter((note) => (
           !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
         )),
       );
-      if (notesMetaEqual(mergedNotes, notesRef.current)) {
-        notesRef.current = mergedNotes;
-        local = { ...local, notes: mergedNotes };
-        return;
-      }
+      const prev = notesRef.current;
       notesRef.current = mergedNotes;
       local = { ...local, notes: mergedNotes };
-      setNotes(mergedNotes);
       rememberNotesBootCache(mergedNotes, true);
       writeNotesListCache(mergedNotes);
+      if (opts?.paint === false) return;
+      // Same membership: keep the first complete paint. Extra setNotes is the drip.
+      if (notesIdSetEqual(mergedNotes, prev) && prev.length > 0) return;
+      if (notesMetaEqual(mergedNotes, prev)) return;
+      setNotes(mergedNotes);
     };
 
-    // IndexedDB is local and fast — fold image notes in immediately, never wait on Quiz/cloud.
+    // IndexedDB already awaited in BootLoader — fold in without a second paint when ids match.
     const notesIdbReady = (async () => {
       const idbNotes = await prefetchAllNotesLocal();
       if (cancelled || !idbNotes.length) return;
@@ -2523,7 +2533,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       notesRef.current = local.notes;
       quizzesRef.current = local.quizzes;
       quizSetsRef.current = local.sets;
-      setNotes(local.notes);
+      commitNotes(local.notes);
       return edits;
     });
 
@@ -3190,9 +3200,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizzes = appliedQ.quizzes;
         }
 
-        setNotes(notes);
-        notesRef.current = notes;
-        safeSetItem('malacadhati', JSON.stringify(notes));
+        commitNotes(mergeNotesPreferRicher(notesRef.current, notes));
+        safeSetItem('malacadhati', JSON.stringify(notesRef.current));
 
         setQuizzes(quizzes);
         quizzesRef.current = quizzes;
@@ -5984,6 +5993,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const merged = sortNotesByCreatedDesc(
         stripPermDeletedNotes(mergeNotesPreferRicher(notesRef.current, liveDurable), tombstones),
       );
+      if (notesIdSetEqual(merged, notesRef.current) && notesRef.current.length > 0) {
+        notesRef.current = merged;
+        return;
+      }
       if (notesMetaEqual(merged, notesRef.current)) return;
       isApplyingRemoteRef.current = true;
       try {
