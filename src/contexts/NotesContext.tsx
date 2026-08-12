@@ -2784,13 +2784,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             void remove(dbRef(database, `users/${user.uid}/quizFoldersById/${row.id}`)).catch(() => {});
           }
         }
-        for (const row of cloudQuizItemsById) {
-          const id = Number(row?.id);
-          if (!Number.isFinite(id)) continue;
-          if (deadQuizIds.has(id) || (row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)) {
-            void removeQuizItemDurable(user.uid, id);
-          }
-        }
+        // Do NOT mass-delete quizItemsById here — that saturated the socket for
+        // ~30s after Trash X (every boot re-DELETEd every tombstoned id). Dead
+        // rows are ignored by merge/UI filters; permDelete/emptyTrash scrub one id.
         quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
           quizSetsByIdCacheRef.current,
           cloudSetsById.filter((row) => (
@@ -3056,7 +3052,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           });
           const applied = applyDurableQuizItems(quizzes, normalizedSets, durableBody);
           quizzes = honorQuizItemTrashTombstonesOnItems(applied.quizzes, quizItemTombstonesRef.current)
-            .filter((q) => !deadQuizIds.has(q.id));
+            .filter((q) => !deadQuizIds.has(Number(q.id)));
           normalizedSets = applyStoredQuizSetsListOrder(
             stripPermDeletedQuizSets(
               honorQuizItemTrashTombstones(applied.sets, quizItemTombstonesRef.current),
@@ -4569,7 +4565,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const safe: typeof patch = { ...patch };
     // Always send the latest structure from refs — a queued save captured before
     // create/delete must not overwrite the cloud array with a stale snapshot.
-    if (safe.notes !== undefined) safe.notes = notesRef.current;
+    // (notes stay as provided — rewriting the full notes[] here slowed saves.)
     if (safe.quizzes !== undefined) {
       safe.quizzes = stripPermDeletedQuizzes(quizzesRef.current, permDeletedRef.current);
     }
@@ -5519,14 +5515,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizItemApplyQueue.push(...durable);
         return;
       }
-      const deadQuizzes = new Set(permDeletedRef.current.quizzes);
-      // Lingering quizItemsById rows after Trash X / Empty Trash must not re-open Trash.
-      durable.forEach((item) => {
-        const id = Number(item.id);
-        if (Number.isFinite(id) && deadQuizzes.has(id)) {
-          void removeQuizItemDurable(userRef.current?.uid, id);
-        }
-      });
+      const deadQuizzes = new Set(
+        permDeletedRef.current.quizzes.map(Number).filter(Number.isFinite),
+      );
+      // Ignore tombstoned rows — never DELETE them on every child event (that
+      // blocked normal note/quiz sync for tens of seconds after reconnect).
       const liveDurable = durable.filter((item) => {
         const id = Number(item.id);
         return Number.isFinite(id) && !deadQuizzes.has(id);
@@ -5543,7 +5536,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const appliedRaw = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, liveDurable);
       const applied = {
         quizzes: honorQuizItemTrashTombstonesOnItems(appliedRaw.quizzes, itemTrash)
-          .filter((q) => !deadQuizzes.has(q.id)),
+          .filter((q) => !deadQuizzes.has(Number(q.id))),
         sets: stripPermDeletedQuizSets(
           honorQuizItemTrashTombstones(appliedRaw.sets, itemTrash),
           permDeletedRef.current,
