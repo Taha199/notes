@@ -70,12 +70,18 @@ import {
   honorQuizListsWithTrashTombstones,
   mergeTombstoneMaps,
   normalizeTombstoneMap,
+  pruneQuizListsAgainstTrashState,
   readQuizTrashTombstonesIdb,
+  readTrashEmptiedAt,
   readTrashTombstones,
+  writeTinyDurableValue,
+  writeTrashEmptiedAt,
   writeTrashTombstones,
+  PERM_DELETED_KEY,
   QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
   QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
   QUIZ_SET_TRASH_TOMBSTONE_KEY,
+  TRASH_EMPTIED_AT_KEY,
   type TrashTombstones,
 } from '../lib/quizTrashTombstones';
 
@@ -144,9 +150,6 @@ function noteContentLength(note: Note) {
   return text + images + (note.title || '').trim().length;
 }
 
-const TRASH_EMPTIED_AT_KEY = 'malacadhati_trash_emptied_at';
-const PERM_DELETED_KEY = 'malacadhati_perm_deleted';
-
 interface PermanentlyDeletedIds {
   notes: number[];
   quizzes: number[];
@@ -175,7 +178,7 @@ function readPermDeleted(): PermanentlyDeletedIds {
 }
 
 function writePermDeleted(ids: PermanentlyDeletedIds) {
-  safeSetItem(PERM_DELETED_KEY, JSON.stringify(ids));
+  writeTinyDurableValue(PERM_DELETED_KEY, JSON.stringify(ids));
 }
 
 function parseCloudPermDeleted(cloud: Record<string, unknown> | null | undefined): PermanentlyDeletedIds {
@@ -488,17 +491,6 @@ function mergeQuizzesForSync(
     permanentlyDeletedIds: tombstones.quizzes,
     orderFrom,
   });
-}
-
-function readTrashEmptiedAt(): number {
-  return Number(localStorage.getItem(TRASH_EMPTIED_AT_KEY)) || 0;
-}
-
-function writeTrashEmptiedAt(at: number) {
-  if (!Number.isFinite(at) || at <= 0) return;
-  const prev = readTrashEmptiedAt();
-  if (at <= prev) return;
-  safeSetItem(TRASH_EMPTIED_AT_KEY, String(at));
 }
 
 /** Adopt cloud Empty-Trash watermark so every device drops the same ghosts. */
@@ -949,10 +941,11 @@ const QUIZ_SETS_SHELL_KEY = 'malacadhati_quiz_sets_shells';
  */
 let quizListsBootCache: { quizzes: QuizItem[]; sets: QuizSet[] } | null = null;
 
-function rememberQuizListsBootCache(quizzes: QuizItem[], sets: QuizSet[]) {
+function rememberQuizListsBootCache(quizzes: QuizItem[], sets: QuizSet[], force = false) {
   const prev = quizListsBootCache;
   if (
-    prev
+    !force
+    && prev
     && countLiveQuizItems(prev.sets) > countLiveQuizItems(sets)
     && prev.sets.length >= sets.length
     && !quizSetsSoftTrashExplainsShrink(prev.sets, sets)
@@ -963,10 +956,12 @@ function rememberQuizListsBootCache(quizzes: QuizItem[], sets: QuizSet[]) {
 }
 
 /** Keep durable last-good in sync with user edits (delete/order/body). */
-function rememberLastGoodComplete(quizzes: QuizItem[], sets: QuizSet[]) {
-  rememberQuizListsBootCache(quizzes, sets);
+function rememberLastGoodComplete(quizzes: QuizItem[], sets: QuizSet[], force = false) {
+  rememberQuizListsBootCache(quizzes, sets, force);
   if (quizSetsHaveCompleteBodies(sets)) {
-    persistQuizCompleteCache(quizzes, sets);
+    persistQuizCompleteCache(quizzes, sets, { force });
+  } else if (force) {
+    clearQuizCompleteCache();
   }
 }
 
@@ -982,6 +977,8 @@ const LOCAL_DATA_KEYS = [
   QUIZ_SET_TRASH_TOMBSTONE_KEY,
   QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
   QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
+  TRASH_EMPTIED_AT_KEY,
+  PERM_DELETED_KEY,
 ] as const;
 
 /** Tiny membership journal — survives when the full quizSets[] localStorage write hits QuotaExceeded. */
@@ -2113,7 +2110,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       bootPick.quizzes,
       quizItemTombstonesRef.current,
     );
-    local = { ...local, quizzes: bootQuizzes, sets: bootSets };
+    const prunedBoot = pruneQuizListsAgainstTrashState(bootQuizzes, bootSets);
+    const emptiedAtBootLocal = readTrashEmptiedAt();
+    local = {
+      ...local,
+      quizzes: prunedBoot.quizzes,
+      sets: prunedBoot.sets,
+      notes: stripPermDeletedNotes(local.notes, permDeletedRef.current).filter((note) => (
+        !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
+      )),
+      folders: local.folders.filter((folder) => {
+        if (permDeletedRef.current.quizFolders.includes(folder.id)) return false;
+        if (folder.trashed && emptiedAtBootLocal && entitySyncTime(folder) <= emptiedAtBootLocal) return false;
+        return true;
+      }),
+    };
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
     bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
@@ -2198,11 +2209,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         sets: quizSetTombstonesRef.current,
         folders: quizFolderTombstonesRef.current,
       });
-      if (!quizSetsHaveCompleteBodies(honored.sets)) return;
-      if (!isQuizSetsLocalWriteSafe(honored.sets, maxKnownLiveBySetRef.current, lastPaintedQuizSetsRef.current)) {
+      const pruned = pruneQuizListsAgainstTrashState(honored.quizzes, honored.sets);
+      if (!quizSetsHaveCompleteBodies(pruned.sets)) return;
+      if (!isQuizSetsLocalWriteSafe(pruned.sets, maxKnownLiveBySetRef.current, lastPaintedQuizSetsRef.current)) {
         return;
       }
-      persistQuizCompleteCache(honored.quizzes, honored.sets);
+      persistQuizCompleteCache(pruned.quizzes, pruned.sets);
     };
     /** Single commit path: union into refs, setState, safe LS — never shrink below max-known. */
     const commitQuizListsLocal = (
@@ -2245,16 +2257,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       sets = applySetTrashTombstones(sets, quizSetTombstonesRef.current, {
         emptiedAt: readTrashEmptiedAt(),
       });
-      quizSetsByIdCacheRef.current = applySetTrashTombstones(
-        honorQuizItemTrashTombstones(
-          preferRicherQuizSetsMembership(byIdHonored, sets),
-          itemTrash,
-        ),
-        quizSetTombstonesRef.current,
-        { emptiedAt: readTrashEmptiedAt() },
+      const prunedLists = pruneQuizListsAgainstTrashState(
+        honorQuizItemTrashTombstonesOnItems(nextQuizzes, itemTrash),
+        sets,
       );
+      sets = prunedLists.sets;
+      quizSetsByIdCacheRef.current = pruneQuizListsAgainstTrashState(
+        [],
+        applySetTrashTombstones(
+          honorQuizItemTrashTombstones(
+            preferRicherQuizSetsMembership(byIdHonored, sets),
+            itemTrash,
+          ),
+          quizSetTombstonesRef.current,
+          { emptiedAt: readTrashEmptiedAt() },
+        ),
+      ).sets;
       const prevQ = quizzesRef.current;
-      const quizzesHonored = honorQuizItemTrashTombstonesOnItems(nextQuizzes, itemTrash);
+      const quizzesHonored = prunedLists.quizzes;
       quizzesRef.current = quizzesHonored;
       quizSetsRef.current = sets;
       // Structure-first / empty UI: always hydrate shells before content-ready.
@@ -2323,6 +2343,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizItemTombstonesRef.current = mergeTombstoneMaps(quizItemTombstonesRef.current, idbTombs.items);
         quizSetTombstonesRef.current = mergeTombstoneMaps(quizSetTombstonesRef.current, idbTombs.sets);
         quizFolderTombstonesRef.current = mergeTombstoneMaps(quizFolderTombstonesRef.current, idbTombs.folders);
+        if (idbTombs.emptiedAt) writeTrashEmptiedAt(idbTombs.emptiedAt);
+        if (idbTombs.permDeletedQuizzes?.length || idbTombs.permDeletedSets?.length) {
+          permDeletedRef.current = addPermDeleted(permDeletedRef.current, {
+            quizzes: idbTombs.permDeletedQuizzes,
+            quizSets: idbTombs.permDeletedSets,
+          });
+          writePermDeleted(permDeletedRef.current);
+        }
         writeTrashTombstones(QUIZ_ITEM_TRASH_TOMBSTONE_KEY, quizItemTombstonesRef.current);
         writeTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY, quizSetTombstonesRef.current);
         writeTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY, quizFolderTombstonesRef.current);
@@ -7058,10 +7086,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     trashedNotes.forEach((n) => { void removeNoteDurable(uid, n.id); });
     emptiedQuizIds.forEach((id) => { void removeQuizItemDurable(uid, id); });
     lastPaintedQuizSetsRef.current = nextSets;
+    lastPaintedQuizzesRef.current = nextQuizzes;
     for (const set of nextSets) {
       if (!set?.id) continue;
       maxKnownLiveBySetRef.current.set(set.id, countLiveItemsInSet(set));
     }
+    rememberLastGoodComplete(nextQuizzes, nextSets, true);
 
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);

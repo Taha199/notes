@@ -16,6 +16,8 @@ import {
 export const QUIZ_SET_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_set_trash_tombstones';
 export const QUIZ_FOLDER_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_folder_trash_tombstones';
 export const QUIZ_ITEM_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_item_trash_tombstones';
+export const TRASH_EMPTIED_AT_KEY = 'malacadhati_trash_emptied_at';
+export const PERM_DELETED_KEY = 'malacadhati_perm_deleted';
 const LAST_GOOD_LS_KEY = 'malacadhati_quiz_sets_complete_cache';
 
 export type TrashTombstones = Record<string, number>;
@@ -65,6 +67,73 @@ export function writeTrashTombstones(key: string, tombstones: TrashTombstones): 
   void persistAllTombstonesIdb();
 }
 
+/** Tiny keys must win quota over the multi-MB last-good cache. */
+export function writeTinyDurableValue(key: string, value: string): boolean {
+  const ok = writeLs(key, value);
+  void persistAllTombstonesIdb();
+  return ok;
+}
+
+export function readTrashEmptiedAt(): number {
+  try {
+    return Number(localStorage.getItem(TRASH_EMPTIED_AT_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function writeTrashEmptiedAt(at: number): void {
+  if (!Number.isFinite(at) || at <= 0) return;
+  if (at <= readTrashEmptiedAt()) return;
+  writeLs(TRASH_EMPTIED_AT_KEY, String(at));
+  void persistAllTombstonesIdb();
+}
+
+function readPermDeletedLite(): { quizzes: number[]; quizSets: string[] } {
+  try {
+    const raw = localStorage.getItem(PERM_DELETED_KEY);
+    if (!raw) return { quizzes: [], quizSets: [] };
+    const parsed = JSON.parse(raw) as { quizzes?: unknown; quizSets?: unknown };
+    return {
+      quizzes: Array.isArray(parsed.quizzes)
+        ? [...new Set(parsed.quizzes.map(Number).filter(Number.isFinite))]
+        : [],
+      quizSets: Array.isArray(parsed.quizSets) ? [...new Set(parsed.quizSets.map(String))] : [],
+    };
+  } catch {
+    return { quizzes: [], quizSets: [] };
+  }
+}
+
+function entityTime(row: { updatedAt?: string; createdAt?: string; savedAt?: string }): number {
+  return Date.parse(row.updatedAt || row.savedAt || row.createdAt || '') || 0;
+}
+
+/**
+ * Drop Empty-Trash / permanent-delete ghosts so last-good cannot resurrect
+ * them into Quiz or Trash after refresh.
+ */
+export function pruneQuizListsAgainstTrashState(
+  quizzes: QuizItem[],
+  sets: QuizSet[],
+  tombstones = readAllQuizTrashTombstones(),
+): { quizzes: QuizItem[]; sets: QuizSet[] } {
+  const emptiedAt = readTrashEmptiedAt();
+  const dead = readPermDeletedLite();
+  const deadQ = new Set(dead.quizzes);
+  const deadS = new Set(dead.quizSets);
+  const dropItem = (item: QuizItem) =>
+    deadQ.has(item.id) || (!!item.trashed && emptiedAt > 0 && entityTime(item) <= emptiedAt);
+  const dropSet = (set: QuizSet) =>
+    deadS.has(set.id) || (!!set.trashed && emptiedAt > 0 && entityTime(set) <= emptiedAt);
+  const nextSets = sets.filter((set) => !dropSet(set)).map((set) => {
+    const items = (set.items ?? []).filter((item) => !dropItem(item));
+    return items.length === (set.items ?? []).length ? set : { ...set, items };
+  });
+  const nextQuizzes = quizzes.filter((item) => !dropItem(item));
+  return honorQuizListsWithTrashTombstones(nextQuizzes, nextSets, tombstones);
+}
+
 export function readAllQuizTrashTombstones(): {
   items: TrashTombstones;
   sets: TrashTombstones;
@@ -75,14 +144,6 @@ export function readAllQuizTrashTombstones(): {
     sets: readTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY),
     folders: readTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY),
   };
-}
-
-function readTrashEmptiedAt(): number {
-  try {
-    return Number(localStorage.getItem('malacadhati_trash_emptied_at')) || 0;
-  } catch {
-    return 0;
-  }
 }
 
 /** Stamp last-good / boot lists with durable trash markers before paint or save. */
@@ -123,7 +184,14 @@ function openTombstoneDb(): Promise<IDBDatabase> {
 }
 
 async function persistAllTombstonesIdb(): Promise<void> {
-  const all = { id: TOMBSTONE_ROW, ...readAllQuizTrashTombstones() };
+  const dead = readPermDeletedLite();
+  const all = {
+    id: TOMBSTONE_ROW,
+    ...readAllQuizTrashTombstones(),
+    emptiedAt: readTrashEmptiedAt(),
+    permDeletedQuizzes: dead.quizzes,
+    permDeletedSets: dead.quizSets,
+  };
   try {
     const db = await openTombstoneDb();
     await new Promise<void>((resolve, reject) => {
@@ -141,6 +209,9 @@ export async function readQuizTrashTombstonesIdb(): Promise<{
   items: TrashTombstones;
   sets: TrashTombstones;
   folders: TrashTombstones;
+  emptiedAt?: number;
+  permDeletedQuizzes?: number[];
+  permDeletedSets?: string[];
 } | null> {
   try {
     const db = await openTombstoneDb();
@@ -151,11 +222,23 @@ export async function readQuizTrashTombstonesIdb(): Promise<{
       req.onerror = () => reject(req.error);
     });
     if (!row || typeof row !== 'object') return null;
-    const obj = row as { items?: unknown; sets?: unknown; folders?: unknown };
+    const obj = row as {
+      items?: unknown;
+      sets?: unknown;
+      folders?: unknown;
+      emptiedAt?: unknown;
+      permDeletedQuizzes?: unknown;
+      permDeletedSets?: unknown;
+    };
     return {
       items: normalizeTombstoneMap(obj.items),
       sets: normalizeTombstoneMap(obj.sets),
       folders: normalizeTombstoneMap(obj.folders),
+      emptiedAt: Number(obj.emptiedAt) || 0,
+      permDeletedQuizzes: Array.isArray(obj.permDeletedQuizzes)
+        ? obj.permDeletedQuizzes.map(Number).filter(Number.isFinite)
+        : [],
+      permDeletedSets: Array.isArray(obj.permDeletedSets) ? obj.permDeletedSets.map(String) : [],
     };
   } catch {
     return null;

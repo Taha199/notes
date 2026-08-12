@@ -10,7 +10,7 @@ import {
 } from './quizCompleteCache';
 import { countLiveQuizItems, decideQuizListsUiPaint } from './quizSetMerge';
 import { quizzesEqualForUI, quizSetsEqualForUI } from './quizContent';
-import { QUIZ_ITEM_TRASH_TOMBSTONE_KEY } from './quizTrashTombstones';
+import { QUIZ_ITEM_TRASH_TOMBSTONE_KEY, PERM_DELETED_KEY, TRASH_EMPTIED_AT_KEY } from './quizTrashTombstones';
 import type { QuizItem, QuizSet } from '../types';
 
 function item(id: number, question: string, updatedAt: string, extra?: Partial<QuizItem>): QuizItem {
@@ -63,6 +63,8 @@ afterEach(() => {
   try {
     localStorage.removeItem(QUIZ_COMPLETE_CACHE_LS_KEY);
     localStorage.removeItem(QUIZ_ITEM_TRASH_TOMBSTONE_KEY);
+    localStorage.removeItem(PERM_DELETED_KEY);
+    localStorage.removeItem(TRASH_EMPTIED_AT_KEY);
   } catch {
     /* ignore */
   }
@@ -175,6 +177,61 @@ describe('quizCompleteCache last-good boot', () => {
     expect(boot.source).toBe('last-good');
     expect(boot.sets[0].items.find((i) => i.id === 11)?.trashed).toBe(true);
     expect(countLiveQuizItems(boot.sets)).toBe(10);
+  });
+
+  it('drops emptied / permanently deleted questions from last-good on read', () => {
+    writeQuizCompleteCache([], lastGoodEleven);
+    localStorage.setItem(
+      PERM_DELETED_KEY,
+      JSON.stringify({ notes: [], quizzes: [11], quizSets: [], quizFolders: [] }),
+    );
+    localStorage.setItem(TRASH_EMPTIED_AT_KEY, String(Date.parse('2026-08-12T18:40:00.000Z')));
+    const stored = readQuizCompleteCache();
+    expect(stored?.sets[0].items.find((i) => i.id === 11)).toBeUndefined();
+    expect(countLiveQuizItems(stored!.sets)).toBe(10);
+  });
+
+  it('boot does not resurrect emptied trash from a last-good overlay', () => {
+    const lastGoodTrashed = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: eleven.map((row, i) => (
+          i === 10
+            ? { ...row, trashed: true, updatedAt: '2026-08-12T18:34:00.000Z' }
+            : row
+        )),
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-12T18:34:00.000Z',
+      }),
+    ];
+    const localEmptied = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: eleven.filter((row) => row.id !== 11),
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-12T18:40:00.000Z',
+      }),
+    ];
+    localStorage.setItem(
+      PERM_DELETED_KEY,
+      JSON.stringify({ notes: [], quizzes: [11], quizSets: [], quizFolders: [] }),
+    );
+    localStorage.setItem(TRASH_EMPTIED_AT_KEY, String(Date.parse('2026-08-12T18:40:00.000Z')));
+    const boot = pickBootQuizLists({
+      localQuizzes: [],
+      localSets: localEmptied,
+      lastGood: {
+        quizzes: [eleven[10]],
+        sets: lastGoodTrashed,
+        savedAt: Date.now(),
+        liveItemCount: 10,
+      },
+      memory: null,
+    });
+    expect(boot.sets[0].items.find((i) => i.id === 11)).toBeUndefined();
+    expect(boot.quizzes.find((i) => i.id === 11)).toBeUndefined();
   });
 });
 

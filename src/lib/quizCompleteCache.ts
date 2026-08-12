@@ -20,7 +20,7 @@ import {
   quizSetsSoftTrashExplainsShrink,
   unionQuizSetsForCommit,
 } from './quizSetMerge';
-import { honorQuizListsWithTrashTombstones } from './quizTrashTombstones';
+import { honorQuizListsWithTrashTombstones, pruneQuizListsAgainstTrashState } from './quizTrashTombstones';
 
 export { quizListsHaveNewerOrderStamps, quizListsHaveStrictlyNewerItems };
 
@@ -72,7 +72,9 @@ function parseSnapshot(raw: unknown): QuizCompleteCacheSnapshot | null {
   if (!quizSetsHaveCompleteBodies(sets)) return null;
   const quizzes = Array.isArray(obj.quizzes) ? obj.quizzes : [];
   const honored = honorQuizListsWithTrashTombstones(quizzes, sets);
-  return normalizeSnapshot(honored.quizzes, honored.sets, typeof obj.savedAt === 'number' ? obj.savedAt : Date.now());
+  const pruned = pruneQuizListsAgainstTrashState(honored.quizzes, honored.sets);
+  if (!quizSetsHaveCompleteBodies(pruned.sets)) return null;
+  return normalizeSnapshot(pruned.quizzes, pruned.sets, typeof obj.savedAt === 'number' ? obj.savedAt : Date.now());
 }
 
 /** Sync read — used on first paint. */
@@ -90,13 +92,17 @@ export function readQuizCompleteCache(): QuizCompleteCacheSnapshot | null {
  * Persist last-good. Never overwrite a richer complete snapshot with a shorter
  * incomplete shell (classic 11→9 poison). Soft-deletes that explain shrink win.
  */
-export function writeQuizCompleteCache(quizzes: QuizItem[], sets: QuizSet[]): boolean {
-  const honored = honorQuizListsWithTrashTombstones(quizzes, sets);
-  quizzes = honored.quizzes;
-  sets = honored.sets;
+export function writeQuizCompleteCache(
+  quizzes: QuizItem[],
+  sets: QuizSet[],
+  opts?: { force?: boolean },
+): boolean {
+  const pruned = pruneQuizListsAgainstTrashState(quizzes, sets);
+  quizzes = pruned.quizzes;
+  sets = pruned.sets;
   if (!sets.length || !quizSetsHaveCompleteBodies(sets)) return false;
   const prev = readQuizCompleteCache();
-  if (prev) {
+  if (prev && !opts?.force) {
     const maxKnown = new Map<string, number>();
     bumpMaxKnownLiveBySet(maxKnown, prev.sets);
     if (!isQuizSetsLocalWriteSafe(sets, maxKnown, prev.sets)) return false;
@@ -157,13 +163,14 @@ function openCompleteDb(): Promise<IDBDatabase> {
 export async function writeQuizCompleteCacheIdb(
   quizzes: QuizItem[],
   sets: QuizSet[],
+  opts?: { force?: boolean },
 ): Promise<boolean> {
-  const honored = honorQuizListsWithTrashTombstones(quizzes, sets);
-  quizzes = honored.quizzes;
-  sets = honored.sets;
+  const pruned = pruneQuizListsAgainstTrashState(quizzes, sets);
+  quizzes = pruned.quizzes;
+  sets = pruned.sets;
   if (!sets.length || !quizSetsHaveCompleteBodies(sets)) return false;
   const prev = await readQuizCompleteCacheIdb();
-  if (prev) {
+  if (prev && !opts?.force) {
     const maxKnown = new Map<string, number>();
     bumpMaxKnownLiveBySet(maxKnown, prev.sets);
     if (!isQuizSetsLocalWriteSafe(sets, maxKnown, prev.sets)) return false;
@@ -214,9 +221,13 @@ async function clearQuizCompleteCacheIdb(): Promise<void> {
 }
 
 /** Persist both LS (sync boot) and IDB (quota / durability). */
-export function persistQuizCompleteCache(quizzes: QuizItem[], sets: QuizSet[]): void {
-  writeQuizCompleteCache(quizzes, sets);
-  void writeQuizCompleteCacheIdb(quizzes, sets);
+export function persistQuizCompleteCache(
+  quizzes: QuizItem[],
+  sets: QuizSet[],
+  opts?: { force?: boolean },
+): void {
+  writeQuizCompleteCache(quizzes, sets, opts);
+  void writeQuizCompleteCacheIdb(quizzes, sets, opts);
 }
 
 /**
@@ -250,7 +261,8 @@ export function pickBootQuizLists(opts: {
       opts.memory?.sets ?? [],
     );
     const honored = honorQuizListsWithTrashTombstones(quizzes, overlaid);
-    return { quizzes: honored.quizzes, sets: honored.sets, fromLastGood, source };
+    const pruned = pruneQuizListsAgainstTrashState(honored.quizzes, honored.sets);
+    return { quizzes: pruned.quizzes, sets: pruned.sets, fromLastGood, source };
   };
 
   if (
