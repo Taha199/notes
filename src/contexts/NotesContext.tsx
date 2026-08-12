@@ -2157,17 +2157,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       writeSidebarCounts(computed);
       return computed;
     }
-    // First pixel: never under-report vs last session (incomplete LS vs IDB).
+    // First pixel: never under-report study/library vs last session (incomplete LS vs IDB).
+    // Trash must follow live lists — a stale "1" here is why the badge stayed red on an empty page.
     const merged: SidebarCounts = {
       home: Math.max(cached.home, computed.home),
       unread: Math.max(cached.unread, computed.unread),
       read: Math.max(cached.read, computed.read),
       fav: Math.max(cached.fav, computed.fav),
       archive: Math.max(cached.archive, computed.archive),
-      trashNotes: Math.max(cached.trashNotes, computed.trashNotes),
-      trashQuizzes: Math.max(cached.trashQuizzes, computed.trashQuizzes),
-      trashSets: Math.max(cached.trashSets, computed.trashSets),
-      trashFolders: Math.max(cached.trashFolders, computed.trashFolders),
+      trashNotes: computed.trashNotes,
+      trashQuizzes: computed.trashQuizzes,
+      trashSets: computed.trashSets,
+      trashFolders: computed.trashFolders,
     };
     writeSidebarCounts(merged);
     return merged;
@@ -2300,7 +2301,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   tokenUsageRef.current = tokenUsage;
 
   // Durable sidebar badges + list cache: never wait on cloud.
-  // Until `loaded`, never shrink a last-session count just because LS is incomplete.
+  // Until `loaded`, never shrink study/library counts just because LS is incomplete.
+  // Trash always follows the live lists so an emptied/deleted item cannot leave a ghost badge.
   useEffect(() => {
     if (!user) return;
     if (notes.length) {
@@ -2317,10 +2319,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             read: Math.max(prev.read, next.read),
             fav: Math.max(prev.fav, next.fav),
             archive: Math.max(prev.archive, next.archive),
-            trashNotes: Math.max(prev.trashNotes, next.trashNotes),
-            trashQuizzes: Math.max(prev.trashQuizzes, next.trashQuizzes),
-            trashSets: Math.max(prev.trashSets, next.trashSets),
-            trashFolders: Math.max(prev.trashFolders, next.trashFolders),
+            trashNotes: next.trashNotes,
+            trashQuizzes: next.trashQuizzes,
+            trashSets: next.trashSets,
+            trashFolders: next.trashFolders,
           };
       if (
         prev.home === merged.home
@@ -2458,10 +2460,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             read: Math.max(cached.read, computed.read),
             fav: Math.max(cached.fav, computed.fav),
             archive: Math.max(cached.archive, computed.archive),
-            trashNotes: Math.max(cached.trashNotes, computed.trashNotes),
-            trashQuizzes: Math.max(cached.trashQuizzes, computed.trashQuizzes),
-            trashSets: Math.max(cached.trashSets, computed.trashSets),
-            trashFolders: Math.max(cached.trashFolders, computed.trashFolders),
+            trashNotes: computed.trashNotes,
+            trashQuizzes: computed.trashQuizzes,
+            trashSets: computed.trashSets,
+            trashFolders: computed.trashFolders,
           }
         : computed;
       writeSidebarCounts(merged);

@@ -22,7 +22,7 @@ export function Sidebar({
   onMobileClose?: () => void;
 }) {
   const { t } = useLanguage();
-  const { sidebarCounts } = useNotes();
+  const { notes, trashedQuizzes, quizSets, quizFolders, sidebarCounts } = useNotes();
   const { incompleteCount } = useTodos();
   const { user, hasPassword, isPlus, profilePhotoURL, signOut } = useAuth();
   const { dark, toggleDark, colorTheme, setColorTheme, colorThemes } = useTheme();
@@ -35,8 +35,12 @@ export function Sidebar({
   };
   const [collapsed, setCollapsed] = useState(false);
 
-  // Badges come from durable sidebarCounts (first pixel = last session / local boot).
-  // Never recompute from empty-in-flight notes arrays (that caused the 12→15 lag).
+  // Study/library badges come from durable sidebarCounts (first pixel = last session).
+  // Trash must match the trash page: live notes + quizzes + sets + folders.
+  const liveTrash = notes.filter((n) => n.trashed).length
+    + trashedQuizzes.length
+    + quizSets.filter((s) => s.trashed).length
+    + quizFolders.filter((f) => f.trashed).length;
   const counts = {
     home: sidebarCounts.home,
     unread: sidebarCounts.unread,
@@ -44,10 +48,7 @@ export function Sidebar({
     fav: sidebarCounts.fav,
     todo: incompleteCount,
     archive: sidebarCounts.archive,
-    trash: sidebarCounts.trashNotes
-      + sidebarCounts.trashQuizzes
-      + sidebarCounts.trashSets
-      + sidebarCounts.trashFolders,
+    trash: liveTrash,
   };
 
   const items: { page: Page; icon: string; label: string; badge?: number; badgeClass?: string }[] = [
