@@ -118,15 +118,23 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                     'relative flex min-h-[4.4rem] flex-col items-center gap-1 border-b border-r border-app-border/70 px-1 py-1.5 text-sm transition-colors dark:border-white/10 ' +
                     (selected
                       ? 'bg-primary/12 text-primary'
-                      : isToday
-                        ? 'bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200'
-                        : 'hover:bg-app-bg dark:hover:bg-white/5') +
+                      : overdue
+                        ? 'bg-red-50 text-red-700 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.35)] dark:bg-red-500/15 dark:text-red-200 dark:shadow-[inset_0_0_0_1px_rgba(248,113,113,0.35)]'
+                        : isToday
+                          ? 'bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200'
+                          : 'hover:bg-app-bg dark:hover:bg-white/5') +
                     (inMonth ? '' : ' text-app-text-secondary/40')
                   }
                 >
                   <span className={
                     'flex h-7 w-7 items-center justify-center rounded-full text-[13px] font-semibold ' +
-                    (selected ? 'bg-primary text-white' : isToday ? 'ring-2 ring-amber-400' : '')
+                    (selected
+                      ? 'bg-primary text-white'
+                      : overdue
+                        ? 'bg-red-500 text-white shadow-[0_0_12px_rgba(239,68,68,0.55)]'
+                        : isToday
+                          ? 'ring-2 ring-amber-400'
+                          : '')
                   }>
                     {day.getDate()}
                   </span>
@@ -137,9 +145,9 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                       ) : (
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                       )}
-                      {stats.total > 1 && (
-                        <span className="text-[10px] font-bold text-app-text-secondary">{stats.total}</span>
-                      )}
+                      <span className={'text-[10px] font-bold ' + (overdue ? 'text-red-600 dark:text-red-300' : 'text-app-text-secondary')}>
+                        {stats.total}
+                      </span>
                     </span>
                   )}
                 </button>
