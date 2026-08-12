@@ -15,11 +15,12 @@ function weekdayLabels(locale: string): string[] {
 
 export function TodoCalendarPage({ search = '' }: { search?: string }) {
   const { t } = useLanguage();
-  const { todos, addTodo, toggleTodo, renameTodo, deleteTodo } = useTodos();
+  const { todos, addTodo, toggleTodo, renameTodo, setTodoTime, deleteTodo } = useTodos();
   const todayKey = toDateKey(new Date());
   const [cursor, setCursor] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedKey, setSelectedKey] = useState(todayKey);
   const [draft, setDraft] = useState('');
+  const [draftTime, setDraftTime] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
@@ -49,8 +50,9 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
   }, [visibleTodos]);
 
   const submitDraft = () => {
-    addTodo(draft, selectedKey);
+    addTodo(draft, selectedKey, draftTime);
     setDraft('');
+    setDraftTime('');
   };
 
   return (
@@ -152,7 +154,7 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
             <h4 className="mt-0.5 text-base font-bold capitalize text-app-text dark:text-gray-100">{selectedLabel}</h4>
           </div>
           <form
-            className="mb-3 flex gap-2"
+            className="mb-3 flex flex-wrap gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               submitDraft();
@@ -163,6 +165,14 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
               onChange={(e) => setDraft(e.target.value)}
               placeholder={t.todoAddPh}
               className="min-w-0 flex-1 rounded-xl border border-app-border bg-app-bg px-3 py-2 text-[13.5px] text-app-text outline-none placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
+            />
+            <input
+              type="time"
+              value={draftTime}
+              onChange={(e) => setDraftTime(e.target.value)}
+              aria-label={t.todoTimeOptional}
+              title={t.todoTimeOptional}
+              className="w-[7.75rem] rounded-xl border border-app-border bg-app-bg px-2.5 py-2 text-[13.5px] text-app-text outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
             />
             <button
               type="submit"
@@ -225,6 +235,27 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                     {todo.title}
                   </button>
                 )}
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  <input
+                    type="time"
+                    value={todo.time ?? ''}
+                    onChange={(e) => setTodoTime(todo.id, e.target.value)}
+                    aria-label={t.todoTimeOptional}
+                    title={t.todoTimeOptional}
+                    className="w-[6.75rem] rounded-lg border border-app-border/80 bg-white px-1.5 py-1 text-[12px] text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                  {todo.time && (
+                    <button
+                      type="button"
+                      onClick={() => setTodoTime(todo.id)}
+                      className="rounded-lg px-1 py-1 text-[11px] text-app-text-secondary hover:bg-app-bg hover:text-app-text dark:hover:bg-white/10"
+                      title={t.todoClearTime}
+                      aria-label={t.todoClearTime}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => deleteTodo(todo.id)}

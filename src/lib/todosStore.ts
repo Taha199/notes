@@ -32,6 +32,21 @@ export function monthGrid(year: number, month: number): Date[] {
   return Array.from({ length: 42 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
 }
 
+export function normalizeTodoTime(raw: unknown): string | undefined {
+  const value = String(raw || '').trim();
+  if (!/^\d{2}:\d{2}$/.test(value)) return undefined;
+  const [hours, minutes] = value.split(':').map(Number);
+  if (hours > 23 || minutes > 59) return undefined;
+  return value;
+}
+
+export function compareTodosOnDay(a: TodoItem, b: TodoItem): number {
+  if (a.time && b.time) return a.time.localeCompare(b.time) || a.createdAt - b.createdAt;
+  if (a.time) return -1;
+  if (b.time) return 1;
+  return a.createdAt - b.createdAt;
+}
+
 export function normalizeTodo(raw: unknown): TodoItem | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Partial<TodoItem>;
@@ -41,7 +56,8 @@ export function normalizeTodo(raw: unknown): TodoItem | null {
   if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const createdAt = Number(obj.createdAt) || Date.now();
   const updatedAt = Number(obj.updatedAt) || createdAt;
-  return { id, title, done: !!obj.done, date, createdAt, updatedAt };
+  const time = normalizeTodoTime(obj.time);
+  return { id, title, done: !!obj.done, date, ...(time ? { time } : {}), createdAt, updatedAt };
 }
 
 export function readTodosLocal(): TodoItem[] {
@@ -91,11 +107,11 @@ export function mergeTodos(local: TodoItem[], remote: TodoItem[], deletedIds: It
     const prev = map.get(row.id);
     if (!prev || row.updatedAt >= prev.updatedAt) map.set(row.id, row);
   }
-  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date) || compareTodosOnDay(a, b));
 }
 
 export function todosForDate(todos: TodoItem[], dateKey: string): TodoItem[] {
-  return todos.filter((todo) => todo.date === dateKey);
+  return todos.filter((todo) => todo.date === dateKey).sort(compareTodosOnDay);
 }
 
 export function incompleteTodoCount(todos: TodoItem[]): number {

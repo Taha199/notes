@@ -8,6 +8,7 @@ import {
   incompleteTodoCount,
   mergeTodos,
   normalizeTodo,
+  normalizeTodoTime,
   readDeletedTodoIds,
   readTodosLocal,
   TODOS_DELETED_LS_KEY,
@@ -20,9 +21,10 @@ import {
 interface TodosContextValue {
   todos: TodoItem[];
   incompleteCount: number;
-  addTodo: (title: string, date: string) => void;
+  addTodo: (title: string, date: string, time?: string) => void;
   toggleTodo: (id: string) => void;
   renameTodo: (id: string, title: string) => void;
+  setTodoTime: (id: string, time?: string) => void;
   deleteTodo: (id: string) => void;
 }
 
@@ -105,15 +107,17 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [user?.uid, commit]);
 
-  const addTodo = useCallback((title: string, date: string) => {
+  const addTodo = useCallback((title: string, date: string, time?: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
     const now = Date.now();
+    const normalizedTime = normalizeTodoTime(time);
     const todo: TodoItem = {
       id: `todo-${now}-${Math.random().toString(36).slice(2, 8)}`,
       title: trimmed,
       done: false,
       date,
+      ...(normalizedTime ? { time: normalizedTime } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -141,6 +145,25 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     if (updated) persistTodoCloud(user?.uid, updated);
   }, [commit, user?.uid]);
 
+  const setTodoTime = useCallback((id: string, time?: string) => {
+    const normalizedTime = normalizeTodoTime(time);
+    const next = todosRef.current.map((todo) => {
+      if (todo.id !== id) return todo;
+      return {
+        id: todo.id,
+        title: todo.title,
+        done: todo.done,
+        date: todo.date,
+        createdAt: todo.createdAt,
+        ...(normalizedTime ? { time: normalizedTime } : {}),
+        updatedAt: Date.now(),
+      };
+    });
+    const updated = next.find((todo) => todo.id === id);
+    commit(next);
+    if (updated) persistTodoCloud(user?.uid, updated);
+  }, [commit, user?.uid]);
+
   const deleteTodo = useCallback((id: string) => {
     deletedRef.current = [...new Set([...deletedRef.current, id])];
     writeDeletedTodoIds(deletedRef.current);
@@ -154,8 +177,9 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     addTodo,
     toggleTodo,
     renameTodo,
+    setTodoTime,
     deleteTodo,
-  }), [todos, addTodo, toggleTodo, renameTodo, deleteTodo]);
+  }), [todos, addTodo, toggleTodo, renameTodo, setTodoTime, deleteTodo]);
 
   return <TodosContext.Provider value={value}>{children}</TodosContext.Provider>;
 }

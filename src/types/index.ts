@@ -122,6 +122,8 @@ export interface TodoItem {
   done: boolean;
   /** Local calendar day `YYYY-MM-DD`. */
   date: string;
+  /** Optional local time `HH:mm`. */
+  time?: string;
   createdAt: number;
   updatedAt: number;
 }

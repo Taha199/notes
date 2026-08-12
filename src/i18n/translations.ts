@@ -593,6 +593,9 @@ export interface Translation {
   todoDelete: string;
   todoPrevMonth: string;
   todoNextMonth: string;
+  todoTime: string;
+  todoTimeOptional: string;
+  todoClearTime: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -1002,6 +1005,9 @@ export const LANGS: Record<Lang, Translation> = {
     todoDelete: 'Delete task',
     todoPrevMonth: 'Previous month',
     todoNextMonth: 'Next month',
+    todoTime: 'Time',
+    todoTimeOptional: 'Time (optional)',
+    todoClearTime: 'Clear time',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -1409,5 +1415,8 @@ export const LANGS: Record<Lang, Translation> = {
     todoDelete: 'Ta bort uppgift',
     todoPrevMonth: 'Föregående månad',
     todoNextMonth: 'Nästa månad',
+    todoTime: 'Tid',
+    todoTimeOptional: 'Tid (valfritt)',
+    todoClearTime: 'Ta bort tid',
   },
 };
