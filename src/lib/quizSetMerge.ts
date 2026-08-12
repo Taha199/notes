@@ -115,7 +115,8 @@ export function pickNewerQuizItem(a: QuizItem, b: QuizItem): QuizItem {
  * Force `trashed: true` onto quiz items with an active soft-delete tombstone.
  * Mirrors set/folder quizTrash markers so union-keep / richer ById shells cannot
  * resurrect a question the user already deleted.
- * Tombstone timestamps are ms; a strictly newer live updatedAt (restore/edit) wins.
+ * Tombstone is the source of truth until restore/empty-trash clears it.
+ * A live last-good/ById copy with a newer updatedAt must not resurrect.
  */
 export function applyQuizItemTrashTombstones(
   items: QuizItem[],
@@ -129,7 +130,8 @@ export function applyQuizItemTrashTombstones(
     const at = tombstones[String(item.id)];
     if (at === undefined || item.trashed) return item;
     if (emptiedAt && at <= emptiedAt) return item;
-    if (at < quizItemSyncTime(item)) return item;
+    // Tombstone is the source of truth until restore/empty-trash clears it.
+    // A live ById/last-good copy with a newer updatedAt must not resurrect.
     changed = true;
     if (item.deletedAt || !opts?.deletedAt) return { ...item, trashed: true };
     return { ...item, trashed: true, deletedAt: opts.deletedAt };

@@ -34,6 +34,7 @@ import {
   quizItemSyncTime,
   shouldHydrateQuizSetsUi,
   unionQuizSetsForCommit,
+  quizSetsSoftTrashExplainsShrink,
 } from '../lib/quizSetMerge';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import {
@@ -341,7 +342,8 @@ function applyTrashTombstones<T extends { id: string; trashed?: boolean; deleted
     const at = tombstones[item.id];
     if (at === undefined || item.trashed) return item;
     if (emptiedAt && at <= emptiedAt) return item;
-    if (at < entitySyncTime(item)) return item;
+    // Durable quizTrash marker wins over a newer live last-good/ById echo.
+    // Restore clears the tombstone before flipping trashed:false.
     changed = true;
     if (item.deletedAt || !deletedAt) return { ...item, trashed: true };
     return { ...item, trashed: true, deletedAt };
@@ -970,6 +972,7 @@ function rememberQuizListsBootCache(quizzes: QuizItem[], sets: QuizSet[]) {
     prev
     && countLiveQuizItems(prev.sets) > countLiveQuizItems(sets)
     && prev.sets.length >= sets.length
+    && !quizSetsSoftTrashExplainsShrink(prev.sets, sets)
   ) {
     return;
   }
@@ -3450,9 +3453,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   /**
    * Keep the durable soft-delete marker in step with a row that just arrived
-   * from cloud: a trashed row records one, a strictly newer live row (a real
-   * restore) clears it. Without this, only the boot merge knew about deletes
-   * made on another device.
+   * from cloud: a trashed row records one. Live rows must not clear it —
+   * last-good/ById echoes with a newer updatedAt used to look like restores
+   * and resurrect deleted sets/folders after refresh.
    */
   const syncTrashTombstoneFromRemote = (
     kind: 'sets' | 'folders',
@@ -3474,8 +3477,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (known !== undefined && known >= at) return;
       next = markTrashTombstone(key, current, row.id, at || Date.now());
     } else {
-      if (known === undefined || at <= known) return;
-      next = clearTrashTombstone(key, current, row.id);
+      // A live ById/last-good echo is NOT a restore. Restores clear
+      // quizTrash/{path}/{id} and arrive via onChildRemoved.
+      return;
     }
     if (isSet) quizSetTombstonesRef.current = next;
     else quizFolderTombstonesRef.current = next;
@@ -5900,7 +5904,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       s.id === id ? { ...s, trashed: true, deletedAt: nowStr(), updatedAt: trashAt } : s
     ));
     quizSetsRef.current = next;
+    lastPaintedQuizSetsRef.current = next;
     setQuizSets(next);
+    rememberLastGoodComplete(quizzesRef.current, next);
     // Durable tombstone — proves the soft-delete happened even if the ById/array
     // writes below race or fail, so refresh can never resurrect this set.
     quizSetTombstonesRef.current = markTrashTombstone(

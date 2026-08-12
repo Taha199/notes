@@ -520,6 +520,9 @@ export function applyDurableQuizItems(
       const existing = set.items.find((i) => i.id === bare.id);
       if (existing) {
         matchedInSet = true;
+        // Soft-delete always wins over a live durable copy. Restore writes
+        // trashed:false locally first and clears the tombstone.
+        if (existing.trashed && !bare.trashed) return set;
         if (existing.trashed && syncTime(existing) > syncTime(bare)) return set;
         if (syncTime(existing) > syncTime(bare)) return set;
         // Prefer incoming when timestamps tie but content changed (live typing).
@@ -546,6 +549,7 @@ export function applyDurableQuizItems(
     if (!matchedInSet) {
       const existing = nextQuizzes.find((q) => q.id === bare.id);
       if (existing) {
+        if (existing.trashed && !bare.trashed) continue;
         if (existing.trashed && syncTime(existing) > syncTime(bare)) continue;
         if (syncTime(existing) > syncTime(bare)) continue;
         nextQuizzes = nextQuizzes.map((q) => (q.id === bare.id ? bare : q));
@@ -555,7 +559,9 @@ export function applyDurableQuizItems(
     } else {
       // Keep top-level quizzes list in sync when the same id exists there.
       const existing = nextQuizzes.find((q) => q.id === bare.id);
-      if (existing && syncTime(bare) >= syncTime(existing)) {
+      if (existing?.trashed && !bare.trashed) {
+        /* keep trash */
+      } else if (existing && syncTime(bare) >= syncTime(existing)) {
         nextQuizzes = nextQuizzes.map((q) => (q.id === bare.id ? bare : q));
       }
     }

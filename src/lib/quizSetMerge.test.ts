@@ -308,6 +308,35 @@ describe('applyDurableQuizItems keep-more-data', () => {
     const { sets: next } = applyDurableQuizItems([], sets, durable);
     expect(next[0].items.filter((i) => !i.trashed)).toHaveLength(10);
   });
+
+  it('does not resurrect a soft-deleted question from a live durable copy', () => {
+    const sets: QuizSet[] = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [
+          item(12, 'تجربة ٢', '2026-08-12T01:20:00.000Z', {
+            trashed: true,
+            deletedAt: '2026-08-12T01:20:00.000Z',
+          }),
+          item(14, 'keep', '2026-08-12T00:00:00.000Z'),
+        ],
+        createdAt: '2026-08-12T00:00:00.000Z',
+      }),
+    ];
+    const quizzes = [
+      item(12, 'تجربة ٢', '2026-08-12T01:20:00.000Z', {
+        trashed: true,
+        deletedAt: '2026-08-12T01:20:00.000Z',
+      }),
+    ];
+    const durable: StoredQuizItem[] = [
+      { ...item(12, 'تجربة ٢', '2026-08-12T01:20:00.000Z'), setId: 's1' },
+    ];
+    const { sets: nextSets, quizzes: nextQuizzes } = applyDurableQuizItems(quizzes, sets, durable);
+    expect(nextSets[0].items.find((i) => i.id === 12)?.trashed).toBe(true);
+    expect(nextQuizzes.find((q) => q.id === 12)?.trashed).toBe(true);
+  });
 });
 
 describe('notes-like union commit (no paint gates)', () => {
@@ -658,6 +687,21 @@ describe('soft-deleted quiz items survive richer ById union', () => {
     expect(honored[0].items.find((i) => i.id === 12)?.trashed).toBe(true);
     expect(honored[0].items.find((i) => i.id === 13)?.trashed).toBe(true);
     expect(countLiveQuizItems(honored)).toBe(1);
+  });
+
+  it('tombstone keeps a question trashed even if last-good/ById live copy is newer', () => {
+    const liveNewer = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [item(12, 'تجربة ٢', '2026-08-12T02:00:00.000Z')],
+        createdAt: '2026-08-12T00:00:00.000Z',
+      }),
+    ];
+    const tombstones = { '12': Date.parse('2026-08-12T01:20:00.000Z') };
+    const honored = applyQuizItemTrashTombstonesToSets(liveNewer, tombstones);
+    expect(honored[0].items.find((i) => i.id === 12)?.trashed).toBe(true);
+    expect(countLiveQuizItems(honored)).toBe(0);
   });
 
   it('pickBetterQuizSet honors softTrashQuizItems against newer-looking live copy', () => {
