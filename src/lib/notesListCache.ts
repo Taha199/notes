@@ -34,16 +34,22 @@ export function clearNotesBootCache(): void {
   notesBootCache = null;
 }
 
-/** Drop multi-MB data-URI images so the list cache fits in localStorage. */
+/** Tiny membership+preview cache — never store note HTML (images blow quota). */
 export function compactNoteForListCache(note: Note): Note {
-  const html = note.html;
-  if (!html || !/data:image\//i.test(html)) return note;
+  const text = (note.text || '').slice(0, 400);
   return {
-    ...note,
-    html: html.replace(
-      /(<img\b[^>]*\bsrc\s*=\s*)(["'])data:image\/[^"']*\2/gi,
-      '$1$2$2 data-img-pending="1"',
-    ),
+    id: Number(note.id),
+    title: note.title || '',
+    text,
+    html: '',
+    fav: !!note.fav,
+    read: !!note.read,
+    archived: !!note.archived,
+    trashed: !!note.trashed,
+    deletedAt: note.deletedAt,
+    date: note.date || '',
+    lastEdited: note.lastEdited,
+    savedAt: note.savedAt,
   };
 }
 
