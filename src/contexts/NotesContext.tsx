@@ -51,8 +51,6 @@ import {
   fetchQuizItemsByIdCloud,
   fetchQuizSetsByIdCloud,
   getAllNotesLocal,
-  peekPrefetchedNotes,
-  prefetchAllNotesLocal,
   getAllQuizItemsLocal,
   getAllQuizSetsLocal,
   mergeByIdNewer,
@@ -73,12 +71,8 @@ import {
   recordRecentEdit,
 } from '../lib/recentEdits';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
-import { sortNotesByCreatedDesc } from '../lib/noteSort';
 import {
-  clearNotesBootCache,
   clearNotesListCache,
-  readNotesBootCache,
-  readNotesListCache,
   rememberNotesBootCache,
   writeNotesListCache,
   NOTES_LIST_CACHE_KEY,
@@ -93,6 +87,7 @@ import {
   readTrashTombstones,
   readSidebarCounts,
   writeSidebarCounts,
+  emptySidebarCounts,
   writeTinyDurableValue,
   writeTrashEmptiedAt,
   writeTrashTombstones,
@@ -177,15 +172,6 @@ function notesMetaEqual(a: Note[], b: Note[]): boolean {
     if ((left.title || '') !== (right.title || '')) return false;
     // Length proxy — avoid scanning multi-MB base64 HTML on every ById flush.
     if ((left.html || '').length !== (right.html || '').length) return false;
-  }
-  return true;
-}
-
-function notesIdSetEqual(a: Note[], b: Note[]): boolean {
-  if (a.length !== b.length) return false;
-  const ids = new Set(a.map((n) => Number(n.id)));
-  for (const note of b) {
-    if (!ids.has(Number(note.id))) return false;
   }
   return true;
 }
@@ -1203,7 +1189,6 @@ function clearLocalNotesData() {
   quizListsBootCache = null;
   clearQuizCompleteCache();
   clearNotesListCache();
-  clearNotesBootCache();
 }
 
 /** Clear cached notes when a different account signs in (keys are not uid-scoped). */
@@ -1236,23 +1221,6 @@ function readLocalNotesDataRaw() {
 /** Sync read used by recovery helpers; journal is applied separately on boot. */
 function readLocalNotesData() {
   return applyRecentEditsToData(readLocalNotesDataRaw());
-}
-
-/** Sync boot notes for first React paint — sidebar counts + list must not wait on useEffect/IDB. */
-function readBootNotesForPaint(): Note[] {
-  const emptiedAt = readTrashEmptiedAt();
-  const tombstones = readPermDeleted();
-  const fromLs = stripPermDeletedNotes(readLocalNotesDataRaw().notes, tombstones);
-  const fromListCache = stripPermDeletedNotes(readNotesListCache(), tombstones);
-  const fromMemory = stripPermDeletedNotes(readNotesBootCache(), tombstones);
-  const fromIdb = stripPermDeletedNotes(peekPrefetchedNotes(), tombstones);
-  // Prefer richer bodies (IDB/memory) over compact list-cache shells when timestamps tie.
-  const merged = mergeNotesPreferRicher(fromLs, fromListCache, fromMemory, fromIdb).filter((note) => (
-    !(note.trashed && emptiedAt && entitySyncTime(note) <= emptiedAt)
-  ));
-  const sorted = sortNotesByCreatedDesc(merged);
-  if (sorted.length) rememberNotesBootCache(sorted);
-  return sorted;
 }
 
 function computeSidebarCounts(
@@ -2128,7 +2096,7 @@ function nextId() {
 export function NotesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
-  const [notes, setNotes] = useState<Note[]>(() => readBootNotesForPaint());
+  const [notes, setNotes] = useState<Note[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
   const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
@@ -2140,38 +2108,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return ensureRestoredFolder([]);
     }
   });
-  const [sidebarCounts, setSidebarCounts] = useState<SidebarCounts>(() => {
-    const bootNotes = readBootNotesForPaint();
-    let bootSets: QuizSet[] = [];
-    let bootQuizzes: QuizItem[] = [];
-    let bootFolders: QuizFolder[] = [];
-    try {
-      const local = readLocalNotesDataRaw();
-      bootSets = local.sets;
-      bootQuizzes = local.quizzes;
-      bootFolders = local.folders;
-    } catch { /* ignore */ }
-    const computed = computeSidebarCounts(bootNotes, bootQuizzes, bootSets, bootFolders);
-    const cached = readSidebarCounts();
-    if (!cached) {
-      writeSidebarCounts(computed);
-      return computed;
-    }
-    // First pixel: never under-report vs last session (incomplete LS vs IDB).
-    const merged: SidebarCounts = {
-      home: Math.max(cached.home, computed.home),
-      unread: Math.max(cached.unread, computed.unread),
-      read: Math.max(cached.read, computed.read),
-      fav: Math.max(cached.fav, computed.fav),
-      archive: Math.max(cached.archive, computed.archive),
-      trashNotes: Math.max(cached.trashNotes, computed.trashNotes),
-      trashQuizzes: Math.max(cached.trashQuizzes, computed.trashQuizzes),
-      trashSets: Math.max(cached.trashSets, computed.trashSets),
-      trashFolders: Math.max(cached.trashFolders, computed.trashFolders),
-    };
-    writeSidebarCounts(merged);
-    return merged;
-  });
+  const [sidebarCounts, setSidebarCounts] = useState<SidebarCounts>(() => readSidebarCounts() ?? emptySidebarCounts());
   const [chats, setChats] = useState<ChatConversation[]>([]);
   const [tokenUsage, setTokenUsage] = useState<number>(0);
   const draftCounter = useRef(0);
@@ -2426,75 +2363,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return true;
       }),
     };
-    // Paint the richest local snapshot immediately — never wait on cloud.
-    const bootMergedNotes = sortNotesByCreatedDesc(mergeNotesPreferRicher(
-      local.notes,
-      readNotesListCache(),
-      readNotesBootCache(),
-      peekPrefetchedNotes(),
-      notesRef.current,
-    ));
-    local = { ...local, notes: bootMergedNotes };
-    notesRef.current = bootMergedNotes;
-    // First paint already happened from useState(readBootNotesForPaint) after IDB
-    // prefetch — do not setNotes again here (that was the old→new drip).
-    if (bootMergedNotes.length) {
-      rememberNotesBootCache(bootMergedNotes);
-      writeNotesListCache(bootMergedNotes);
-    }
-    {
-      const computed = computeSidebarCounts(
-        bootMergedNotes,
-        local.quizzes,
-        local.sets,
-        local.folders,
-        permDeletedRef.current,
-      );
-      const cached = readSidebarCounts();
-      const merged: SidebarCounts = cached
-        ? {
-            home: Math.max(cached.home, computed.home),
-            unread: Math.max(cached.unread, computed.unread),
-            read: Math.max(cached.read, computed.read),
-            fav: Math.max(cached.fav, computed.fav),
-            archive: Math.max(cached.archive, computed.archive),
-            trashNotes: Math.max(cached.trashNotes, computed.trashNotes),
-            trashQuizzes: Math.max(cached.trashQuizzes, computed.trashQuizzes),
-            trashSets: Math.max(cached.trashSets, computed.trashSets),
-            trashFolders: Math.max(cached.trashFolders, computed.trashFolders),
-          }
-        : computed;
-      writeSidebarCounts(merged);
-      setSidebarCounts(merged);
-    }
+    notesRef.current = local.notes;
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
-
-    const commitNotes = (snapshot: Note[], opts?: { paint?: boolean }) => {
-      if (cancelled) return;
-      const mergedNotes = sortNotesByCreatedDesc(
-        stripPermDeletedNotes(snapshot, permDeletedRef.current).filter((note) => (
-          !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
-        )),
-      );
-      const prev = notesRef.current;
-      notesRef.current = mergedNotes;
-      local = { ...local, notes: mergedNotes };
-      rememberNotesBootCache(mergedNotes, true);
-      writeNotesListCache(mergedNotes);
-      if (opts?.paint === false) return;
-      // Same membership: keep the first complete paint. Extra setNotes is the drip.
-      if (notesIdSetEqual(mergedNotes, prev) && prev.length > 0) return;
-      if (notesMetaEqual(mergedNotes, prev)) return;
-      setNotes(mergedNotes);
-    };
-
-    // IndexedDB already awaited in BootLoader — fold in without a second paint when ids match.
-    const notesIdbReady = (async () => {
-      const idbNotes = await prefetchAllNotesLocal();
-      if (cancelled || !idbNotes.length) return;
-      commitNotes(mergeNotesPreferRicher(notesRef.current, idbNotes));
-    })();
     bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
     if (bootPick.fromLastGood && local.sets.length > 0) {
       setQuizzes(local.quizzes);
@@ -2523,17 +2394,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
       local = applyRecentEditsToData(local, edits);
-      local = {
-        ...local,
-        notes: stripPermDeletedNotes(
-          mergeNotesPreferRicher(local.notes, notesRef.current),
-          permDeletedRef.current,
-        ),
-      };
+      local = { ...local, notes: stripPermDeletedNotes(local.notes, permDeletedRef.current) };
       notesRef.current = local.notes;
       quizzesRef.current = local.quizzes;
       quizSetsRef.current = local.sets;
-      commitNotes(local.notes);
+      setNotes(local.notes);
       return edits;
     });
 
@@ -2789,18 +2654,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
       if (local.sets.length > 0) markQuizLocalReady();
     })();
-    // Phase 2: quiz item bodies + notes catch-up. Notes IDB already started above —
-    // await it in parallel with set shells so Studerade never waits on quiz hydrate.
+    // Phase 2: notes + quiz item bodies (can be large HTML) — enrich after structure paint.
     const durableReady = (async () => {
-      const [, idbQuizzes] = await Promise.all([
-        Promise.all([durableSetsReady, notesIdbReady]),
+      await durableSetsReady;
+      const [idbNotes, idbQuizzes] = await Promise.all([
+        getAllNotesLocal(),
         getAllQuizItemsLocal(),
       ]);
       if (cancelled) return;
-      // notesIdbReady already painted; keep local.notes aligned with refs.
-      local = { ...local, notes: notesRef.current };
-      rememberNotesBootCache(notesRef.current, true);
-      writeNotesListCache(notesRef.current);
+      if (idbNotes.length) {
+        local = {
+          ...local,
+          notes: stripPermDeletedNotes(mergeByIdNewer(local.notes, idbNotes), permDeletedRef.current),
+        };
+        notesRef.current = local.notes;
+        setNotes(local.notes);
+      }
       if (idbQuizzes.length) {
         const applied = applyDurableQuizItems(
           local.quizzes,
@@ -2818,11 +2687,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizzesRef.current = local.quizzes;
         quizSetsRef.current = local.sets;
       }
-      // Re-paint from IDB-enriched local (may grow item bodies / set shells).
-      // If last-good already painted, do not force incomplete IDB over it.
       if (local.quizzes.length || local.sets.length) {
         commitQuizListsLocal(local.quizzes, local.sets, {
-          // Online: paint IDB union but don't poison LS until ById catch-up.
           persistLocal: typeof navigator !== 'undefined' ? navigator.onLine === false : false,
           forcePaint: !quizContentReadyRef.current,
         });
@@ -2835,7 +2701,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const applyLocalCache = (opts?: { includeQuiz?: boolean }) => {
       const includeQuiz = opts?.includeQuiz !== false;
-      if (local.notes.length) commitNotes(local.notes);
+      if (local.notes.length) setNotes(local.notes);
       if (local.chats.length) setChats(local.chats);
       if (local.folders.length) {
         setQuizFolders(ensureRestoredFolder(initializeQuizColors(local.folders)));
@@ -2927,26 +2793,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       fetchQuizSetsByIdCloud(user.uid),
       fetchQuizFoldersByIdCloud(user.uid),
     ]);
-    // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
-    // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
-    const notesCloudPromise = fetchNotesByIdCloud(user.uid);
-    const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
-    const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
-
-    const applyNotesSnapshot = (incoming: Note[]) => {
-      if (cancelled || !incoming.length) return;
-      commitNotes(mergeNotesPreferRicher(notesRef.current, incoming));
-    };
-
-    // Cloud notes enrich in the background — never block first paint on the network.
-    const notesCloudReady = (async () => {
-      await notesIdbReady;
-      if (cancelled) return;
-      try {
-        const cloudNotes = await notesCloudPromise;
-        if (!cancelled && cloudNotes.length) applyNotesSnapshot(cloudNotes);
-      } catch { /* ignore */ }
-    })();
+    const cloudBodiesPromise = Promise.all([
+      fetchNotesByIdCloud(user.uid),
+      fetchQuizItemsByIdCloud(user.uid),
+    ]);
 
     (async () => {
       try {
@@ -3003,12 +2853,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         // Item/note bodies: local IDB + cloud ById in parallel — enrich without clearing shells.
         const [, [cloudNotesById, cloudQuizItemsById]] = await Promise.all([
-          Promise.all([durableReady, notesCloudReady]),
+          durableReady,
           cloudBodiesPromise,
         ]);
         if (cancelled) return;
-        // Notes usually already painted via notesCloudReady; re-apply only if richer.
-        applyNotesSnapshot(cloudNotesById);
+        if (cloudNotesById.length) {
+          const mergedNotes = stripPermDeletedNotes(
+            mergeByIdNewer(notesRef.current, cloudNotesById),
+            permDeletedRef.current,
+          );
+          notesRef.current = mergedNotes;
+          setNotes(mergedNotes);
+          local = { ...local, notes: mergedNotes };
+        }
         // Fold cloud ById items into refs, then commit once. First visible card
         // bodies should be this merge (not stale IDB alone) — no old→new FOUC.
         if (cloudQuizItemsById.length) {
@@ -3200,8 +3057,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizzes = appliedQ.quizzes;
         }
 
-        commitNotes(mergeNotesPreferRicher(notesRef.current, notes));
-        safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+        setNotes(notes);
+        notesRef.current = notes;
+        safeSetItem('malacadhati', JSON.stringify(notes));
 
         setQuizzes(quizzes);
         quizzesRef.current = quizzes;
@@ -5990,21 +5848,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       // event (image notesById DELETEs saturated the socket and notes blinked).
       const liveDurable = durable.filter((n) => !dead.has(Number(n.id)));
       if (!liveDurable.length) return;
-      const merged = sortNotesByCreatedDesc(
-        stripPermDeletedNotes(mergeNotesPreferRicher(notesRef.current, liveDurable), tombstones),
-      );
-      if (notesIdSetEqual(merged, notesRef.current) && notesRef.current.length > 0) {
-        notesRef.current = merged;
-        return;
-      }
+      const merged = stripPermDeletedNotes(mergeNotesPreferRicher(notesRef.current, liveDurable), tombstones);
       if (notesMetaEqual(merged, notesRef.current)) return;
       isApplyingRemoteRef.current = true;
       try {
         notesRef.current = merged;
         setNotes(merged);
         safeSetItem('malacadhati', JSON.stringify(merged));
-        writeNotesListCache(merged);
-        rememberNotesBootCache(merged);
       } finally {
         isApplyingRemoteRef.current = false;
         flushPendingInstantDataSave();
@@ -6021,22 +5871,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         applyNotesByIdBatch(batch);
       }, 120);
     }
-    const queueNoteChild = (val: unknown, fromChange = false) => {
+    const queueNoteChild = (val: unknown) => {
       if (!val || typeof val !== 'object') return;
       const note = val as Note;
       if (note.id == null) return;
-      // onChildAdded replays every note oldest-id-first. Skip ids we already
-      // have so new image notes are not dripped in last after a slow download.
-      if (!fromChange) {
-        const id = Number(note.id);
-        if (notesRef.current.some((n) => Number(n.id) === id)) return;
-      }
       notesByIdBuffer.push(note);
       scheduleNotesByIdFlush();
     };
     const notesByIdRef = dbRef(database, `users/${uid}/notesById`);
-    const unsubNoteAdded = onChildAdded(notesByIdRef, (snap) => queueNoteChild(snap.val(), false));
-    const unsubNoteChanged = onChildChanged(notesByIdRef, (snap) => queueNoteChild(snap.val(), true));
+    const unsubNoteAdded = onChildAdded(notesByIdRef, (snap) => queueNoteChild(snap.val()));
+    const unsubNoteChanged = onChildChanged(notesByIdRef, (snap) => queueNoteChild(snap.val()));
     const unsubNoteRemoved = onChildRemoved(notesByIdRef, (snap) => {
       // A missing mirror is not a delete — only an explicit permanent-delete
       // tombstone may drop a note, exactly like quizSetsById.
