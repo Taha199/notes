@@ -33,7 +33,9 @@ const IDB_NAME = 'malacadhati_items_v1';
 const NOTES_STORE = 'notes';
 const QUIZ_STORE = 'quizItems';
 const QUIZ_SETS_STORE = 'quizSets';
-const IDB_VERSION = 2;
+/** Keep in sync with quizCompleteCache IDB_VERSION (adds quizCompleteCache store). */
+const IDB_VERSION = 3;
+const QUIZ_COMPLETE_CACHE_STORE = 'quizCompleteCache';
 
 export type StoredQuizItem = QuizItem & { setId?: string | null };
 
@@ -50,6 +52,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(QUIZ_SETS_STORE)) {
         db.createObjectStore(QUIZ_SETS_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(QUIZ_COMPLETE_CACHE_STORE)) {
+        db.createObjectStore(QUIZ_COMPLETE_CACHE_STORE, { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);

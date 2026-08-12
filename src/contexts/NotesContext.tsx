@@ -8,6 +8,16 @@ import { useAuth } from './AuthContext';
 import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import {
+  clearQuizCompleteCache,
+  persistQuizCompleteCache,
+  pickBootQuizLists,
+  quizSetsHaveCompleteBodies,
+  readQuizCompleteCache,
+  readQuizCompleteCacheIdb,
+  shouldApplyBackgroundQuizUpdate,
+  QUIZ_COMPLETE_CACHE_LS_KEY,
+} from '../lib/quizCompleteCache';
+import {
   adoptByIdMembershipWhenRicher,
   applyQuizItemTrashTombstones,
   applyQuizItemTrashTombstonesToSets,
@@ -966,12 +976,21 @@ function rememberQuizListsBootCache(quizzes: QuizItem[], sets: QuizSet[]) {
   quizListsBootCache = { quizzes, sets };
 }
 
+/** Keep durable last-good in sync with user edits (delete/order/body). */
+function rememberLastGoodComplete(quizzes: QuizItem[], sets: QuizSet[]) {
+  rememberQuizListsBootCache(quizzes, sets);
+  if (quizSetsHaveCompleteBodies(sets)) {
+    persistQuizCompleteCache(quizzes, sets);
+  }
+}
+
 const LOCAL_DATA_KEYS = [
   'malacadhati',
   'malacadhati_drafts',
   'malacadhati_quiz',
   'malacadhati_quiz_sets',
   QUIZ_SETS_SHELL_KEY,
+  QUIZ_COMPLETE_CACHE_LS_KEY,
   'malacadhati_quiz_folders',
   'malacadhati_chats',
 ] as const;
@@ -1025,6 +1044,7 @@ function insertQuizSetInFolderOrder(sets: QuizSet[], newSet: QuizSet): QuizSet[]
 function clearLocalNotesData() {
   for (const key of LOCAL_DATA_KEYS) localStorage.removeItem(key);
   quizListsBootCache = null;
+  clearQuizCompleteCache();
 }
 
 /** Clear cached notes when a different account signs in (keys are not uid-scoped). */
@@ -2082,39 +2102,43 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // quota can't hold them). Load it in parallel with the first paint from the
     // raw localStorage snapshot, then fold journal entries in before cloud merge.
     let local = readLocalNotesDataRaw();
-    // Seed refs. Paint set-list shells when LS/boot-cache has rows so folders
-    // never show "0 set" while ById/IDB enrich items. Empty LS must NOT paint
-    // or claim authority — cloud/ById hydrate below will fill the UI.
+    // LAST-GOOD COMPLETE CACHE (sync): paint the correct full snapshot immediately.
+    // Never first-paint incomplete LS shells (classic 9) over last-good 11.
+    const lastGoodSync = readQuizCompleteCache();
+    const bootPick = pickBootQuizLists({
+      localQuizzes: local.quizzes,
+      localSets: local.sets,
+      lastGood: lastGoodSync,
+      memory: quizListsBootCache,
+    });
+    // Honor soft-delete tombstones on boot so deletes stick in the first pixel.
+    const bootSets = applyTrashTombstones(
+      honorQuizItemTrashTombstones(bootPick.sets, quizItemTombstonesRef.current),
+      quizSetTombstonesRef.current,
+    );
+    const bootQuizzes = honorQuizItemTrashTombstonesOnItems(
+      bootPick.quizzes,
+      quizItemTombstonesRef.current,
+    );
+    local = { ...local, quizzes: bootQuizzes, sets: bootSets };
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
     bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
-    // Same-session remount: prefer last full in-memory lists over a short LS shell.
-    if (
-      quizListsBootCache
-      && (
-        countLiveQuizItems(quizListsBootCache.sets) >= countLiveQuizItems(local.sets)
-        || liveUserQuizSetIds(quizListsBootCache.sets).size >= liveUserQuizSetIds(local.sets).size
-      )
-      && quizListsBootCache.sets.length > 0
-    ) {
-      local = { ...local, quizzes: quizListsBootCache.quizzes, sets: quizListsBootCache.sets };
-      quizzesRef.current = quizListsBootCache.quizzes;
-      quizSetsRef.current = quizListsBootCache.sets;
-      bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, quizListsBootCache.sets);
-      setQuizzes(quizListsBootCache.quizzes);
-      setQuizSets(quizListsBootCache.sets);
-      lastPaintedQuizzesRef.current = quizListsBootCache.quizzes;
-      lastPaintedQuizSetsRef.current = quizListsBootCache.sets;
+    if (bootPick.fromLastGood && local.sets.length > 0) {
+      setQuizzes(local.quizzes);
+      setQuizSets(local.sets);
+      lastPaintedQuizzesRef.current = local.quizzes;
+      lastPaintedQuizSetsRef.current = local.sets;
+      rememberQuizListsBootCache(local.quizzes, local.sets);
       quizLocalReadyRef.current = true;
-      // Same-session cache already survived a prior ById merge — safe for bodies.
+      // Last-good IS the correct last session state — cards ready with zero wait.
       quizContentReadyRef.current = true;
       quizAuthoritativeByIdSeenRef.current = true;
       setQuizLocalReady(true);
       setQuizContentReady(true);
     } else if (local.sets.length > 0) {
-      // Structure-first paint: set ids/folders visible immediately from LS.
-      // Mark local-ready now — do not wait on IDB item bodies / cloud.
-      // Question cards stay gated on quizContentReady until ById (or timeout).
+      // Structure-first: sidebar shells only. Question cards wait for last-good
+      // IDB hydrate or first ById merge — never timeout-reveal incomplete LS-9.
       setQuizSets(local.sets);
       lastPaintedQuizSetsRef.current = local.sets;
       if (local.quizzes.length) {
@@ -2149,7 +2173,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (via === 'timeout' && !quizContentReadyRef.current) {
         quizRevealedViaTimeoutRef.current = true;
       }
-      if (via === 'byid') {
+      if (via === 'byid' || via === 'cache') {
         quizAuthoritativeByIdSeenRef.current = true;
         quizRevealedViaTimeoutRef.current = false;
       }
@@ -2163,14 +2187,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
     const armQuizContentReadyTimeout = () => {
       if (cancelled || quizContentReadyRef.current || quizContentReadyTimer) return;
+      // Online: never timeout-reveal incomplete LS (classic 9→11 FOUC). Wait for
+      // ById / last-good IDB. Offline: reveal best local after a short grace.
+      const online = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
+      if (online) return;
       quizContentReadyTimer = setTimeout(() => {
         quizContentReadyTimer = null;
-        // Best-effort local bodies — prefer cloud ById when it arrives within the window.
         markQuizContentReady('timeout');
       }, QUIZ_CONTENT_READY_TIMEOUT_MS);
     };
-    // Structure-first may have already marked local-ready above — start the body gate clock.
-    if (quizLocalReadyRef.current) armQuizContentReadyTimeout();
+    // Only arm offline grace — last-good already set contentReady above when present.
+    if (quizLocalReadyRef.current && !quizContentReadyRef.current) armQuizContentReadyTimeout();
+    /** Persist last-good complete snapshot after a successful full merge. */
+    const persistLastGoodIfComplete = (quizzes: QuizItem[], sets: QuizSet[]) => {
+      if (!quizSetsHaveCompleteBodies(sets)) return;
+      if (!isQuizSetsLocalWriteSafe(sets, maxKnownLiveBySetRef.current, lastPaintedQuizSetsRef.current)) {
+        return;
+      }
+      persistQuizCompleteCache(quizzes, sets);
+    };
     /** Single commit path: union into refs, setState, safe LS — never shrink below max-known. */
     const commitQuizListsLocal = (
       nextQuizzes: QuizItem[],
@@ -2216,22 +2251,30 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSetsRef.current = sets;
       // Structure-first / empty UI: always hydrate shells before content-ready.
       // After cards are visible, block same-id HTML flips unless ById catch-up,
-      // membership growth, or structural order/trash changes.
+      // membership growth, newer bodies/order, or structural order/trash changes.
       let hydrateUi = opts?.forcePaint || shouldHydrateQuizSetsUi(paintedHonored, sets);
       if (hydrateUi && quizContentReadyRef.current && !opts?.forcePaint) {
-        const decision = decideQuizListsUiPaint({
-          contentReady: quizContentReadyRef.current,
-          revealedViaTimeout: quizRevealedViaTimeoutRef.current,
-          seenAuthoritativeById: quizAuthoritativeByIdSeenRef.current,
-          isAuthoritativeByIdMerge: !!opts?.isAuthoritativeByIdMerge,
-          paintedSets: paintedHonored,
-          nextSets: sets,
-          paintedQuizzes,
-          nextQuizzes: quizzesHonored,
-          setsEqualForUI: quizSetsEqualForUI,
-          quizzesEqualForUI,
-        });
-        if (!decision.paint) hydrateUi = false;
+        // Hard block: never paint shorter incomplete over last-good / painted.
+        if (
+          countLiveQuizItems(sets) < countLiveQuizItems(paintedHonored)
+          && !shouldApplyBackgroundQuizUpdate(paintedHonored, sets)
+        ) {
+          hydrateUi = false;
+        } else {
+          const decision = decideQuizListsUiPaint({
+            contentReady: quizContentReadyRef.current,
+            revealedViaTimeout: quizRevealedViaTimeoutRef.current,
+            seenAuthoritativeById: quizAuthoritativeByIdSeenRef.current,
+            isAuthoritativeByIdMerge: !!opts?.isAuthoritativeByIdMerge,
+            paintedSets: paintedHonored,
+            nextSets: sets,
+            paintedQuizzes,
+            nextQuizzes: quizzesHonored,
+            setsEqualForUI: quizSetsEqualForUI,
+            quizzesEqualForUI,
+          });
+          if (!decision.paint) hydrateUi = false;
+        }
       }
       if (hydrateUi) {
         if (!quizzesEqualForUI(quizzesHonored, prevQ) || !quizzesEqualForUI(quizzesHonored, paintedQuizzes)) {
@@ -2244,6 +2287,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         lastPaintedQuizzesRef.current = quizzesHonored;
         lastPaintedQuizSetsRef.current = sets;
         rememberQuizListsBootCache(quizzesHonored, sets);
+        // Rewrite last-good whenever UI holds a complete authoritative snapshot.
+        if (
+          opts?.isAuthoritativeByIdMerge
+          || quizAuthoritativeByIdSeenRef.current
+          || quizContentReadyRef.current
+        ) {
+          persistLastGoodIfComplete(quizzesHonored, sets);
+        }
       }
       if (
         opts?.persistLocal !== false
@@ -2256,8 +2307,34 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         safeSetItem('malacadhati_quiz', JSON.stringify(quizzesHonored));
       }
     };
+    // Phase 0: IDB last-good complete cache (async, but local — beats network).
+    // If sync LS last-good was missing (quota), this still paints correct 11 before ById.
+    const idbLastGoodReady = (async () => {
+      if (quizContentReadyRef.current) return;
+      const idbLastGood = await readQuizCompleteCacheIdb();
+      if (cancelled || !idbLastGood || !quizSetsHaveCompleteBodies(idbLastGood.sets)) return;
+      if (quizContentReadyRef.current) return;
+      const paintedLive = countLiveQuizItems(lastPaintedQuizSetsRef.current);
+      const cacheLive = countLiveQuizItems(idbLastGood.sets);
+      if (paintedLive > cacheLive) return;
+      const mergedSets = unionQuizSetsForCommit(idbLastGood.sets, quizSetsRef.current, local.sets);
+      const mergedQuizzes = idbLastGood.quizzes.length ? idbLastGood.quizzes : local.quizzes;
+      local = { ...local, quizzes: mergedQuizzes, sets: mergedSets };
+      quizzesRef.current = mergedQuizzes;
+      quizSetsRef.current = mergedSets;
+      bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, mergedSets);
+      commitQuizListsLocal(mergedQuizzes, mergedSets, {
+        persistLocal: false,
+        forcePaint: true,
+      });
+      markQuizLocalReady();
+      markQuizContentReady('cache');
+      // Heal sync LS key for the next cold boot.
+      persistLastGoodIfComplete(mergedQuizzes, mergedSets);
+    })();
     // Phase 1 (fast): set shells only — tiny IDB store; unblocks "0 set" immediately.
     const durableSetsReady = (async () => {
+      await idbLastGoodReady;
       const idbSets = await getAllQuizSetsLocal();
       if (cancelled) return;
       if (idbSets.length) {
@@ -2266,9 +2343,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           sets: unionQuizSetsFromById(local.sets, idbSets, permDeletedRef.current),
         };
         quizSetsRef.current = local.sets;
+        // Never force-paint incomplete IDB shells over last-good complete cache.
         commitQuizListsLocal(local.quizzes, local.sets, {
           persistLocal: typeof navigator !== 'undefined' ? navigator.onLine === false : false,
-          forcePaint: true,
+          forcePaint: !quizContentReadyRef.current,
         });
       }
       if (local.sets.length > 0) markQuizLocalReady();
@@ -2296,9 +2374,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizSetsRef.current = local.sets;
       }
       // Re-paint from IDB-enriched local (may grow item bodies / set shells).
-      // Before cards are visible, force hydrate so ById merges against full local.
-      // After a timeout reveal, do not forcePaint — decideQuizListsUiPaint blocks
-      // same-id HTML flips until authoritative ById catch-up.
+      // If last-good already painted, do not force incomplete IDB over it.
       if (local.quizzes.length || local.sets.length) {
         commitQuizListsLocal(local.quizzes, local.sets, {
           // Online: paint IDB union but don't poison LS until ById catch-up.
@@ -2502,6 +2578,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         } else if (!quizContentReadyRef.current) {
           markQuizContentReady('fallback');
         }
+        // Always rewrite last-good after a successful ById merge (self-heal 9→11).
+        persistLastGoodIfComplete(quizzesRef.current, quizSetsRef.current);
 
         const cloud = await fetchCloudSyncBundle(user.uid);
         if (!cloud) throw new Error('cloud-fetch-failed');
@@ -3069,6 +3147,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (isQuizSetsLocalWriteSafe(safeSets, maxKnownLiveBySetRef.current, paintedHonored)) {
       safeSetItem('malacadhati_quiz_sets', JSON.stringify(safeSets));
       writeQuizSetsShellJournal(safeSets);
+      rememberLastGoodComplete(quizzesRef.current, safeSets);
     }
     quizSetsRef.current = safeSets;
     quizSetsByIdCacheRef.current = honorQuizItemTrashTombstones(
@@ -3148,6 +3227,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = nextSets;
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     writeQuizSetsShellJournal(nextSets);
+    rememberLastGoodComplete(quizzesRef.current, nextSets);
     const changedList = changed ? (Array.isArray(changed) ? changed : [changed]) : [];
     // Critical path: membership mirror lands before the caller can refresh away.
     for (const row of changedList) {
@@ -5653,6 +5733,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
+    rememberLastGoodComplete(nextQuizzes, nextSets);
     safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     // Instant cross-device delete: tiny single-item write first, then the big
@@ -5726,6 +5807,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = nextSets;
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
+    rememberLastGoodComplete(nextQuizzes, nextSets);
     safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     void persistQuizItemDurable(userRef.current?.uid, live, RESTORED_QUESTIONS_SET_ID, { immediate: true });
@@ -6434,6 +6516,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     quizSetsRef.current = next;
     setQuizSets(next);
+    rememberLastGoodComplete(quizzesRef.current, next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
     everHadSetsRef.current = true;
     persistSets(next, true, true);
@@ -6475,6 +6558,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const touched = next.find((s) => s.id === setId);
     if (touched) maxKnownLiveBySetRef.current.set(setId, countLiveItemsInSet(touched));
     setQuizSets(next);
+    rememberLastGoodComplete(quizzesRef.current, next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
     if (existing) {
       void tombstoneQuizItemDurable(userRef.current?.uid, {
@@ -6506,6 +6590,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ));
     quizSetsRef.current = next;
     setQuizSets(next);
+    rememberLastGoodComplete(quizzesRef.current, next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
     persistSets(next, false, true);
     if (forceCloud) {
@@ -6770,6 +6855,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return { ...s, items, orderUpdatedAt: stamp, itemsOrder: items.map((i) => i.id) };
       });
       if (!changed) return prev;
+      quizSetsRef.current = next;
+      rememberLastGoodComplete(quizzesRef.current, next);
       persistSets(next, true, true);
       scheduleInstantDataCloudSave({ quizSets: next });
       // Push the full reordered set (never a shorter items[]) so ById/IDB honor

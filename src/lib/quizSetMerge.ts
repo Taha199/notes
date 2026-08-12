@@ -373,13 +373,42 @@ export function quizListsStructuralUiChanged(prev: QuizSet[], next: QuizSet[]): 
   return false;
 }
 
+/** True when any shared item id has a strictly newer updatedAt on `next`. */
+export function quizListsHaveStrictlyNewerItems(prev: QuizSet[], next: QuizSet[]): boolean {
+  const prevTimes = new Map<number, number>();
+  for (const set of prev) {
+    for (const item of set.items ?? []) {
+      prevTimes.set(item.id, quizItemSyncTime(item));
+    }
+  }
+  for (const set of next) {
+    for (const item of set.items ?? []) {
+      const prevT = prevTimes.get(item.id);
+      if (prevT !== undefined && quizItemSyncTime(item) > prevT) return true;
+    }
+  }
+  return false;
+}
+
+/** True when any shared set has a newer Manual / list-order stamp on `next`. */
+export function quizListsHaveNewerOrderStamps(prev: QuizSet[], next: QuizSet[]): boolean {
+  const prevById = new Map(prev.map((set) => [set.id, set]));
+  for (const set of next) {
+    const prior = prevById.get(set.id);
+    if (!prior) continue;
+    if (quizSetOrderTime(set) > quizSetOrderTime(prior)) return true;
+    if (quizSetListOrderTime(set) > quizSetListOrderTime(prior)) return true;
+  }
+  return false;
+}
+
 /**
  * Decide whether merged quiz lists must reach React after a hydrate step.
  *
  * Membership growth (9→11) always paints. Same-id HTML flips are allowed on the
  * first authoritative ById catch-up after a timeout reveal, but skipped once an
  * authoritative body snapshot was already shown — without blocking later adds,
- * soft-deletes, or Manual order.
+ * soft-deletes, Manual order, or strictly-newer item bodies / order stamps.
  */
 export function decideQuizListsUiPaint(opts: {
   contentReady: boolean;
@@ -409,10 +438,16 @@ export function decideQuizListsUiPaint(opts: {
   if (membershipGrew) {
     return { paint: true, reason: 'membership-grew' };
   }
-  // After an authoritative body reveal, skip same-id HTML flips from later echoes
-  // but still allow order / trash / metadata structural UI updates.
+  // After an authoritative / last-good body reveal, skip same-id older HTML echoes
+  // but still allow order / trash / strictly-newer bodies / order stamps.
   if (opts.seenAuthoritativeById) {
     if (quizListsStructuralUiChanged(opts.paintedSets, opts.nextSets)) {
+      return { paint: true, reason: 'content-changed' };
+    }
+    if (quizListsHaveStrictlyNewerItems(opts.paintedSets, opts.nextSets)) {
+      return { paint: true, reason: 'content-changed' };
+    }
+    if (quizListsHaveNewerOrderStamps(opts.paintedSets, opts.nextSets)) {
       return { paint: true, reason: 'content-changed' };
     }
     return { paint: false, reason: 'skip' };

@@ -2030,9 +2030,9 @@ export function QuizPage({
       </div>
       )}
 
-      {/* Main content — sets sidebar stays local-first; question bodies wait for
-          first authoritative merge (quizContentReady) so old HTML never flips.
-          On narrow folder browse (no set yet), hide main so the set list is readable. */}
+      {/* Main content — last-good complete cache boots quizContentReady instantly
+          (correct bodies, zero wait). Spinner only on first install before any
+          last-good exists. On narrow folder browse (no set yet), hide main. */}
       {!(isNarrow && sidebarOpen && selectedFolderId && !selectedSetId && !isNotesView) && (
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="px-3 py-4 sm:px-5 sm:py-5">

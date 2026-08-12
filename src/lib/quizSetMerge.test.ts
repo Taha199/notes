@@ -454,7 +454,40 @@ describe('notes-like union commit (no paint gates)', () => {
     expect(shouldHydrateQuizSetsUi(merged, merged.slice(0, 1))).toBe(false);
   });
 
-  it('decideQuizListsUiPaint skips same-id HTML flips after authoritative ById', () => {
+  it('decideQuizListsUiPaint skips same-id older/equal HTML echoes after authoritative ById', () => {
+    const painted = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: [item(1, '<p>current</p>', '2026-01-02T00:00:00.000Z')],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const staleEcho = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: [item(1, '<p>stale</p>', '2026-01-01T00:00:00.000Z')],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const decision = decideQuizListsUiPaint({
+      contentReady: true,
+      revealedViaTimeout: false,
+      seenAuthoritativeById: true,
+      isAuthoritativeByIdMerge: false,
+      paintedSets: painted,
+      nextSets: staleEcho,
+      paintedQuizzes: [],
+      nextQuizzes: [],
+      setsEqualForUI: quizSetsEqualForUI,
+      quizzesEqualForUI: quizzesEqualForUI,
+    });
+    expect(decision).toEqual({ paint: false, reason: 'skip' });
+    expect(quizListsStructuralUiChanged(painted, staleEcho)).toBe(false);
+  });
+
+  it('decideQuizListsUiPaint allows strictly newer item bodies after authoritative ById', () => {
     const painted = [
       set({
         id: 'koag',
@@ -471,7 +504,7 @@ describe('notes-like union commit (no paint gates)', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       }),
     ];
-    const decision = decideQuizListsUiPaint({
+    expect(decideQuizListsUiPaint({
       contentReady: true,
       revealedViaTimeout: false,
       seenAuthoritativeById: true,
@@ -482,9 +515,7 @@ describe('notes-like union commit (no paint gates)', () => {
       nextQuizzes: [],
       setsEqualForUI: quizSetsEqualForUI,
       quizzesEqualForUI: quizzesEqualForUI,
-    });
-    expect(decision).toEqual({ paint: false, reason: 'skip' });
-    expect(quizListsStructuralUiChanged(painted, newerHtml)).toBe(false);
+    })).toEqual({ paint: true, reason: 'content-changed' });
   });
 
   it('decideQuizListsUiPaint still allows soft-delete and Manual order after ById', () => {
