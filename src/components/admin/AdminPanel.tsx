@@ -121,14 +121,16 @@ export function AdminPanel() {
   const [now, setNow] = useState(() => Date.now());
   const presenceRef = useRef<Record<string, PresenceEntry> | null>(null);
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  const load = useCallback(async (opts?: { silent?: boolean; mode?: 'list' | 'full' }) => {
     const silent = opts?.silent === true;
+    const mode = opts?.mode ?? 'full';
     if (!silent) {
       setLoading(true);
       setLoadError(null);
     }
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 45_000);
+    // List mode is tiny; full mode used to hang ~45s downloading every user's quizSets.
+    const timer = window.setTimeout(() => controller.abort(), mode === 'list' ? 15_000 : 45_000);
     try {
       const authUser = user ?? (await waitForAuthUser());
       if (!authUser) {
@@ -143,7 +145,7 @@ export function AdminPanel() {
         if (!silent) setLoadError('Kunde inte hämta autentiseringstoken.');
         return;
       }
-      const res = await fetch('/api/admin-user-stats', {
+      const res = await fetch(`/api/admin-user-stats?mode=${mode}`, {
         headers: { Authorization: `Bearer ${token}` },
         signal: controller.signal,
       });
@@ -187,7 +189,14 @@ export function AdminPanel() {
 
   useEffect(() => {
     if (authLoading || !isAdmin || !user) return;
-    void load();
+    let cancelled = false;
+    (async () => {
+      // Paint names/presence first, then refresh storage bytes in the background.
+      await load({ mode: 'list' });
+      if (cancelled) return;
+      void load({ mode: 'full', silent: true });
+    })();
+    return () => { cancelled = true; };
   }, [authLoading, isAdmin, user, load]);
 
   // Live presence from RTDB — updates Senast sedd; re-sort with online pinned, stable within group.
@@ -208,7 +217,7 @@ export function AdminPanel() {
     if (authLoading || !isAdmin || !user) return;
     const poll = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return;
-      void load({ silent: true });
+      void load({ silent: true, mode: 'full' });
     }, 8_000);
     const tick = window.setInterval(() => {
       const stamp = Date.now();
@@ -217,7 +226,7 @@ export function AdminPanel() {
       setRows((prev) => sortAdminRows(prev, stamp));
     }, 5_000);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void load({ silent: true });
+      if (document.visibilityState === 'visible') void load({ silent: true, mode: 'list' });
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -339,7 +348,12 @@ export function AdminPanel() {
           </p>
         </div>
         <button
-          onClick={() => void load()}
+          onClick={() => {
+            void (async () => {
+              await load({ mode: 'list' });
+              void load({ mode: 'full', silent: true });
+            })();
+          }}
           className="rounded-xl border border-app-border px-4 py-2 text-sm font-medium text-app-text-secondary transition hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
         >
           🔄 Uppdatera nu

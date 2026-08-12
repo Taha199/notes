@@ -58,6 +58,11 @@ function storageBytes(userData) {
   );
 }
 
+function cachedStorageBytes(profile) {
+  const raw = profile?.storageBytes;
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : null;
+}
+
 function isPlus(profile, email) {
   if (email === ADMIN_EMAIL) return true;
   return profile?.isPlus === true;
@@ -104,17 +109,59 @@ async function mapPool(items, concurrency, mapper) {
   return results;
 }
 
-/** Read profile + storage fields only — skips notesById / quiz*ById / dataHistory. */
+/** Profile only — used for instant admin table paint. */
+async function readUserProfile(accessToken, uid) {
+  const profile = await readRtdb(accessToken, `/users/${uid}/profile`).catch(() => null);
+  return { profile: profile && typeof profile === 'object' ? profile : {} };
+}
+
+/**
+ * Profile + storage fields. Skips multi-MB downloads when profile.storageBytes
+ * was written by the client on save.
+ */
 async function readUserLight(accessToken, uid) {
-  const [profile, ...storageParts] = await Promise.all([
-    readRtdb(accessToken, `/users/${uid}/profile`).catch(() => null),
-    ...STORAGE_KEYS.map((key) => readRtdb(accessToken, `/users/${uid}/${key}`).catch(() => null)),
-  ]);
-  const blob = { profile: profile && typeof profile === 'object' ? profile : {} };
+  const profile = await readRtdb(accessToken, `/users/${uid}/profile`).catch(() => null);
+  const safeProfile = profile && typeof profile === 'object' ? profile : {};
+  const cached = cachedStorageBytes(safeProfile);
+  if (cached != null) {
+    return { profile: safeProfile, storageBytes: cached };
+  }
+  const storageParts = await Promise.all(
+    STORAGE_KEYS.map((key) => readRtdb(accessToken, `/users/${uid}/${key}`).catch(() => null)),
+  );
+  const blob = { profile: safeProfile };
   STORAGE_KEYS.forEach((key, i) => {
     blob[key] = storageParts[i];
   });
-  return blob;
+  return { ...blob, storageBytes: storageBytes(blob) };
+}
+
+function buildRow(uid, blob, authByUid, presenceByUid) {
+  const profile = blob.profile ?? {};
+  const authUser = authByUid.get(uid);
+  const live = presenceByUid[uid] ?? {};
+  const email = ((profile.email) || authUser?.email || live.email || '').trim();
+  const displayName = ((profile.displayName) || authUser?.displayName || live.displayName || '').trim();
+  const profileSeen = Number(profile.lastSeen) || 0;
+  const authSeen = Number(authUser?.lastLoginAt) || 0;
+  const presenceSeen = Number(live.lastSeen) || 0;
+  const lastSeen = Math.max(presenceSeen, profileSeen, authSeen);
+  const ip = (typeof live.ip === 'string' && live.ip) || profile.ip || '';
+  const bytes = typeof blob.storageBytes === 'number'
+    ? blob.storageBytes
+    : (cachedStorageBytes(profile) ?? storageBytes(blob));
+  return {
+    uid,
+    email,
+    displayName,
+    lastSeen,
+    ip,
+    provider: profile.provider || authUser?.providerUserInfo?.[0]?.providerId || '',
+    blocked: profile.blocked === true,
+    isPlus: isPlus(profile, email),
+    bytes,
+    storageLimitMB: storageLimitMB(profile, email),
+  };
 }
 
 export default async function handler(request, response) {
@@ -129,6 +176,9 @@ export default async function handler(request, response) {
   if (!idToken || !(await verifyAdmin(idToken))) {
     return response.status(403).json({ error: 'forbidden' });
   }
+
+  const url = new URL(request.url, 'http://localhost');
+  const listOnly = url.searchParams.get('mode') === 'list';
 
   try {
     const serviceAccount = readServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '');
@@ -151,42 +201,24 @@ export default async function handler(request, response) {
       : [];
     const allUids = [...new Set([...rtdbUids, ...authByUid.keys()])];
 
-    const blobs = await mapPool(allUids, 4, async (uid) => {
+    // Fast path: profiles only so the admin table paints in ~1–2s.
+    const blobs = await mapPool(allUids, listOnly ? 10 : 6, async (uid) => {
       try {
-        return await readUserLight(dbToken, uid);
+        return listOnly
+          ? await readUserProfile(dbToken, uid)
+          : await readUserLight(dbToken, uid);
       } catch {
-        return { profile: {} };
+        return { profile: {}, storageBytes: 0 };
       }
     });
 
-    const rows = allUids.map((uid, index) => {
-      const blob = blobs[index] ?? { profile: {} };
-      const profile = blob.profile ?? {};
-      const authUser = authByUid.get(uid);
-      const live = presenceByUid[uid] ?? {};
-      const email = ((profile.email) || authUser?.email || live.email || '').trim();
-      const displayName = ((profile.displayName) || authUser?.displayName || live.displayName || '').trim();
-      const profileSeen = Number(profile.lastSeen) || 0;
-      const authSeen = Number(authUser?.lastLoginAt) || 0;
-      const presenceSeen = Number(live.lastSeen) || 0;
-      const lastSeen = Math.max(presenceSeen, profileSeen, authSeen);
-      const ip = (typeof live.ip === 'string' && live.ip) || profile.ip || '';
-      return {
-        uid,
-        email,
-        displayName,
-        lastSeen,
-        ip,
-        provider: profile.provider || authUser?.providerUserInfo?.[0]?.providerId || '',
-        blocked: profile.blocked === true,
-        isPlus: isPlus(profile, email),
-        bytes: storageBytes(blob),
-        storageLimitMB: storageLimitMB(profile, email),
-      };
-    });
+    const rows = allUids.map((uid, index) => (
+      buildRow(uid, blobs[index] ?? { profile: {} }, authByUid, presenceByUid)
+    ));
     rows.sort((a, b) => b.lastSeen - a.lastSeen);
 
-    return response.status(200).json({ users: rows });
+    response.setHeader('Cache-Control', listOnly ? 'no-store' : 'private, max-age=15');
+    return response.status(200).json({ users: rows, mode: listOnly ? 'list' : 'full' });
   } catch (error) {
     console.error('Admin user stats failed', error);
     return response.status(500).json({ error: 'request-failed' });

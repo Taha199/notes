@@ -233,18 +233,45 @@ function addPermDeleted(local: PermanentlyDeletedIds, patch: Partial<Permanently
 function stripPermDeletedQuizzes(quizzes: QuizItem[], tombstones: PermanentlyDeletedIds): QuizItem[] {
   if (!tombstones.quizzes.length) return quizzes;
   const dead = new Set(tombstones.quizzes.map(Number).filter(Number.isFinite));
-  return quizzes.filter((q) => !dead.has(Number(q.id)));
+  if (!dead.size) return quizzes;
+  let changed = false;
+  const next = quizzes.filter((q) => {
+    if (!dead.has(Number(q.id))) return true;
+    changed = true;
+    return false;
+  });
+  return changed ? next : quizzes;
 }
 
 function stripPermDeletedQuizSets(sets: QuizSet[], tombstones: PermanentlyDeletedIds): QuizSet[] {
   const deadSets = new Set(tombstones.quizSets.map(String));
   const deadQuizzes = new Set(tombstones.quizzes.map(Number).filter(Number.isFinite));
-  return sets
-    .filter((set) => !deadSets.has(String(set.id)))
-    .map((set) => ({
+  // Hot path: most saves/syncs have no permanent-delete tombstones. Cloning every
+  // set/items[] here used to freeze the UI for tens of seconds after Trash X.
+  if (!deadSets.size && !deadQuizzes.size) return sets;
+  let changed = false;
+  const next: QuizSet[] = [];
+  for (const set of sets) {
+    if (deadSets.has(String(set.id))) {
+      changed = true;
+      continue;
+    }
+    if (!deadQuizzes.size) {
+      next.push(set);
+      continue;
+    }
+    const items = set.items ?? [];
+    if (!items.some((item) => deadQuizzes.has(Number(item.id)))) {
+      next.push(set);
+      continue;
+    }
+    changed = true;
+    next.push({
       ...set,
-      items: (set.items ?? []).filter((item) => !deadQuizzes.has(Number(item.id))),
-    }));
+      items: items.filter((item) => !deadQuizzes.has(Number(item.id))),
+    });
+  }
+  return changed ? next : sets;
 }
 
 function entitySyncTime(item: { updatedAt?: string; createdAt?: string; savedAt?: string }) {
@@ -2040,6 +2067,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const lastCloudDraftIdsRef = useRef<Set<string>>(new Set());
   const pendingDraftCloudSaveRef = useRef(false);
   const draftCloudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const storageBytesHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftLocalEditAtRef = useRef<Map<string, number>>(new Map());
   const lastPushedDraftUpdatedAtRef = useRef<Map<string, number>>(new Map());
   const lastPushedDraftHtmlRef = useRef<Map<string, string>>(new Map());
@@ -4643,6 +4671,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData(safe, syncedAt);
       saveFailedRef.current = false;
+      scheduleStorageBytesHint();
     } catch (err) {
       // This is the hot path for every quiz/note instant save. Swallowing the
       // failure used to leave the UI claiming "saved" while Firebase never got
@@ -4653,6 +4682,28 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     } finally {
       if (track) endTrackedSave();
     }
+  };
+
+  const scheduleStorageBytesHint = () => {
+    const u = userRef.current;
+    if (!u || !loadedRef.current) return;
+    if (storageBytesHintTimer.current) clearTimeout(storageBytesHintTimer.current);
+    // Debounced — keeps admin panel storage fast without blocking note saves.
+    storageBytesHintTimer.current = setTimeout(() => {
+      storageBytesHintTimer.current = null;
+      try {
+        const bytes = new Blob([JSON.stringify({
+          notes: notesRef.current,
+          quizzes: quizzesRef.current,
+          quizSets: quizSetsRef.current,
+          quizFolders: quizFoldersRef.current,
+          chats: chatsRef.current,
+        })]).size;
+        void update(dbRef(database, `users/${u.uid}/profile`), { storageBytes: bytes });
+      } catch {
+        /* ignore */
+      }
+    }, 2500);
   };
 
   const scheduleInstantDataCloudSave = (
@@ -4847,6 +4898,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           lastAppliedRemoteSyncAt.current = syncedAt;
           setCloudSyncedAt(syncedAt);
           safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+          scheduleStorageBytesHint();
         })
       .catch(() => {
         saveFailedRef.current = true;
