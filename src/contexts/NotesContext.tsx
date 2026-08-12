@@ -72,6 +72,15 @@ import {
 } from '../lib/recentEdits';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
 import {
+  clearNotesBootCache,
+  clearNotesListCache,
+  readNotesBootCache,
+  readNotesListCache,
+  rememberNotesBootCache,
+  writeNotesListCache,
+  NOTES_LIST_CACHE_KEY,
+} from '../lib/notesListCache';
+import {
   honorQuizListsWithTrashTombstones,
   mergeTombstoneMaps,
   normalizeTombstoneMap,
@@ -1084,6 +1093,7 @@ const LOCAL_DATA_KEYS = [
   TRASH_EMPTIED_AT_KEY,
   PERM_DELETED_KEY,
   SIDEBAR_COUNTS_KEY,
+  NOTES_LIST_CACHE_KEY,
 ] as const;
 
 /** Tiny membership journal — survives when the full quizSets[] localStorage write hits QuotaExceeded. */
@@ -1153,6 +1163,8 @@ function clearLocalNotesData() {
   for (const key of LOCAL_DATA_KEYS) localStorage.removeItem(key);
   quizListsBootCache = null;
   clearQuizCompleteCache();
+  clearNotesListCache();
+  clearNotesBootCache();
 }
 
 /** Clear cached notes when a different account signs in (keys are not uid-scoped). */
@@ -1187,12 +1199,28 @@ function readLocalNotesData() {
   return applyRecentEditsToData(readLocalNotesDataRaw());
 }
 
-/** Sync boot notes for first React paint — sidebar counts must not wait on useEffect. */
+/** Sync boot notes for first React paint — sidebar counts + list must not wait on useEffect/IDB. */
 function readBootNotesForPaint(): Note[] {
   const emptiedAt = readTrashEmptiedAt();
-  return stripPermDeletedNotes(readLocalNotesDataRaw().notes, readPermDeleted()).filter((note) => (
+  const tombstones = readPermDeleted();
+  const fromLs = stripPermDeletedNotes(readLocalNotesDataRaw().notes, tombstones);
+  const fromListCache = stripPermDeletedNotes(readNotesListCache(), tombstones);
+  const fromMemory = stripPermDeletedNotes(readNotesBootCache(), tombstones);
+  // Prefer richer bodies (IDB/memory) over compact list-cache shells when timestamps tie.
+  const merged = (() => {
+    const map = new Map<number, Note>();
+    for (const note of [...fromLs, ...fromListCache, ...fromMemory]) {
+      const id = Number(note.id);
+      if (!Number.isFinite(id)) continue;
+      const existing = map.get(id);
+      map.set(id, existing ? pickBetterNote(existing, note) : note);
+    }
+    return [...map.values()];
+  })().filter((note) => (
     !(note.trashed && emptiedAt && entitySyncTime(note) <= emptiedAt)
   ));
+  if (merged.length) rememberNotesBootCache(merged);
+  return merged;
 }
 
 function computeSidebarCounts(
@@ -2239,10 +2267,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   draftsRef.current = drafts;
   tokenUsageRef.current = tokenUsage;
 
-  // Durable sidebar badges: never wait on cloud. Until `loaded`, never shrink a
-  // last-session count just because LS is incomplete (IDB/cloud still merging).
+  // Durable sidebar badges + list cache: never wait on cloud.
+  // Until `loaded`, never shrink a last-session count just because LS is incomplete.
   useEffect(() => {
     if (!user) return;
+    if (notes.length) {
+      rememberNotesBootCache(notes);
+      writeNotesListCache(notes);
+    }
     const next = computeSidebarCounts(notes, quizzes, quizSets, quizFolders, permDeletedRef.current);
     setSidebarCounts((prev) => {
       const merged: SidebarCounts = loaded
@@ -2365,6 +2397,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Paint notes + durable badges immediately from local — do not wait on journal/cloud.
     notesRef.current = local.notes;
     setNotes(local.notes);
+    if (local.notes.length) {
+      rememberNotesBootCache(local.notes);
+      writeNotesListCache(local.notes);
+    }
     {
       const computed = computeSidebarCounts(
         local.notes,
@@ -2392,6 +2428,37 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
+
+    // Notes IDB hydrate FIRST — never wait on quiz last-good / set shells.
+    // Image notes live here when localStorage quota dropped them from `malacadhati`.
+    const notesIdbReady = (async () => {
+      const idbNotes = await getAllNotesLocal();
+      if (cancelled || !idbNotes.length) return;
+      const mergedNotes = stripPermDeletedNotes(
+        (() => {
+          const map = new Map<number, Note>();
+          for (const note of [...notesRef.current, ...idbNotes]) {
+            const id = Number(note.id);
+            if (!Number.isFinite(id)) continue;
+            const existing = map.get(id);
+            map.set(id, existing ? pickBetterNote(existing, note) : note);
+          }
+          return [...map.values()];
+        })(),
+        permDeletedRef.current,
+      ).filter((note) => (
+        !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
+      ));
+      if (mergedNotes.length === notesRef.current.length
+        && mergedNotes.every((n) => notesRef.current.some((c) => c.id === n.id && noteSyncKey(c) === noteSyncKey(n)))) {
+        return;
+      }
+      notesRef.current = mergedNotes;
+      setNotes(mergedNotes);
+      local = { ...local, notes: mergedNotes };
+      rememberNotesBootCache(mergedNotes, true);
+      writeNotesListCache(mergedNotes);
+    })();
     bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
     if (bootPick.fromLastGood && local.sets.length > 0) {
       setQuizzes(local.quizzes);
@@ -2681,22 +2748,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }
       if (local.sets.length > 0) markQuizLocalReady();
     })();
-    // Phase 2: notes + quiz item bodies (can be large HTML) — enrich after structure paint.
+    // Phase 2: quiz item bodies + notes catch-up. Notes IDB already started above —
+    // await it in parallel with set shells so Studerade never waits on quiz hydrate.
     const durableReady = (async () => {
-      await durableSetsReady;
-      const [idbNotes, idbQuizzes] = await Promise.all([
-        getAllNotesLocal(),
+      const [, idbQuizzes] = await Promise.all([
+        Promise.all([durableSetsReady, notesIdbReady]),
         getAllQuizItemsLocal(),
       ]);
       if (cancelled) return;
-      if (idbNotes.length) {
-        local = {
-          ...local,
-          notes: stripPermDeletedNotes(mergeByIdNewer(local.notes, idbNotes), permDeletedRef.current),
-        };
-        notesRef.current = local.notes;
-        setNotes(local.notes);
-      }
+      // notesIdbReady already painted; keep local.notes aligned with refs.
+      local = { ...local, notes: notesRef.current };
+      rememberNotesBootCache(notesRef.current, true);
+      writeNotesListCache(notesRef.current);
       if (idbQuizzes.length) {
         const applied = applyDurableQuizItems(
           local.quizzes,
@@ -4180,6 +4243,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const writeLocalCache = () => {
     safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+    writeNotesListCache(notesRef.current);
+    rememberNotesBootCache(notesRef.current);
     safeSetItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
     safeSetItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
   };
