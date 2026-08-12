@@ -173,7 +173,7 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
 
 export function Dashboard() {
   const { t, lang } = useLanguage();
-  const { notes, drafts, trashedQuizzes, quizzes, quizSets, quizFolders, notesListReady, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
+  const { notes, drafts, trashedQuizzes, quizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
   const { show } = useToast();
   const [page, setPageState] = useState<Page>(() => pageFromPath(window.location.pathname));
   const setPage = useCallback((next: Page) => {
@@ -403,11 +403,7 @@ export function Dashboard() {
                 ))}
               </div>
               <NoteSectionBar label={`📚 ${t.secAll}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              {notesListReady ? (
-                <NoteList notes={active} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-              ) : (
-                <div className="py-16 text-center text-sm text-app-text-secondary dark:text-gray-400">…</div>
-              )}
+              <NoteList notes={active} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
@@ -427,51 +423,33 @@ export function Dashboard() {
           {!showGlobalSearch && page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`📖 ${t.secUnread}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              {notesListReady ? (
-                <NoteList notes={unread} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-              ) : (
-                <div className="py-16 text-center text-sm text-app-text-secondary dark:text-gray-400">…</div>
-              )}
+              <NoteList notes={unread} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {!showGlobalSearch && page === 'read' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`✓ ${t.secRead}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              {notesListReady ? (
-                <NoteList notes={read} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-              ) : (
-                <div className="py-16 text-center text-sm text-app-text-secondary dark:text-gray-400">…</div>
-              )}
+              <NoteList notes={read} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} emptyHint={t.emptyReadHint} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {!showGlobalSearch && page === 'archive' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`🗄 ${t.secArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              {notesListReady ? (
-                <NoteList notes={archived} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-              ) : (
-                <div className="py-16 text-center text-sm text-app-text-secondary dark:text-gray-400">…</div>
-              )}
+              <NoteList notes={archived} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
             </div>
           )}
 
           {!showGlobalSearch && page === 'fav' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <NoteSectionBar label={`★ ${t.secFav}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} />
-              {notesListReady ? (
+              <NoteList notes={fav} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
+              {favArch.length > 0 && (
                 <>
-                  <NoteList notes={fav} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-                  {favArch.length > 0 && (
-                    <>
-                      <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} showViewToggle={false} />
-                      <NoteList notes={favArch} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
-                    </>
-                  )}
+                  <NoteSectionBar label={`🗄 ${t.secFavArch}`} noteViewMode={noteViewMode} onNoteViewModeChange={handleNoteViewMode} showViewToggle={false} />
+                  <NoteList notes={favArch} search="" emptySearchText={t.emptySearch} emptyText={t.emptyNotes} onOpen={setOpenNoteId} viewMode={noteViewMode} />
                 </>
-              ) : (
-                <div className="py-16 text-center text-sm text-app-text-secondary dark:text-gray-400">…</div>
               )}
             </div>
           )}
