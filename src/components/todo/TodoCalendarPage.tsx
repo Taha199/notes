@@ -167,7 +167,7 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
             <h4 className="mt-0.5 text-base font-bold capitalize text-app-text dark:text-gray-100">{selectedLabel}</h4>
           </div>
           <form
-            className="mb-3 flex flex-wrap gap-2"
+            className="mb-3 flex flex-nowrap gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               submitDraft();
@@ -185,12 +185,12 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
               onChange={(e) => setDraftTime(e.target.value)}
               aria-label={t.todoTimeOptional}
               title={t.todoTimeOptional}
-              className="w-[7.75rem] rounded-xl border border-app-border bg-app-bg px-2.5 py-2 text-[13.5px] text-app-text outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
+              className="w-[5.1rem] flex-shrink-0 rounded-xl border border-app-border bg-app-bg px-1 py-2 text-[12px] text-app-text outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
             />
             <button
               type="submit"
               disabled={!draft.trim()}
-              className="rounded-xl bg-primary px-3.5 py-2 text-[13px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex-shrink-0 rounded-xl bg-primary px-3.5 py-2 text-[13px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t.todoAdd}
             </button>
@@ -255,7 +255,7 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                     onChange={(e) => setTodoTime(todo.id, e.target.value)}
                     aria-label={t.todoTimeOptional}
                     title={t.todoTimeOptional}
-                    className="w-[6.75rem] rounded-lg border border-app-border/80 bg-white px-1.5 py-1 text-[12px] text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                    className="w-[5rem] rounded-lg border border-app-border/80 bg-white px-1 py-1 text-[11px] text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
                   />
                   {todo.time && (
                     <button
