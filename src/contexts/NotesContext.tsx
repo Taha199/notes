@@ -31,12 +31,17 @@ import {
   mergeQuizItemsUnion,
   overlayQuizTrashFlags,
   pickBetterQuizSet as pickBetterQuizSetCore,
+  pickBetterQuizSetsListOrder,
   pickNewerQuizItem as pickNewerQuizItemCore,
   preferRicherQuizSetsMembership,
+  applyQuizSetsListOrder,
   quizItemSyncTime,
+  quizSetsListOrderIds,
+  normalizeQuizSetsListOrder,
   shouldHydrateQuizSetsUi,
   unionQuizSetsForCommit,
   quizSetsSoftTrashExplainsShrink,
+  type QuizSetsListOrder,
 } from '../lib/quizSetMerge';
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import {
@@ -933,6 +938,7 @@ const CLOUD_SYNCED_AT_KEY = 'malacadhati_cloud_synced_at';
 const DELETED_DRAFT_IDS_KEY = 'malacadhati_deleted_draft_ids';
 
 const QUIZ_SETS_SHELL_KEY = 'malacadhati_quiz_sets_shells';
+const QUIZ_SETS_LIST_ORDER_KEY = 'malacadhati_quiz_sets_list_order';
 
 /**
  * In-memory last-known quiz lists for this JS session (survives React remount,
@@ -971,6 +977,7 @@ const LOCAL_DATA_KEYS = [
   'malacadhati_quiz',
   'malacadhati_quiz_sets',
   QUIZ_SETS_SHELL_KEY,
+  QUIZ_SETS_LIST_ORDER_KEY,
   QUIZ_COMPLETE_CACHE_LS_KEY,
   'malacadhati_quiz_folders',
   'malacadhati_chats',
@@ -2010,6 +2017,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   /** Durable ById mirrors — union into every array apply so devices never diverge. */
   const quizSetsByIdCacheRef = useRef<QuizSet[]>([]);
   const quizFoldersByIdCacheRef = useRef<QuizFolder[]>([]);
+  /** Manual Egen set-list order — lightweight cloud mirror independent of ById scramble. */
+  const quizSetsListOrderRef = useRef<QuizSetsListOrder | null>(
+    normalizeQuizSetsListOrder(readLocalJson<QuizSetsListOrder>(QUIZ_SETS_LIST_ORDER_KEY)),
+  );
   const draftsRef = useRef(drafts);
   const tokenUsageRef = useRef(tokenUsage);
   const MIN_SYNC_VISIBLE_MS = 650;
@@ -2937,10 +2948,29 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           normalizedFolders.map((folder) => folder.color).filter((color): color is string => !!color),
         );
         {
+          // Tiny Manual-order mirror — restores Egen order when ById scramble wins.
+          try {
+            const orderRes = await rtdbFetch(`/users/${user.uid}/quizSetsListOrder`);
+            if (orderRes.ok) {
+              ingestQuizSetsListOrder(await orderRes.json());
+            }
+          } catch { /* ignore */ }
+          // Migrate: if user already had Egen stamps but no list-order mirror yet, seed it.
+          if (!quizSetsListOrderRef.current) {
+            const maxStamp = Math.max(0, ...normalizedSets.map((set) => quizSetListOrderTime(set)));
+            if (maxStamp > 0) {
+              persistQuizSetsListOrder(normalizedSets, new Date(maxStamp).toISOString());
+            }
+          }
+          normalizedSets = applyStoredQuizSetsListOrder(normalizedSets);
+        }
+        {
           const idbQuizzesFinal = await getAllQuizItemsLocal();
           const applied = applyDurableQuizItems(quizzes, normalizedSets, [...cloudQuizItemsById, ...idbQuizzesFinal]);
           quizzes = honorQuizItemTrashTombstonesOnItems(applied.quizzes, quizItemTombstonesRef.current);
-          normalizedSets = honorQuizItemTrashTombstones(applied.sets, quizItemTombstonesRef.current);
+          normalizedSets = applyStoredQuizSetsListOrder(
+            honorQuizItemTrashTombstones(applied.sets, quizItemTombstonesRef.current),
+          );
           // Membership vs last *painted* UI: timeout may have shown local-9 while
           // refs already absorbed a richer merge — always surface 9→11 here.
           // After authoritative ById, same-id HTML echoes are skipped by decide.
@@ -3283,6 +3313,61 @@ export function NotesProvider({ children }: { children: ReactNode }) {
    * fire-and-forget the giant quizSets[] array. Create durability must not wait
    * on the multi-MB array write (that is what caused ~2 min post-refresh delays).
    */
+  const rememberQuizSetsListOrder = (order: QuizSetsListOrder | null) => {
+    quizSetsListOrderRef.current = order;
+    if (order) safeSetItem(QUIZ_SETS_LIST_ORDER_KEY, JSON.stringify(order));
+    else {
+      try { localStorage.removeItem(QUIZ_SETS_LIST_ORDER_KEY); } catch { /* ignore */ }
+    }
+  };
+
+  const applyStoredQuizSetsListOrder = (sets: QuizSet[], order = quizSetsListOrderRef.current): QuizSet[] => {
+    if (!order?.ids?.length) return sets;
+    return applyQuizSetsListOrder(sets, order.ids);
+  };
+
+  /** Lightweight Manual-order mirror — never rewrites question bodies. */
+  const persistQuizSetsListOrder = (sets: QuizSet[], stamp?: string) => {
+    const ids = quizSetsListOrderIds(sets);
+    if (!ids.length) {
+      rememberQuizSetsListOrder(null);
+      return;
+    }
+    const prev = quizSetsListOrderRef.current;
+    const sameIds = !!prev
+      && prev.ids.length === ids.length
+      && prev.ids.every((id, i) => id === ids[i]);
+    const updatedAt = stamp
+      || (!sameIds ? nowStr() : (prev?.updatedAt || nowStr()));
+    if (sameIds && prev?.updatedAt === updatedAt) return;
+    const next: QuizSetsListOrder = { ids, updatedAt };
+    rememberQuizSetsListOrder(next);
+    const u = userRef.current;
+    if (!u || !loadedRef.current) return;
+    void set(dbRef(database, `users/${u.uid}/quizSetsListOrder`), next).catch((err) => {
+      console.error('[cloud-save] quizSetsListOrder set failed', err);
+      return rtdbFetch(`/users/${u.uid}/quizSetsListOrder`, {
+        method: 'PUT',
+        body: JSON.stringify(next),
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => {});
+    });
+  };
+
+  const ingestQuizSetsListOrder = (raw: unknown): boolean => {
+    const remote = normalizeQuizSetsListOrder(raw);
+    const next = pickBetterQuizSetsListOrder(quizSetsListOrderRef.current, remote);
+    if (!next) return false;
+    const prev = quizSetsListOrderRef.current;
+    const unchanged = !!prev
+      && prev.updatedAt === next.updatedAt
+      && prev.ids.length === next.ids.length
+      && prev.ids.every((id, i) => id === next.ids[i]);
+    if (unchanged) return false;
+    rememberQuizSetsListOrder(next);
+    return true;
+  };
+
   const pushQuizSetStructure = async (
     nextSets: QuizSet[],
     changed?: QuizSet | QuizSet[],
@@ -3291,6 +3376,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
     writeQuizSetsShellJournal(nextSets);
     rememberLastGoodComplete(quizzesRef.current, nextSets);
+    persistQuizSetsListOrder(nextSets);
     const changedList = changed ? (Array.isArray(changed) ? changed : [changed]) : [];
     // Critical path: membership mirror lands before the caller can refresh away.
     for (const row of changedList) {
@@ -4148,7 +4234,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizSetsByIdCacheRef.current,
         );
       }
-      merged = applyTrashTombstones(merged, quizSetTombstonesRef.current, nowStr());
+      merged = applyStoredQuizSetsListOrder(
+        applyTrashTombstones(merged, quizSetTombstonesRef.current, nowStr()),
+      );
       const json = JSON.stringify(merged);
       const needsCloudHeal = quizSetsMissingFromRemote(merged, remoteSets)
         || quizSetsRemoteMembershipIncomplete(merged, remoteSets);
@@ -4186,10 +4274,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // while this array merge was computing (creates/soft-deletes must not be overwritten).
     const tombstonesAtCommit = permDeletedRef.current;
     const trashStamp = nowStr();
-    nextSets = applyTrashTombstones(
-      unionQuizSetsFromById(nextSets, quizSetsByIdCacheRef.current, tombstonesAtCommit),
-      quizSetTombstonesRef.current,
-      trashStamp,
+    nextSets = applyStoredQuizSetsListOrder(
+      applyTrashTombstones(
+        unionQuizSetsFromById(nextSets, quizSetsByIdCacheRef.current, tombstonesAtCommit),
+        quizSetTombstonesRef.current,
+        trashStamp,
+      ),
     );
     nextFolders = applyTrashTombstones(
       mergeFoldersForSync(nextFolders, quizFoldersByIdCacheRef.current, tombstonesAtCommit),
@@ -5137,6 +5227,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       firebaseToArray<QuizSet>(val as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] })));
     const unsubFolders = bindRealtime('quizFolders', 'quizFolders');
 
+    // Tiny Manual Egen order mirror — keeps set-list order identical across devices
+    // without rewriting question bodies through ById.
+    const unsubSetsListOrder = onValue(dbRef(database, `users/${uid}/quizSetsListOrder`), (snap) => {
+      const val = snap.val();
+      if (val == null || !loadedRef.current) return;
+      if (!ingestQuizSetsListOrder(val)) return;
+      const next = applyStoredQuizSetsListOrder(quizSetsRef.current);
+      if (quizSetsEqualForUI(next, quizSetsRef.current)) return;
+      quizSetsRef.current = next;
+      setQuizSets(next);
+      safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+      writeQuizSetsShellJournal(next);
+    });
+
     // AI chat conversations had no listener at all: a chat started on the phone
     // only showed up on the desktop after a refresh or the 60s poll.
     let lastAppliedChatsJson = '';
@@ -5480,6 +5584,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubQuizzes();
       unsubSets();
       unsubFolders();
+      unsubSetsListOrder();
       unsubChats();
       unsubTokenUsage();
       if (arrayPatchTimer) clearTimeout(arrayPatchTimer);
@@ -6028,6 +6133,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Dedicated quizSets[] write (same path as create/rename). Do not fan out
     // ById puts for every stamped row — that would rewrite every set's items
     // on each drag. Array order + listOrderUpdatedAt is enough for merge.
+    // Also write the tiny quizSetsListOrder mirror so other devices keep Egen order
+    // even when ById Object.values scramble the giant array.
+    persistQuizSetsListOrder(next, stamp);
     void pushQuizSetStructure(next);
   };
 

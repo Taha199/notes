@@ -29,6 +29,62 @@ export function quizSetItemsOrderIds(set: QuizSet): number[] {
   return (set.items ?? []).map((item) => item.id);
 }
 
+/** Durable Manual SET LIST order — survives ById Object.values scramble. */
+export type QuizSetsListOrder = {
+  ids: string[];
+  updatedAt: string;
+};
+
+export function quizSetsListOrderIds(sets: QuizSet[]): string[] {
+  return sets.filter((set) => set?.id && !set.system).map((set) => set.id);
+}
+
+export function normalizeQuizSetsListOrder(raw: unknown): QuizSetsListOrder | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as { ids?: unknown; updatedAt?: unknown };
+  const ids = Array.isArray(obj.ids)
+    ? [...new Set(obj.ids.map((id) => String(id || '').trim()).filter(Boolean))]
+    : [];
+  const updatedAt = String(obj.updatedAt || '').trim();
+  if (!ids.length || !updatedAt || !Number.isFinite(Date.parse(updatedAt))) return null;
+  return { ids, updatedAt };
+}
+
+export function pickBetterQuizSetsListOrder(
+  local: QuizSetsListOrder | null | undefined,
+  remote: QuizSetsListOrder | null | undefined,
+): QuizSetsListOrder | null {
+  if (!local) return remote ?? null;
+  if (!remote) return local;
+  return Date.parse(remote.updatedAt) >= Date.parse(local.updatedAt) ? remote : local;
+}
+
+/**
+ * Re-sequence quiz sets by a durable Manual id list.
+ * Unknown / system rows keep their prior relative order after known ids.
+ */
+export function applyQuizSetsListOrder(
+  sets: QuizSet[],
+  orderIds?: string[] | null,
+): QuizSet[] {
+  if (!orderIds?.length || !sets.length) return sets;
+  const map = new Map(sets.map((set) => [set.id, set]));
+  const ordered: QuizSet[] = [];
+  const seen = new Set<string>();
+  for (const id of orderIds) {
+    const set = map.get(id);
+    if (!set || seen.has(id)) continue;
+    ordered.push(set);
+    seen.add(id);
+  }
+  for (const set of sets) {
+    if (seen.has(set.id)) continue;
+    ordered.push(set);
+    seen.add(set.id);
+  }
+  return ordered;
+}
+
 /** Re-sequence items by an id list; unknown ids append in prior relative order. */
 export function applyQuizItemsOrder(items: QuizItem[], orderIds?: number[] | null): QuizItem[] {
   if (!orderIds?.length || !items.length) return items;

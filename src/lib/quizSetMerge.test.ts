@@ -12,7 +12,9 @@ import {
   overlayQuizTrashFlags,
   orderQuizSetsByListAuthority,
   pickBetterQuizSet,
+  pickBetterQuizSetsListOrder,
   preferRicherQuizSetsMembership,
+  applyQuizSetsListOrder,
   quizSetsMembershipGrew,
   quizSetsMembershipShrunk,
   quizSetsSoftTrashExplainsShrink,
@@ -284,6 +286,22 @@ describe('Manual set-list order across union / ById shells', () => {
     ];
     const merged = preferRicherQuizSetsMembership(painted, cloud);
     expect(merged.map((s) => s.id)).toEqual(['serum', 'koag']);
+  });
+
+  it('applyQuizSetsListOrder restores Manual order after ById scramble', () => {
+    const scrambled = [
+      stamp('koag', 'Koagulationsstatus', '2026-01-01T00:00:00.000Z'),
+      stamp('abl', 'ABL', '2026-01-01T00:00:00.000Z'),
+      stamp('serum', 'Serum & Plasma', '2026-01-01T00:00:00.000Z'),
+    ];
+    expect(applyQuizSetsListOrder(scrambled, ['serum', 'abl', 'koag']).map((s) => s.id))
+      .toEqual(['serum', 'abl', 'koag']);
+  });
+
+  it('pickBetterQuizSetsListOrder keeps the newer Manual list', () => {
+    const older = { ids: ['a', 'b'], updatedAt: '2026-08-12T01:00:00.000Z' };
+    const newer = { ids: ['b', 'a'], updatedAt: '2026-08-12T02:00:00.000Z' };
+    expect(pickBetterQuizSetsListOrder(older, newer)?.ids).toEqual(['b', 'a']);
   });
 });
 
