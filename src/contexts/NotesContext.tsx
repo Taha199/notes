@@ -152,18 +152,45 @@ function noteSyncKey(note: Note) {
   return `${note.title}\0${note.html}\0${note.read}\0${note.fav}\0${note.archived}\0${note.trashed}`;
 }
 
-/** Cheap notes[] equality — never JSON.stringify multi-MB image HTML. */
+/** Cheap notes[] equality — never JSON.stringify / full-HTML compare multi-MB notes. */
 function notesMetaEqual(a: Note[], b: Note[]): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const left = a[i];
-    const right = b[i];
-    if (Number(left.id) !== Number(right.id)) return false;
+  const bById = new Map<number, Note>();
+  for (const note of b) {
+    const id = Number(note.id);
+    if (Number.isFinite(id)) bById.set(id, note);
+  }
+  if (bById.size !== a.length) return false;
+  for (const left of a) {
+    const id = Number(left.id);
+    const right = bById.get(id);
+    if (!right) return false;
     if ((left.savedAt || '') !== (right.savedAt || '')) return false;
-    if (noteSyncKey(left) !== noteSyncKey(right)) return false;
+    if (!!left.trashed !== !!right.trashed) return false;
+    if (!!left.read !== !!right.read) return false;
+    if (!!left.fav !== !!right.fav) return false;
+    if (!!left.archived !== !!right.archived) return false;
+    if ((left.title || '') !== (right.title || '')) return false;
+    // Length proxy — avoid scanning multi-MB base64 HTML on every ById flush.
+    if ((left.html || '').length !== (right.html || '').length) return false;
   }
   return true;
+}
+
+function mergeNotesPreferRicher(...lists: Note[][]): Note[] {
+  const map = new Map<number, Note>();
+  for (const list of lists) {
+    for (const note of list) {
+      if (!note || note.id == null) continue;
+      const id = Number(note.id);
+      if (!Number.isFinite(id)) continue;
+      const normalized = id === note.id ? note : { ...note, id };
+      const existing = map.get(id);
+      map.set(id, existing ? pickBetterNote(existing, normalized) : normalized);
+    }
+  }
+  return [...map.values()];
 }
 
 function quizSyncTime(item: QuizItem) {
@@ -2435,24 +2462,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const idbNotes = await getAllNotesLocal();
       if (cancelled || !idbNotes.length) return;
       const mergedNotes = stripPermDeletedNotes(
-        (() => {
-          const map = new Map<number, Note>();
-          for (const note of [...notesRef.current, ...idbNotes]) {
-            const id = Number(note.id);
-            if (!Number.isFinite(id)) continue;
-            const existing = map.get(id);
-            map.set(id, existing ? pickBetterNote(existing, note) : note);
-          }
-          return [...map.values()];
-        })(),
+        mergeNotesPreferRicher(notesRef.current, idbNotes),
         permDeletedRef.current,
       ).filter((note) => (
         !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
       ));
-      if (mergedNotes.length === notesRef.current.length
-        && mergedNotes.every((n) => notesRef.current.some((c) => c.id === n.id && noteSyncKey(c) === noteSyncKey(n)))) {
-        return;
-      }
+      if (notesMetaEqual(mergedNotes, notesRef.current)) return;
       notesRef.current = mergedNotes;
       setNotes(mergedNotes);
       local = { ...local, notes: mergedNotes };
@@ -2886,10 +2901,45 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       fetchQuizSetsByIdCloud(user.uid),
       fetchQuizFoldersByIdCloud(user.uid),
     ]);
-    const cloudBodiesPromise = Promise.all([
-      fetchNotesByIdCloud(user.uid),
-      fetchQuizItemsByIdCloud(user.uid),
-    ]);
+    // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
+    // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
+    const notesCloudPromise = fetchNotesByIdCloud(user.uid);
+    const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
+    const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
+
+    const applyNotesSnapshot = (incoming: Note[], source: 'early' | 'boot') => {
+      if (cancelled || !incoming.length) return;
+      const mergedNotes = stripPermDeletedNotes(
+        mergeNotesPreferRicher(notesRef.current, incoming),
+        permDeletedRef.current,
+      ).filter((note) => (
+        !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
+      ));
+      if (notesMetaEqual(mergedNotes, notesRef.current)) return;
+      notesRef.current = mergedNotes;
+      setNotes(mergedNotes);
+      local = { ...local, notes: mergedNotes };
+      rememberNotesBootCache(mergedNotes, true);
+      writeNotesListCache(mergedNotes);
+      if (source === 'early') {
+        const computed = computeSidebarCounts(
+          mergedNotes,
+          quizzesRef.current,
+          quizSetsRef.current,
+          quizFoldersRef.current,
+          permDeletedRef.current,
+        );
+        writeSidebarCounts(computed);
+        setSidebarCounts(computed);
+      }
+    };
+
+    // Paint full notes ASAP — same speed as ~09:00 today, without blocking on Quiz.
+    const notesCloudReady = (async () => {
+      const [cloudNotes] = await Promise.all([notesCloudPromise, notesIdbReady]);
+      if (cancelled) return;
+      applyNotesSnapshot(cloudNotes, 'early');
+    })();
 
     (async () => {
       try {
@@ -2946,19 +2996,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         // Item/note bodies: local IDB + cloud ById in parallel — enrich without clearing shells.
         const [, [cloudNotesById, cloudQuizItemsById]] = await Promise.all([
-          durableReady,
+          Promise.all([durableReady, notesCloudReady]),
           cloudBodiesPromise,
         ]);
         if (cancelled) return;
-        if (cloudNotesById.length) {
-          const mergedNotes = stripPermDeletedNotes(
-            mergeByIdNewer(notesRef.current, cloudNotesById),
-            permDeletedRef.current,
-          );
-          notesRef.current = mergedNotes;
-          setNotes(mergedNotes);
-          local = { ...local, notes: mergedNotes };
-        }
+        // Notes usually already painted via notesCloudReady; re-apply only if richer.
+        applyNotesSnapshot(cloudNotesById, 'boot');
         // Fold cloud ById items into refs, then commit once. First visible card
         // bodies should be this merge (not stale IDB alone) — no old→new FOUC.
         if (cloudQuizItemsById.length) {
@@ -5941,26 +5984,30 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       // event (image notesById DELETEs saturated the socket and notes blinked).
       const liveDurable = durable.filter((n) => !dead.has(Number(n.id)));
       if (!liveDurable.length) return;
-      const merged = stripPermDeletedNotes(mergeByIdNewer(notesRef.current, liveDurable), tombstones);
+      const merged = stripPermDeletedNotes(mergeNotesPreferRicher(notesRef.current, liveDurable), tombstones);
       if (notesMetaEqual(merged, notesRef.current)) return;
       isApplyingRemoteRef.current = true;
       try {
         notesRef.current = merged;
         setNotes(merged);
         safeSetItem('malacadhati', JSON.stringify(merged));
+        writeNotesListCache(merged);
+        rememberNotesBootCache(merged);
       } finally {
         isApplyingRemoteRef.current = false;
         flushPendingInstantDataSave();
       }
     };
     function scheduleNotesByIdFlush() {
-      if (notesByIdFlush) return;
+      // Trailing debounce — coalesce the full onChildAdded storm into one paint
+      // so newest notes (highest ids) don't trickle in after older ones.
+      if (notesByIdFlush) clearTimeout(notesByIdFlush);
       notesByIdFlush = setTimeout(() => {
         notesByIdFlush = null;
         const batch = notesByIdBuffer;
         notesByIdBuffer = [];
         applyNotesByIdBatch(batch);
-      }, 40);
+      }, 120);
     }
     const queueNoteChild = (val: unknown) => {
       if (!val || typeof val !== 'object') return;
