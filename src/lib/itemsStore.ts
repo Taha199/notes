@@ -284,6 +284,10 @@ export async function removeQuizItemDurable(
   uid: string | null | undefined,
   id: number,
 ): Promise<void> {
+  // Cancel any coalesced soft-delete / live write that would recreate the node
+  // after this REMOVE (Trash X → blink → gone).
+  cancelPendingQuizItemCloudWrite(id);
+  durableQuizItemTrashIds.delete(id);
   await deleteQuizItemLocal(id);
   if (!uid) return;
   try {

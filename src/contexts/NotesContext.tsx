@@ -2685,14 +2685,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         // Fold cloud ById items into refs, then commit once. First visible card
         // bodies should be this merge (not stale IDB alone) — no old→new FOUC.
         if (cloudQuizItemsById.length) {
+          const earlyDead = new Set(permDeletedRef.current.quizzes);
           const applied = applyDurableQuizItems(
             quizzesRef.current,
             quizSetsRef.current,
-            cloudQuizItemsById,
+            cloudQuizItemsById.filter((row) => {
+              const id = Number(row?.id);
+              return Number.isFinite(id) && !earlyDead.has(id);
+            }),
           );
-          quizzesRef.current = applied.quizzes;
-          quizSetsRef.current = applied.sets;
-          local = { ...local, quizzes: applied.quizzes, sets: applied.sets };
+          quizzesRef.current = applied.quizzes.filter((q) => !earlyDead.has(q.id));
+          quizSetsRef.current = stripPermDeletedQuizSets(applied.sets, permDeletedRef.current);
+          local = { ...local, quizzes: quizzesRef.current, sets: quizSetsRef.current };
         }
         commitQuizListsLocal(quizzesRef.current, quizSetsRef.current, {
           isAuthoritativeByIdMerge: true,
@@ -2747,6 +2751,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         // deleted keys). Destroy them so they cannot re-enter Trash on this boot.
         const deadSetIds = new Set(tombstones.quizSets);
         const deadFolderIds = new Set(tombstones.quizFolders);
+        const deadQuizIds = new Set(tombstones.quizzes);
         for (const row of cloudSetsById) {
           if (!row?.id) continue;
           if (deadSetIds.has(row.id) || (row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)) {
@@ -2757,6 +2762,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           if (!row?.id) continue;
           if (deadFolderIds.has(row.id) || (row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)) {
             void remove(dbRef(database, `users/${user.uid}/quizFoldersById/${row.id}`)).catch(() => {});
+          }
+        }
+        for (const row of cloudQuizItemsById) {
+          const id = Number(row?.id);
+          if (!Number.isFinite(id)) continue;
+          if (deadQuizIds.has(id) || (row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot)) {
+            void removeQuizItemDurable(user.uid, id);
           }
         }
         quizSetsByIdCacheRef.current = preferRicherQuizSetsMembership(
@@ -3015,10 +3027,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
         {
           const idbQuizzesFinal = await getAllQuizItemsLocal();
-          const applied = applyDurableQuizItems(quizzes, normalizedSets, [...cloudQuizItemsById, ...idbQuizzesFinal]);
-          quizzes = honorQuizItemTrashTombstonesOnItems(applied.quizzes, quizItemTombstonesRef.current);
+          const durableBody = [...cloudQuizItemsById, ...idbQuizzesFinal].filter((row) => {
+            const id = Number(row?.id);
+            if (!Number.isFinite(id)) return false;
+            if (deadQuizIds.has(id)) return false;
+            if (row.trashed && emptiedAtBoot && entitySyncTime(row) <= emptiedAtBoot) return false;
+            return true;
+          });
+          const applied = applyDurableQuizItems(quizzes, normalizedSets, durableBody);
+          quizzes = honorQuizItemTrashTombstonesOnItems(applied.quizzes, quizItemTombstonesRef.current)
+            .filter((q) => !deadQuizIds.has(q.id));
           normalizedSets = applyStoredQuizSetsListOrder(
-            honorQuizItemTrashTombstones(applied.sets, quizItemTombstonesRef.current),
+            stripPermDeletedQuizSets(
+              honorQuizItemTrashTombstones(applied.sets, quizItemTombstonesRef.current),
+              tombstones,
+            ),
           );
           // Membership vs last *painted* UI: timeout may have shown local-9 while
           // refs already absorbed a richer merge — always surface 9→11 here.
@@ -5452,11 +5475,35 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizItemApplyQueue.push(...durable);
         return;
       }
+      const deadQuizzes = new Set(permDeletedRef.current.quizzes);
+      // Lingering quizItemsById rows after Trash X / Empty Trash must not re-open Trash.
+      durable.forEach((item) => {
+        const id = Number(item.id);
+        if (Number.isFinite(id) && deadQuizzes.has(id)) {
+          void removeQuizItemDurable(userRef.current?.uid, id);
+        }
+      });
+      const liveDurable = durable.filter((item) => {
+        const id = Number(item.id);
+        return Number.isFinite(id) && !deadQuizzes.has(id);
+      });
+      if (!liveDurable.length) {
+        if (quizItemApplyQueue.length) {
+          const more = quizItemApplyQueue;
+          quizItemApplyQueue = [];
+          queueMicrotask(() => applyQuizItemsBatch(more));
+        }
+        return;
+      }
       const itemTrash = quizItemTombstonesRef.current;
-      const appliedRaw = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, durable);
+      const appliedRaw = applyDurableQuizItems(quizzesRef.current, quizSetsRef.current, liveDurable);
       const applied = {
-        quizzes: honorQuizItemTrashTombstonesOnItems(appliedRaw.quizzes, itemTrash),
-        sets: honorQuizItemTrashTombstones(appliedRaw.sets, itemTrash),
+        quizzes: honorQuizItemTrashTombstonesOnItems(appliedRaw.quizzes, itemTrash)
+          .filter((q) => !deadQuizzes.has(q.id)),
+        sets: stripPermDeletedQuizSets(
+          honorQuizItemTrashTombstones(appliedRaw.sets, itemTrash),
+          permDeletedRef.current,
+        ),
       };
       const quizzesChanged = JSON.stringify(applied.quizzes) !== JSON.stringify(quizzesRef.current);
       const setsChanged = JSON.stringify(applied.sets) !== JSON.stringify(quizSetsRef.current);
@@ -5517,6 +5564,23 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ? Number((raw as StoredQuizItem).id)
         : Number(snap.key);
       if (!Number.isFinite(id)) return;
+      // Permanent delete / Empty Trash removes the ById node. Do NOT synthesize a
+      // soft-delete row — that is what made Trash X flash back then vanish.
+      if (permDeletedRef.current.quizzes.includes(id)) {
+        const nextQuizzes = quizzesRef.current.filter((q) => q.id !== id);
+        const nextSets = stripPermDeletedQuizSets(quizSetsRef.current, permDeletedRef.current);
+        if (nextQuizzes.length !== quizzesRef.current.length) {
+          quizzesRef.current = nextQuizzes;
+          setQuizzes(nextQuizzes);
+          safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+        }
+        if (JSON.stringify(nextSets) !== JSON.stringify(quizSetsRef.current)) {
+          quizSetsRef.current = nextSets;
+          setQuizSets(nextSets);
+          safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+        }
+        return;
+      }
       queueQuizItemChild({
         id,
         noteId: 0,
@@ -6073,9 +6137,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
+    rememberLastGoodComplete(nextQuizzes, nextSets);
     safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    // Destroy ById/IDB mirror — otherwise quizItemsById child events re-import
+    // the soft-deleted row into Trash until permanentlyDeletedIds catches up.
+    void removeQuizItemDurable(uid, id);
     persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
+    persistSets(nextSets, true, true);
     void pushPermDeletedCloud({ quizzes: nextQuizzes, quizSets: nextSets });
   };
 
