@@ -940,6 +940,37 @@ const DELETED_DRAFT_IDS_KEY = 'malacadhati_deleted_draft_ids';
 const QUIZ_SETS_SHELL_KEY = 'malacadhati_quiz_sets_shells';
 const QUIZ_SETS_LIST_ORDER_KEY = 'malacadhati_quiz_sets_list_order';
 
+function readQuizSetsListOrderLocal(): QuizSetsListOrder | null {
+  return normalizeQuizSetsListOrder(readLocalJson<QuizSetsListOrder>(QUIZ_SETS_LIST_ORDER_KEY));
+}
+
+function writeQuizSetsListOrderLocal(order: QuizSetsListOrder | null): void {
+  if (order) {
+    try {
+      localStorage.setItem(QUIZ_SETS_LIST_ORDER_KEY, JSON.stringify(order));
+    } catch { /* quota */ }
+    return;
+  }
+  try {
+    localStorage.removeItem(QUIZ_SETS_LIST_ORDER_KEY);
+  } catch { /* ignore */ }
+}
+
+/** Re-apply durable Egen order — call after every union/ById merge that may scramble ids. */
+function applyLocalQuizSetsListOrder(
+  sets: QuizSet[],
+  order: QuizSetsListOrder | null = readQuizSetsListOrderLocal(),
+): QuizSet[] {
+  if (!order?.ids?.length) return sets;
+  return applyQuizSetsListOrder(sets, order.ids);
+}
+
+function buildQuizSetsListOrder(sets: QuizSet[], stamp: string): QuizSetsListOrder | null {
+  const ids = quizSetsListOrderIds(sets);
+  if (!ids.length || !stamp) return null;
+  return { ids, updatedAt: stamp };
+}
+
 /**
  * In-memory last-known quiz lists for this JS session (survives React remount,
  * not a full tab reload). Used so refresh/hydration never paints a shorter
@@ -1018,6 +1049,23 @@ function mergeSetsWithShellJournal(sets: QuizSet[]): QuizSet[] {
   const missing = shells.filter((s) => s?.id && !have.has(s.id));
   if (!missing.length) return sets;
   return [...sets, ...missing];
+}
+
+/**
+ * If the durable Egen id-list is missing, recover it from the shell journal
+ * (small, ordered, written on every structure change) — never from ById scramble.
+ */
+function ensureQuizSetsListOrderFromShells(): QuizSetsListOrder | null {
+  const existing = readQuizSetsListOrderLocal();
+  if (existing?.ids?.length) return existing;
+  const shells = readQuizSetsShellJournal();
+  if (!shells.length) return null;
+  const stampMs = Math.max(0, ...shells.map((set) => Date.parse(set.listOrderUpdatedAt || '') || 0));
+  if (stampMs <= 0) return null;
+  const order = buildQuizSetsListOrder(shells, new Date(stampMs).toISOString());
+  if (!order) return null;
+  writeQuizSetsListOrderLocal(order);
+  return order;
 }
 
 function insertQuizSetInFolderOrder(sets: QuizSet[], newSet: QuizSet): QuizSet[] {
@@ -2123,10 +2171,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
     const prunedBoot = pruneQuizListsAgainstTrashState(bootQuizzes, bootSets);
     const emptiedAtBootLocal = readTrashEmptiedAt();
+    const bootListOrder = ensureQuizSetsListOrderFromShells() ?? readQuizSetsListOrderLocal();
+    quizSetsListOrderRef.current = bootListOrder;
     local = {
       ...local,
       quizzes: prunedBoot.quizzes,
-      sets: prunedBoot.sets,
+      // Egen order must win over last-good / LS scramble on the first pixel.
+      sets: applyLocalQuizSetsListOrder(prunedBoot.sets, bootListOrder),
       notes: stripPermDeletedNotes(local.notes, permDeletedRef.current).filter((note) => (
         !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
       )),
@@ -2272,7 +2323,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         honorQuizItemTrashTombstonesOnItems(nextQuizzes, itemTrash),
         sets,
       );
-      sets = prunedLists.sets;
+      sets = applyLocalQuizSetsListOrder(
+        prunedLists.sets,
+        quizSetsListOrderRef.current ?? readQuizSetsListOrderLocal(),
+      );
       quizSetsByIdCacheRef.current = pruneQuizListsAgainstTrashState(
         [],
         applySetTrashTombstones(
@@ -2955,13 +3009,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
               ingestQuizSetsListOrder(await orderRes.json());
             }
           } catch { /* ignore */ }
-          // Migrate: if user already had Egen stamps but no list-order mirror yet, seed it.
-          if (!quizSetsListOrderRef.current) {
-            const maxStamp = Math.max(0, ...normalizedSets.map((set) => quizSetListOrderTime(set)));
-            if (maxStamp > 0) {
-              persistQuizSetsListOrder(normalizedSets, new Date(maxStamp).toISOString());
-            }
-          }
+          // Never invent order from a possibly scrambled ById union — only apply
+          // a durable list (local or cloud). Seeding here used to lock bad order in.
           normalizedSets = applyStoredQuizSetsListOrder(normalizedSets);
         }
         {
@@ -3238,11 +3287,19 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       itemTrash,
     );
     if (isQuizSetsLocalWriteSafe(safeSets, maxKnownLiveBySetRef.current, paintedHonored)) {
+      safeSets = applyLocalQuizSetsListOrder(
+        safeSets,
+        quizSetsListOrderRef.current ?? readQuizSetsListOrderLocal(),
+      );
       safeSetItem('malacadhati_quiz_sets', JSON.stringify(safeSets));
       writeQuizSetsShellJournal(safeSets);
       rememberLastGoodComplete(quizzesRef.current, safeSets);
     }
-    quizSetsRef.current = safeSets;
+    quizSetsRef.current = applyLocalQuizSetsListOrder(
+      safeSets,
+      quizSetsListOrderRef.current ?? readQuizSetsListOrderLocal(),
+    );
+    safeSets = quizSetsRef.current;
     quizSetsByIdCacheRef.current = honorQuizItemTrashTombstones(
       preferRicherQuizSetsMembership(byIdHonored, safeSets),
       itemTrash,
@@ -3315,16 +3372,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
    */
   const rememberQuizSetsListOrder = (order: QuizSetsListOrder | null) => {
     quizSetsListOrderRef.current = order;
-    if (order) safeSetItem(QUIZ_SETS_LIST_ORDER_KEY, JSON.stringify(order));
-    else {
-      try { localStorage.removeItem(QUIZ_SETS_LIST_ORDER_KEY); } catch { /* ignore */ }
-    }
+    writeQuizSetsListOrderLocal(order);
   };
 
-  const applyStoredQuizSetsListOrder = (sets: QuizSet[], order = quizSetsListOrderRef.current): QuizSet[] => {
-    if (!order?.ids?.length) return sets;
-    return applyQuizSetsListOrder(sets, order.ids);
-  };
+  const applyStoredQuizSetsListOrder = (sets: QuizSet[], order = quizSetsListOrderRef.current): QuizSet[] => (
+    applyLocalQuizSetsListOrder(sets, order ?? readQuizSetsListOrderLocal())
+  );
 
   /** Lightweight Manual-order mirror — never rewrites question bodies. */
   const persistQuizSetsListOrder = (sets: QuizSet[], stamp?: string) => {
@@ -3333,20 +3386,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       rememberQuizSetsListOrder(null);
       return;
     }
-    const prev = quizSetsListOrderRef.current;
+    const prev = quizSetsListOrderRef.current ?? readQuizSetsListOrderLocal();
     const sameIds = !!prev
       && prev.ids.length === ids.length
       && prev.ids.every((id, i) => id === ids[i]);
     const updatedAt = stamp
       || (!sameIds ? nowStr() : (prev?.updatedAt || nowStr()));
-    if (sameIds && prev?.updatedAt === updatedAt) return;
-    const next: QuizSetsListOrder = { ids, updatedAt };
+    if (sameIds && prev?.updatedAt === updatedAt) {
+      // Still refresh the ref from disk so boot/commit always see the durable list.
+      rememberQuizSetsListOrder(prev);
+      return;
+    }
+    const next = buildQuizSetsListOrder(sets, updatedAt);
+    if (!next) return;
     rememberQuizSetsListOrder(next);
-    const u = userRef.current;
-    if (!u || !loadedRef.current) return;
-    void set(dbRef(database, `users/${u.uid}/quizSetsListOrder`), next).catch((err) => {
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    // Do not wait for loadedRef — order must reach cloud as soon as the user reorders.
+    void set(dbRef(database, `users/${uid}/quizSetsListOrder`), next).catch((err) => {
       console.error('[cloud-save] quizSetsListOrder set failed', err);
-      return rtdbFetch(`/users/${u.uid}/quizSetsListOrder`, {
+      return rtdbFetch(`/users/${uid}/quizSetsListOrder`, {
         method: 'PUT',
         body: JSON.stringify(next),
         headers: { 'Content-Type': 'application/json' },
@@ -3356,14 +3415,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const ingestQuizSetsListOrder = (raw: unknown): boolean => {
     const remote = normalizeQuizSetsListOrder(raw);
-    const next = pickBetterQuizSetsListOrder(quizSetsListOrderRef.current, remote);
+    const next = pickBetterQuizSetsListOrder(
+      quizSetsListOrderRef.current ?? readQuizSetsListOrderLocal(),
+      remote,
+    );
     if (!next) return false;
-    const prev = quizSetsListOrderRef.current;
+    const prev = quizSetsListOrderRef.current ?? readQuizSetsListOrderLocal();
     const unchanged = !!prev
       && prev.updatedAt === next.updatedAt
       && prev.ids.length === next.ids.length
       && prev.ids.every((id, i) => id === next.ids[i]);
-    if (unchanged) return false;
+    if (unchanged) {
+      rememberQuizSetsListOrder(prev);
+      return false;
+    }
     rememberQuizSetsListOrder(next);
     return true;
   };
@@ -6129,12 +6194,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = reorderQuizSetsList(quizSetsRef.current, dragId, targetId, stamp);
     if (!next) return;
     quizSetsRef.current = next;
+    lastPaintedQuizSetsRef.current = next;
     setQuizSets(next);
-    // Dedicated quizSets[] write (same path as create/rename). Do not fan out
-    // ById puts for every stamped row — that would rewrite every set's items
-    // on each drag. Array order + listOrderUpdatedAt is enough for merge.
-    // Also write the tiny quizSetsListOrder mirror so other devices keep Egen order
-    // even when ById Object.values scramble the giant array.
+    // Write the tiny order mirror first (local + cloud) so refresh/other devices
+    // keep Egen order even when giant quizSets[] / ById scramble.
     persistQuizSetsListOrder(next, stamp);
     void pushQuizSetStructure(next);
   };
