@@ -10,6 +10,7 @@ import {
 } from './quizCompleteCache';
 import { countLiveQuizItems, decideQuizListsUiPaint } from './quizSetMerge';
 import { quizzesEqualForUI, quizSetsEqualForUI } from './quizContent';
+import { QUIZ_ITEM_TRASH_TOMBSTONE_KEY } from './quizTrashTombstones';
 import type { QuizItem, QuizSet } from '../types';
 
 function item(id: number, question: string, updatedAt: string, extra?: Partial<QuizItem>): QuizItem {
@@ -61,6 +62,7 @@ afterEach(() => {
   clearQuizCompleteCache();
   try {
     localStorage.removeItem(QUIZ_COMPLETE_CACHE_LS_KEY);
+    localStorage.removeItem(QUIZ_ITEM_TRASH_TOMBSTONE_KEY);
   } catch {
     /* ignore */
   }
@@ -134,6 +136,45 @@ describe('quizCompleteCache last-good boot', () => {
     expect(boot.fromLastGood).toBe(false);
     expect(boot.source).toBe('local');
     expect(countLiveQuizItems(boot.sets)).toBe(9);
+  });
+
+  it('honors item trash tombstones on last-good read/write', () => {
+    writeQuizCompleteCache([], lastGoodEleven);
+    localStorage.setItem(
+      QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
+      JSON.stringify({ '11': Date.parse('2026-08-12T01:20:00.000Z') }),
+    );
+    const stored = readQuizCompleteCache();
+    expect(stored?.sets[0].items.find((i) => i.id === 11)?.trashed).toBe(true);
+    expect(countLiveQuizItems(stored!.sets)).toBe(10);
+    expect(writeQuizCompleteCache([], lastGoodEleven)).toBe(true);
+    expect(countLiveQuizItems(readQuizCompleteCache()!.sets)).toBe(10);
+  });
+
+  it('overlays local soft-deletes onto a live last-good boot snapshot', () => {
+    const localDeleted = [
+      set({
+        id: 'koag',
+        name: 'Koagulationsstatus',
+        items: eleven.map((row, i) => (i === 10 ? { ...row, trashed: true } : row)),
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-11T22:00:00.000Z',
+      }),
+    ];
+    const boot = pickBootQuizLists({
+      localQuizzes: [],
+      localSets: localDeleted,
+      lastGood: {
+        quizzes: [],
+        sets: lastGoodEleven,
+        savedAt: Date.now(),
+        liveItemCount: 11,
+      },
+      memory: null,
+    });
+    expect(boot.source).toBe('last-good');
+    expect(boot.sets[0].items.find((i) => i.id === 11)?.trashed).toBe(true);
+    expect(countLiveQuizItems(boot.sets)).toBe(10);
   });
 });
 

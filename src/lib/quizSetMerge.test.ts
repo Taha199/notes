@@ -4,10 +4,12 @@ import {
   adoptByIdMembershipWhenRicher,
   applyQuizItemTrashTombstonesToSets,
   applyQuizItemsOrder,
+  applySetTrashTombstones,
   bumpMaxKnownLiveBySet,
   countLiveQuizItems,
   enforceMaxKnownLiveMembership,
   isQuizSetsLocalWriteSafe,
+  overlayQuizTrashFlags,
   orderQuizSetsByListAuthority,
   pickBetterQuizSet,
   preferRicherQuizSetsMembership,
@@ -784,5 +786,41 @@ describe('soft-deleted quiz items survive richer ById union', () => {
     const maxKnown = new Map<string, number>([['s1', 2]]);
     expect(quizSetsSoftTrashExplainsShrink(painted, shortShell)).toBe(false);
     expect(isQuizSetsLocalWriteSafe(shortShell, maxKnown, painted)).toBe(false);
+  });
+
+  it('overlayQuizTrashFlags copies local deletes onto a live last-good snapshot', () => {
+    const lastGood = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [item(12, 'q', '2026-08-12T02:00:00.000Z')],
+        createdAt: '2026-08-12T00:00:00.000Z',
+      }),
+    ];
+    const local = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [item(12, 'q', '2026-08-12T01:20:00.000Z', { trashed: true })],
+        createdAt: '2026-08-12T00:00:00.000Z',
+      }),
+    ];
+    const overlaid = overlayQuizTrashFlags(lastGood, local);
+    expect(overlaid[0].items[0].trashed).toBe(true);
+    expect(countLiveQuizItems(overlaid)).toBe(0);
+  });
+
+  it('applySetTrashTombstones keeps a deleted set trashed against a live echo', () => {
+    const live = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [item(1, 'q', '2026-08-12T02:00:00.000Z')],
+        createdAt: '2026-08-12T00:00:00.000Z',
+        updatedAt: '2026-08-12T02:00:00.000Z',
+      }),
+    ];
+    const honored = applySetTrashTombstones(live, { s1: Date.parse('2026-08-12T01:20:00.000Z') });
+    expect(honored[0].trashed).toBe(true);
   });
 });

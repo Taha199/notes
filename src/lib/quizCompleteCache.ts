@@ -13,12 +13,14 @@ import {
   bumpMaxKnownLiveBySet,
   countLiveQuizItems,
   isQuizSetsLocalWriteSafe,
+  overlayQuizTrashFlags,
   quizListsHaveNewerOrderStamps,
   quizListsHaveStrictlyNewerItems,
   quizSetsMembershipShrunk,
   quizSetsSoftTrashExplainsShrink,
   unionQuizSetsForCommit,
 } from './quizSetMerge';
+import { honorQuizListsWithTrashTombstones } from './quizTrashTombstones';
 
 export { quizListsHaveNewerOrderStamps, quizListsHaveStrictlyNewerItems };
 
@@ -27,8 +29,8 @@ export const QUIZ_COMPLETE_CACHE_LS_KEY = 'malacadhati_quiz_sets_complete_cache'
 const IDB_NAME = 'malacadhati_items_v1';
 const COMPLETE_STORE = 'quizCompleteCache';
 const COMPLETE_KEY = 'lastGood';
-/** Bump when adding stores; must stay >= itemsStore version (2). */
-const IDB_VERSION = 3;
+/** Bump when adding stores; must stay in sync with itemsStore / quizTrashTombstones. */
+const IDB_VERSION = 4;
 
 export type QuizCompleteCacheSnapshot = {
   quizzes: QuizItem[];
@@ -69,7 +71,8 @@ function parseSnapshot(raw: unknown): QuizCompleteCacheSnapshot | null {
   const sets = obj.sets.map((set) => ({ ...set, items: set.items ?? [] }));
   if (!quizSetsHaveCompleteBodies(sets)) return null;
   const quizzes = Array.isArray(obj.quizzes) ? obj.quizzes : [];
-  return normalizeSnapshot(quizzes, sets, typeof obj.savedAt === 'number' ? obj.savedAt : Date.now());
+  const honored = honorQuizListsWithTrashTombstones(quizzes, sets);
+  return normalizeSnapshot(honored.quizzes, honored.sets, typeof obj.savedAt === 'number' ? obj.savedAt : Date.now());
 }
 
 /** Sync read — used on first paint. */
@@ -88,6 +91,9 @@ export function readQuizCompleteCache(): QuizCompleteCacheSnapshot | null {
  * incomplete shell (classic 11→9 poison). Soft-deletes that explain shrink win.
  */
 export function writeQuizCompleteCache(quizzes: QuizItem[], sets: QuizSet[]): boolean {
+  const honored = honorQuizListsWithTrashTombstones(quizzes, sets);
+  quizzes = honored.quizzes;
+  sets = honored.sets;
   if (!sets.length || !quizSetsHaveCompleteBodies(sets)) return false;
   const prev = readQuizCompleteCache();
   if (prev) {
@@ -139,6 +145,9 @@ function openCompleteDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(COMPLETE_STORE)) {
         db.createObjectStore(COMPLETE_STORE, { keyPath: 'id' });
       }
+      if (!db.objectStoreNames.contains('quizTrashTombstones')) {
+        db.createObjectStore('quizTrashTombstones', { keyPath: 'id' });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('idb-open-failed'));
@@ -149,6 +158,9 @@ export async function writeQuizCompleteCacheIdb(
   quizzes: QuizItem[],
   sets: QuizSet[],
 ): Promise<boolean> {
+  const honored = honorQuizListsWithTrashTombstones(quizzes, sets);
+  quizzes = honored.quizzes;
+  sets = honored.sets;
   if (!sets.length || !quizSetsHaveCompleteBodies(sets)) return false;
   const prev = await readQuizCompleteCacheIdb();
   if (prev) {
@@ -225,6 +237,22 @@ export function pickBootQuizLists(opts: {
   const localLive = countLiveQuizItems(opts.localSets);
   const localComplete = quizSetsHaveCompleteBodies(opts.localSets);
 
+  const finish = (
+    quizzes: QuizItem[],
+    sets: QuizSet[],
+    fromLastGood: boolean,
+    source: 'memory' | 'last-good' | 'local',
+  ) => {
+    const overlaid = overlayQuizTrashFlags(
+      sets,
+      opts.localSets,
+      opts.lastGood?.sets ?? [],
+      opts.memory?.sets ?? [],
+    );
+    const honored = honorQuizListsWithTrashTombstones(quizzes, overlaid);
+    return { quizzes: honored.quizzes, sets: honored.sets, fromLastGood, source };
+  };
+
   if (
     opts.memory
     && opts.memory.sets.length > 0
@@ -234,34 +262,30 @@ export function pickBootQuizLists(opts: {
     )
   ) {
     const sets = unionQuizSetsForCommit(opts.memory.sets, opts.localSets, opts.lastGood?.sets ?? []);
-    return {
-      quizzes: opts.memory.quizzes.length ? opts.memory.quizzes : opts.localQuizzes,
+    return finish(
+      opts.memory.quizzes.length ? opts.memory.quizzes : opts.localQuizzes,
       sets,
-      fromLastGood: true,
-      source: 'memory',
-    };
+      true,
+      'memory',
+    );
   }
 
   if (opts.lastGood && opts.lastGood.sets.length > 0 && quizSetsHaveCompleteBodies(opts.lastGood.sets)) {
     const lastLive = countLiveQuizItems(opts.lastGood.sets);
     // Last-good wins over incomplete / shorter LS. Never boot-paint LS-9 over cache-11.
+    // Soft-deletes already on local lists must still overlay onto last-good.
     if (lastLive >= localLive || !localComplete) {
       const sets = unionQuizSetsForCommit(opts.lastGood.sets, opts.localSets);
-      return {
-        quizzes: opts.lastGood.quizzes.length ? opts.lastGood.quizzes : opts.localQuizzes,
+      return finish(
+        opts.lastGood.quizzes.length ? opts.lastGood.quizzes : opts.localQuizzes,
         sets,
-        fromLastGood: true,
-        source: 'last-good',
-      };
+        true,
+        'last-good',
+      );
     }
   }
 
-  return {
-    quizzes: opts.localQuizzes,
-    sets: opts.localSets,
-    fromLastGood: false,
-    source: 'local',
-  };
+  return finish(opts.localQuizzes, opts.localSets, false, 'local');
 }
 
 /**

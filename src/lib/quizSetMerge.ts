@@ -156,6 +156,58 @@ export function applyQuizItemTrashTombstonesToSets(
   return changed ? next : sets;
 }
 
+/** Force `trashed: true` onto quiz sets with an active soft-delete tombstone. */
+export function applySetTrashTombstones(
+  sets: QuizSet[],
+  tombstones: Record<string, number>,
+  opts?: { emptiedAt?: number },
+): QuizSet[] {
+  if (!sets.length || !tombstones || !Object.keys(tombstones).length) return sets;
+  const emptiedAt = opts?.emptiedAt ?? 0;
+  let changed = false;
+  const next = sets.map((set) => {
+    const at = tombstones[set.id];
+    if (at === undefined || set.trashed) return set;
+    if (emptiedAt && at <= emptiedAt) return set;
+    changed = true;
+    return { ...set, trashed: true };
+  });
+  return changed ? next : sets;
+}
+
+/**
+ * Copy `trashed: true` from any source onto matching ids. Never clears trash.
+ * Used when last-good is a live snapshot but local/IDB already recorded deletes.
+ */
+export function overlayQuizTrashFlags(into: QuizSet[], ...from: QuizSet[][]): QuizSet[] {
+  const itemTrash = new Set<number>();
+  const setTrash = new Set<string>();
+  for (const list of from) {
+    for (const set of list) {
+      if (set.trashed) setTrash.add(set.id);
+      for (const item of set.items ?? []) {
+        if (item.trashed) itemTrash.add(item.id);
+      }
+    }
+  }
+  if (!itemTrash.size && !setTrash.size) return into;
+  let changed = false;
+  const next = into.map((set) => {
+    const setTrashed = !!set.trashed || setTrash.has(set.id);
+    let itemsChanged = false;
+    const items = (set.items ?? []).map((item) => {
+      if (item.trashed || !itemTrash.has(item.id)) return item;
+      itemsChanged = true;
+      return { ...item, trashed: true };
+    });
+    if (!setTrashed && !itemsChanged) return set;
+    if (setTrashed === !!set.trashed && !itemsChanged) return set;
+    changed = true;
+    return { ...set, ...(setTrashed && !set.trashed ? { trashed: true } : {}), ...(itemsChanged ? { items } : {}) };
+  });
+  return changed ? next : into;
+}
+
 /**
  * Union quiz items by id (notes-style). Order comes from the authority side;
  * missing ids from the other side are appended — never dropped.

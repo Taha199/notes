@@ -33,9 +33,10 @@ const IDB_NAME = 'malacadhati_items_v1';
 const NOTES_STORE = 'notes';
 const QUIZ_STORE = 'quizItems';
 const QUIZ_SETS_STORE = 'quizSets';
-/** Keep in sync with quizCompleteCache IDB_VERSION (adds quizCompleteCache store). */
-const IDB_VERSION = 3;
+/** Keep in sync with quizCompleteCache / quizTrashTombstones IDB_VERSION. */
+const IDB_VERSION = 4;
 const QUIZ_COMPLETE_CACHE_STORE = 'quizCompleteCache';
+const QUIZ_TRASH_TOMBSTONE_STORE = 'quizTrashTombstones';
 
 export type StoredQuizItem = QuizItem & { setId?: string | null };
 
@@ -55,6 +56,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(QUIZ_COMPLETE_CACHE_STORE)) {
         db.createObjectStore(QUIZ_COMPLETE_CACHE_STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(QUIZ_TRASH_TOMBSTONE_STORE)) {
+        db.createObjectStore(QUIZ_TRASH_TOMBSTONE_STORE, { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -253,6 +257,8 @@ export async function tombstoneQuizItemDurable(
     deletedAt: item.deletedAt || trashAt,
     updatedAt: trashAt,
   });
+  durableQuizItemTrashIds.add(item.id);
+  cancelPendingQuizItemCloudWrite(item.id);
   await putQuizItemLocal(stored);
   if (!uid) return false;
   try {
@@ -293,6 +299,15 @@ export async function removeQuizItemDurable(
 
 const quizCloudWriteTimers = new Map<number, ReturnType<typeof setTimeout>>();
 const quizCloudWriteLatest = new Map<number, { uid: string; stored: StoredQuizItem }>();
+/** Session guard: a live persist must not overwrite a just-trashed item. */
+const durableQuizItemTrashIds = new Set<number>();
+
+function cancelPendingQuizItemCloudWrite(id: number) {
+  const existingTimer = quizCloudWriteTimers.get(id);
+  if (existingTimer) clearTimeout(existingTimer);
+  quizCloudWriteTimers.delete(id);
+  quizCloudWriteLatest.delete(id);
+}
 
 async function flushQuizItemCloud(id: number): Promise<boolean> {
   const pending = quizCloudWriteLatest.get(id);
@@ -330,6 +345,14 @@ export async function persistQuizItemDurable(
   opts?: { immediate?: boolean },
 ): Promise<boolean> {
   const stored: StoredQuizItem = stripUndefined({ ...item, setId: setId ?? null });
+  if (stored.trashed) {
+    durableQuizItemTrashIds.add(item.id);
+    cancelPendingQuizItemCloudWrite(item.id);
+  } else if (durableQuizItemTrashIds.has(item.id)) {
+    // Restore uses immediate:true. A coalesced live persist after delete must not win.
+    if (!opts?.immediate) return false;
+    durableQuizItemTrashIds.delete(item.id);
+  }
   await putQuizItemLocal(stored);
   if (!uid) return false;
 

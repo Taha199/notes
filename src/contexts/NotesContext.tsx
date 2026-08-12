@@ -21,6 +21,7 @@ import {
   adoptByIdMembershipWhenRicher,
   applyQuizItemTrashTombstones,
   applyQuizItemTrashTombstonesToSets,
+  applySetTrashTombstones,
   bumpMaxKnownLiveBySet,
   countLiveItemsInSet,
   countLiveQuizItems,
@@ -28,6 +29,7 @@ import {
   enforceMaxKnownLiveMembership,
   isQuizSetsLocalWriteSafe,
   mergeQuizItemsUnion,
+  overlayQuizTrashFlags,
   pickBetterQuizSet as pickBetterQuizSetCore,
   pickNewerQuizItem as pickNewerQuizItemCore,
   preferRicherQuizSetsMembership,
@@ -64,6 +66,18 @@ import {
   recordRecentEdit,
 } from '../lib/recentEdits';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
+import {
+  honorQuizListsWithTrashTombstones,
+  mergeTombstoneMaps,
+  normalizeTombstoneMap,
+  readQuizTrashTombstonesIdb,
+  readTrashTombstones,
+  writeTrashTombstones,
+  QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
+  QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
+  QUIZ_SET_TRASH_TOMBSTONE_KEY,
+  type TrashTombstones,
+} from '../lib/quizTrashTombstones';
 
 /**
  * localStorage can throw (QuotaExceededError) when quiz answers embed large
@@ -220,10 +234,6 @@ function entitySyncTime(item: { updatedAt?: string; createdAt?: string; savedAt?
   return Date.parse(item.updatedAt || item.savedAt || item.createdAt || '') || 0;
 }
 
-const QUIZ_SET_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_set_trash_tombstones';
-const QUIZ_FOLDER_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_folder_trash_tombstones';
-const QUIZ_ITEM_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_item_trash_tombstones';
-
 /**
  * id -> soft-delete timestamp (ms). A durable proof that a set/folder/item was
  * trashed, independent of the (much larger, more failure-prone) array/ById
@@ -232,33 +242,6 @@ const QUIZ_ITEM_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_item_trash_tombstones';
  * "Saved" — the tombstone always wins over a stale live copy until an
  * explicit restore/permanent-delete clears it.
  */
-type TrashTombstones = Record<string, number>;
-
-function readTrashTombstones(key: string): TrashTombstones {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== 'object') return {};
-    return normalizeTombstoneMap(parsed);
-  } catch {
-    return {};
-  }
-}
-
-function normalizeTombstoneMap(raw: unknown): TrashTombstones {
-  if (!raw || typeof raw !== 'object') return {};
-  const out: TrashTombstones = {};
-  for (const [id, at] of Object.entries(raw as Record<string, unknown>)) {
-    const n = Number(at);
-    if (id && Number.isFinite(n)) out[id] = n;
-  }
-  return out;
-}
-
-function writeTrashTombstones(key: string, tombstones: TrashTombstones) {
-  safeSetItem(key, JSON.stringify(tombstones));
-}
 
 function markTrashTombstone(key: string, tombstones: TrashTombstones, id: string, at = Date.now()): TrashTombstones {
   const next = { ...tombstones, [id]: at };
@@ -996,6 +979,9 @@ const LOCAL_DATA_KEYS = [
   QUIZ_COMPLETE_CACHE_LS_KEY,
   'malacadhati_quiz_folders',
   'malacadhati_chats',
+  QUIZ_SET_TRASH_TOMBSTONE_KEY,
+  QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
+  QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
 ] as const;
 
 /** Tiny membership journal — survives when the full quizSets[] localStorage write hits QuotaExceeded. */
@@ -2101,6 +2087,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return;
     }
     syncAccountLocalStorage(user.uid);
+    // Account switch may have replaced LS; re-read tombstones after the swap.
+    quizSetTombstonesRef.current = readTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY);
+    quizFolderTombstonesRef.current = readTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY);
+    quizItemTombstonesRef.current = readTrashTombstones(QUIZ_ITEM_TRASH_TOMBSTONE_KEY);
     // IndexedDB journal is the durable write-ahead log for image notes (localStorage
     // quota can't hold them). Load it in parallel with the first paint from the
     // raw localStorage snapshot, then fold journal entries in before cloud merge.
@@ -2203,11 +2193,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (quizLocalReadyRef.current && !quizContentReadyRef.current) armQuizContentReadyTimeout();
     /** Persist last-good complete snapshot after a successful full merge. */
     const persistLastGoodIfComplete = (quizzes: QuizItem[], sets: QuizSet[]) => {
-      if (!quizSetsHaveCompleteBodies(sets)) return;
-      if (!isQuizSetsLocalWriteSafe(sets, maxKnownLiveBySetRef.current, lastPaintedQuizSetsRef.current)) {
+      const honored = honorQuizListsWithTrashTombstones(quizzes, sets, {
+        items: quizItemTombstonesRef.current,
+        sets: quizSetTombstonesRef.current,
+        folders: quizFolderTombstonesRef.current,
+      });
+      if (!quizSetsHaveCompleteBodies(honored.sets)) return;
+      if (!isQuizSetsLocalWriteSafe(honored.sets, maxKnownLiveBySetRef.current, lastPaintedQuizSetsRef.current)) {
         return;
       }
-      persistQuizCompleteCache(quizzes, sets);
+      persistQuizCompleteCache(honored.quizzes, honored.sets);
     };
     /** Single commit path: union into refs, setState, safe LS — never shrink below max-known. */
     const commitQuizListsLocal = (
@@ -2231,6 +2226,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       );
       // Soft-deleted questions must stay trashed after union-keep from richer shells.
       sets = honorQuizItemTrashTombstones(sets, itemTrash);
+      sets = applySetTrashTombstones(sets, quizSetTombstonesRef.current, {
+        emptiedAt: readTrashEmptiedAt(),
+      });
       bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, sets);
       bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, byIdHonored);
       bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, paintedHonored);
@@ -2244,9 +2242,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ),
         itemTrash,
       );
-      quizSetsByIdCacheRef.current = honorQuizItemTrashTombstones(
-        preferRicherQuizSetsMembership(byIdHonored, sets),
-        itemTrash,
+      sets = applySetTrashTombstones(sets, quizSetTombstonesRef.current, {
+        emptiedAt: readTrashEmptiedAt(),
+      });
+      quizSetsByIdCacheRef.current = applySetTrashTombstones(
+        honorQuizItemTrashTombstones(
+          preferRicherQuizSetsMembership(byIdHonored, sets),
+          itemTrash,
+        ),
+        quizSetTombstonesRef.current,
+        { emptiedAt: readTrashEmptiedAt() },
       );
       const prevQ = quizzesRef.current;
       const quizzesHonored = honorQuizItemTrashTombstonesOnItems(nextQuizzes, itemTrash);
@@ -2313,26 +2318,52 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Phase 0: IDB last-good complete cache (async, but local — beats network).
     // If sync LS last-good was missing (quota), this still paints correct 11 before ById.
     const idbLastGoodReady = (async () => {
-      if (quizContentReadyRef.current) return;
+      const idbTombs = await readQuizTrashTombstonesIdb();
+      if (!cancelled && idbTombs) {
+        quizItemTombstonesRef.current = mergeTombstoneMaps(quizItemTombstonesRef.current, idbTombs.items);
+        quizSetTombstonesRef.current = mergeTombstoneMaps(quizSetTombstonesRef.current, idbTombs.sets);
+        quizFolderTombstonesRef.current = mergeTombstoneMaps(quizFolderTombstonesRef.current, idbTombs.folders);
+        writeTrashTombstones(QUIZ_ITEM_TRASH_TOMBSTONE_KEY, quizItemTombstonesRef.current);
+        writeTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY, quizSetTombstonesRef.current);
+        writeTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY, quizFolderTombstonesRef.current);
+      }
       const idbLastGood = await readQuizCompleteCacheIdb();
       if (cancelled || !idbLastGood || !quizSetsHaveCompleteBodies(idbLastGood.sets)) return;
-      if (quizContentReadyRef.current) return;
-      const paintedLive = countLiveQuizItems(lastPaintedQuizSetsRef.current);
-      const cacheLive = countLiveQuizItems(idbLastGood.sets);
-      if (paintedLive > cacheLive) return;
-      const mergedSets = unionQuizSetsForCommit(idbLastGood.sets, quizSetsRef.current, local.sets);
-      const mergedQuizzes = idbLastGood.quizzes.length ? idbLastGood.quizzes : local.quizzes;
+      const painted = lastPaintedQuizSetsRef.current;
+      const paintedLive = countLiveQuizItems(painted);
+      const cacheSets = overlayQuizTrashFlags(
+        honorQuizItemTrashTombstones(
+          applySetTrashTombstones(idbLastGood.sets, quizSetTombstonesRef.current, {
+            emptiedAt: readTrashEmptiedAt(),
+          }),
+          quizItemTombstonesRef.current,
+        ),
+        painted,
+        quizSetsRef.current,
+      );
+      const cacheLive = countLiveQuizItems(cacheSets);
+      // A live last-good paint must still accept IDB when the drop is soft-trash.
+      if (
+        paintedLive > cacheLive
+        && !quizSetsSoftTrashExplainsShrink(painted, cacheSets)
+      ) {
+        return;
+      }
+      const mergedSets = unionQuizSetsForCommit(cacheSets, quizSetsRef.current, local.sets);
+      const mergedQuizzes = honorQuizItemTrashTombstonesOnItems(
+        idbLastGood.quizzes.length ? idbLastGood.quizzes : local.quizzes,
+        quizItemTombstonesRef.current,
+      );
       local = { ...local, quizzes: mergedQuizzes, sets: mergedSets };
       quizzesRef.current = mergedQuizzes;
       quizSetsRef.current = mergedSets;
       bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, mergedSets);
       commitQuizListsLocal(mergedQuizzes, mergedSets, {
         persistLocal: false,
-        forcePaint: true,
+        forcePaint: !quizContentReadyRef.current || quizSetsSoftTrashExplainsShrink(painted, mergedSets),
       });
       markQuizLocalReady();
       markQuizContentReady('cache');
-      // Heal sync LS key for the next cold boot.
       persistLastGoodIfComplete(mergedQuizzes, mergedSets);
     })();
     // Phase 1 (fast): set shells only — tiny IDB store; unblocks "0 set" immediately.
@@ -2895,6 +2926,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             quizRevealedViaTimeoutRef.current = false;
           }
         }
+        persistLastGoodIfComplete(quizzesRef.current, quizSetsRef.current);
         setQuizFolders(normalizedFolders);
         safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
         markQuizContentReady(quizAuthoritativeByIdSeenRef.current ? 'byid' : 'fallback');
