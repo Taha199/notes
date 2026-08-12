@@ -63,9 +63,30 @@ export function readNotesListCache(): Note[] {
   }
 }
 
+/** Never shrink the durable list cache with an incomplete LS shell. */
 export function writeNotesListCache(notes: Note[]): void {
   if (!notes.length) return;
-  const compact = compactNotesForListCache(notes);
+  const prev = readNotesListCache();
+  const byId = new Map<number, Note>();
+  for (const note of [...prev, ...notes]) {
+    const id = Number(note.id);
+    if (!Number.isFinite(id)) continue;
+    const existing = byId.get(id);
+    if (!existing) {
+      byId.set(id, note);
+      continue;
+    }
+    // Prefer the incoming body when it is richer / newer meta.
+    const incomingLen = (note.html || '').length + (note.title || '').length;
+    const existingLen = (existing.html || '').length + (existing.title || '').length;
+    const incomingAt = Date.parse(note.savedAt || '') || 0;
+    const existingAt = Date.parse(existing.savedAt || '') || 0;
+    if (incomingLen > existingLen || (incomingLen === existingLen && incomingAt >= existingAt)) {
+      byId.set(id, note);
+    }
+  }
+  const merged = [...byId.values()];
+  const compact = compactNotesForListCache(merged);
   try {
     const json = JSON.stringify(compact);
     if (!writeTinyDurableValue(NOTES_LIST_CACHE_KEY, json)) {

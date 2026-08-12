@@ -945,6 +945,11 @@ interface NotesCtx {
    * merge (or a short timeout / same-session boot cache). Prevents old→new FOUC.
    */
   quizContentReady: boolean;
+  /**
+   * Notes list is safe to show (complete local snapshot). When false, UI should
+   * not paint a partial old-only list that will grow when IDB/cloud arrives.
+   */
+  notesListReady: boolean;
   /** Drafts are usable (read/write/cloud) before the full account load finishes. */
   draftsReady: boolean;
   /** Fetching draft bundle from cloud (other devices). */
@@ -1271,6 +1276,17 @@ function computeSidebarCounts(
     trashSets: sets.filter((s) => s.trashed).length,
     trashFolders: folders.filter((f) => f.trashed).length,
   };
+}
+
+/** True when this notes snapshot covers last-session sidebar membership (no old→new FOUC). */
+function notesCoverExpectedCounts(notes: Note[], expected: SidebarCounts | null | undefined): boolean {
+  if (!expected) return notes.length > 0;
+  const live = computeSidebarCounts(notes, [], [], []);
+  return live.read >= expected.read
+    && live.unread >= expected.unread
+    && live.home >= expected.home
+    && live.fav >= expected.fav
+    && live.archive >= expected.archive;
 }
 
 function readDeletedDraftIds(): Set<string> {
@@ -2124,6 +2140,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
   const [notes, setNotes] = useState<Note[]>(() => readBootNotesForPaint());
+  const [notesListReady, setNotesListReady] = useState(() => {
+    const boot = readBootNotesForPaint();
+    const cached = readSidebarCounts();
+    // If last session said Studerade=15 but boot only has older notes, hold the list.
+    return notesCoverExpectedCounts(boot, cached);
+  });
+  const notesListReadyRef = useRef(notesListReady);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
   const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
@@ -2421,16 +2444,32 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return true;
       }),
     };
-    // Paint notes + durable badges immediately from local — do not wait on journal/cloud.
-    notesRef.current = local.notes;
-    setNotes(local.notes);
-    if (local.notes.length) {
-      rememberNotesBootCache(local.notes);
-      writeNotesListCache(local.notes);
+    // Keep the richest local snapshot in refs — never paint incomplete LS alone
+    // (that caused old notes first, then new image notes later).
+    const bootMergedNotes = mergeNotesPreferRicher(
+      local.notes,
+      readNotesListCache(),
+      readNotesBootCache(),
+      notesRef.current,
+    );
+    const expectedCounts = readSidebarCounts();
+    local = { ...local, notes: bootMergedNotes };
+    notesRef.current = bootMergedNotes;
+    const bootCovers = notesCoverExpectedCounts(bootMergedNotes, expectedCounts);
+    if (bootCovers) {
+      setNotes(bootMergedNotes);
+      notesListReadyRef.current = true;
+      setNotesListReady(true);
+      rememberNotesBootCache(bootMergedNotes);
+      writeNotesListCache(bootMergedNotes);
+    } else {
+      // Hold list paint until IDB (+ short cloud wait) so everything appears together.
+      notesListReadyRef.current = false;
+      setNotesListReady(false);
     }
     {
       const computed = computeSidebarCounts(
-        local.notes,
+        bootMergedNotes,
         local.quizzes,
         local.sets,
         local.folders,
@@ -2456,23 +2495,53 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizzesRef.current = local.quizzes;
     quizSetsRef.current = local.sets;
 
+    const paintNotesTogether = (snapshot: Note[]) => {
+      if (cancelled) return;
+      const mergedNotes = stripPermDeletedNotes(snapshot, permDeletedRef.current).filter((note) => (
+        !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
+      ));
+      notesRef.current = mergedNotes;
+      local = { ...local, notes: mergedNotes };
+      setNotes(mergedNotes);
+      notesListReadyRef.current = true;
+      setNotesListReady(true);
+      rememberNotesBootCache(mergedNotes, true);
+      writeNotesListCache(mergedNotes);
+      const computed = computeSidebarCounts(
+        mergedNotes,
+        quizzesRef.current,
+        quizSetsRef.current,
+        quizFoldersRef.current,
+        permDeletedRef.current,
+      );
+      writeSidebarCounts(computed);
+      setSidebarCounts(computed);
+    };
+
     // Notes IDB hydrate FIRST — never wait on quiz last-good / set shells.
     // Image notes live here when localStorage quota dropped them from `malacadhati`.
     const notesIdbReady = (async () => {
       const idbNotes = await getAllNotesLocal();
-      if (cancelled || !idbNotes.length) return;
+      if (cancelled) return;
+      const prev = notesRef.current;
       const mergedNotes = stripPermDeletedNotes(
-        mergeNotesPreferRicher(notesRef.current, idbNotes),
+        mergeNotesPreferRicher(prev, idbNotes),
         permDeletedRef.current,
       ).filter((note) => (
         !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
       ));
-      if (notesMetaEqual(mergedNotes, notesRef.current)) return;
       notesRef.current = mergedNotes;
-      setNotes(mergedNotes);
       local = { ...local, notes: mergedNotes };
-      rememberNotesBootCache(mergedNotes, true);
-      writeNotesListCache(mergedNotes);
+      // Only paint now if membership already matches last session — otherwise wait
+      // for the combined IDB+cloud reveal so new notes don't trickle in last.
+      if (notesListReadyRef.current || notesCoverExpectedCounts(mergedNotes, expectedCounts)) {
+        if (!notesListReadyRef.current || !notesMetaEqual(mergedNotes, prev)) {
+          paintNotesTogether(mergedNotes);
+        } else {
+          notesListReadyRef.current = true;
+          setNotesListReady(true);
+        }
+      }
     })();
     bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
     if (bootPick.fromLastGood && local.sets.length > 0) {
@@ -2502,12 +2571,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
       local = applyRecentEditsToData(local, edits);
-      local = { ...local, notes: stripPermDeletedNotes(local.notes, permDeletedRef.current) };
+      local = {
+        ...local,
+        notes: stripPermDeletedNotes(
+          mergeNotesPreferRicher(local.notes, notesRef.current),
+          permDeletedRef.current,
+        ),
+      };
       notesRef.current = local.notes;
       quizzesRef.current = local.quizzes;
       quizSetsRef.current = local.sets;
-      setNotes(local.notes);
-      // Set shells already painted from LS when present; item bodies enrich via durable.
+      // Never paint journal alone when the list is held for a complete snapshot.
+      if (notesListReadyRef.current) {
+        setNotes(local.notes);
+      }
       return edits;
     });
 
@@ -2809,7 +2886,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const applyLocalCache = (opts?: { includeQuiz?: boolean }) => {
       const includeQuiz = opts?.includeQuiz !== false;
-      if (local.notes.length) setNotes(local.notes);
+      if (local.notes.length) {
+        notesRef.current = local.notes;
+        if (notesListReadyRef.current || notesCoverExpectedCounts(local.notes, expectedCounts)) {
+          paintNotesTogether(local.notes);
+        }
+      }
       if (local.chats.length) setChats(local.chats);
       if (local.folders.length) {
         setQuizFolders(ensureRestoredFolder(initializeQuizColors(local.folders)));
@@ -2907,38 +2989,55 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
     const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
 
-    const applyNotesSnapshot = (incoming: Note[], source: 'early' | 'boot') => {
-      if (cancelled || !incoming.length) return;
+    const applyNotesSnapshot = (incoming: Note[], _source: 'early' | 'boot') => {
+      if (cancelled) return;
+      const prev = notesRef.current;
       const mergedNotes = stripPermDeletedNotes(
-        mergeNotesPreferRicher(notesRef.current, incoming),
+        mergeNotesPreferRicher(prev, incoming),
         permDeletedRef.current,
       ).filter((note) => (
         !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
       ));
-      if (notesMetaEqual(mergedNotes, notesRef.current)) return;
       notesRef.current = mergedNotes;
-      setNotes(mergedNotes);
       local = { ...local, notes: mergedNotes };
-      rememberNotesBootCache(mergedNotes, true);
-      writeNotesListCache(mergedNotes);
-      if (source === 'early') {
-        const computed = computeSidebarCounts(
-          mergedNotes,
-          quizzesRef.current,
-          quizSetsRef.current,
-          quizFoldersRef.current,
-          permDeletedRef.current,
-        );
-        writeSidebarCounts(computed);
-        setSidebarCounts(computed);
-      }
+      if (notesListReadyRef.current && notesMetaEqual(mergedNotes, prev)) return;
+      paintNotesTogether(mergedNotes);
     };
 
-    // Paint full notes ASAP — same speed as ~09:00 today, without blocking on Quiz.
+    // One reveal: wait for IDB + cloud (grace) so new notes never trickle in after old ones.
     const notesCloudReady = (async () => {
-      const [cloudNotes] = await Promise.all([notesCloudPromise, notesIdbReady]);
+      await notesIdbReady;
       if (cancelled) return;
-      applyNotesSnapshot(cloudNotes, 'early');
+      if (notesListReadyRef.current) {
+        // Already complete from boot/IDB — enrich bodies from cloud without a second FOUC.
+        try {
+          const late = await notesCloudPromise;
+          if (!cancelled && late.length) applyNotesSnapshot(late, 'boot');
+        } catch { /* ignore */ }
+        return;
+      }
+      let cloudNotes: Note[] = [];
+      try {
+        cloudNotes = await Promise.race([
+          notesCloudPromise,
+          new Promise<Note[]>((resolve) => {
+            window.setTimeout(() => resolve([]), 2500);
+          }),
+        ]);
+      } catch {
+        cloudNotes = [];
+      }
+      if (cancelled) return;
+      if (cloudNotes.length) {
+        applyNotesSnapshot(cloudNotes, 'early');
+        return;
+      }
+      // Slow/offline: one local paint, then a single catch-up if cloud arrives later.
+      paintNotesTogether(notesRef.current);
+      try {
+        const late = await notesCloudPromise;
+        if (!cancelled && late.length) applyNotesSnapshot(late, 'boot');
+      } catch { /* ignore */ }
     })();
 
     (async () => {
@@ -7762,9 +7861,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   return (
     <NotesContext.Provider
       value={{
-        notes: notes.filter((n) => (
-          !permDeletedRef.current.notes.some((deadId) => Number(deadId) === Number(n.id))
-        )),
+        notes: notesListReady
+          ? notes.filter((n) => (
+            !permDeletedRef.current.notes.some((deadId) => Number(deadId) === Number(n.id))
+          ))
+          : [],
         drafts,
         quizzes: quizzes.filter((q) => !q.trashed),
         // Never surface permanently-deleted ghosts even if a stale sync briefly
@@ -7781,6 +7882,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         loaded,
         quizLocalReady,
         quizContentReady,
+        notesListReady,
         draftsReady,
         draftsLoading,
         addQuiz,
