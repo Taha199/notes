@@ -49,9 +49,9 @@ export function Sidebar({
     { page: 'home', icon: '🏠', label: t.navHome },
     { page: 'fav', icon: '★', label: t.navFav, badge: counts.fav, badgeClass: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' },
     { page: 'todo', icon: '📅', label: t.navTodo, badge: counts.todo, badgeClass: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300' },
-    { page: 'quiz', icon: '🧠', label: 'Quiz' },
     { page: 'unread', icon: '📖', label: t.navUnread, badge: counts.unread, badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' },
     { page: 'read', icon: '✓', label: t.navRead, badge: counts.read, badgeClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' },
+    { page: 'quiz', icon: '🧠', label: 'Quiz' },
     { page: 'files', icon: '📎', label: t.navFiles },
     { page: 'arabicKb', icon: '⌨️', label: t.navArabicKb },
   ];
