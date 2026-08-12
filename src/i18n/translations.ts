@@ -147,6 +147,7 @@ export interface Translation {
   arabicKbToggleOn: string;
   arabicKbToggleOff: string;
   arabicKbOptionalHint: string;
+  arabicKbDragHint: string;
   filesUploadStuck: string;
   filesAllFiles: string;
   filesNewFolder: string;
@@ -654,7 +655,8 @@ export const LANGS: Record<Lang, Translation> = {
     arabicKbCopied: 'Copied',
     arabicKbToggleOn: 'Turn on Arabic keyboard',
     arabicKbToggleOff: 'Turn off',
-    arabicKbOptionalHint: 'Type in any field. Tap عربي again to turn off.',
+    arabicKbOptionalHint: 'Drag to move · type in any field',
+    arabicKbDragHint: 'Drag to move the keyboard',
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
@@ -1064,7 +1066,8 @@ export const LANGS: Record<Lang, Translation> = {
     arabicKbCopied: 'Kopierat',
     arabicKbToggleOn: 'Slå på arabiskt tangentbord',
     arabicKbToggleOff: 'Stäng av',
-    arabicKbOptionalHint: 'Skriv i valfritt fält. Tryck عربي igen för att stänga av.',
+    arabicKbOptionalHint: 'Dra för att flytta · skriv i valfritt fält',
+    arabicKbDragHint: 'Dra för att flytta tangentbordet',
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',
