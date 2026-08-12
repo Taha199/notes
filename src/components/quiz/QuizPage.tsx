@@ -1440,9 +1440,19 @@ export function QuizPage({
   };
 
   // Sort the sets list
-  const [setSort, setSetSort] = useState<'manual' | 'name' | 'count'>(() => (localStorage.getItem('malacadhati_quiz_setsort') as 'manual' | 'name' | 'count') || 'manual');
+  type SetSortMode = 'manual' | 'name' | 'count' | 'newest' | 'oldest';
+  const [setSort, setSetSort] = useState<SetSortMode>(() => {
+    const saved = localStorage.getItem('malacadhati_quiz_setsort');
+    return saved === 'name' || saved === 'count' || saved === 'newest' || saved === 'oldest' || saved === 'manual'
+      ? saved
+      : 'manual';
+  });
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const changeSort = (mode: 'manual' | 'name' | 'count') => { setSetSort(mode); localStorage.setItem('malacadhati_quiz_setsort', mode); setSortMenuOpen(false); };
+  const changeSort = (mode: SetSortMode) => {
+    setSetSort(mode);
+    localStorage.setItem('malacadhati_quiz_setsort', mode);
+    setSortMenuOpen(false);
+  };
 
   const toggleFav = (item: QuizItem) => {
     // Inside the Favorites set: the card itself is the copy — remove it.
@@ -1689,10 +1699,17 @@ export function QuizPage({
 
   const sortedSets = setSort === 'manual'
     ? quizSets
-    : [...quizSets].sort((a, b) =>
-        setSort === 'name'
-          ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-          : countVisibleQuizItems(b.items) - countVisibleQuizItems(a.items));
+    : [...quizSets].sort((a, b) => {
+        if (setSort === 'name') {
+          return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        }
+        if (setSort === 'count') {
+          return countVisibleQuizItems(b.items) - countVisibleQuizItems(a.items);
+        }
+        const aTime = Date.parse(a.createdAt || '') || 0;
+        const bTime = Date.parse(b.createdAt || '') || 0;
+        return setSort === 'newest' ? bTime - aTime : aTime - bTime;
+      });
 
   const progressForSet = (setId: string | null) => {
     const key = setId ?? 'all';
@@ -1987,15 +2004,23 @@ export function QuizPage({
               <button
                 onClick={() => setSortMenuOpen((v) => !v)}
                 className="flex h-5 items-center gap-1 rounded-md px-1 text-[9px] font-semibold text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
-              >⇅ {setSort === 'name' ? t.quizSortAz : setSort === 'count' ? t.quizSortHash : t.quizSortManualShort}</button>
+              >⇅ {
+                setSort === 'name' ? t.quizSortAz
+                  : setSort === 'count' ? t.quizSortHash
+                    : setSort === 'newest' ? t.quizSortNewestShort
+                      : setSort === 'oldest' ? t.quizSortOldestShort
+                        : t.quizSortManualShort
+              }</button>
               {sortMenuOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
-                  <div className="absolute right-1 top-7 z-50 w-36 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
+                  <div className="absolute right-1 top-7 z-50 w-44 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
                     {([
                       { key: 'manual' as const, label: t.quizSortManual },
                       { key: 'name' as const, label: t.quizSortName },
                       { key: 'count' as const, label: t.quizSortCount },
+                      { key: 'newest' as const, label: t.quizSortNewest },
+                      { key: 'oldest' as const, label: t.quizSortOldest },
                     ]).map((o) => (
                       <button
                         key={o.key}
