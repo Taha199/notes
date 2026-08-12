@@ -2,10 +2,11 @@ import type { Page } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { CloudSavedAtLabel } from '../common/CloudSavedAtLabel';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
+import { useArabicInput } from '../../contexts/ArabicInputContext';
 import { normalizeSearch } from '../../lib/noteSearch';
 
 const ICONS: Record<Page, string> = {
-  home: '🏠', fav: '★', todo: '📅', unread: '📖', read: '✓', library: '📚', files: '📎', archive: '🗄', trash: '🗑', quiz: '🧠', download: '💻', settings: '⚙️', admin: '👑',
+  home: '🏠', fav: '★', todo: '📅', unread: '📖', read: '✓', library: '📚', files: '📎', arabicKb: 'ك', archive: '🗄', trash: '🗑', quiz: '🧠', download: '💻', settings: '⚙️', admin: '👑',
 };
 
 const navBtn = 'flex h-7 w-7 items-center justify-center rounded-lg border border-app-border text-app-text-secondary transition-colors hover:bg-app-bg hover:text-app-text disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
@@ -32,9 +33,10 @@ export function Header({
   onOpenMenu: () => void;
 }) {
   const { t } = useLanguage();
+  const { enabled: arabicOn, toggle: toggleArabic } = useArabicInput();
   const hasSearch = normalizeSearch(search).length > 0;
   const titles: Record<Page, string> = {
-    home: t.pageHome, fav: t.pageFav, todo: t.pageTodo, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, files: t.pageFiles, archive: t.pageArch, trash: t.pageTrash, quiz: 'Quiz', download: t.pageDownload, settings: t.settingsTitle, admin: t.adminTitle,
+    home: t.pageHome, fav: t.pageFav, todo: t.pageTodo, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, files: t.pageFiles, arabicKb: t.pageArabicKb, archive: t.pageArch, trash: t.pageTrash, quiz: 'Quiz', download: t.pageDownload, settings: t.settingsTitle, admin: t.adminTitle,
   };
   const hitLabel = searchHitTotal > 0
     ? t.searchHitsLabel.replace('{current}', String(searchHitCurrent)).replace('{total}', String(searchHitTotal))
@@ -102,6 +104,20 @@ export function Header({
             </div>
           )}
         </div>
+        <button
+          type="button"
+          onClick={toggleArabic}
+          title={arabicOn ? t.arabicKbToggleOff : t.arabicKbToggleOn}
+          aria-pressed={arabicOn}
+          className={
+            'flex flex-shrink-0 items-center rounded-xl border px-2.5 py-1.5 text-[13px] font-bold transition-colors ' +
+            (arabicOn
+              ? 'border-primary bg-primary text-white shadow-sm'
+              : 'border-app-border/70 bg-white/70 text-app-text-secondary hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-300')
+          }
+        >
+          عربي
+        </button>
         <LanguageSwitcher />
         <button onClick={onNewNote} className="flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-primary px-3 py-2 text-[13px] font-semibold text-white shadow-md shadow-primary/30 transition-all hover:-translate-y-0.5 hover:bg-primary-dark sm:px-4">
           + <span className="hidden sm:inline">{t.newNote}</span>

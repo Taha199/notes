@@ -13,6 +13,7 @@ export interface Translation {
   navRead: string;
   navLibrary: string;
   navFiles: string;
+  navArabicKb: string;
   navArchive: string;
   navTrash: string;
   navDownload: string;
@@ -85,6 +86,7 @@ export interface Translation {
   pageTodo: string;
   pageArch: string;
   pageFiles: string;
+  pageArabicKb: string;
   pageTrash: string;
   statActive: string;
   statUnread: string;
@@ -137,6 +139,14 @@ export interface Translation {
   filesUploadAuthError: string;
   filesLoadFailed: string;
   filesRetry: string;
+  arabicKbHint: string;
+  arabicKbPlaceholder: string;
+  arabicKbCopy: string;
+  arabicKbClear: string;
+  arabicKbCopied: string;
+  arabicKbToggleOn: string;
+  arabicKbToggleOff: string;
+  arabicKbOptionalHint: string;
   filesUploadStuck: string;
   filesAllFiles: string;
   filesNewFolder: string;
@@ -590,7 +600,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
     appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
     navHome: 'Home', navFav: 'Favourites', navTodo: 'To-do', navUnread: 'Notes to Study', navRead: 'Studied Notes',
-    navLibrary: 'Notes Library', navFiles: 'File Uploads', navArchive: 'Archive', navTrash: 'Trash',
+    navLibrary: 'Notes Library', navFiles: 'File Uploads', navArabicKb: 'Arabic keyboard', navArchive: 'Archive', navTrash: 'Trash',
     navDownload: 'Desktop app', downloadSectionTitle: 'Download as app',
     pageDownload: 'Desktop app', downloadTitle: 'Taha Note for Mac',
     downloadSubtitle: 'Install Taha Note as a native Mac app. Your notes sync with the web — same account, same features.',
@@ -615,7 +625,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Loading your open drafts from the cloud…',
     draftsWriteWhileLoading: 'You can start a new draft right away while your other drafts sync.',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Notes to Study', pageRead: 'Studied Notes',
-    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageTrash: 'Trash',
+    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageArabicKb: 'Arabic keyboard', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
@@ -634,6 +644,14 @@ export const LANGS: Record<Lang, Translation> = {
     filesTooLarge: 'File too large (max 20 MB):', filesSaveFailed: 'Could not save file to cloud.', filesUploadFailed: 'Upload failed. Please try again.', filesUploadSuccess: 'File uploaded', filesQuotaExceeded: 'Storage limit reached. Delete files or contact support for more space.',
     filesUploading: 'Uploading', filesUploadPermissionDenied: 'No permission to upload. Sign in again and try once more.', filesUploadNetworkError: 'Network error during upload. Check your connection and try again.', filesUploadAuthError: 'Session expired. Sign in again and try once more.',
     filesLoadFailed: 'Could not load your files. Check your connection and try again.', filesRetry: 'Try again', filesUploadStuck: 'Large-file upload timed out. Check your connection and try again.',
+    arabicKbHint: 'Tap the on-screen keys, or type on your physical keyboard — QWERTY is mapped to Arabic 101. Copy the text when you are done. You can also tap عربي in the header to type Arabic in any field.',
+    arabicKbPlaceholder: 'اكتب هنا…',
+    arabicKbCopy: 'Copy',
+    arabicKbClear: 'Clear',
+    arabicKbCopied: 'Copied',
+    arabicKbToggleOn: 'Turn on Arabic keyboard',
+    arabicKbToggleOff: 'Turn off',
+    arabicKbOptionalHint: 'Type in any field. Tap عربي again to turn off.',
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
@@ -989,7 +1007,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
     appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
     navHome: 'Hem', navFav: 'Favoriter', navTodo: 'Att göra', navUnread: 'Att studera', navRead: 'Studerade',
-    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArchive: 'Arkiv', navTrash: 'Papperskorg',
+    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArabicKb: 'Arabiskt tangentbord', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     navDownload: 'Skrivbordsapp', downloadSectionTitle: 'Ladda ner som program',
     pageDownload: 'Skrivbordsapp', downloadTitle: 'Taha Note för Mac',
     downloadSubtitle: 'Installera Taha Note som en inbyggd Mac-app. Dina anteckningar synkas med webben — samma konto, samma funktioner.',
@@ -1014,7 +1032,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Hämtar dina öppna utkast från molnet…',
     draftsWriteWhileLoading: 'Du kan börja skriva ett nytt utkast direkt medan dina andra utkast synkas.',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Att studera', pageRead: 'Studerade',
-    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageTrash: 'Papperskorg',
+    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageArabicKb: 'Arabiskt tangentbord', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
@@ -1033,6 +1051,14 @@ export const LANGS: Record<Lang, Translation> = {
     filesTooLarge: 'Filen är för stor (max 20 MB):', filesSaveFailed: 'Kunde inte spara filen i molnet.', filesUploadFailed: 'Uppladdningen misslyckades. Försök igen.', filesUploadSuccess: 'Fil uppladdad', filesQuotaExceeded: 'Lagringsgränsen är nådd. Radera filer eller kontakta support för mer utrymme.',
     filesUploading: 'Laddar upp', filesUploadPermissionDenied: 'Ingen behörighet att ladda upp. Logga in igen och försök på nytt.', filesUploadNetworkError: 'Nätverksfel under uppladdning. Kontrollera anslutningen och försök igen.', filesUploadAuthError: 'Sessionen har gått ut. Logga in igen och försök på nytt.',
     filesLoadFailed: 'Kunde inte hämta dina filer. Kontrollera anslutningen och försök igen.', filesRetry: 'Försök igen', filesUploadStuck: 'Uppladdningen av den stora filen tog för lång tid. Kontrollera anslutningen och försök igen.',
+    arabicKbHint: 'Klicka på tangenterna på skärmen, eller skriv på datorns tangentbord — QWERTY mappas till arabiska 101. Kopiera texten när du är klar. Du kan också trycka عربي i menyn för att skriva arabiska i valfritt fält.',
+    arabicKbPlaceholder: 'اكتب هنا…',
+    arabicKbCopy: 'Kopiera',
+    arabicKbClear: 'Rensa',
+    arabicKbCopied: 'Kopierat',
+    arabicKbToggleOn: 'Slå på arabiskt tangentbord',
+    arabicKbToggleOff: 'Stäng av',
+    arabicKbOptionalHint: 'Skriv i valfritt fält. Tryck عربي igen för att stänga av.',
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',

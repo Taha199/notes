@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotesProvider } from './contexts/NotesContext';
 import { TodosProvider } from './contexts/TodosContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { ArabicInputProvider } from './contexts/ArabicInputContext';
 import { AuthPage } from './components/auth/AuthPage';
 import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
 import { VerifyEmailPage } from './components/auth/VerifyEmailPage';
@@ -12,6 +13,7 @@ import { BootLoader } from './components/common/BootLoader';
 import { ImageLightbox } from './components/common/ImageLightbox';
 import { FloatingOtterSearch } from './components/common/FloatingOtterSearch';
 import { Dashboard } from './components/Dashboard';
+import { ArabicInputHost } from './components/keyboard/ArabicInputHost';
 
 function getUrlAction(): { mode: string | null; oobCode: string | null } {
   const p = new URLSearchParams(window.location.search);
@@ -79,8 +81,11 @@ function Root() {
   return (
     <NotesProvider>
       <TodosProvider>
-        <Dashboard />
-        <FloatingOtterSearch />
+        <ArabicInputProvider>
+          <Dashboard />
+          <FloatingOtterSearch />
+          <ArabicInputHost />
+        </ArabicInputProvider>
       </TodosProvider>
     </NotesProvider>
   );

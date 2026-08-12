@@ -23,6 +23,7 @@ Created by Abdullah Taha.
 - Home: https://tahanote.com/
 - Notes library: https://tahanote.com/library
 - File uploads: https://tahanote.com/files
+- Arabic keyboard: https://tahanote.com/arabic-keyboard
 - Quiz: https://tahanote.com/quiz
 - Notes to study: https://tahanote.com/unread
 - Studied notes: https://tahanote.com/read
