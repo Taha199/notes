@@ -139,6 +139,20 @@ function noteSyncKey(note: Note) {
   return `${note.title}\0${note.html}\0${note.read}\0${note.fav}\0${note.archived}\0${note.trashed}`;
 }
 
+/** Cheap notes[] equality — never JSON.stringify multi-MB image HTML. */
+function notesMetaEqual(a: Note[], b: Note[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (Number(left.id) !== Number(right.id)) return false;
+    if ((left.savedAt || '') !== (right.savedAt || '')) return false;
+    if (noteSyncKey(left) !== noteSyncKey(right)) return false;
+  }
+  return true;
+}
+
 function quizSyncTime(item: QuizItem) {
   return quizItemSyncTime(item);
 }
@@ -496,29 +510,39 @@ function mergeDraftsForPull(
   return [...map.values()];
 }
 
-function mergeNotesForSync(local: Note[], remote: Note[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
-  const dead = new Set(tombstones.notes);
-  const remoteIds = new Set(remote.map((item) => item.id));
-  const map = new Map<number, Note>();
-  for (const item of local) {
-    if (dead.has(item.id)) continue;
-    if (!remoteIds.has(item.id) && item.trashed) continue;
-    map.set(item.id, item);
-  }
-  for (const item of remote) {
-    if (dead.has(item.id)) continue;
-    const existing = map.get(item.id);
-    map.set(item.id, existing ? pickBetterNote(existing, item) : item);
-  }
-  return [...map.values()];
-}
-
 /** notesById / IndexedDB must honor permanent-delete tombstones or trash X
  *  resurrects image notes on every refresh. */
 function stripPermDeletedNotes(notes: Note[], tombstones: PermanentlyDeletedIds = readPermDeleted()): Note[] {
   if (!tombstones.notes.length) return notes;
-  const dead = new Set(tombstones.notes);
-  return notes.filter((n) => !dead.has(n.id));
+  const dead = new Set(tombstones.notes.map(Number).filter(Number.isFinite));
+  if (!dead.size) return notes;
+  let changed = false;
+  const next = notes.filter((n) => {
+    if (!dead.has(Number(n.id))) return true;
+    changed = true;
+    return false;
+  });
+  return changed ? next : notes;
+}
+
+function mergeNotesForSync(local: Note[], remote: Note[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
+  const dead = new Set(tombstones.notes.map(Number).filter(Number.isFinite));
+  const remoteIds = new Set(remote.map((item) => Number(item.id)).filter(Number.isFinite));
+  const map = new Map<number, Note>();
+  for (const item of local) {
+    const id = Number(item.id);
+    if (!Number.isFinite(id) || dead.has(id)) continue;
+    if (!remoteIds.has(id) && item.trashed) continue;
+    map.set(id, id === item.id ? item : { ...item, id });
+  }
+  for (const item of remote) {
+    const id = Number(item.id);
+    if (!Number.isFinite(id) || dead.has(id)) continue;
+    const normalized = id === item.id ? item : { ...item, id };
+    const existing = map.get(id);
+    map.set(id, existing ? pickBetterNote(existing, normalized) : normalized);
+  }
+  return [...map.values()];
 }
 
 function mergeQuizzesForSync(
@@ -4593,7 +4617,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const safe: typeof patch = { ...patch };
     // Always send the latest structure from refs — a queued save captured before
     // create/delete must not overwrite the cloud array with a stale snapshot.
-    // (notes stay as provided — rewriting the full notes[] here slowed saves.)
+    if (safe.notes !== undefined) {
+      safe.notes = stripPermDeletedNotes(notesRef.current, permDeletedRef.current);
+    }
     if (safe.quizzes !== undefined) {
       safe.quizzes = stripPermDeletedQuizzes(quizzesRef.current, permDeletedRef.current);
     }
@@ -5703,23 +5729,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return;
       }
       const tombstones = permDeletedRef.current;
-      const merged = stripPermDeletedNotes(mergeByIdNewer(notesRef.current, durable), tombstones);
-      if (JSON.stringify(merged) !== JSON.stringify(notesRef.current)) {
-        isApplyingRemoteRef.current = true;
-        try {
-          notesRef.current = merged;
-          setNotes(merged);
-          safeSetItem('malacadhati', JSON.stringify(merged));
-        } finally {
-          isApplyingRemoteRef.current = false;
-        }
+      const dead = new Set(tombstones.notes.map(Number).filter(Number.isFinite));
+      // Ignore permanently deleted rows — never mass-DELETE them on every child
+      // event (image notesById DELETEs saturated the socket and notes blinked).
+      const liveDurable = durable.filter((n) => !dead.has(Number(n.id)));
+      if (!liveDurable.length) return;
+      const merged = stripPermDeletedNotes(mergeByIdNewer(notesRef.current, liveDurable), tombstones);
+      if (notesMetaEqual(merged, notesRef.current)) return;
+      isApplyingRemoteRef.current = true;
+      try {
+        notesRef.current = merged;
+        setNotes(merged);
+        safeSetItem('malacadhati', JSON.stringify(merged));
+      } finally {
+        isApplyingRemoteRef.current = false;
+        flushPendingInstantDataSave();
       }
-      // Best-effort: scrub permanently-deleted ids still lingering in notesById
-      // (large image notes sometimes fail the single DELETE).
-      const dead = new Set(tombstones.notes);
-      durable.forEach((n) => {
-        if (dead.has(n.id)) void removeNoteDurable(userRef.current?.uid, n.id);
-      });
     };
     function scheduleNotesByIdFlush() {
       if (notesByIdFlush) return;
@@ -5744,8 +5769,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       // A missing mirror is not a delete — only an explicit permanent-delete
       // tombstone may drop a note, exactly like quizSetsById.
       const id = Number(snap.key);
-      if (!Number.isFinite(id) || !permDeletedRef.current.notes.includes(id)) return;
-      const next = notesRef.current.filter((n) => n.id !== id);
+      if (!Number.isFinite(id)) return;
+      if (!permDeletedRef.current.notes.some((deadId) => Number(deadId) === id)) return;
+      const next = notesRef.current.filter((n) => Number(n.id) !== id);
       if (next.length === notesRef.current.length) return;
       notesRef.current = next;
       setNotes(next);
@@ -7340,12 +7366,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     scheduleInstantDataCloudSave({ notes: notesRef.current });
   };
   const permDelete = (id: number) => {
-    recordPermDeleted({ notes: [id] });
-    const nextNotes = notesRef.current.filter((n) => n.id !== id);
+    const numId = Number(id);
+    if (!Number.isFinite(numId)) return;
+    recordPermDeleted({ notes: [numId] });
+    const nextNotes = stripPermDeletedNotes(
+      notesRef.current.filter((n) => Number(n.id) !== numId),
+      permDeletedRef.current,
+    );
     notesRef.current = nextNotes;
     setNotes(nextNotes);
     safeSetItem('malacadhati', JSON.stringify(nextNotes));
-    void removeNoteDurable(userRef.current?.uid, id);
+    // Single targeted delete — never re-scrub the whole notesById tree on sync.
+    void removeNoteDurable(userRef.current?.uid, numId);
     persist({ notes: nextNotes }, true);
     void pushPermDeletedCloud({ notes: nextNotes });
   };
@@ -7476,7 +7508,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   return (
     <NotesContext.Provider
       value={{
-        notes,
+        notes: notes.filter((n) => (
+          !permDeletedRef.current.notes.some((deadId) => Number(deadId) === Number(n.id))
+        )),
         drafts,
         quizzes: quizzes.filter((q) => !q.trashed),
         // Never surface permanently-deleted ghosts even if a stale sync briefly
