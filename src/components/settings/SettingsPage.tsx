@@ -274,14 +274,14 @@ export function SettingsPage() {
               aria-pressed={dark}
               aria-label={dark ? t.settingsLightMode : t.settingsDarkMode}
               className={
-                'relative h-8 w-14 flex-shrink-0 rounded-full transition-colors ' +
+                'relative h-7 w-12 flex-shrink-0 rounded-full p-0.5 transition-colors ' +
                 (dark ? 'bg-primary' : 'bg-app-border dark:bg-white/20')
               }
             >
               <span
                 className={
-                  'absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-transform ' +
-                  (dark ? 'translate-x-7' : 'translate-x-1')
+                  'block h-6 w-6 rounded-full bg-white shadow transition-transform ' +
+                  (dark ? 'translate-x-5' : 'translate-x-0')
                 }
               />
             </button>
