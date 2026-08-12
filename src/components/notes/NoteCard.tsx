@@ -17,6 +17,7 @@ interface Props {
   selectMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
+  seq?: number;
 }
 
 function favBtnClass(active: boolean) {
@@ -43,7 +44,7 @@ function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: 
   );
 }
 
-export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHitIndex = null, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect }: Props) {
+export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHitIndex = null, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect, seq }: Props) {
   const { t, lang } = useLanguage();
   const { toggleRead, toggleUnread, toggleFav, archive, unarchive, trash, restore, permDelete } = useNotes();
   const { show } = useToast();
@@ -86,6 +87,14 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
             onChange={() => onToggleSelect?.(note.id)}
             className="mt-1 h-4 w-4 flex-shrink-0 accent-primary"
           />
+        )}
+        {seq != null && (
+          <span
+            className="mt-0.5 inline-flex h-6 min-w-[1.5rem] flex-shrink-0 items-center justify-center rounded-md bg-primary/10 px-1.5 text-[11px] font-bold tabular-nums text-primary dark:bg-primary/20"
+            aria-hidden="true"
+          >
+            {seq}
+          </span>
         )}
         <div className="min-w-0 flex-1">
           {note.title && (

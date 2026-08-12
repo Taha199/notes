@@ -82,7 +82,7 @@ function NoteList({ notes, search, searchHitStarts, activeSearchHitIndex, emptyS
         ? 'mx-auto flex max-w-3xl flex-col gap-4 px-3 pb-6 sm:px-5'
         : 'grid grid-cols-1 gap-3.5 px-3 pb-6 sm:grid-cols-2 sm:px-5 lg:grid-cols-3 xl:grid-cols-4'
     }>
-      {sorted.map((n) => (
+      {sorted.map((n, i) => (
         <NoteCard
           key={n.id}
           note={n}
@@ -94,6 +94,7 @@ function NoteList({ notes, search, searchHitStarts, activeSearchHitIndex, emptyS
           selectMode={selectMode}
           selected={selected?.has(n.id)}
           onToggleSelect={onToggleSelect}
+          seq={i + 1}
         />
       ))}
     </div>
