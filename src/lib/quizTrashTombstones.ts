@@ -120,12 +120,12 @@ export function pruneQuizListsAgainstTrashState(
 ): { quizzes: QuizItem[]; sets: QuizSet[] } {
   const emptiedAt = readTrashEmptiedAt();
   const dead = readPermDeletedLite();
-  const deadQ = new Set(dead.quizzes);
-  const deadS = new Set(dead.quizSets);
+  const deadQ = new Set(dead.quizzes.map(Number).filter(Number.isFinite));
+  const deadS = new Set(dead.quizSets.map(String));
   const dropItem = (item: QuizItem) =>
-    deadQ.has(item.id) || (!!item.trashed && emptiedAt > 0 && entityTime(item) <= emptiedAt);
+    deadQ.has(Number(item.id)) || (!!item.trashed && emptiedAt > 0 && entityTime(item) <= emptiedAt);
   const dropSet = (set: QuizSet) =>
-    deadS.has(set.id) || (!!set.trashed && emptiedAt > 0 && entityTime(set) <= emptiedAt);
+    deadS.has(String(set.id)) || (!!set.trashed && emptiedAt > 0 && entityTime(set) <= emptiedAt);
   const nextSets = sets.filter((set) => !dropSet(set)).map((set) => {
     const items = (set.items ?? []).filter((item) => !dropItem(item));
     return items.length === (set.items ?? []).length ? set : { ...set, items };

@@ -278,32 +278,37 @@ export function mergeQuizItemsUnion(
     orderFrom?: 'local' | 'remote';
   },
 ): QuizItem[] {
-  const dead = new Set(opts?.permanentlyDeletedIds ?? []);
+  const dead = new Set(
+    [...(opts?.permanentlyDeletedIds ?? [])].map((id) => Number(id)).filter((id) => Number.isFinite(id)),
+  );
   const softTrash = new Set(
     [...(opts?.softTrashTombstoneIds ?? [])].map((id) => Number(id)).filter((id) => Number.isFinite(id)),
   );
-  const remoteIds = new Set(remote.map((item) => item.id));
+  const remoteIds = new Set(remote.map((item) => Number(item.id)).filter((id) => Number.isFinite(id)));
   const map = new Map<number, QuizItem>();
   for (const item of local) {
-    if (dead.has(item.id)) continue;
+    const id = Number(item.id);
+    if (!Number.isFinite(id) || dead.has(id)) continue;
     // Local-only trashed row omitted from remote: drop (ghost after Empty Trash
     // style cleanup is handled by callers). Keep pending soft-deletes that still
     // need to sync — and always keep rows with an active soft-trash tombstone.
-    if (!remoteIds.has(item.id) && item.trashed && !softTrash.has(item.id)) continue;
-    map.set(item.id, item);
+    if (!remoteIds.has(id) && item.trashed && !softTrash.has(id)) continue;
+    map.set(id, id === item.id ? item : { ...item, id });
   }
   for (const item of remote) {
-    if (dead.has(item.id)) continue;
-    const existing = map.get(item.id);
-    let merged = existing ? pickNewerQuizItem(existing, item) : item;
+    const id = Number(item.id);
+    if (!Number.isFinite(id) || dead.has(id)) continue;
+    const normalized = id === item.id ? item : { ...item, id };
+    const existing = map.get(id);
+    let merged = existing ? pickNewerQuizItem(existing, normalized) : normalized;
     // Soft-trash tombstone always beats a stale live copy from a richer shell.
-    if (softTrash.has(merged.id) && !merged.trashed) {
-      const trashedSide = existing?.trashed ? existing : (item.trashed ? item : null);
+    if (softTrash.has(id) && !merged.trashed) {
+      const trashedSide = existing?.trashed ? existing : (normalized.trashed ? normalized : null);
       merged = trashedSide
         ? pickNewerQuizItem(trashedSide, { ...merged, trashed: true })
         : { ...merged, trashed: true };
     }
-    map.set(item.id, merged);
+    map.set(id, merged);
   }
   const localMax = Math.max(0, ...local.map((item) => quizItemSyncTime(item)));
   const remoteMax = Math.max(0, ...remote.map((item) => quizItemSyncTime(item)));
@@ -312,7 +317,8 @@ export function mergeQuizItemsUnion(
   const ordered: QuizItem[] = [];
   const seen = new Set<number>();
   for (const item of orderSource) {
-    const merged = map.get(item.id);
+    const id = Number(item.id);
+    const merged = Number.isFinite(id) ? map.get(id) : undefined;
     if (!merged || seen.has(merged.id)) continue;
     ordered.push(merged);
     seen.add(merged.id);
