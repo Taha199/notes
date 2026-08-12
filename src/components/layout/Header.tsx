@@ -5,7 +5,7 @@ import { LanguageSwitcher } from '../common/LanguageSwitcher';
 import { normalizeSearch } from '../../lib/noteSearch';
 
 const ICONS: Record<Page, string> = {
-  home: '🏠', fav: '★', unread: '📖', read: '✓', library: '📚', files: '📎', archive: '🗄', trash: '🗑', quiz: '🧠', download: '💻', settings: '⚙️', admin: '👑',
+  home: '🏠', fav: '★', todo: '📅', unread: '📖', read: '✓', library: '📚', files: '📎', archive: '🗄', trash: '🗑', quiz: '🧠', download: '💻', settings: '⚙️', admin: '👑',
 };
 
 const navBtn = 'flex h-7 w-7 items-center justify-center rounded-lg border border-app-border text-app-text-secondary transition-colors hover:bg-app-bg hover:text-app-text disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
@@ -34,7 +34,7 @@ export function Header({
   const { t } = useLanguage();
   const hasSearch = normalizeSearch(search).length > 0;
   const titles: Record<Page, string> = {
-    home: t.pageHome, fav: t.pageFav, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, files: t.pageFiles, archive: t.pageArch, trash: t.pageTrash, quiz: 'Quiz', download: t.pageDownload, settings: t.settingsTitle, admin: t.adminTitle,
+    home: t.pageHome, fav: t.pageFav, todo: t.pageTodo, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, files: t.pageFiles, archive: t.pageArch, trash: t.pageTrash, quiz: 'Quiz', download: t.pageDownload, settings: t.settingsTitle, admin: t.adminTitle,
   };
   const hitLabel = searchHitTotal > 0
     ? t.searchHitsLabel.replace('{current}', String(searchHitCurrent)).replace('{total}', String(searchHitTotal))

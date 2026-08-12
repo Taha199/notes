@@ -3,6 +3,7 @@ import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotesProvider } from './contexts/NotesContext';
+import { TodosProvider } from './contexts/TodosContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AuthPage } from './components/auth/AuthPage';
 import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
@@ -77,8 +78,10 @@ function Root() {
 
   return (
     <NotesProvider>
-      <Dashboard />
-      <FloatingOtterSearch />
+      <TodosProvider>
+        <Dashboard />
+        <FloatingOtterSearch />
+      </TodosProvider>
     </NotesProvider>
   );
 }

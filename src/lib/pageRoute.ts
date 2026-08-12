@@ -3,6 +3,7 @@ import type { Page } from '../types';
 const PAGE_PATHS: Record<Page, string> = {
   home: '/',
   fav: '/favorites',
+  todo: '/todo',
   unread: '/unread',
   read: '/read',
   library: '/library',

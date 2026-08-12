@@ -15,6 +15,7 @@ import { SetPasswordModal } from './auth/SetPasswordModal';
 import { SeoHead } from './common/SeoHead';
 import { FilesPage } from './files/FilesPage';
 import { QuizPage } from './quiz/QuizPage';
+import { TodoCalendarPage } from './todo/TodoCalendarPage';
 import { SettingsPage } from './settings/SettingsPage';
 import { DownloadPage } from './download/DownloadPage';
 import { AdminPanel } from './admin/AdminPanel';
@@ -205,7 +206,7 @@ export function Dashboard() {
   const [noteViewMode, setNoteViewMode] = useState<NoteViewMode>(() => readNoteViewMode());
   const [quizFocusItemId, setQuizFocusItemId] = useState<number | null>(null);
   const hasSearch = normalizeSearch(search).length > 0;
-  const showGlobalSearch = hasSearch && page !== 'files' && page !== 'settings' && page !== 'admin';
+  const showGlobalSearch = hasSearch && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo';
 
   const handleNoteViewMode = useCallback((mode: NoteViewMode) => {
     setNoteViewMode(mode);
@@ -406,6 +407,7 @@ export function Dashboard() {
           )}
 
           {!showGlobalSearch && page === 'files' && <FilesPage search={search} />}
+          {!showGlobalSearch && page === 'todo' && <TodoCalendarPage search={search} />}
           {!showGlobalSearch && page === 'quiz' && (
             <QuizPage
               focusItemId={quizFocusItemId}

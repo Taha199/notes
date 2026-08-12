@@ -61,6 +61,10 @@ const PAGE_META: Partial<Record<Page, { sv: { title: string; description: string
     sv: { title: 'Favoriter – Taha Note', description: 'Dina favoritmarkerade anteckningar i Taha Note.' },
     en: { title: 'Favourites – Taha Note', description: 'Your favourite notes in Taha Note.' },
   },
+  todo: {
+    sv: { title: 'Att göra – Taha Note', description: 'Kalender och att-göra-lista i Taha Note.' },
+    en: { title: 'To-do calendar – Taha Note', description: 'Calendar to-do list in Taha Note.' },
+  },
   archive: {
     sv: { title: 'Arkiv – Taha Note', description: 'Arkiverade anteckningar sparade i Taha Note.' },
     en: { title: 'Archive – Taha Note', description: 'Archived notes stored in Taha Note.' },

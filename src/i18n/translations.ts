@@ -8,6 +8,7 @@ export interface Translation {
   appSubtitle: string;
   navHome: string;
   navFav: string;
+  navTodo: string;
   navUnread: string;
   navRead: string;
   navLibrary: string;
@@ -81,6 +82,7 @@ export interface Translation {
   pageUnread: string;
   pageRead: string;
   pageFav: string;
+  pageTodo: string;
   pageArch: string;
   pageFiles: string;
   pageTrash: string;
@@ -572,13 +574,22 @@ export interface Translation {
   noteCreatedLabel: string;
   noteUpdatedLabel: string;
   noteLastSaved: string;
+  todoToday: string;
+  todoAdd: string;
+  todoAddPh: string;
+  todoEmptyDay: string;
+  todoDone: string;
+  todoUndone: string;
+  todoDelete: string;
+  todoPrevMonth: string;
+  todoNextMonth: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
   en: {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
     appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
-    navHome: 'Home', navFav: 'Favourites', navUnread: 'Notes to Study', navRead: 'Studied Notes',
+    navHome: 'Home', navFav: 'Favourites', navTodo: 'To-do', navUnread: 'Notes to Study', navRead: 'Studied Notes',
     navLibrary: 'Notes Library', navFiles: 'File Uploads', navArchive: 'Archive', navTrash: 'Trash',
     navDownload: 'Desktop app', downloadSectionTitle: 'Download as app',
     pageDownload: 'Desktop app', downloadTitle: 'Taha Note for Mac',
@@ -604,7 +615,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Loading your open drafts from the cloud…',
     draftsWriteWhileLoading: 'You can start a new draft right away while your other drafts sync.',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Notes to Study', pageRead: 'Studied Notes',
-    pageFav: 'Favourites', pageArch: 'Archive', pageFiles: 'File Uploads', pageTrash: 'Trash',
+    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
@@ -964,11 +975,20 @@ export const LANGS: Record<Lang, Translation> = {
     noteCreatedLabel: 'Created',
     noteUpdatedLabel: 'Updated',
     noteLastSaved: 'Last',
+    todoToday: 'Today',
+    todoAdd: 'Add',
+    todoAddPh: 'Add a task for this day…',
+    todoEmptyDay: 'No tasks on this day',
+    todoDone: 'Mark as done',
+    todoUndone: 'Mark as not done',
+    todoDelete: 'Delete task',
+    todoPrevMonth: 'Previous month',
+    todoNextMonth: 'Next month',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
     appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
-    navHome: 'Hem', navFav: 'Favoriter', navUnread: 'Att studera', navRead: 'Studerade',
+    navHome: 'Hem', navFav: 'Favoriter', navTodo: 'Att göra', navUnread: 'Att studera', navRead: 'Studerade',
     navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     navDownload: 'Skrivbordsapp', downloadSectionTitle: 'Ladda ner som program',
     pageDownload: 'Skrivbordsapp', downloadTitle: 'Taha Note för Mac',
@@ -994,7 +1014,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Hämtar dina öppna utkast från molnet…',
     draftsWriteWhileLoading: 'Du kan börja skriva ett nytt utkast direkt medan dina andra utkast synkas.',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Att studera', pageRead: 'Studerade',
-    pageFav: 'Favoriter', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageTrash: 'Papperskorg',
+    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
@@ -1354,5 +1374,14 @@ export const LANGS: Record<Lang, Translation> = {
     noteCreatedLabel: 'Skapad',
     noteUpdatedLabel: 'Uppdaterad',
     noteLastSaved: 'Senast',
+    todoToday: 'Idag',
+    todoAdd: 'Lägg till',
+    todoAddPh: 'Lägg till en uppgift för den här dagen…',
+    todoEmptyDay: 'Inga uppgifter den här dagen',
+    todoDone: 'Markera som klar',
+    todoUndone: 'Markera som inte klar',
+    todoDelete: 'Ta bort uppgift',
+    todoPrevMonth: 'Föregående månad',
+    todoNextMonth: 'Nästa månad',
   },
 };

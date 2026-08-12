@@ -1,0 +1,243 @@
+import { useMemo, useState } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
+import { useTodos } from '../../contexts/TodosContext';
+import { addMonths, monthGrid, toDateKey, todosForDate } from '../../lib/todosStore';
+import { normalizeSearch } from '../../lib/noteSearch';
+
+function weekdayLabels(locale: string): string[] {
+  const monday = new Date(2026, 7, 10);
+  return Array.from({ length: 7 }, (_, i) => {
+    const day = new Date(monday);
+    day.setDate(monday.getDate() + i);
+    return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(day);
+  });
+}
+
+export function TodoCalendarPage({ search = '' }: { search?: string }) {
+  const { t } = useLanguage();
+  const { todos, addTodo, toggleTodo, renameTodo, deleteTodo } = useTodos();
+  const todayKey = toDateKey(new Date());
+  const [cursor, setCursor] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [selectedKey, setSelectedKey] = useState(todayKey);
+  const [draft, setDraft] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+
+  const query = normalizeSearch(search);
+  const visibleTodos = useMemo(
+    () => (query ? todos.filter((todo) => normalizeSearch(todo.title).includes(query)) : todos),
+    [todos, query],
+  );
+  const cells = useMemo(() => monthGrid(cursor.getFullYear(), cursor.getMonth()), [cursor]);
+  const weekdays = useMemo(() => weekdayLabels(t.dateLocale), [t.dateLocale]);
+  const monthLabel = new Intl.DateTimeFormat(t.dateLocale, { month: 'long', year: 'numeric' }).format(cursor);
+  const selectedLabel = new Intl.DateTimeFormat(t.dateLocale, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(new Date(`${selectedKey}T12:00:00`));
+  const dayTodos = todosForDate(visibleTodos, selectedKey);
+  const counts = useMemo(() => {
+    const map = new Map<string, { total: number; open: number }>();
+    for (const todo of visibleTodos) {
+      const row = map.get(todo.date) ?? { total: 0, open: 0 };
+      row.total += 1;
+      if (!todo.done) row.open += 1;
+      map.set(todo.date, row);
+    }
+    return map;
+  }, [visibleTodos]);
+
+  const submitDraft = () => {
+    addTodo(draft, selectedKey);
+    setDraft('');
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCursor((prev) => addMonths(prev, -1))}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-app-border bg-white text-app-text-secondary hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5"
+            title={t.todoPrevMonth}
+          >
+            ‹
+          </button>
+          <h3 className="min-w-[10.5rem] text-center text-lg font-bold capitalize tracking-tight text-app-text dark:text-gray-100">
+            {monthLabel}
+          </h3>
+          <button
+            type="button"
+            onClick={() => setCursor((prev) => addMonths(prev, 1))}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-app-border bg-white text-app-text-secondary hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5"
+            title={t.todoNextMonth}
+          >
+            ›
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            const now = new Date();
+            setCursor(new Date(now.getFullYear(), now.getMonth(), 1));
+            setSelectedKey(todayKey);
+          }}
+          className="rounded-xl border border-app-border bg-white px-3.5 py-2 text-[13px] font-semibold text-app-text hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
+        >
+          {t.todoToday}
+        </button>
+      </div>
+
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.9fr)]">
+        <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-900/70">
+          <div className="grid grid-cols-7 border-b border-app-border bg-app-bg/80 px-1 py-2 dark:border-white/10 dark:bg-white/5">
+            {weekdays.map((label) => (
+              <div key={label} className="text-center text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/80">
+                {label}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {cells.map((day) => {
+              const key = toDateKey(day);
+              const inMonth = day.getMonth() === cursor.getMonth();
+              const selected = key === selectedKey;
+              const isToday = key === todayKey;
+              const stats = counts.get(key);
+              const overdue = !!stats?.open && key < todayKey;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSelectedKey(key)}
+                  className={
+                    'relative flex min-h-[4.4rem] flex-col items-center gap-1 border-b border-r border-app-border/70 px-1 py-1.5 text-sm transition-colors dark:border-white/10 ' +
+                    (selected
+                      ? 'bg-primary/12 text-primary'
+                      : isToday
+                        ? 'bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200'
+                        : 'hover:bg-app-bg dark:hover:bg-white/5') +
+                    (inMonth ? '' : ' text-app-text-secondary/40')
+                  }
+                >
+                  <span className={
+                    'flex h-7 w-7 items-center justify-center rounded-full text-[13px] font-semibold ' +
+                    (selected ? 'bg-primary text-white' : isToday ? 'ring-2 ring-amber-400' : '')
+                  }>
+                    {day.getDate()}
+                  </span>
+                  {stats && (
+                    <span className="flex items-center gap-0.5">
+                      {stats.open > 0 ? (
+                        <span className={'h-1.5 w-1.5 rounded-full ' + (overdue ? 'bg-red-500' : 'bg-primary')} />
+                      ) : (
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      )}
+                      {stats.total > 1 && (
+                        <span className="text-[10px] font-bold text-app-text-secondary">{stats.total}</span>
+                      )}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <section className="flex min-h-[22rem] flex-col rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-900/70">
+          <div className="mb-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.pageTodo}</p>
+            <h4 className="mt-0.5 text-base font-bold capitalize text-app-text dark:text-gray-100">{selectedLabel}</h4>
+          </div>
+          <form
+            className="mb-3 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitDraft();
+            }}
+          >
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={t.todoAddPh}
+              className="min-w-0 flex-1 rounded-xl border border-app-border bg-app-bg px-3 py-2 text-[13.5px] text-app-text outline-none placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
+            />
+            <button
+              type="submit"
+              disabled={!draft.trim()}
+              className="rounded-xl bg-primary px-3.5 py-2 text-[13px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t.todoAdd}
+            </button>
+          </form>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+            {dayTodos.length === 0 && (
+              <p className="py-8 text-center text-sm text-app-text-secondary/70">{t.todoEmptyDay}</p>
+            )}
+            {dayTodos.map((todo) => (
+              <div
+                key={todo.id}
+                className="flex items-start gap-2 rounded-xl border border-app-border/80 bg-app-bg/60 px-3 py-2.5 dark:border-white/10 dark:bg-white/5"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleTodo(todo.id)}
+                  className={
+                    'mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border text-[11px] ' +
+                    (todo.done
+                      ? 'border-emerald-400 bg-emerald-500 text-white'
+                      : 'border-app-border bg-white dark:border-white/20 dark:bg-gray-900')
+                  }
+                  title={todo.done ? t.todoUndone : t.todoDone}
+                >
+                  {todo.done ? '✓' : ''}
+                </button>
+                {editingId === todo.id ? (
+                  <input
+                    autoFocus
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => {
+                      renameTodo(todo.id, editValue);
+                      setEditingId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        renameTodo(todo.id, editValue);
+                        setEditingId(null);
+                      }
+                      if (e.key === 'Escape') setEditingId(null);
+                    }}
+                    className="min-w-0 flex-1 rounded-lg border border-primary/40 bg-white px-2 py-1 text-[13.5px] text-app-text outline-none dark:bg-gray-800 dark:text-gray-100"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onDoubleClick={() => {
+                      setEditingId(todo.id);
+                      setEditValue(todo.title);
+                    }}
+                    className={'min-w-0 flex-1 text-left text-[13.5px] ' + (todo.done ? 'text-app-text-secondary line-through' : 'text-app-text dark:text-gray-100')}
+                  >
+                    {todo.title}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => deleteTodo(todo.id)}
+                  className="rounded-lg px-1.5 py-1 text-xs text-app-text-secondary hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                  title={t.todoDelete}
+                >
+                  🗑
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}

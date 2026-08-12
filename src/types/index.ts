@@ -21,7 +21,7 @@ export interface DraftContent {
   html: string;
 }
 
-export type Page = 'home' | 'fav' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz' | 'download' | 'settings' | 'admin';
+export type Page = 'home' | 'fav' | 'todo' | 'unread' | 'read' | 'library' | 'files' | 'archive' | 'trash' | 'quiz' | 'download' | 'settings' | 'admin';
 
 export type NoteViewMode = 'grid' | 'expanded';
 
@@ -113,4 +113,15 @@ export interface QuizFolder {
   /** Manual folder-list order only. */
   orderUpdatedAt?: string;
   system?: 'restored' | 'favorites';
+}
+
+/** Calendar to-do item — dated task, independent of notes/quiz sync. */
+export interface TodoItem {
+  id: string;
+  title: string;
+  done: boolean;
+  /** Local calendar day `YYYY-MM-DD`. */
+  date: string;
+  createdAt: number;
+  updatedAt: number;
 }
