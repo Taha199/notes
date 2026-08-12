@@ -115,17 +115,14 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                   type="button"
                   onClick={() => setSelectedKey(key)}
                   className={
-                    'relative flex min-h-[4.4rem] flex-col items-center gap-1 border-b border-r border-app-border/70 px-1 py-1.5 text-sm transition-colors dark:border-white/10 ' +
+                    'relative flex min-h-[4.4rem] flex-col items-center gap-0.5 border-b border-r border-app-border/70 px-1 py-1.5 text-sm transition-colors dark:border-white/10 ' +
                     (selected
                       ? 'bg-primary/12 text-primary'
                       : overdue
                         ? 'bg-red-50 text-red-700 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.35)] dark:bg-red-500/15 dark:text-red-200 dark:shadow-[inset_0_0_0_1px_rgba(248,113,113,0.35)]'
                         : isToday
-                          ? 'bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200'
+                          ? 'bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-200'
                           : 'hover:bg-app-bg dark:hover:bg-white/5') +
-                    (isToday
-                      ? ' shadow-[inset_0_0_0_2px_rgba(245,158,11,0.85),inset_0_0_14px_rgba(251,191,36,0.45)] dark:shadow-[inset_0_0_0_2px_rgba(251,191,36,0.9),inset_0_0_16px_rgba(251,191,36,0.35)]'
-                      : '') +
                     (inMonth ? '' : ' text-app-text-secondary/40')
                   }
                 >
@@ -136,14 +133,16 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                       : overdue
                         ? 'bg-red-500 text-white shadow-[0_0_12px_rgba(239,68,68,0.55)]'
                         : isToday
-                          ? 'bg-amber-400 text-white'
-                          : '') +
-                    (isToday
-                      ? ' ring-2 ring-amber-300 shadow-[0_0_0_2px_rgba(251,191,36,0.55),0_0_14px_rgba(245,158,11,0.85)] dark:ring-amber-200 dark:shadow-[0_0_0_2px_rgba(253,230,138,0.5),0_0_16px_rgba(251,191,36,0.75)]'
-                      : '')
+                          ? 'bg-white text-sky-700 ring-2 ring-sky-400/80 dark:bg-sky-500/20 dark:text-sky-100 dark:ring-sky-300/70'
+                          : '')
                   }>
                     {day.getDate()}
                   </span>
+                  {isToday && (
+                    <span className="rounded-full bg-sky-500/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700 dark:bg-sky-400/20 dark:text-sky-200">
+                      {t.todoToday}
+                    </span>
+                  )}
                   {stats && (
                     <span className="flex items-center gap-0.5">
                       {stats.open > 0 ? (
