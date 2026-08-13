@@ -301,7 +301,13 @@ function parseCloudPermDeleted(cloud: Record<string, unknown> | null | undefined
 function cloudIdList(val: unknown): unknown[] {
   if (!val) return [];
   if (Array.isArray(val)) return val.filter((v) => v != null && v !== false);
-  if (typeof val === 'object') return Object.values(val as Record<string, unknown>).filter((v) => v != null && v !== false);
+  if (typeof val === 'object') {
+    const obj = val as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    const mapStyle = keys.length > 0 && keys.every((k) => obj[k] === true || obj[k] === 1);
+    if (mapStyle) return keys;
+    return Object.values(obj).filter((v) => v != null && v !== false);
+  }
   return [];
 }
 
@@ -325,6 +331,44 @@ function mergePermDeleted(local: PermanentlyDeletedIds, cloud: Record<string, un
     quizFolders: [...new Set([...local.quizFolders, ...remote.quizFolders])],
   };
   writePermDeleted(merged);
+  return merged;
+}
+
+function permDeletedToMap(ids: Array<string | number>): Record<string, true> {
+  const map: Record<string, true> = {};
+  for (const id of ids) {
+    if (id == null || id === '') continue;
+    map[String(id)] = true;
+  }
+  return map;
+}
+
+async function appendPermDeletedCloud(uid: string, local: PermanentlyDeletedIds): Promise<PermanentlyDeletedIds> {
+  let remote = emptyPermDeleted();
+  let gotRemote = false;
+  try {
+    const res = await rtdbFetch(`/users/${uid}/permanentlyDeletedIds`);
+    if (res.ok) {
+      remote = parsePermDeletedVal(await res.json());
+      gotRemote = true;
+    }
+  } catch { /* keep local */ }
+  const merged = addPermDeleted(local, remote);
+  const patch: Record<string, unknown> = { cloudSyncAt: Date.now() };
+  if (gotRemote) {
+    patch.permanentlyDeletedIds = {
+      notes: permDeletedToMap(merged.notes),
+      quizzes: permDeletedToMap(merged.quizzes),
+      quizSets: permDeletedToMap(merged.quizSets),
+      quizFolders: permDeletedToMap(merged.quizFolders),
+    };
+  } else {
+    if (local.notes.length) patch['permanentlyDeletedIds/notes'] = permDeletedToMap(local.notes);
+    if (local.quizzes.length) patch['permanentlyDeletedIds/quizzes'] = permDeletedToMap(local.quizzes);
+    if (local.quizSets.length) patch['permanentlyDeletedIds/quizSets'] = permDeletedToMap(local.quizSets);
+    if (local.quizFolders.length) patch['permanentlyDeletedIds/quizFolders'] = permDeletedToMap(local.quizFolders);
+  }
+  await update(dbRef(database, `users/${uid}`), patch);
   return merged;
 }
 
@@ -518,13 +562,19 @@ function adoptCloudNoteBodies(current: Note[], cloud: Note[], applyFlags = true)
         || !!incoming.trashed !== !!next.trashed
       )
     ) {
+      const incomingAt = Date.parse(incoming.savedAt || '') || 0;
+      const curAt = Date.parse(next.savedAt || '') || 0;
+      // A stale live copy on the other phone must not undelete a newer trash.
+      const trashed = next.trashed && !incoming.trashed && incomingAt <= curAt
+        ? true
+        : !!incoming.trashed;
       next = {
         ...next,
         archived: !!incoming.archived,
         read: !!incoming.read,
         fav: !!incoming.fav,
-        trashed: incoming.trashed,
-        deletedAt: incoming.deletedAt ?? next.deletedAt,
+        trashed,
+        deletedAt: trashed ? (next.deletedAt || incoming.deletedAt) : incoming.deletedAt,
       };
     }
     if (next !== cur) byId.set(id, next);
@@ -2591,15 +2641,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         )),
       );
       const prev = notesRef.current;
-      // A short local snapshot must not hide notes the other device already
-      // put in notesById (mobile 15 vs desktop 64).
-      if (prev.length > mergedNotes.length) {
-        const have = new Set(mergedNotes.map((n) => Number(n.id)));
-        const extra = prev.filter((n) => !have.has(Number(n.id)));
-        if (extra.length) {
-          mergedNotes = sortNotesByCreatedDesc([...mergedNotes, ...extra]);
-        }
-      }
       notesRef.current = mergedNotes;
       local = { ...local, notes: mergedNotes };
       rememberNotesBootCache(mergedNotes, true);
@@ -4972,14 +5013,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     savingStartedAt.current = syncedAt;
     try {
       await update(dbRef(database, `users/${u.uid}`), {
-        notes: nextNotes,
+        notes: compactNotesForListCache(nextNotes),
         quizzes: nextQuizzes,
         quizSets: nextSets,
         quizFolders: nextFolders,
-        permanentlyDeletedIds: permDeletedRef.current,
         trashEmptiedAt: readTrashEmptiedAt(),
         cloudSyncAt: syncedAt,
       });
+      permDeletedRef.current = await appendPermDeletedCloud(u.uid, permDeletedRef.current);
       saveFailedRef.current = false;
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
@@ -5008,25 +5049,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFolders?: QuizFolder[];
   }) => {
     const u = userRef.current;
-    if (!u || !loadedRef.current) return;
+    if (!u) return;
     const syncedAt = Date.now();
     try {
-      await update(dbRef(database, `users/${u.uid}`), {
-        ...(payload?.notes ? { notes: payload.notes } : {}),
-        ...(payload?.quizzes ? { quizzes: payload.quizzes } : {}),
-        ...(payload?.quizSets ? { quizSets: payload.quizSets } : {}),
-        ...(payload?.quizFolders ? { quizFolders: payload.quizFolders } : {}),
-        permanentlyDeletedIds: permDeletedRef.current,
-        cloudSyncAt: syncedAt,
-      });
+      permDeletedRef.current = await appendPermDeletedCloud(u.uid, permDeletedRef.current);
+      writePermDeleted(permDeletedRef.current);
+      if (payload?.notes || payload?.quizzes || payload?.quizSets || payload?.quizFolders) {
+        await update(dbRef(database, `users/${u.uid}`), {
+          ...(payload?.notes ? { notes: compactNotesForListCache(payload.notes) } : {}),
+          ...(payload?.quizzes ? { quizzes: payload.quizzes } : {}),
+          ...(payload?.quizSets ? { quizSets: payload.quizSets } : {}),
+          ...(payload?.quizFolders ? { quizFolders: payload.quizFolders } : {}),
+          cloudSyncAt: syncedAt,
+        });
+      }
       lastLocalSaveAt.current = syncedAt;
       lastAppliedRemoteSyncAt.current = syncedAt;
       setCloudSyncedAt(syncedAt);
       safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
       markPushedData(payload ?? {}, syncedAt);
     } catch (err) {
-      // Full cloud save will retry the data, but surface the failure instead
-      // of silently pretending the delete was synced.
       console.error('[cloud-save] perm-delete push failed', err);
       saveFailedRef.current = true;
       setCloudStatus('error');
@@ -5330,7 +5372,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // (A race after a failed/partial load used to wipe notes/quizzes with [].)
     const body: Record<string, unknown> = {
       ...draftPayload,
-      permanentlyDeletedIds: permDeletedRef.current,
       tokenUsage: tokenUsageRef.current,
       cloudSyncAt: Date.now(),
     };

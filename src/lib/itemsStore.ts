@@ -215,8 +215,20 @@ export function keepRicherNoteBody(existing: Note | undefined, incoming: Note): 
   return { ...incoming, html: existing.html, text: incoming.text || existing.text };
 }
 
+function isNotePermanentlyDeleted(id: number): boolean {
+  try {
+    const raw = localStorage.getItem('malacadhati_perm_deleted');
+    if (!raw) return false;
+    const notes = (JSON.parse(raw) as { notes?: unknown[] }).notes;
+    return Array.isArray(notes) && notes.some((x) => Number(x) === Number(id));
+  } catch {
+    return false;
+  }
+}
+
 /** Single-note cloud write — independent of the giant notes[] array. */
 export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
+  if (isNotePermanentlyDeleted(Number(note.id))) return true;
   let toWrite = note;
   // Only peek cloud when this looks like an empty shell — a real save must
   // not wait on a 90s GET before the other phone can see the note.
