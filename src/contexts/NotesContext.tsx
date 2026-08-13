@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { onChildAdded, onChildChanged, onChildRemoved, onValue, ref as dbRef, remove, set, update } from 'firebase/database';
 import type { Note, QuizItem, QuizSet, QuizFolder, ChatConversation } from '../types';
 import { database, FB_DB_URL } from '../lib/firebase';
@@ -47,9 +47,7 @@ import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import {
   applyDurableQuizItems,
   fetchNoteByIdCloud,
-  fetchNotesArchiveCloud,
   fetchNotesByIdCloud,
-  putNotesArchiveCloud,
   fetchQuizFoldersByIdCloud,
   fetchQuizItemsByIdCloud,
   fetchQuizSetsByIdCloud,
@@ -84,10 +82,8 @@ import {
   clearNotesBootCache,
   clearNotesListCache,
   readNotesBootCache,
-  readArchiveNotesCache,
   readNotesListCache,
   rememberNotesBootCache,
-  writeArchiveNotesCache,
   writeNotesListCache,
   NOTES_LIST_CACHE_KEY,
 } from '../lib/notesListCache';
@@ -502,14 +498,17 @@ function adoptCloudNoteBodies(current: Note[], cloud: Note[]): Note[] {
     }
     const cloudImg = noteHasDisplayableImage(incoming.html);
     const localImg = noteHasDisplayableImage(cur.html);
+    let next = cur;
     if (cloudImg && !localImg) {
-      byId.set(id, { ...cur, html: incoming.html, text: incoming.text || cur.text });
-      continue;
+      next = { ...next, html: incoming.html, text: incoming.text || next.text };
+    } else if (!localImg && (incoming.html || '').length > (cur.html || '').length) {
+      next = { ...next, html: incoming.html, text: incoming.text || next.text };
     }
-    if (localImg && !cloudImg) continue;
-    if ((incoming.html || '').length > (cur.html || '').length) {
-      byId.set(id, { ...cur, html: incoming.html, text: incoming.text || cur.text });
+    // Same notesById row as every other section — archive is only this flag.
+    if (!!incoming.archived !== !!next.archived) {
+      next = { ...next, archived: !!incoming.archived };
     }
+    if (next !== cur) byId.set(id, next);
   }
   return [...byId.values()];
 }
@@ -1104,9 +1103,6 @@ interface NotesCtx {
   updateNote: (id: number, patch: Partial<Note>) => void;
   /** Pull one note body from notesById — used when a fresh PC painted an empty shell. */
   hydrateNote: (id: number) => Promise<void>;
-  /** Archive-page only: tiny list cache + notesArchive cloud. Does not touch other sections. */
-  archiveFastNotes: Note[];
-  hydrateArchiveNotes: () => Promise<void>;
   nowStr: () => string;
 }
 
@@ -1341,10 +1337,7 @@ function readBootNotesForPaint(): Note[] {
   const merged = mergeNotesPreferRicher(fromLs, fromListCache, fromMemory, fromIdb).filter((note) => (
     !(note.trashed && emptiedAt && entitySyncTime(note) <= emptiedAt)
   ));
-  const have = new Set(merged.map((n) => Number(n.id)));
-  const archiveOnly = stripPermDeletedNotes(readArchiveNotesCache(), tombstones)
-    .filter((n) => n.archived && !n.trashed && !have.has(Number(n.id)));
-  const sorted = sortNotesByCreatedDesc(archiveOnly.length ? [...merged, ...archiveOnly] : merged);
+  const sorted = sortNotesByCreatedDesc(merged);
   if (sorted.length) rememberNotesBootCache(sorted);
   return sorted;
 }
@@ -2223,7 +2216,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
   const [notes, setNotes] = useState<Note[]>(() => readBootNotesForPaint());
-  const [archiveFastNotes, setArchiveFastNotes] = useState<Note[]>(() => readArchiveNotesCache());
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
   const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
@@ -2352,7 +2344,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   } | null>(null);
   const instantDataSaveQueuedRef = useRef(false);
   const notesRef = useRef(notes);
-  const lastArchiveSigRef = useRef('');
   const quizzesRef = useRef(quizzes);
   const chatsRef = useRef(chats);
   const quizSetsRef = useRef(quizSets);
@@ -2437,18 +2428,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return merged;
     });
   }, [notes, quizzes, quizSets, quizFolders, loaded, user]);
-
-  // Archive membership only — tiny LS + notesArchive node. Never part of boot sync.
-  useEffect(() => {
-    const archived = notes.filter((n) => n.archived && !n.trashed);
-    const sig = archived.map((n) => Number(n.id)).sort((a, b) => a - b).join(',');
-    if (sig === lastArchiveSigRef.current) return;
-    if (!sig && !lastArchiveSigRef.current) return;
-    lastArchiveSigRef.current = sig;
-    writeArchiveNotesCache(archived);
-    setArchiveFastNotes(archived.length ? archived : readArchiveNotesCache());
-    if (user?.uid) void putNotesArchiveCloud(user.uid, archived);
-  }, [notes, user?.uid]);
 
   const nowStr = () =>
     new Date().toLocaleString(t.dateLocale, {
@@ -5459,7 +5438,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     lastCloudDraftIdsRef.current = new Set(parseCloudDrafts(cloud).map((d) => d.id));
 
     const mergedNotes = filterResurrectedTrash(
-      adoptCloudNoteBodies(notesRef.current, mergeNotesForSync(notesRef.current, remoteNotes, tombstones)),
+      adoptCloudNoteBodies(
+        mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
+        remoteNotes,
+      ),
       notesRef.current,
     );
     let mergedQuizzes = stripPermDeletedQuizzes(
@@ -6198,7 +6180,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!fromChange) {
         const id = Number(note.id);
         const existing = notesRef.current.find((n) => Number(n.id) === id);
-        if (existing && noteContentLength(existing) >= noteContentLength(note)) return;
+        if (
+          existing
+          && noteContentLength(existing) >= noteContentLength(note)
+          && !!existing.archived === !!note.archived
+        ) return;
       }
       notesByIdBuffer.push(note);
       scheduleNotesByIdFlush();
@@ -6510,27 +6496,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const found = merged.find((n) => Number(n.id) === Number(id));
     if (found) void putNoteLocal(found);
   };
-
-  const hydrateArchiveNotes = useCallback(async () => {
-    const adoptArchiveShells = (incoming: Note[]) => {
-      const archived = incoming.filter((n) => n.archived && !n.trashed);
-      if (!archived.length) return;
-      writeArchiveNotesCache(archived);
-      setArchiveFastNotes(archived);
-      const have = new Set(notesRef.current.map((n) => Number(n.id)));
-      const missing = archived.filter((n) => !have.has(Number(n.id)));
-      if (!missing.length) return;
-      const next = sortNotesByCreatedDesc([...notesRef.current, ...missing]);
-      notesRef.current = next;
-      setNotes(next);
-    };
-    const cached = readArchiveNotesCache();
-    if (cached.length) adoptArchiveShells(cached);
-    const uid = userRef.current?.uid;
-    if (!uid) return;
-    const cloud = await fetchNotesArchiveCloud(uid);
-    if (cloud.length) adoptArchiveShells(cloud);
-  }, []);
 
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
     const newId = Date.now();
@@ -8058,8 +8023,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         deleteMany,
         updateNote,
         hydrateNote,
-        archiveFastNotes,
-        hydrateArchiveNotes,
         nowStr,
         chats,
         saveChats,
