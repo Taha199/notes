@@ -7502,61 +7502,54 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // near its quota permanently — the reason fresh saves' local writes can fail
   // silently. Once per session, quietly upload those to Storage and swap the
   // content to short URLs, a few images at a time.
-  const INLINE_IMAGE_MIGRATE_MIN_CHARS = 80;
-  const INLINE_IMAGE_MIGRATE_MAX_PER_SESSION = 80;
-
-  const collectInlineImageUrls = (): string[] => {
-    const found = new Set<string>();
-    const scan = (html?: string) => {
-      if (!html) return;
-      let idx = 0;
-      for (;;) {
-        const start = html.indexOf('src="data:image/', idx);
-        if (start === -1) break;
-        const urlStart = start + 5;
-        const end = html.indexOf('"', urlStart);
-        if (end === -1) break;
-        const url = html.slice(urlStart, end);
-        if (url.length > INLINE_IMAGE_MIGRATE_MIN_CHARS) found.add(url);
-        idx = end + 1;
-      }
-    };
-    const scanQuizItem = (q: QuizItem) => {
-      scan(q.question);
-      scan(q.answer);
-      scan(q.explanation);
-      (q.options ?? []).forEach((o) => scan(o));
-    };
-    notesRef.current.forEach((n) => scan(n.html));
-    quizzesRef.current.forEach(scanQuizItem);
-    quizSetsRef.current.forEach((s) => s.items.forEach(scanQuizItem));
-    return [...found];
+  const collectNoteInlineImageUrls = (html?: string): string[] => {
+    if (!html) return [];
+    const found: string[] = [];
+    const re = /src=["'](data:image\/[^"']+)["']/gi;
+    for (let match = re.exec(html); match; match = re.exec(html)) {
+      if (match[1] && match[1].length > 80) found.push(match[1]);
+    }
+    return found;
   };
 
-  const migrateInlineImagesToStorage = async () => {
-    const urls = collectInlineImageUrls().slice(0, INLINE_IMAGE_MIGRATE_MAX_PER_SESSION);
-    for (const dataUrl of urls) {
-      if (!userRef.current) return;
-      try {
-        // Quiet: do not hold beforeunload / "Saving…" for background migration.
-        const remoteUrl = await uploadEditorImage(dataUrl, { trackPending: false });
-        if (remoteUrl) replaceEditorImageUrl(dataUrl, remoteUrl, true);
-      } catch {
-        /* keep the base64 copy — retried next session */
+  const syncNoteImagesToCloud = async () => {
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    beginTrackedSave();
+    try {
+      const inline = [...new Set(notesRef.current.flatMap((n) => collectNoteInlineImageUrls(n.html)))];
+      for (const dataUrl of inline) {
+        if (!userRef.current) return;
+        try {
+          const remoteUrl = await uploadEditorImage(dataUrl, { trackPending: false });
+          if (remoteUrl) replaceEditorImageUrl(dataUrl, remoteUrl, true);
+        } catch {
+          /* keep the base64 copy — retried next session */
+        }
       }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const imageNotes = notesRef.current.filter((n) => noteHasDisplayableImage(n.html));
+      for (const note of imageNotes) {
+        if (!userRef.current) return;
+        await persistNoteDurable(uid, note).catch(() => false);
+      }
+    } finally {
+      endTrackedSave();
     }
   };
 
-  const inlineImageMigrationRanRef = useRef(false);
+  const noteImageSyncRanRef = useRef(false);
   useEffect(() => {
-    if (!user || !loaded || inlineImageMigrationRanRef.current) return;
-    inlineImageMigrationRanRef.current = true;
-    // Start soon after load settles: every save ships the full notes/quizSets
-    // arrays, so leftover base64 images tax every single write until migrated.
-    const timer = setTimeout(() => { void migrateInlineImagesToStorage(); }, 4000);
+    if (!user || noteImageSyncRanRef.current) return;
+    const hasImages = notes.some((n) => (
+      noteHasDisplayableImage(n.html) || /data:image\//i.test(n.html || '')
+    ));
+    if (!hasImages) return;
+    // Home PC: IDB already has the photos. Push them (as Storage URLs) so the
+    // hospital PC can load notes the same way Quiz already does.
+    noteImageSyncRanRef.current = true;
+    const timer = setTimeout(() => { void syncNoteImagesToCloud(); }, 600);
     return () => clearTimeout(timer);
-  }, [user?.uid, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.uid, notes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const moveItemInSet = (setId: string, itemId: number, direction: 'up' | 'down') => {
     setQuizSets((prev) => {

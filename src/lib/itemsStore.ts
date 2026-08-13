@@ -228,7 +228,7 @@ export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
         method: weakHtml ? 'PATCH' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(stripUndefined(payload)),
-      });
+      }, 120_000);
       return res.ok;
     } catch (err2) {
       console.error('[itemsStore] notesById REST fallback failed', err2);
@@ -239,7 +239,7 @@ export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
 
 export async function fetchNoteByIdCloud(uid: string, id: number): Promise<Note | null> {
   try {
-    const res = await rtdbFetch(`/users/${uid}/notesById/${id}`);
+    const res = await rtdbFetch(`/users/${uid}/notesById/${id}`, undefined, 90_000);
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || typeof data !== 'object' || (data as Note).id == null) return null;
