@@ -7,7 +7,18 @@
  * the list/cards appear immediately; IDB/cloud then restore full bodies.
  */
 import type { Note } from '../types';
-import { writeTinyDurableValue } from './quizTrashTombstones';
+import { PERM_DELETED_KEY, writeTinyDurableValue } from './quizTrashTombstones';
+
+function readPermDeletedNoteIds(): Set<number> {
+  try {
+    const raw = localStorage.getItem(PERM_DELETED_KEY);
+    if (!raw) return new Set();
+    const notes = (JSON.parse(raw) as { notes?: unknown[] }).notes;
+    return new Set((Array.isArray(notes) ? notes : []).map(Number).filter(Number.isFinite));
+  } catch {
+    return new Set();
+  }
+}
 
 export const NOTES_LIST_CACHE_KEY = 'malacadhati_notes_list_cache';
 
@@ -62,7 +73,10 @@ let serverNotesCatalog: Note[] | null = null;
 
 export function rememberServerNotesCatalog(notes: Note[]): void {
   if (!notes.length) return;
-  serverNotesCatalog = compactNotesForListCache(notes);
+  const dead = readPermDeletedNoteIds();
+  serverNotesCatalog = compactNotesForListCache(
+    dead.size ? notes.filter((n) => !dead.has(Number(n.id))) : notes,
+  );
 }
 
 export function peekServerNotesCatalog(): Note[] {
@@ -81,14 +95,40 @@ export function readNotesListCache(): Note[] {
   }
 }
 
+/** Drop ids that were permanently deleted so a late cache merge cannot revive them. */
+export function purgeNotesFromListCache(ids: Iterable<number>): void {
+  const dead = new Set([...ids].map(Number).filter(Number.isFinite));
+  if (!dead.size) return;
+  if (notesBootCache) {
+    notesBootCache = notesBootCache.filter((n) => !dead.has(Number(n.id)));
+    if (!notesBootCache.length) notesBootCache = null;
+  }
+  if (serverNotesCatalog) {
+    serverNotesCatalog = serverNotesCatalog.filter((n) => !dead.has(Number(n.id)));
+    if (!serverNotesCatalog.length) serverNotesCatalog = null;
+  }
+  const prev = readNotesListCache().filter((n) => !dead.has(Number(n.id)));
+  try {
+    if (!prev.length) {
+      localStorage.removeItem(NOTES_LIST_CACHE_KEY);
+      return;
+    }
+    const json = JSON.stringify(compactNotesForListCache(prev));
+    if (!writeTinyDurableValue(NOTES_LIST_CACHE_KEY, json)) {
+      localStorage.setItem(NOTES_LIST_CACHE_KEY, json);
+    }
+  } catch { /* ignore */ }
+}
+
 /** Never shrink the durable list cache with an incomplete LS shell. */
 export function writeNotesListCache(notes: Note[]): void {
   if (!notes.length) return;
+  const dead = readPermDeletedNoteIds();
   const prev = readNotesListCache();
   const byId = new Map<number, Note>();
   for (const note of [...prev, ...notes]) {
     const id = Number(note.id);
-    if (!Number.isFinite(id)) continue;
+    if (!Number.isFinite(id) || dead.has(id)) continue;
     const existing = byId.get(id);
     if (!existing) {
       byId.set(id, note);

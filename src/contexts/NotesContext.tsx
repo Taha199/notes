@@ -86,6 +86,7 @@ import {
   peekServerNotesCatalog,
   readNotesBootCache,
   readNotesListCache,
+  purgeNotesFromListCache,
   rememberNotesBootCache,
   rememberServerNotesCatalog,
   writeNotesListCache,
@@ -534,11 +535,17 @@ function noteContentKey(note: Note) {
 }
 
 /** Cloud note HTML is the shared source. Local shells must not hide photos. */
-function adoptCloudNoteBodies(current: Note[], cloud: Note[], applyFlags = true): Note[] {
+function adoptCloudNoteBodies(
+  current: Note[],
+  cloud: Note[],
+  applyFlags = true,
+  skipAddIds?: Set<number>,
+): Note[] {
   const byId = new Map(current.map((n) => [Number(n.id), n]));
   for (const incoming of cloud) {
     const id = Number(incoming.id);
     if (!Number.isFinite(id)) continue;
+    if (skipAddIds?.has(id)) continue;
     const cur = byId.get(id);
     if (!cur) {
       byId.set(id, incoming);
@@ -731,6 +738,36 @@ function stripPermDeletedNotes(notes: Note[], tombstones: PermanentlyDeletedIds 
   return changed ? next : notes;
 }
 
+const NOTE_REJECT_TTL_MS = 10 * 60_000;
+
+function pruneRejectedNoteIds(rejected: Map<number, number>, now = Date.now()): Set<number> {
+  const live = new Set<number>();
+  for (const [id, at] of rejected) {
+    if (now - at > NOTE_REJECT_TTL_MS) rejected.delete(id);
+    else live.add(id);
+  }
+  return live;
+}
+
+function blockedNoteIdSet(
+  tombs: PermanentlyDeletedIds,
+  rejected: Map<number, number>,
+): Set<number> {
+  const dead = new Set(tombs.notes.map(Number).filter(Number.isFinite));
+  for (const id of pruneRejectedNoteIds(rejected)) dead.add(id);
+  return dead;
+}
+
+function filterBlockedNotes(
+  incoming: Note[],
+  tombs: PermanentlyDeletedIds,
+  rejected: Map<number, number>,
+): Note[] {
+  const dead = blockedNoteIdSet(tombs, rejected);
+  if (!dead.size) return incoming;
+  return incoming.filter((n) => !dead.has(Number(n.id)));
+}
+
 function mergeNotesForSync(local: Note[], remote: Note[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
   const dead = new Set(tombstones.notes.map(Number).filter(Number.isFinite));
   const remoteIds = new Set(remote.map((item) => Number(item.id)).filter(Number.isFinite));
@@ -738,7 +775,6 @@ function mergeNotesForSync(local: Note[], remote: Note[], tombstones: Permanentl
   for (const item of local) {
     const id = Number(item.id);
     if (!Number.isFinite(id) || dead.has(id)) continue;
-    if (!remoteIds.has(id) && item.trashed) continue;
     map.set(id, id === item.id ? item : { ...item, id });
   }
   for (const item of remote) {
@@ -2373,6 +2409,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const STUCK_SAVING_MS = 45_000;
   const pendingDeletedDraftIdsRef = useRef<Set<string>>(readDeletedDraftIds());
   const permDeletedRef = useRef<PermanentlyDeletedIds>(readPermDeleted());
+  /** Ids removed this session — a late notesById download must not resurrect them. */
+  const rejectedNoteIdsRef = useRef<Map<number, number>>(new Map());
+  const localTrashIdsRef = useRef<Set<number>>(new Set());
+  const notesCloudGenRef = useRef(0);
   /** Durable soft-delete markers — see applyTrashTombstones for why these exist. */
   const quizSetTombstonesRef = useRef<TrashTombstones>(readTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY));
   const quizFolderTombstonesRef = useRef<TrashTombstones>(readTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY));
@@ -2512,6 +2552,52 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       hour12: false,
     });
 
+  const rejectNoteIds = (ids: Iterable<number>) => {
+    const at = Date.now();
+    notesCloudGenRef.current += 1;
+    for (const raw of ids) {
+      const id = Number(raw);
+      if (!Number.isFinite(id)) continue;
+      rejectedNoteIdsRef.current.set(id, at);
+    }
+  };
+
+  const markNotesTrashedLocally = (ids: Iterable<number>) => {
+    notesCloudGenRef.current += 1;
+    for (const raw of ids) {
+      const id = Number(raw);
+      if (Number.isFinite(id)) localTrashIdsRef.current.add(id);
+    }
+  };
+
+  const incomingNotesSafe = (incoming: Note[], allowNewIds = true): Note[] => {
+    const blocked = blockedNoteIdSet(permDeletedRef.current, rejectedNoteIdsRef.current);
+    let next = incoming.filter((n) => !blocked.has(Number(n.id)));
+    if (!allowNewIds) {
+      const have = new Set(notesRef.current.map((n) => Number(n.id)));
+      next = next.filter((n) => have.has(Number(n.id)));
+    }
+    if (localTrashIdsRef.current.size) {
+      next = next.map((n) => {
+        const id = Number(n.id);
+        if (!localTrashIdsRef.current.has(id) || n.trashed) return n;
+        const cur = notesRef.current.find((c) => Number(c.id) === id);
+        return cur?.trashed ? cur : { ...n, trashed: true, deletedAt: n.deletedAt || nowStr() };
+      });
+    }
+    return next;
+  };
+
+  const adoptNotesSafe = (current: Note[], incoming: Note[], applyFlags = true, allowNewIds = true) => {
+    const safe = incomingNotesSafe(incoming, allowNewIds);
+    return adoptCloudNoteBodies(
+      current,
+      safe,
+      applyFlags,
+      blockedNoteIdSet(permDeletedRef.current, rejectedNoteIdsRef.current),
+    );
+  };
+
   // Load from cloud when user changes
   useEffect(() => {
     let cancelled = false;
@@ -2635,9 +2721,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const commitNotes = (snapshot: Note[], opts?: { paint?: boolean }) => {
       if (cancelled) return;
+      const blocked = blockedNoteIdSet(permDeletedRef.current, rejectedNoteIdsRef.current);
       let mergedNotes = sortNotesByCreatedDesc(
-        stripPermDeletedNotes(snapshot, permDeletedRef.current).filter((note) => (
-          !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
+        snapshot.filter((note) => (
+          !blocked.has(Number(note.id))
+          && !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
         )),
       );
       const prev = notesRef.current;
@@ -3099,14 +3187,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     ]);
     // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
     // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
+    const notesCloudGenAtStart = notesCloudGenRef.current;
     const notesCloudPromise = fetchNotesByIdCloud(user.uid);
     const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
     const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
 
-    const applyNotesSnapshot = (incoming: Note[]) => {
+    const applyNotesSnapshot = (incoming: Note[], allowNewIds = true) => {
       if (cancelled || !incoming.length) return;
-      rememberServerNotesCatalog(incoming);
-      commitNotes(adoptCloudNoteBodies(notesRef.current, incoming, true));
+      const safe = incomingNotesSafe(incoming, allowNewIds);
+      if (!safe.length) return;
+      rememberServerNotesCatalog(safe);
+      commitNotes(adoptNotesSafe(notesRef.current, safe, true, allowNewIds));
     };
 
     const hydrateMissingNoteBodies = async () => {
@@ -3134,7 +3225,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       try {
         const cloudNotes = await notesCloudPromise;
-        if (!cancelled && cloudNotes.length) applyNotesSnapshot(cloudNotes);
+        if (!cancelled && cloudNotes.length) {
+          applyNotesSnapshot(cloudNotes, notesCloudGenAtStart === notesCloudGenRef.current);
+        }
       } catch { /* ignore */ }
       if (cancelled) return;
       try {
@@ -3217,7 +3310,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ]);
         if (cancelled) return;
         // Notes usually already painted via notesCloudReady; re-apply only if richer.
-        applyNotesSnapshot(cloudNotesById);
+        applyNotesSnapshot(cloudNotesById, notesCloudGenAtStart === notesCloudGenRef.current);
         // Fold cloud ById items into refs, then commit once. First visible card
         // bodies should be this merge (not stale IDB alone) — no old→new FOUC.
         if (cloudQuizItemsById.length) {
@@ -3281,9 +3374,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
           emptiedAtBoot,
         );
-        const tombstones = permDeletedRef.current;
+        const tombstones = {
+          ...permDeletedRef.current,
+          notes: [...new Set([
+            ...permDeletedRef.current.notes,
+            ...pruneRejectedNoteIds(rejectedNoteIdsRef.current),
+          ])],
+        };
 
-        // Heal orphaned ById rows left by older Empty Trash (merge-only maps never
+        // Heal orphaned ById rows left by older Empty Trash (merge-only maps never)
         // deleted keys). Destroy them so they cannot re-enter Trash on this boot.
         const deadSetIds = new Set(tombstones.quizSets);
         const deadFolderIds = new Set(tombstones.quizFolders);
@@ -3373,12 +3472,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         const historySnapshots = await fetchAllDataHistorySnapshots(user.uid);
         for (const snapshot of historySnapshots) {
-          const trashedIds = new Set(notes.filter((n) => n.trashed).map((n) => n.id));
+          const liveTombs = {
+            ...permDeletedRef.current,
+            notes: [...new Set([
+              ...permDeletedRef.current.notes,
+              ...pruneRejectedNoteIds(rejectedNoteIdsRef.current),
+            ])],
+          };
+          const trashedIds = new Set(
+            notes.filter((n) => n.trashed).map((n) => Number(n.id)),
+          );
+          for (const id of localTrashIdsRef.current) trashedIds.add(id);
           const before = notes.length;
           notes = mergeNotesForSync(
             notes,
-            snapshot.notes.filter((n) => !n.trashed && !trashedIds.has(n.id)),
-            tombstones,
+            snapshot.notes.filter((n) => !n.trashed && !trashedIds.has(Number(n.id))),
+            liveTombs,
           );
           if (notes.length > before) {
             notesRepair = true;
@@ -3394,13 +3503,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         // stale/incomplete notes[] can never wipe a note that notesById / IndexedDB
         // already holds (the exact failure mode for image notes on refresh).
         const idbNotesAgain = await getAllNotesLocal();
-        const durableNotes = stripPermDeletedNotes(
+        const liveTombs = {
+          ...permDeletedRef.current,
+          notes: [...new Set([
+            ...permDeletedRef.current.notes,
+            ...pruneRejectedNoteIds(rejectedNoteIdsRef.current),
+          ])],
+        };
+        const durableNotes = filterBlockedNotes(
           mergeNotesPreferRicher(cloudNotesById, idbNotesAgain),
-          tombstones,
+          liveTombs,
+          rejectedNoteIdsRef.current,
         );
         if (durableNotes.length) {
           const before = notes.length;
-          notes = stripPermDeletedNotes(mergeNotesPreferRicher(notes, durableNotes), tombstones);
+          notes = filterBlockedNotes(
+            mergeNotesPreferRicher(notes, durableNotes),
+            liveTombs,
+            rejectedNoteIdsRef.current,
+          );
           if (notes.length > before) notesRepair = true;
         }
         {
@@ -3621,7 +3742,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (needsRepair) {
           recoveryLog('repairing cloud from local/history');
           const repairBody: Record<string, unknown> = { chats, quizFolders: normalizedFolders };
-          if (notes.length > 0) repairBody.notes = notes;
+          if (notesRef.current.length > 0) repairBody.notes = notesRef.current;
           if (quizzes.length > 0) repairBody.quizzes = quizzes;
           if (safeToPushQuizSets && countUserQuizSets(quizSetsRef.current) > 0) {
             repairBody.quizSets = quizSetsRef.current;
@@ -4693,7 +4814,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const applyPermDeletedLocally = (): boolean => {
     const tombstones = permDeletedRef.current;
-    const deadNotes = new Set(tombstones.notes);
+    const deadNotes = new Set(tombstones.notes.map(Number).filter(Number.isFinite));
     const deadQuizzes = new Set(tombstones.quizzes);
     const deadSets = new Set(tombstones.quizSets);
     const deadFolders = new Set(tombstones.quizFolders);
@@ -4718,7 +4839,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
 
     const nextNotes = filterResurrectedTrash(
-      notesRef.current.filter((n) => !deadNotes.has(n.id)),
+      notesRef.current.filter((n) => !deadNotes.has(Number(n.id))),
       notesRef.current,
     );
     const nextQuizzes = filterResurrectedTrash(
@@ -4828,12 +4949,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     let changed = false;
 
     if (patch.notes !== undefined) {
-      const remoteNotes = firebaseToArray<Note>(patch.notes as Note[] | Record<string, Note>);
+      const remoteNotes = incomingNotesSafe(
+        firebaseToArray<Note>(patch.notes as Note[] | Record<string, Note>),
+      );
       const merged = filterResurrectedTrash(
-        adoptCloudNoteBodies(
-          mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
-          remoteNotes,
-          true,
+        stripPermDeletedNotes(
+          adoptNotesSafe(
+            mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
+            remoteNotes,
+            true,
+          ),
+          permDeletedRef.current,
         ),
         notesRef.current,
       );
@@ -5528,7 +5654,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       emptiedAtPull,
     );
     const tombstones = permDeletedRef.current;
-    const remoteNotes = firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>);
+    const remoteNotes = incomingNotesSafe(
+      firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>),
+    );
     if (remoteNotes.length) rememberServerNotesCatalog(remoteNotes);
     const remoteQuizzes = firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>);
     const remoteChats = firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>)
@@ -5540,10 +5668,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     lastCloudDraftIdsRef.current = new Set(parseCloudDrafts(cloud).map((d) => d.id));
 
     const mergedNotes = filterResurrectedTrash(
-      adoptCloudNoteBodies(
-        mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
-        remoteNotes,
-        true,
+      stripPermDeletedNotes(
+        adoptNotesSafe(
+          mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
+          remoteNotes,
+          true,
+        ),
+        permDeletedRef.current,
       ),
       notesRef.current,
     );
@@ -5627,7 +5758,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       void Promise.all(stillMissing.map(async (note) => {
         const one = await fetchNoteByIdCloud(uid, Number(note.id));
         if (!one || !noteHasDisplayableImage(one.html)) return;
-        const next = sortNotesByCreatedDesc(mergeNotesPreferRicher(notesRef.current, [one]));
+        const safe = incomingNotesSafe([one]);
+        if (!safe.length) return;
+        const next = sortNotesByCreatedDesc(mergeNotesPreferRicher(notesRef.current, safe));
         if (!notesBodiesRicher(next, notesRef.current)) return;
         notesRef.current = next;
         setNotes(next);
@@ -5747,7 +5880,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         await Promise.all(Array.from({ length: Math.min(6, missingIds.length) }, () => worker()));
         if (incoming.length) {
           const merged = sortNotesByCreatedDesc(
-            stripPermDeletedNotes(adoptCloudNoteBodies(notesRef.current, incoming, true), permDeletedRef.current),
+            stripPermDeletedNotes(adoptNotesSafe(notesRef.current, incoming, true), permDeletedRef.current),
           );
           notesRef.current = merged;
           setNotes(merged);
@@ -6257,13 +6390,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return;
       }
       const tombstones = permDeletedRef.current;
-      const dead = new Set(tombstones.notes.map(Number).filter(Number.isFinite));
-      // Ignore permanently deleted rows — never mass-DELETE them on every child
-      // event (image notesById DELETEs saturated the socket and notes blinked).
-      const liveDurable = durable.filter((n) => !dead.has(Number(n.id)));
+      const liveDurable = incomingNotesSafe(durable);
       if (!liveDurable.length) return;
       const merged = sortNotesByCreatedDesc(
-        stripPermDeletedNotes(adoptCloudNoteBodies(notesRef.current, liveDurable), tombstones),
+        stripPermDeletedNotes(adoptNotesSafe(notesRef.current, liveDurable), tombstones),
       );
       if (
         notesIdSetEqual(merged, notesRef.current)
@@ -6624,13 +6754,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const hydrateNote = async (id: number) => {
     const uid = userRef.current?.uid;
     if (!uid) return;
+    if (blockedNoteIdSet(permDeletedRef.current, rejectedNoteIdsRef.current).has(Number(id))) return;
     const current = notesRef.current.find((n) => Number(n.id) === Number(id));
     if (current && noteHasDisplayableImage(current.html)) return;
     const [local, cloud] = await Promise.all([
       getNoteLocal(Number(id)),
       fetchNoteByIdCloud(uid, Number(id)),
     ]);
-    const incoming = [local, cloud].filter((n): n is Note => !!n);
+    const incoming = incomingNotesSafe([local, cloud].filter((n): n is Note => !!n));
     if (!incoming.length) return;
     const merged = sortNotesByCreatedDesc(mergeNotesPreferRicher(notesRef.current, incoming));
     if (!notesBodiesRicher(merged, notesRef.current) && notesFlagsEqual(merged, notesRef.current)) return;
@@ -7924,6 +8055,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const savedAt = new Date().toISOString();
     const base = notesRef.current.find((n) => n.id === id);
     if (!base) return;
+    markNotesTrashedLocally([id]);
     const trashedNote: Note = { ...base, trashed: true, deletedAt: nowStr(), savedAt };
     // Write the tombstone to IndexedDB + notesById FIRST — otherwise a refresh
     // reloads the live copy from those stores and the note "comes back".
@@ -7939,6 +8071,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const savedAt = new Date().toISOString();
     const base = notesRef.current.find((n) => n.id === id);
     if (!base) return;
+    localTrashIdsRef.current.delete(Number(id));
+    rejectedNoteIdsRef.current.delete(Number(id));
     const restored: Note = { ...base, trashed: false, deletedAt: undefined, savedAt };
     recordRecentEdit({ kind: 'note', at: Date.now(), note: restored });
     void persistNoteDurable(userRef.current?.uid, restored);
@@ -7951,7 +8085,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const permDelete = (id: number) => {
     const numId = Number(id);
     if (!Number.isFinite(numId)) return;
+    rejectNoteIds([numId]);
     recordPermDeleted({ notes: [numId] });
+    purgeNotesFromListCache([numId]);
     const nextNotes = stripPermDeletedNotes(
       notesRef.current.filter((n) => Number(n.id) !== numId),
       permDeletedRef.current,
@@ -7975,6 +8111,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       .flatMap((set) => (set.items ?? []).filter((item) => item.trashed).map((item) => item.id));
     const emptiedAt = new Date().toISOString();
     const emptiedAtMs = Date.now();
+    rejectNoteIds(trashedNotes.map((n) => n.id));
+    purgeNotesFromListCache(trashedNotes.map((n) => n.id));
     recordPermDeleted({
       notes: trashedNotes.map((n) => n.id),
       quizzes: [...trashedQuizzes.map((q) => q.id), ...quizIdsFromTrashedSets, ...inSetTrashedIds],
@@ -8077,7 +8215,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
   const deleteMany = (ids: number[]) => {
     if (ids.length === 0) return;
+    rejectNoteIds(ids);
     recordPermDeleted({ notes: ids });
+    purgeNotesFromListCache(ids);
     const idSet = new Set(ids);
     const nextNotes = notesRef.current.filter((n) => !idSet.has(n.id));
     notesRef.current = nextNotes;
@@ -8092,7 +8232,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     <NotesContext.Provider
       value={{
         notes: notes.filter((n) => (
-          !permDeletedRef.current.notes.some((deadId) => Number(deadId) === Number(n.id))
+          !blockedNoteIdSet(permDeletedRef.current, rejectedNoteIdsRef.current).has(Number(n.id))
         )),
         drafts,
         quizzes: quizzes.filter((q) => !q.trashed),
