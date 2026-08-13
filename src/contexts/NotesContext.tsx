@@ -77,6 +77,7 @@ import { sortNotesByCreatedDesc } from '../lib/noteSort';
 import {
   clearNotesBootCache,
   clearNotesListCache,
+  compactNoteForListCache,
   readNotesBootCache,
   readNotesListCache,
   rememberNotesBootCache,
@@ -188,6 +189,39 @@ function notesIdSetEqual(a: Note[], b: Note[]): boolean {
     if (!ids.has(Number(note.id))) return false;
   }
   return true;
+}
+
+/** Trash/read/fav/archive must still paint even when the id set is unchanged. */
+function notesFlagsEqual(a: Note[], b: Note[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  const bById = new Map<number, Note>();
+  for (const note of b) {
+    const id = Number(note.id);
+    if (Number.isFinite(id)) bById.set(id, note);
+  }
+  if (bById.size !== a.length) return false;
+  for (const left of a) {
+    const right = bById.get(Number(left.id));
+    if (!right) return false;
+    if (!!left.trashed !== !!right.trashed) return false;
+    if (!!left.read !== !!right.read) return false;
+    if (!!left.fav !== !!right.fav) return false;
+    if (!!left.archived !== !!right.archived) return false;
+  }
+  return true;
+}
+
+/** True when incoming notes have images/bodies the current list is missing. */
+function notesBodiesRicher(incoming: Note[], current: Note[]): boolean {
+  if (!current.length && incoming.length) return true;
+  const cur = new Map(current.map((n) => [Number(n.id), n]));
+  for (const note of incoming) {
+    const prev = cur.get(Number(note.id));
+    if (!prev) return true;
+    if (noteContentLength(note) > noteContentLength(prev)) return true;
+  }
+  return incoming.length > current.length;
 }
 
 function mergeNotesPreferRicher(...lists: Note[][]): Note[] {
@@ -575,6 +609,15 @@ function stripPermDeletedNotes(notes: Note[], tombstones: PermanentlyDeletedIds 
     return false;
   });
   return changed ? next : notes;
+}
+
+/** Giant notes[] array is membership + preview only. Full HTML lives in notesById. */
+function notesForCloudArray(notes: Note[]): Note[] {
+  return notes.map((note) => {
+    const html = note.html || '';
+    if (html.length < 8000 && !/data:image\//i.test(html)) return note;
+    return compactNoteForListCache(note);
+  });
 }
 
 function mergeNotesForSync(local: Note[], remote: Note[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
@@ -2486,7 +2529,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       writeNotesListCache(mergedNotes);
       if (opts?.paint === false) return;
       // Same membership: keep the first complete paint. Extra setNotes is the drip.
-      if (notesIdSetEqual(mergedNotes, prev) && prev.length > 0) return;
+      // Still paint when a new device got empty shells first and notesById then
+      // brought the real image HTML — skipping that is why hospital PCs lost photos.
+      if (
+        notesIdSetEqual(mergedNotes, prev)
+        && prev.length > 0
+        && notesFlagsEqual(mergedNotes, prev)
+        && !notesBodiesRicher(mergedNotes, prev)
+      ) return;
       if (notesMetaEqual(mergedNotes, prev)) return;
       setNotes(mergedNotes);
     };
@@ -3188,12 +3238,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         // already holds (the exact failure mode for image notes on refresh).
         const idbNotesAgain = await getAllNotesLocal();
         const durableNotes = stripPermDeletedNotes(
-          mergeByIdNewer(cloudNotesById, idbNotesAgain),
+          mergeNotesPreferRicher(cloudNotesById, idbNotesAgain),
           tombstones,
         );
         if (durableNotes.length) {
           const before = notes.length;
-          notes = stripPermDeletedNotes(mergeByIdNewer(notes, durableNotes), tombstones);
+          notes = stripPermDeletedNotes(mergeNotesPreferRicher(notes, durableNotes), tombstones);
           if (notes.length > before) notesRepair = true;
         }
         {
@@ -4800,7 +4850,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     savingStartedAt.current = syncedAt;
     try {
       await update(dbRef(database, `users/${u.uid}`), {
-        notes: nextNotes,
+        notes: notesForCloudArray(nextNotes),
         quizzes: nextQuizzes,
         quizSets: nextSets,
         quizFolders: nextFolders,
@@ -4840,7 +4890,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const syncedAt = Date.now();
     try {
       await update(dbRef(database, `users/${u.uid}`), {
-        ...(payload?.notes ? { notes: payload.notes } : {}),
+        ...(payload?.notes ? { notes: notesForCloudArray(payload.notes) } : {}),
         ...(payload?.quizzes ? { quizzes: payload.quizzes } : {}),
         ...(payload?.quizSets ? { quizSets: payload.quizSets } : {}),
         ...(payload?.quizFolders ? { quizFolders: payload.quizFolders } : {}),
@@ -4876,7 +4926,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Always send the latest structure from refs — a queued save captured before
     // create/delete must not overwrite the cloud array with a stale snapshot.
     if (safe.notes !== undefined) {
-      safe.notes = stripPermDeletedNotes(notesRef.current, permDeletedRef.current);
+      safe.notes = notesForCloudArray(stripPermDeletedNotes(notesRef.current, permDeletedRef.current));
     }
     if (safe.quizzes !== undefined) {
       safe.quizzes = stripPermDeletedQuizzes(quizzesRef.current, permDeletedRef.current);
@@ -5160,7 +5210,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       tokenUsage: tokenUsageRef.current,
       cloudSyncAt: Date.now(),
     };
-    if (nextNotes.length > 0 || !everHadNotesRef.current) body.notes = nextNotes;
+    if (nextNotes.length > 0 || !everHadNotesRef.current) body.notes = notesForCloudArray(nextNotes);
     else recoveryLog('skipped wiping notes with empty local array');
     if (qList.length > 0 || !everHadQuizzesRef.current) body.quizzes = qList;
     else recoveryLog('skipped wiping quizzes with empty local array');
@@ -5977,7 +6027,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     let notesByIdBuffer: Note[] = [];
     let notesByIdFlush: ReturnType<typeof setTimeout> | null = null;
     const applyNotesByIdBatch = (durable: Note[]) => {
-      if (!loadedRef.current || !durable.length) return;
+      if (!durable.length) return;
       if (isApplyingRemoteRef.current) {
         // Used to return outright, which silently dropped a remote note edit
         // whenever an array merge happened to hold the lock — the other device
@@ -5995,7 +6045,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const merged = sortNotesByCreatedDesc(
         stripPermDeletedNotes(mergeNotesPreferRicher(notesRef.current, liveDurable), tombstones),
       );
-      if (notesIdSetEqual(merged, notesRef.current) && notesRef.current.length > 0) {
+      if (
+        notesIdSetEqual(merged, notesRef.current)
+        && notesRef.current.length > 0
+        && notesFlagsEqual(merged, notesRef.current)
+        && !notesBodiesRicher(merged, notesRef.current)
+      ) {
         notesRef.current = merged;
         return;
       }
@@ -6028,10 +6083,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const note = val as Note;
       if (note.id == null) return;
       // onChildAdded replays every note oldest-id-first. Skip ids we already
-      // have so new image notes are not dripped in last after a slow download.
+      // have with an equal-or-richer body so image notes are not dripped last.
+      // Never skip a richer body — a fresh PC paints empty shells from notes[]
+      // first, and notesById is the copy that still has the photos.
       if (!fromChange) {
         const id = Number(note.id);
-        if (notesRef.current.some((n) => Number(n.id) === id)) return;
+        const existing = notesRef.current.find((n) => Number(n.id) === id);
+        if (existing && noteContentLength(existing) >= noteContentLength(note)) return;
       }
       notesByIdBuffer.push(note);
       scheduleNotesByIdFlush();
