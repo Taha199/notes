@@ -113,7 +113,7 @@ function snapshotMatchesForm(
 }
 
 export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNote, onClose, onNavigate }: NoteEditorModalProps) {
-  const { notes, updateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz, updateQuiz } = useNotes();
+  const { notes, updateNote, hydrateNote, toggleFav, trash, archive, unarchive, nowStr, addQuiz, updateQuiz } = useNotes();
   const { t } = useLanguage();
   const { show } = useToast();
   const { hasAi } = useAuth();
@@ -169,8 +169,20 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
       setHtml(nextHtml);
       htmlLiveRef.current = nextHtml;
       setLocked(!!note.read);
+      if (!/<img\b[^>]*src=["'](?:data:image\/|https?:\/\/)/i.test(note.html || '')) {
+        void hydrateNote(note.id);
+      }
     }
   }, [note?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!note?.html) return;
+    if (!/<img\b[^>]*src=["'](?:data:image\/|https?:\/\/)/i.test(note.html)) return;
+    const nextHtml = mdToHtml(note.html);
+    if (nextHtml === htmlLiveRef.current) return;
+    setHtml(nextHtml);
+    htmlLiveRef.current = nextHtml;
+  }, [note?.html]);
 
   useEffect(() => {
     const handleArrowNavigation = (event: KeyboardEvent) => {

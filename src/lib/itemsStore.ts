@@ -90,32 +90,16 @@ function idbGetAll<T>(store: string): Promise<T[]> {
   ).catch(() => [] as T[]);
 }
 
-function idbGet<T>(store: string, id: number | string): Promise<T | null> {
+function idbGet<T>(store: string, id: number | string): Promise<T | undefined> {
   return openDb().then(
     (db) =>
-      new Promise<T | null>((resolve, reject) => {
+      new Promise<T | undefined>((resolve, reject) => {
         const tx = db.transaction(store, 'readonly');
         const req = tx.objectStore(store).get(id);
-        req.onsuccess = () => resolve((req.result as T) ?? null);
+        req.onsuccess = () => resolve(req.result as T | undefined);
         req.onerror = () => reject(req.error);
       }),
-  ).catch(() => null);
-}
-
-function noteHtmlScore(note: Note | null | undefined): number {
-  if (!note) return 0;
-  const html = note.html || '';
-  const images = (html.match(/<img\b/gi) || []).length;
-  return html.length + images * 50_000;
-}
-
-function keepRicherNoteHtml(incoming: Note, existing: Note | null): Note {
-  if (!existing || noteHtmlScore(existing) <= noteHtmlScore(incoming)) return incoming;
-  return {
-    ...incoming,
-    html: existing.html,
-    text: existing.text || incoming.text,
-  };
+  ).catch(() => undefined);
 }
 
 function idbDelete(store: string, id: number | string): Promise<void> {
@@ -160,14 +144,9 @@ export function mergeByIdNewer<T extends { id: number | string; updatedAt?: stri
 
 // ── Notes ──────────────────────────────────────────────────────────────────
 
-export async function getNoteLocal(id: number): Promise<Note | null> {
-  return idbGet<Note>(NOTES_STORE, id);
-}
-
 export async function putNoteLocal(note: Note): Promise<void> {
   try {
-    const existing = await getNoteLocal(Number(note.id));
-    await idbPut(NOTES_STORE, keepRicherNoteHtml(note, existing));
+    await idbPut(NOTES_STORE, note);
   } catch (err) {
     console.error('[itemsStore] IndexedDB note write failed', err);
   }
@@ -213,19 +192,43 @@ export async function deleteNoteLocal(id: number): Promise<void> {
   await idbDelete(NOTES_STORE, id);
 }
 
+export async function getNoteLocal(id: number): Promise<Note | undefined> {
+  return idbGet<Note>(NOTES_STORE, id);
+}
+
+export function noteHasDisplayableImage(html?: string): boolean {
+  if (!html) return false;
+  if (/src=["']data:image\//i.test(html)) return true;
+  return /<img\b[^>]*src=["']https?:\/\//i.test(html);
+}
+
+function noteHtmlScore(html?: string): number {
+  const h = html || '';
+  return h.length + ((h.match(/<img\b/gi) || []).length * 50_000);
+}
+
+/** Meta toggles must not replace a note that still has photos with an empty shell. */
+export function keepRicherNoteBody(existing: Note | undefined, incoming: Note): Note {
+  if (!existing) return incoming;
+  if (noteHtmlScore(incoming.html) >= noteHtmlScore(existing.html)) return incoming;
+  return { ...incoming, html: existing.html, text: incoming.text || existing.text };
+}
+
 /** Single-note cloud write — independent of the giant notes[] array. */
 export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
+  const weakHtml = !noteHasDisplayableImage(note.html) && (note.html || '').length < 400;
+  const payload = weakHtml ? { ...note, html: undefined } : note;
   try {
-    await update(dbRef(database, `users/${uid}/notesById/${note.id}`), note);
+    await update(dbRef(database, `users/${uid}/notesById/${note.id}`), stripUndefined(payload));
     return true;
   } catch (err) {
     console.error('[itemsStore] notesById cloud write failed', err);
     try {
       const res = await rtdbFetch(`/users/${uid}/notesById/${note.id}`, {
-        method: 'PUT',
+        method: weakHtml ? 'PATCH' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(note),
-      }, 90_000);
+        body: JSON.stringify(stripUndefined(payload)),
+      });
       return res.ok;
     } catch (err2) {
       console.error('[itemsStore] notesById REST fallback failed', err2);
@@ -234,60 +237,25 @@ export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
   }
 }
 
-async function fetchNoteIdsShallow(uid: string): Promise<string[]> {
+export async function fetchNoteByIdCloud(uid: string, id: number): Promise<Note | null> {
   try {
-    const res = await rtdbFetch(`/users/${uid}/notesById?shallow=true`, undefined, 20_000);
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!data || typeof data !== 'object') return [];
-    return Object.keys(data as Record<string, unknown>);
-  } catch {
-    return [];
-  }
-}
-
-async function fetchOneNoteCloud(uid: string, id: string): Promise<Note | null> {
-  try {
-    const res = await rtdbFetch(`/users/${uid}/notesById/${id}`, undefined, 90_000);
+    const res = await rtdbFetch(`/users/${uid}/notesById/${id}`);
     if (!res.ok) return null;
-    const note = await res.json();
-    if (!note || typeof note !== 'object' || (note as Note).id == null) return null;
-    return note as Note;
+    const data = await res.json();
+    if (!data || typeof data !== 'object' || (data as Note).id == null) return null;
+    return data as Note;
   } catch {
     return null;
   }
 }
 
-/**
- * Fetch notes one-by-one so a hospital/slow network cannot time out the whole
- * image dump. `onBatch` paints photos as soon as each small group arrives.
- */
-export async function fetchNotesByIdCloud(
-  uid: string,
-  onBatch?: (notes: Note[]) => void,
-): Promise<Note[]> {
-  const ids = await fetchNoteIdsShallow(uid);
-  if (ids.length) {
-    const all: Note[] = [];
-    const size = 4;
-    for (let i = 0; i < ids.length; i += size) {
-      const rows = await Promise.all(ids.slice(i, i + size).map((id) => fetchOneNoteCloud(uid, id)));
-      const ok = rows.filter((n): n is Note => !!n);
-      if (ok.length) {
-        all.push(...ok);
-        onBatch?.(ok);
-      }
-    }
-    return all;
-  }
+export async function fetchNotesByIdCloud(uid: string): Promise<Note[]> {
   try {
-    const res = await rtdbFetch(`/users/${uid}/notesById`, undefined, 120_000);
+    const res = await rtdbFetch(`/users/${uid}/notesById`);
     if (!res.ok) return [];
     const data = await res.json();
     if (!data || typeof data !== 'object') return [];
-    const notes = Object.values(data as Record<string, Note>).filter((n) => n && typeof n === 'object' && n.id != null);
-    if (notes.length) onBatch?.(notes);
-    return notes;
+    return Object.values(data as Record<string, Note>).filter((n) => n && typeof n === 'object' && n.id != null);
   } catch {
     return [];
   }
@@ -295,21 +263,14 @@ export async function fetchNotesByIdCloud(
 
 /**
  * Persist one note durably: IndexedDB first (survives refresh even offline),
- * then a single-item cloud write. Never overwrite a richer image body with a
- * preview shell — that is how a second computer erased photos from notesById.
+ * then a single-item cloud write. Returns whether the cloud write succeeded.
  */
 export async function persistNoteDurable(uid: string | null | undefined, note: Note): Promise<boolean> {
-  const local = await getNoteLocal(Number(note.id));
-  let toStore = keepRicherNoteHtml(note, local);
-  if (uid) {
-    const cloud = await fetchOneNoteCloud(uid, String(note.id));
-    toStore = keepRicherNoteHtml(toStore, cloud);
-    await putNoteLocal(toStore);
-    if (cloud && noteHtmlScore(cloud) >= noteHtmlScore(toStore)) return true;
-    return putNoteCloud(uid, toStore);
-  }
+  const existing = await getNoteLocal(Number(note.id));
+  const toStore = keepRicherNoteBody(existing, note);
   await putNoteLocal(toStore);
-  return false;
+  if (!uid) return false;
+  return putNoteCloud(uid, toStore);
 }
 
 /** Soft-delete tombstone — must run on every trash so IndexedDB/notesById

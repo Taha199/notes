@@ -46,11 +46,15 @@ import {
 import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import {
   applyDurableQuizItems,
+  fetchNoteByIdCloud,
   fetchNotesByIdCloud,
   fetchQuizFoldersByIdCloud,
   fetchQuizItemsByIdCloud,
   fetchQuizSetsByIdCloud,
   getAllNotesLocal,
+  getNoteLocal,
+  noteHasDisplayableImage,
+  putNoteLocal,
   peekPrefetchedNotes,
   prefetchAllNotesLocal,
   getAllQuizItemsLocal,
@@ -77,7 +81,6 @@ import { sortNotesByCreatedDesc } from '../lib/noteSort';
 import {
   clearNotesBootCache,
   clearNotesListCache,
-  compactNoteForListCache,
   readNotesBootCache,
   readNotesListCache,
   rememberNotesBootCache,
@@ -611,15 +614,6 @@ function stripPermDeletedNotes(notes: Note[], tombstones: PermanentlyDeletedIds 
   return changed ? next : notes;
 }
 
-/** Giant notes[] array is membership + preview only. Full HTML lives in notesById. */
-function notesForCloudArray(notes: Note[]): Note[] {
-  return notes.map((note) => {
-    const html = note.html || '';
-    if (html.length < 8000 && !/data:image\//i.test(html)) return note;
-    return compactNoteForListCache(note);
-  });
-}
-
 function mergeNotesForSync(local: Note[], remote: Note[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
   const dead = new Set(tombstones.notes.map(Number).filter(Number.isFinite));
   const remoteIds = new Set(remote.map((item) => Number(item.id)).filter(Number.isFinite));
@@ -1059,6 +1053,8 @@ interface NotesCtx {
   emptyTrash: () => void;
   deleteMany: (ids: number[]) => void;
   updateNote: (id: number, patch: Partial<Note>) => void;
+  /** Pull one note body from notesById — used when a fresh PC painted an empty shell. */
+  hydrateNote: (id: number) => Promise<void>;
   nowStr: () => string;
 }
 
@@ -2979,20 +2975,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       fetchQuizSetsByIdCloud(user.uid),
       fetchQuizFoldersByIdCloud(user.uid),
     ]);
+    // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
+    // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
+    const notesCloudPromise = fetchNotesByIdCloud(user.uid);
+    const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
+    const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
+
     const applyNotesSnapshot = (incoming: Note[]) => {
       if (cancelled || !incoming.length) return;
       commitNotes(mergeNotesPreferRicher(notesRef.current, incoming));
     };
-
-    // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
-    // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
-    // Paint each small batch so image notes appear on a new PC without waiting
-    // for the whole notesById dump (that 30s timeout is why hospital photos vanished).
-    const notesCloudPromise = fetchNotesByIdCloud(user.uid, (batch) => {
-      applyNotesSnapshot(batch);
-    });
-    const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
-    const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
 
     // Cloud notes enrich in the background — never block first paint on the network.
     const notesCloudReady = (async () => {
@@ -3001,20 +2993,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       try {
         const cloudNotes = await notesCloudPromise;
         if (!cancelled && cloudNotes.length) applyNotesSnapshot(cloudNotes);
+        if (cancelled) return;
+        // Hospital/new PC: the giant notesById tree often times out, so shells
+        // stay image-less. Pull missing bodies one note at a time like quiz does.
+        const missing = notesRef.current.filter((n) => !noteHasDisplayableImage(n.html));
+        for (const note of missing) {
+          if (cancelled) return;
+          const one = await fetchNoteByIdCloud(user.uid, Number(note.id));
+          if (one && noteHasDisplayableImage(one.html)) applyNotesSnapshot([one]);
+        }
       } catch { /* ignore */ }
     })();
-
-    // Home PC still has the real photos in IndexedDB — push them back to notesById
-    // so the hospital computer can download them one note at a time.
-    void notesIdbReady.then(async () => {
-      if (cancelled || !user.uid) return;
-      const localNotes = await prefetchAllNotesLocal();
-      for (const note of localNotes) {
-        if (cancelled) return;
-        if (!/<img\b/i.test(note.html || '')) continue;
-        await persistNoteDurable(user.uid, note).catch(() => false);
-      }
-    });
 
     (async () => {
       try {
@@ -4866,7 +4855,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     savingStartedAt.current = syncedAt;
     try {
       await update(dbRef(database, `users/${u.uid}`), {
-        notes: notesForCloudArray(nextNotes),
+        notes: nextNotes,
         quizzes: nextQuizzes,
         quizSets: nextSets,
         quizFolders: nextFolders,
@@ -4906,7 +4895,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const syncedAt = Date.now();
     try {
       await update(dbRef(database, `users/${u.uid}`), {
-        ...(payload?.notes ? { notes: notesForCloudArray(payload.notes) } : {}),
+        ...(payload?.notes ? { notes: payload.notes } : {}),
         ...(payload?.quizzes ? { quizzes: payload.quizzes } : {}),
         ...(payload?.quizSets ? { quizSets: payload.quizSets } : {}),
         ...(payload?.quizFolders ? { quizFolders: payload.quizFolders } : {}),
@@ -4942,7 +4931,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Always send the latest structure from refs — a queued save captured before
     // create/delete must not overwrite the cloud array with a stale snapshot.
     if (safe.notes !== undefined) {
-      safe.notes = notesForCloudArray(stripPermDeletedNotes(notesRef.current, permDeletedRef.current));
+      safe.notes = stripPermDeletedNotes(notesRef.current, permDeletedRef.current);
     }
     if (safe.quizzes !== undefined) {
       safe.quizzes = stripPermDeletedQuizzes(quizzesRef.current, permDeletedRef.current);
@@ -5226,7 +5215,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       tokenUsage: tokenUsageRef.current,
       cloudSyncAt: Date.now(),
     };
-    if (nextNotes.length > 0 || !everHadNotesRef.current) body.notes = notesForCloudArray(nextNotes);
+    if (nextNotes.length > 0 || !everHadNotesRef.current) body.notes = nextNotes;
     else recoveryLog('skipped wiping notes with empty local array');
     if (qList.length > 0 || !everHadQuizzesRef.current) body.quizzes = qList;
     else recoveryLog('skipped wiping quizzes with empty local array');
@@ -6399,6 +6388,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (instant) scheduleInstantDataCloudSave({ notes: next });
   };
 
+  const hydrateNote = async (id: number) => {
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    const current = notesRef.current.find((n) => Number(n.id) === Number(id));
+    if (current && noteHasDisplayableImage(current.html)) return;
+    const [local, cloud] = await Promise.all([
+      getNoteLocal(Number(id)),
+      fetchNoteByIdCloud(uid, Number(id)),
+    ]);
+    const incoming = [local, cloud].filter((n): n is Note => !!n);
+    if (!incoming.length) return;
+    const merged = sortNotesByCreatedDesc(mergeNotesPreferRicher(notesRef.current, incoming));
+    if (!notesBodiesRicher(merged, notesRef.current) && notesFlagsEqual(merged, notesRef.current)) return;
+    notesRef.current = merged;
+    setNotes(merged);
+    const found = merged.find((n) => Number(n.id) === Number(id));
+    if (found) void putNoteLocal(found);
+  };
+
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
     const newId = Date.now();
     const now = new Date().toISOString();
@@ -7494,8 +7502,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // near its quota permanently — the reason fresh saves' local writes can fail
   // silently. Once per session, quietly upload those to Storage and swap the
   // content to short URLs, a few images at a time.
-  const INLINE_IMAGE_MIGRATE_MIN_CHARS = 65_000;
-  const INLINE_IMAGE_MIGRATE_MAX_PER_SESSION = 40;
+  const INLINE_IMAGE_MIGRATE_MIN_CHARS = 80;
+  const INLINE_IMAGE_MIGRATE_MAX_PER_SESSION = 80;
 
   const collectInlineImageUrls = (): string[] => {
     const found = new Set<string>();
@@ -7930,6 +7938,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         emptyTrash,
         deleteMany,
         updateNote,
+        hydrateNote,
         nowStr,
         chats,
         saveChats,
