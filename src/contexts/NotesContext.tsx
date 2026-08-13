@@ -485,6 +485,31 @@ function noteContentKey(note: Note) {
   return `${note.title}\0${note.html}`;
 }
 
+/** Cloud note HTML is the shared source. Local shells must not hide photos. */
+function adoptCloudNoteBodies(current: Note[], cloud: Note[]): Note[] {
+  const byId = new Map(current.map((n) => [Number(n.id), n]));
+  for (const incoming of cloud) {
+    const id = Number(incoming.id);
+    if (!Number.isFinite(id)) continue;
+    const cur = byId.get(id);
+    if (!cur) {
+      byId.set(id, incoming);
+      continue;
+    }
+    const cloudImg = noteHasDisplayableImage(incoming.html);
+    const localImg = noteHasDisplayableImage(cur.html);
+    if (cloudImg && !localImg) {
+      byId.set(id, { ...cur, html: incoming.html, text: incoming.text || cur.text });
+      continue;
+    }
+    if (localImg && !cloudImg) continue;
+    if ((incoming.html || '').length > (cur.html || '').length) {
+      byId.set(id, { ...cur, html: incoming.html, text: incoming.text || cur.text });
+    }
+  }
+  return [...byId.values()];
+}
+
 function pickBetterNote(local: Note, remote: Note) {
   if (noteSyncKey(local) === noteSyncKey(remote)) return local;
   if (local.trashed !== remote.trashed) return remote.trashed ? remote : local;
@@ -3003,7 +3028,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const applyNotesSnapshot = (incoming: Note[]) => {
       if (cancelled || !incoming.length) return;
-      commitNotes(mergeNotesPreferRicher(notesRef.current, incoming));
+      commitNotes(adoptCloudNoteBodies(notesRef.current, incoming));
     };
 
     const hydrateMissingNoteBodies = async () => {
@@ -5410,7 +5435,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     lastCloudDraftIdsRef.current = new Set(parseCloudDrafts(cloud).map((d) => d.id));
 
     const mergedNotes = filterResurrectedTrash(
-      mergeNotesPreferRicher(notesRef.current, mergeNotesForSync(notesRef.current, remoteNotes, tombstones)),
+      adoptCloudNoteBodies(notesRef.current, mergeNotesForSync(notesRef.current, remoteNotes, tombstones)),
       notesRef.current,
     );
     let mergedQuizzes = stripPermDeletedQuizzes(
@@ -6104,7 +6129,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const liveDurable = durable.filter((n) => !dead.has(Number(n.id)));
       if (!liveDurable.length) return;
       const merged = sortNotesByCreatedDesc(
-        stripPermDeletedNotes(mergeNotesPreferRicher(notesRef.current, liveDurable), tombstones),
+        stripPermDeletedNotes(adoptCloudNoteBodies(notesRef.current, liveDurable), tombstones),
       );
       if (
         notesIdSetEqual(merged, notesRef.current)
