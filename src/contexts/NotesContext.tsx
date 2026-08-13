@@ -2979,16 +2979,20 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       fetchQuizSetsByIdCloud(user.uid),
       fetchQuizFoldersByIdCloud(user.uid),
     ]);
-    // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
-    // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
-    const notesCloudPromise = fetchNotesByIdCloud(user.uid);
-    const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
-    const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
-
     const applyNotesSnapshot = (incoming: Note[]) => {
       if (cancelled || !incoming.length) return;
       commitNotes(mergeNotesPreferRicher(notesRef.current, incoming));
     };
+
+    // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
+    // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
+    // Paint each small batch so image notes appear on a new PC without waiting
+    // for the whole notesById dump (that 30s timeout is why hospital photos vanished).
+    const notesCloudPromise = fetchNotesByIdCloud(user.uid, (batch) => {
+      applyNotesSnapshot(batch);
+    });
+    const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
+    const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
 
     // Cloud notes enrich in the background — never block first paint on the network.
     const notesCloudReady = (async () => {
@@ -2999,6 +3003,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (!cancelled && cloudNotes.length) applyNotesSnapshot(cloudNotes);
       } catch { /* ignore */ }
     })();
+
+    // Home PC still has the real photos in IndexedDB — push them back to notesById
+    // so the hospital computer can download them one note at a time.
+    void notesIdbReady.then(async () => {
+      if (cancelled || !user.uid) return;
+      const localNotes = await prefetchAllNotesLocal();
+      for (const note of localNotes) {
+        if (cancelled) return;
+        if (!/<img\b/i.test(note.html || '')) continue;
+        await persistNoteDurable(user.uid, note).catch(() => false);
+      }
+    });
 
     (async () => {
       try {

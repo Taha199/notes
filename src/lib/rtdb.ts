@@ -84,11 +84,11 @@ async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = RTD
 }
 
 /** Authenticated Firebase Realtime Database REST fetch with timeout + one 401/403 retry. */
-export async function rtdbFetch(path: string, init?: RequestInit): Promise<Response> {
+export async function rtdbFetch(path: string, init?: RequestInit, timeoutMs = RTDB_TIMEOUT_MS): Promise<Response> {
   const url = await rtdbUrl(path);
-  const res = await fetchWithTimeout(url, init);
+  const res = await fetchWithTimeout(url, init, timeoutMs);
   if (res.ok || (res.status !== 401 && res.status !== 403)) return res;
   const retryUrl = await rtdbUrl(path, true);
   if (retryUrl === url) return res;
-  return fetchWithTimeout(retryUrl, init);
+  return fetchWithTimeout(retryUrl, init, timeoutMs);
 }
