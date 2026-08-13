@@ -3006,6 +3006,25 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       commitNotes(mergeNotesPreferRicher(notesRef.current, incoming));
     };
 
+    const hydrateMissingNoteBodies = async () => {
+      const missing = notesRef.current.filter((n) => !noteHasDisplayableImage(n.html));
+      if (!missing.length) return;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < missing.length && !cancelled) {
+          const note = missing[cursor++];
+          const one = await fetchNoteByIdCloud(user.uid, Number(note.id));
+          if (one) applyNotesSnapshot([one]);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, missing.length) }, () => worker()));
+    };
+
+    // Pull photo bodies immediately. Do NOT wait on the giant notesById tree —
+    // that download times out on hospital Wi-Fi while a third PC on normal
+    // internet succeeds, which is why only one machine was missing images.
+    void hydrateMissingNoteBodies();
+
     // Cloud notes enrich in the background — never block first paint on the network.
     const notesCloudReady = (async () => {
       await notesIdbReady;
@@ -3013,16 +3032,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       try {
         const cloudNotes = await notesCloudPromise;
         if (!cancelled && cloudNotes.length) applyNotesSnapshot(cloudNotes);
-        if (cancelled) return;
-        // Hospital/new PC: the giant notesById tree often times out, so shells
-        // stay image-less. Pull missing bodies one note at a time like quiz does.
-        const missing = notesRef.current.filter((n) => !noteHasDisplayableImage(n.html));
-        for (const note of missing) {
-          if (cancelled) return;
-          const one = await fetchNoteByIdCloud(user.uid, Number(note.id));
-          if (one && noteHasDisplayableImage(one.html)) applyNotesSnapshot([one]);
-        }
       } catch { /* ignore */ }
+      if (!cancelled) await hydrateMissingNoteBodies();
     })();
 
     (async () => {
@@ -4368,7 +4379,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [user, loaded]);
 
   const writeLocalCache = () => {
-    safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+    // Never JSON.stringify full note HTML into localStorage. Image notes blow
+    // the quota on locked-down hospital PCs; the throw used to abort applying
+    // the cloud copy that still has the photos.
     writeNotesListCache(notesRef.current);
     rememberNotesBootCache(notesRef.current);
     safeSetItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
@@ -5396,7 +5409,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const remoteDrafts = parseCloudDrafts(cloud).filter((draft) => !pendingDeletedDraftIdsRef.current.has(draft.id));
     lastCloudDraftIdsRef.current = new Set(parseCloudDrafts(cloud).map((d) => d.id));
 
-    const mergedNotes = filterResurrectedTrash(mergeNotesForSync(notesRef.current, remoteNotes, tombstones), notesRef.current);
+    const mergedNotes = filterResurrectedTrash(
+      mergeNotesPreferRicher(notesRef.current, mergeNotesForSync(notesRef.current, remoteNotes, tombstones)),
+      notesRef.current,
+    );
     let mergedQuizzes = stripPermDeletedQuizzes(
       filterResurrectedTrash(mergeQuizzesForSync(quizzesRef.current, remoteQuizzes, tombstones), quizzesRef.current),
       tombstones,
@@ -5460,10 +5476,30 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
 
     let changed = false;
-    if (JSON.stringify(mergedNotes) !== JSON.stringify(notesRef.current)) {
+    if (
+      notesBodiesRicher(mergedNotes, notesRef.current)
+      || !notesFlagsEqual(mergedNotes, notesRef.current)
+      || !notesMetaEqual(mergedNotes, notesRef.current)
+    ) {
+      notesRef.current = mergedNotes;
       setNotes(mergedNotes);
-      safeSetItem('malacadhati', JSON.stringify(mergedNotes));
+      writeNotesListCache(mergedNotes);
+      rememberNotesBootCache(mergedNotes, true);
       changed = true;
+    }
+    const uid = userRef.current?.uid;
+    const stillMissing = notesRef.current.filter((n) => !noteHasDisplayableImage(n.html));
+    if (uid && stillMissing.length) {
+      void Promise.all(stillMissing.map(async (note) => {
+        const one = await fetchNoteByIdCloud(uid, Number(note.id));
+        if (!one || !noteHasDisplayableImage(one.html)) return;
+        const next = sortNotesByCreatedDesc(mergeNotesPreferRicher(notesRef.current, [one]));
+        if (!notesBodiesRicher(next, notesRef.current)) return;
+        notesRef.current = next;
+        setNotes(next);
+        writeNotesListCache(next);
+        rememberNotesBootCache(next, true);
+      }));
     }
     if (JSON.stringify(mergedQuizzes) !== JSON.stringify(quizzesRef.current)) {
       setQuizzes(mergedQuizzes);
@@ -6084,7 +6120,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       try {
         notesRef.current = merged;
         setNotes(merged);
-        safeSetItem('malacadhati', JSON.stringify(merged));
         writeNotesListCache(merged);
         rememberNotesBootCache(merged);
       } finally {

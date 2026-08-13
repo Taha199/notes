@@ -260,7 +260,7 @@ export async function fetchNoteByIdCloud(uid: string, id: number): Promise<Note 
 
 export async function fetchNotesByIdCloud(uid: string): Promise<Note[]> {
   try {
-    const res = await rtdbFetch(`/users/${uid}/notesById`);
+    const res = await rtdbFetch(`/users/${uid}/notesById`, undefined, 90_000);
     if (!res.ok) return [];
     const data = await res.json();
     if (!data || typeof data !== 'object') return [];
