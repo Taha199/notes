@@ -3862,7 +3862,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   /** Structure-only cloud bump — never nest giant quizSets/quizFolders in parent update(). */
   const bumpCloudSyncAt = () => {
     const u = userRef.current;
-    if (!u || !loadedRef.current) return;
+    if (!u) return;
     const syncedAt = Date.now();
     void update(dbRef(database, `users/${u.uid}`), { cloudSyncAt: syncedAt }).then(() => {
       lastLocalSaveAt.current = syncedAt;
@@ -6229,7 +6229,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         flushPendingInstantDataSave();
       }
     };
-    function scheduleNotesByIdFlush() {
+    function scheduleNotesByIdFlush(delayMs = 120) {
       // Trailing debounce — coalesce the full onChildAdded storm into one paint
       // so newest notes (highest ids) don't trickle in after older ones.
       if (notesByIdFlush) clearTimeout(notesByIdFlush);
@@ -6238,7 +6238,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const batch = notesByIdBuffer;
         notesByIdBuffer = [];
         applyNotesByIdBatch(batch);
-      }, 120);
+      }, delayMs);
     }
     const queueNoteChild = (val: unknown, fromChange = false) => {
       if (!val || typeof val !== 'object') return;
@@ -6261,7 +6261,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ) return;
       }
       notesByIdBuffer.push(note);
-      scheduleNotesByIdFlush();
+      const isLiveNew = notesRef.current.length > 0
+        && !notesRef.current.some((n) => Number(n.id) === Number(note.id));
+      scheduleNotesByIdFlush(isLiveNew ? 0 : 120);
     };
     const notesByIdRef = dbRef(database, `users/${uid}/notesById`);
     const unsubNoteAdded = onChildAdded(notesByIdRef, (snap) => queueNoteChild(snap.val(), false));
@@ -6378,7 +6380,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         return;
       }
       scheduleRemoteDraftPull();
-      if (loadedRef.current) scheduleRemotePull(true);
+      scheduleRemotePull(true);
     });
     return () => {
       unsubscribe();
@@ -6483,6 +6485,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         const durableOk = await persistNoteDurable(userRef.current?.uid, newNote).catch(() => false);
+        if (durableOk) bumpCloudSyncAt();
         await runInstantDataCloudSave({ notes: nextNotes }, { trackInFlight: false });
         if (durableOk) {
           saveFailedRef.current = false;
@@ -6530,6 +6533,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       void (async () => {
         try {
           const durableOk = await persistNoteDurable(userRef.current?.uid, merged).catch(() => false);
+          if (durableOk) bumpCloudSyncAt();
           await runInstantDataCloudSave({ notes: next }, { trackInFlight: false });
           if (durableOk) {
             saveFailedRef.current = false;

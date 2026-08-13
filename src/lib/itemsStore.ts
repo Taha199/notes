@@ -217,8 +217,10 @@ export function keepRicherNoteBody(existing: Note | undefined, incoming: Note): 
 /** Single-note cloud write — independent of the giant notes[] array. */
 export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
   let toWrite = note;
-  if (!noteHasDisplayableImage(note.html)) {
-    const cloud = await fetchNoteByIdCloud(uid, Number(note.id));
+  // Only peek cloud when this looks like an empty shell — a real save must
+  // not wait on a 90s GET before the other phone can see the note.
+  if (!noteHasDisplayableImage(note.html) && (note.html || '').length < 400) {
+    const cloud = await fetchNoteByIdCloud(uid, Number(note.id), 8_000);
     if (cloud && noteHasDisplayableImage(cloud.html)) {
       toWrite = { ...note, html: cloud.html, text: note.text || cloud.text };
     }
@@ -256,9 +258,9 @@ export async function fetchNotesByIdKeysCloud(uid: string): Promise<number[]> {
   }
 }
 
-export async function fetchNoteByIdCloud(uid: string, id: number): Promise<Note | null> {
+export async function fetchNoteByIdCloud(uid: string, id: number, timeoutMs = 90_000): Promise<Note | null> {
   try {
-    const res = await rtdbFetch(`/users/${uid}/notesById/${id}`, undefined, 90_000);
+    const res = await rtdbFetch(`/users/${uid}/notesById/${id}`, undefined, timeoutMs);
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || typeof data !== 'object' || (data as Note).id == null) return null;
