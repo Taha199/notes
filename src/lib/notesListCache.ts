@@ -7,7 +7,7 @@
  * the list/cards appear immediately; IDB/cloud then restore full bodies.
  */
 import type { Note } from '../types';
-import { PERM_DELETED_KEY, writeTinyDurableValue } from './quizTrashTombstones';
+import { NOTE_TRASH_TOMBSTONE_KEY, PERM_DELETED_KEY, readTrashTombstones, writeTinyDurableValue } from './quizTrashTombstones';
 
 function readPermDeletedNoteIds(): Set<number> {
   try {
@@ -134,6 +134,11 @@ export function writeNotesListCache(notes: Note[]): void {
       byId.set(id, note);
       continue;
     }
+    if (note.trashed && !existing.trashed) {
+      byId.set(id, { ...existing, ...note, trashed: true });
+      continue;
+    }
+    if (existing.trashed && !note.trashed) continue;
     // Prefer the incoming body when it is richer / newer meta.
     const incomingLen = (note.html || '').length + (note.title || '').length;
     const existingLen = (existing.html || '').length + (existing.title || '').length;
@@ -143,7 +148,10 @@ export function writeNotesListCache(notes: Note[]): void {
       byId.set(id, note);
     }
   }
-  const merged = [...byId.values()];
+  const tombs = readTrashTombstones(NOTE_TRASH_TOMBSTONE_KEY);
+  const merged = [...byId.values()].map((note) => (
+    tombs[String(note.id)] && !note.trashed ? { ...note, trashed: true } : note
+  ));
   const compact = compactNotesForListCache(merged);
   try {
     const json = JSON.stringify(compact);

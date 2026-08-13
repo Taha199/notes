@@ -16,6 +16,7 @@ import {
 export const QUIZ_SET_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_set_trash_tombstones';
 export const QUIZ_FOLDER_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_folder_trash_tombstones';
 export const QUIZ_ITEM_TRASH_TOMBSTONE_KEY = 'malacadhati_quiz_item_trash_tombstones';
+export const NOTE_TRASH_TOMBSTONE_KEY = 'malacadhati_note_trash_tombstones';
 export const TRASH_EMPTIED_AT_KEY = 'malacadhati_trash_emptied_at';
 export const PERM_DELETED_KEY = 'malacadhati_perm_deleted';
 export const SIDEBAR_COUNTS_KEY = 'malacadhati_sidebar_counts';
@@ -185,12 +186,19 @@ export function readAllQuizTrashTombstones(): {
   items: TrashTombstones;
   sets: TrashTombstones;
   folders: TrashTombstones;
+  notes: TrashTombstones;
 } {
   return {
     items: readTrashTombstones(QUIZ_ITEM_TRASH_TOMBSTONE_KEY),
     sets: readTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY),
     folders: readTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY),
+    notes: readTrashTombstones(NOTE_TRASH_TOMBSTONE_KEY),
   };
+}
+
+export function isNoteTrashTombstoned(id: number): boolean {
+  const at = readTrashTombstones(NOTE_TRASH_TOMBSTONE_KEY)[String(id)];
+  return Number.isFinite(at) && at > 0;
 }
 
 /** Stamp last-good / boot lists with durable trash markers before paint or save. */
@@ -256,6 +264,7 @@ export async function readQuizTrashTombstonesIdb(): Promise<{
   items: TrashTombstones;
   sets: TrashTombstones;
   folders: TrashTombstones;
+  notes: TrashTombstones;
   emptiedAt?: number;
   permDeletedQuizzes?: number[];
   permDeletedSets?: string[];
@@ -273,6 +282,7 @@ export async function readQuizTrashTombstonesIdb(): Promise<{
       items?: unknown;
       sets?: unknown;
       folders?: unknown;
+      notes?: unknown;
       emptiedAt?: unknown;
       permDeletedQuizzes?: unknown;
       permDeletedSets?: unknown;
@@ -281,6 +291,7 @@ export async function readQuizTrashTombstonesIdb(): Promise<{
       items: normalizeTombstoneMap(obj.items),
       sets: normalizeTombstoneMap(obj.sets),
       folders: normalizeTombstoneMap(obj.folders),
+      notes: normalizeTombstoneMap(obj.notes),
       emptiedAt: Number(obj.emptiedAt) || 0,
       permDeletedQuizzes: Array.isArray(obj.permDeletedQuizzes)
         ? obj.permDeletedQuizzes.map(Number).filter(Number.isFinite)

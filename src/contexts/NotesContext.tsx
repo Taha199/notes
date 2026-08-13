@@ -106,6 +106,7 @@ import {
   writeTrashEmptiedAt,
   writeTrashTombstones,
   PERM_DELETED_KEY,
+  NOTE_TRASH_TOMBSTONE_KEY,
   QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
   QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
   QUIZ_SET_TRASH_TOMBSTONE_KEY,
@@ -468,23 +469,26 @@ async function fetchCloudTrashTombstones(uid: string): Promise<{
   sets: TrashTombstones;
   folders: TrashTombstones;
   items: TrashTombstones;
+  notes: TrashTombstones;
 }> {
   try {
-    const [setsRes, foldersRes, itemsRes] = await Promise.all([
+    const [setsRes, foldersRes, itemsRes, notesRes] = await Promise.all([
       rtdbFetch(`/users/${uid}/quizTrash/sets`),
       rtdbFetch(`/users/${uid}/quizTrash/folders`),
       rtdbFetch(`/users/${uid}/quizTrash/items`),
+      rtdbFetch(`/users/${uid}/quizTrash/notes`),
     ]);
     const sets = setsRes.ok ? normalizeTombstoneMap(await setsRes.json()) : {};
     const folders = foldersRes.ok ? normalizeTombstoneMap(await foldersRes.json()) : {};
     const items = itemsRes.ok ? normalizeTombstoneMap(await itemsRes.json()) : {};
-    return { sets, folders, items };
+    const notes = notesRes.ok ? normalizeTombstoneMap(await notesRes.json()) : {};
+    return { sets, folders, items, notes };
   } catch {
-    return { sets: {}, folders: {}, items: {} };
+    return { sets: {}, folders: {}, items: {}, notes: {} };
   }
 }
 
-function pushTrashTombstoneCloud(uid: string, path: 'sets' | 'folders' | 'items', id: string, at: number) {
+function pushTrashTombstoneCloud(uid: string, path: 'sets' | 'folders' | 'items' | 'notes', id: string, at: number) {
   // Other devices apply the delete from this node, so a dropped SDK write here
   // would leave them showing the set until the (much larger) array/ById write
   // lands — retry over REST just like the ById mirrors do.
@@ -497,7 +501,7 @@ function pushTrashTombstoneCloud(uid: string, path: 'sets' | 'folders' | 'items'
   ));
 }
 
-function clearTrashTombstoneCloud(uid: string, path: 'sets' | 'folders' | 'items', id: string) {
+function clearTrashTombstoneCloud(uid: string, path: 'sets' | 'folders' | 'items' | 'notes', id: string) {
   void remove(dbRef(database, `users/${uid}/quizTrash/${path}/${id}`)).catch(() => {});
 }
 
@@ -509,7 +513,7 @@ function clearTrashTombstoneCloud(uid: string, path: 'sets' | 'folders' | 'items
  * `deletedAt` is only stamped when the row has none (Trash card label).
  * Empty-Trash watermark wins over soft tombstones for rows deleted at-or-before it.
  */
-function applyTrashTombstones<T extends { id: string; trashed?: boolean; deletedAt?: string; updatedAt?: string; createdAt?: string }>(
+function applyTrashTombstones<T extends { id: string | number; trashed?: boolean; deletedAt?: string; updatedAt?: string; createdAt?: string }>(
   items: T[],
   tombstones: TrashTombstones,
   deletedAt?: string,
@@ -518,7 +522,7 @@ function applyTrashTombstones<T extends { id: string; trashed?: boolean; deleted
   const emptiedAt = readTrashEmptiedAt();
   let changed = false;
   const next = items.map((item) => {
-    const at = tombstones[item.id];
+    const at = tombstones[String(item.id)];
     if (at === undefined || item.trashed) return item;
     if (emptiedAt && at <= emptiedAt) return item;
     // Durable quizTrash marker wins over a newer live last-good/ById echo.
@@ -1440,10 +1444,13 @@ function readBootNotesForPaint(): Note[] {
   const fromIdb = stripPermDeletedNotes(peekPrefetchedNotes(), tombstones);
   const fromCatalog = stripPermDeletedNotes(peekServerNotesCatalog(), tombstones);
   // Prefer richer bodies (IDB/memory) over compact list-cache shells when timestamps tie.
-  const merged = adoptCloudNoteBodies(
-    mergeNotesPreferRicher(fromLs, fromListCache, fromMemory, fromIdb, fromCatalog),
-    fromCatalog,
-    true,
+  const merged = applyTrashTombstones(
+    adoptCloudNoteBodies(
+      mergeNotesPreferRicher(fromLs, fromListCache, fromMemory, fromIdb, fromCatalog),
+      fromCatalog,
+      true,
+    ),
+    readTrashTombstones(NOTE_TRASH_TOMBSTONE_KEY),
   ).filter((note) => (
     !(note.trashed && emptiedAt && entitySyncTime(note) <= emptiedAt)
   ));
@@ -2417,6 +2424,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const quizSetTombstonesRef = useRef<TrashTombstones>(readTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY));
   const quizFolderTombstonesRef = useRef<TrashTombstones>(readTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY));
   const quizItemTombstonesRef = useRef<TrashTombstones>(readTrashTombstones(QUIZ_ITEM_TRASH_TOMBSTONE_KEY));
+  const noteTrashTombstonesRef = useRef<TrashTombstones>(readTrashTombstones(NOTE_TRASH_TOMBSTONE_KEY));
   /** Once true, refuse to PATCH/PUT empty arrays over cloud (prevents accidental wipe). */
   const everHadNotesRef = useRef(false);
   const everHadQuizzesRef = useRef(false);
@@ -2577,10 +2585,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const have = new Set(notesRef.current.map((n) => Number(n.id)));
       next = next.filter((n) => have.has(Number(n.id)));
     }
-    if (localTrashIdsRef.current.size) {
+    const trashTombs = noteTrashTombstonesRef.current;
+    if (localTrashIdsRef.current.size || Object.keys(trashTombs).length) {
       next = next.map((n) => {
         const id = Number(n.id);
-        if (!localTrashIdsRef.current.has(id) || n.trashed) return n;
+        const tombAt = trashTombs[String(id)];
+        if (n.trashed) return n;
+        if (!localTrashIdsRef.current.has(id) && tombAt == null) return n;
         const cur = notesRef.current.find((c) => Number(c.id) === id);
         return cur?.trashed ? cur : { ...n, trashed: true, deletedAt: n.deletedAt || nowStr() };
       });
@@ -2590,11 +2601,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const adoptNotesSafe = (current: Note[], incoming: Note[], applyFlags = true, allowNewIds = true) => {
     const safe = incomingNotesSafe(incoming, allowNewIds);
-    return adoptCloudNoteBodies(
-      current,
-      safe,
-      applyFlags,
-      blockedNoteIdSet(permDeletedRef.current, rejectedNoteIdsRef.current),
+    return applyTrashTombstones(
+      adoptCloudNoteBodies(
+        current,
+        safe,
+        applyFlags,
+        blockedNoteIdSet(permDeletedRef.current, rejectedNoteIdsRef.current),
+      ),
+      noteTrashTombstonesRef.current,
+      nowStr(),
     );
   };
 
@@ -2635,6 +2650,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetTombstonesRef.current = readTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY);
     quizFolderTombstonesRef.current = readTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY);
     quizItemTombstonesRef.current = readTrashTombstones(QUIZ_ITEM_TRASH_TOMBSTONE_KEY);
+    noteTrashTombstonesRef.current = readTrashTombstones(NOTE_TRASH_TOMBSTONE_KEY);
     // IndexedDB journal is the durable write-ahead log for image notes (localStorage
     // quota can't hold them). Load it in parallel with the first paint from the
     // raw localStorage snapshot, then fold journal entries in before cloud merge.
@@ -2723,10 +2739,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       const blocked = blockedNoteIdSet(permDeletedRef.current, rejectedNoteIdsRef.current);
       let mergedNotes = sortNotesByCreatedDesc(
-        snapshot.filter((note) => (
-          !blocked.has(Number(note.id))
-          && !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
-        )),
+        applyTrashTombstones(
+          snapshot.filter((note) => (
+            !blocked.has(Number(note.id))
+            && !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
+          )),
+          noteTrashTombstonesRef.current,
+        ),
       );
       const prev = notesRef.current;
       notesRef.current = mergedNotes;
@@ -2839,6 +2858,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         items: quizItemTombstonesRef.current,
         sets: quizSetTombstonesRef.current,
         folders: quizFolderTombstonesRef.current,
+        notes: noteTrashTombstonesRef.current,
       });
       const pruned = pruneQuizListsAgainstTrashState(honored.quizzes, honored.sets);
       if (!quizSetsHaveCompleteBodies(pruned.sets)) return;
@@ -2977,6 +2997,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizItemTombstonesRef.current = mergeTombstoneMaps(quizItemTombstonesRef.current, idbTombs.items);
         quizSetTombstonesRef.current = mergeTombstoneMaps(quizSetTombstonesRef.current, idbTombs.sets);
         quizFolderTombstonesRef.current = mergeTombstoneMaps(quizFolderTombstonesRef.current, idbTombs.folders);
+        noteTrashTombstonesRef.current = mergeTombstoneMaps(noteTrashTombstonesRef.current, idbTombs.notes ?? {});
         if (idbTombs.emptiedAt) writeTrashEmptiedAt(idbTombs.emptiedAt);
         if (idbTombs.permDeletedQuizzes?.length || idbTombs.permDeletedSets?.length) {
           permDeletedRef.current = addPermDeleted(permDeletedRef.current, {
@@ -2988,6 +3009,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         writeTrashTombstones(QUIZ_ITEM_TRASH_TOMBSTONE_KEY, quizItemTombstonesRef.current);
         writeTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY, quizSetTombstonesRef.current);
         writeTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY, quizFolderTombstonesRef.current);
+        writeTrashTombstones(NOTE_TRASH_TOMBSTONE_KEY, noteTrashTombstonesRef.current);
       }
       const idbLastGood = await readQuizCompleteCacheIdb();
       if (cancelled || !idbLastGood || !quizSetsHaveCompleteBodies(idbLastGood.sets)) return;
@@ -3374,6 +3396,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
           emptiedAtBoot,
         );
+        noteTrashTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+          noteTrashTombstonesRef.current,
+          NOTE_TRASH_TOMBSTONE_KEY,
+          emptiedAtBoot,
+        );
         const tombstones = {
           ...permDeletedRef.current,
           notes: [...new Set([
@@ -3652,6 +3679,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
           quizItemTombstonesRef.current,
           cloudTrashTombstones.items,
+        );
+        noteTrashTombstonesRef.current = mergeTrashTombstones(
+          NOTE_TRASH_TOMBSTONE_KEY,
+          noteTrashTombstonesRef.current,
+          cloudTrashTombstones.notes,
         );
         rawSets = honorQuizItemTrashTombstones(
           applyTrashTombstones(rawSets, quizSetTombstonesRef.current),
@@ -4439,6 +4471,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizFoldersRef.current = nextFolders;
       safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
       setQuizFolders(nextFolders);
+    }
+    const nextNotes = applyTrashTombstones(notesRef.current, noteTrashTombstonesRef.current, stamp);
+    if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+      writeNotesListCache(nextNotes);
+      rememberNotesBootCache(nextNotes, true);
+      safeSetItem('malacadhati', JSON.stringify(nextNotes));
     }
   };
 
@@ -5653,6 +5693,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
       emptiedAtPull,
     );
+    noteTrashTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+      noteTrashTombstonesRef.current,
+      NOTE_TRASH_TOMBSTONE_KEY,
+      emptiedAtPull,
+    );
     const tombstones = permDeletedRef.current;
     const remoteNotes = incomingNotesSafe(
       firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>),
@@ -6041,6 +6086,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
         remote,
       );
+      noteTrashTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+        noteTrashTombstonesRef.current,
+        NOTE_TRASH_TOMBSTONE_KEY,
+        remote,
+      );
       // Drop emptied ghosts immediately so Trash matches the device that emptied.
       applyPermDeletedLocally();
       applyTrashTombstonesToState();
@@ -6242,6 +6292,34 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const unsubSetTrash = bindTrashTombstoneNode('sets');
     const unsubFolderTrash = bindTrashTombstoneNode('folders');
     const unsubItemTrash = bindTrashTombstoneNode('items');
+    const notesTrashNode = dbRef(database, `users/${uid}/quizTrash/notes`);
+    const unsubNoteTrashAdded = onChildAdded(notesTrashNode, (snap) => {
+      const id = String(snap.key || '');
+      const at = Number(snap.val());
+      if (!id || !Number.isFinite(at) || at <= 0) return;
+      if (permDeletedRef.current.notes.some((deadId) => Number(deadId) === Number(id))) return;
+      const emptiedAt = readTrashEmptiedAt();
+      if (emptiedAt && at <= emptiedAt) return;
+      if ((noteTrashTombstonesRef.current[id] ?? 0) >= at) return;
+      noteTrashTombstonesRef.current = markTrashTombstone(
+        NOTE_TRASH_TOMBSTONE_KEY,
+        noteTrashTombstonesRef.current,
+        id,
+        at,
+      );
+      localTrashIdsRef.current.add(Number(id));
+      scheduleTrashTombstoneApply();
+    });
+    const unsubNoteTrashRemoved = onChildRemoved(notesTrashNode, (snap) => {
+      const id = String(snap.key || '');
+      if (!id || !(id in noteTrashTombstonesRef.current)) return;
+      noteTrashTombstonesRef.current = clearTrashTombstone(
+        NOTE_TRASH_TOMBSTONE_KEY,
+        noteTrashTombstonesRef.current,
+        id,
+      );
+      localTrashIdsRef.current.delete(Number(id));
+    });
 
     // Instant quiz item sync (add/edit/delete) — tiny per-item path, not the
     // multi-MB quizSets array. Child listeners keep live typing snappy; a full
@@ -6533,6 +6611,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       unsubSetTrash();
       unsubFolderTrash();
       unsubItemTrash();
+      unsubNoteTrashAdded();
+      unsubNoteTrashRemoved();
       if (trashApplyTimer) clearTimeout(trashApplyTimer);
       unsubQuizItemAdded();
       unsubQuizItemChanged();
@@ -8053,9 +8133,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const unarchive = (id: number) => updateNote(id, { archived: false, read: false });
   const trash = (id: number) => {
     const savedAt = new Date().toISOString();
+    const trashAtMs = Date.parse(savedAt) || Date.now();
     const base = notesRef.current.find((n) => n.id === id);
     if (!base) return;
     markNotesTrashedLocally([id]);
+    noteTrashTombstonesRef.current = markTrashTombstone(
+      NOTE_TRASH_TOMBSTONE_KEY,
+      noteTrashTombstonesRef.current,
+      String(id),
+      trashAtMs,
+    );
+    const uid = userRef.current?.uid;
+    if (uid) pushTrashTombstoneCloud(uid, 'notes', String(id), trashAtMs);
     const trashedNote: Note = { ...base, trashed: true, deletedAt: nowStr(), savedAt };
     // Write the tombstone to IndexedDB + notesById FIRST — otherwise a refresh
     // reloads the live copy from those stores and the note "comes back".
@@ -8073,6 +8162,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!base) return;
     localTrashIdsRef.current.delete(Number(id));
     rejectedNoteIdsRef.current.delete(Number(id));
+    noteTrashTombstonesRef.current = clearTrashTombstone(
+      NOTE_TRASH_TOMBSTONE_KEY,
+      noteTrashTombstonesRef.current,
+      String(id),
+    );
+    const restoreUid = userRef.current?.uid;
+    if (restoreUid) clearTrashTombstoneCloud(restoreUid, 'notes', String(id));
     const restored: Note = { ...base, trashed: false, deletedAt: undefined, savedAt };
     recordRecentEdit({ kind: 'note', at: Date.now(), note: restored });
     void persistNoteDurable(userRef.current?.uid, restored);
@@ -8088,6 +8184,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     rejectNoteIds([numId]);
     recordPermDeleted({ notes: [numId] });
     purgeNotesFromListCache([numId]);
+    noteTrashTombstonesRef.current = clearTrashTombstone(
+      NOTE_TRASH_TOMBSTONE_KEY,
+      noteTrashTombstonesRef.current,
+      String(numId),
+    );
+    const permUid = userRef.current?.uid;
+    if (permUid) clearTrashTombstoneCloud(permUid, 'notes', String(numId));
     const nextNotes = stripPermDeletedNotes(
       notesRef.current.filter((n) => Number(n.id) !== numId),
       permDeletedRef.current,
@@ -8167,6 +8270,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
       emptiedAtMs,
     );
+    noteTrashTombstonesRef.current = pruneSoftTombstonesAfterEmpty(
+      noteTrashTombstonesRef.current,
+      NOTE_TRASH_TOMBSTONE_KEY,
+      emptiedAtMs,
+    );
 
     const uid = userRef.current?.uid;
     // Destroy ById mirrors BEFORE clearing soft-delete markers. Otherwise a
@@ -8192,7 +8300,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       );
       if (uid) clearTrashTombstoneCloud(uid, 'items', String(id));
     });
-    trashedNotes.forEach((n) => { void removeNoteDurable(uid, n.id); });
+    trashedNotes.forEach((n) => {
+      noteTrashTombstonesRef.current = clearTrashTombstone(
+        NOTE_TRASH_TOMBSTONE_KEY,
+        noteTrashTombstonesRef.current,
+        String(n.id),
+      );
+      if (uid) clearTrashTombstoneCloud(uid, 'notes', String(n.id));
+      void removeNoteDurable(uid, n.id);
+    });
     emptiedQuizIds.forEach((id) => { void removeQuizItemDurable(uid, id); });
     lastPaintedQuizSetsRef.current = nextSets;
     lastPaintedQuizzesRef.current = nextQuizzes;
@@ -8218,6 +8334,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     rejectNoteIds(ids);
     recordPermDeleted({ notes: ids });
     purgeNotesFromListCache(ids);
+    ids.forEach((id) => {
+      noteTrashTombstonesRef.current = clearTrashTombstone(
+        NOTE_TRASH_TOMBSTONE_KEY,
+        noteTrashTombstonesRef.current,
+        String(id),
+      );
+      const manyUid = userRef.current?.uid;
+      if (manyUid) clearTrashTombstoneCloud(manyUid, 'notes', String(id));
+    });
     const idSet = new Set(ids);
     const nextNotes = notesRef.current.filter((n) => !idSet.has(n.id));
     notesRef.current = nextNotes;

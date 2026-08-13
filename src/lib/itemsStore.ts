@@ -25,6 +25,7 @@ import { database } from './firebase';
 import { applyQuizItemsOrder } from './quizSetMerge';
 import { rtdbFetch } from './rtdb';
 import { rememberServerNotesCatalog, peekServerNotesCatalog } from './notesListCache';
+import { isNoteTrashTombstoned } from './quizTrashTombstones';
 
 function stripUndefined<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -229,6 +230,7 @@ function isNotePermanentlyDeleted(id: number): boolean {
 /** Single-note cloud write — independent of the giant notes[] array. */
 export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
   if (isNotePermanentlyDeleted(Number(note.id))) return true;
+  if (!note.trashed && isNoteTrashTombstoned(Number(note.id))) return true;
   let toWrite = note;
   // Only peek cloud when this looks like an empty shell — a real save must
   // not wait on a 90s GET before the other phone can see the note.
