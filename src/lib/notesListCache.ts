@@ -57,6 +57,18 @@ export function compactNotesForListCache(notes: Note[]): Note[] {
   return notes.map(compactNoteForListCache);
 }
 
+/** Last server catalog (id + flags). Both devices paint this count first. */
+let serverNotesCatalog: Note[] | null = null;
+
+export function rememberServerNotesCatalog(notes: Note[]): void {
+  if (!notes.length) return;
+  serverNotesCatalog = compactNotesForListCache(notes);
+}
+
+export function peekServerNotesCatalog(): Note[] {
+  return serverNotesCatalog ? [...serverNotesCatalog] : [];
+}
+
 export function readNotesListCache(): Note[] {
   try {
     const raw = localStorage.getItem(NOTES_LIST_CACHE_KEY);

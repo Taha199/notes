@@ -24,6 +24,7 @@ import type { Note, QuizFolder, QuizItem, QuizSet } from '../types';
 import { database } from './firebase';
 import { applyQuizItemsOrder } from './quizSetMerge';
 import { rtdbFetch } from './rtdb';
+import { rememberServerNotesCatalog, peekServerNotesCatalog } from './notesListCache';
 
 function stripUndefined<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -243,6 +244,21 @@ export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
       console.error('[itemsStore] notesById REST fallback failed', err2);
       return false;
     }
+  }
+}
+
+/** Tiny server list: ids + read/archive/fav. Same count on every device. */
+export async function prefetchNotesCatalog(uid: string): Promise<Note[]> {
+  try {
+    const res = await rtdbFetch(`/users/${uid}/notes`);
+    if (!res.ok) return peekServerNotesCatalog();
+    const data = await res.json();
+    const raw = Array.isArray(data) ? data : data && typeof data === 'object' ? Object.values(data) : [];
+    const notes = (raw as Note[]).filter((n) => n && typeof n === 'object' && n.id != null);
+    rememberServerNotesCatalog(notes);
+    return notes;
+  } catch {
+    return peekServerNotesCatalog();
   }
 }
 

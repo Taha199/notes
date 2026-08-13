@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Note, NoteViewMode } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
@@ -46,10 +46,23 @@ function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: 
 
 export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHitIndex = null, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect, seq }: Props) {
   const { t, lang } = useLanguage();
-  const { toggleRead, toggleUnread, toggleFav, archive, unarchive, trash, restore, permDelete } = useNotes();
+  const { toggleRead, toggleUnread, toggleFav, archive, unarchive, trash, restore, permDelete, hydrateNote } = useNotes();
   const { show } = useToast();
   const [confirmPermDel, setConfirmPermDel] = useState(false);
   const expanded = viewMode === 'expanded';
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node || (note.html || '').length > 40) return;
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      void hydrateNote(note.id);
+      io.disconnect();
+    }, { rootMargin: '200px' });
+    io.observe(node);
+    return () => io.disconnect();
+  }, [hydrateNote, note.html, note.id]);
 
   const handleClick = () => {
     if (selectMode && onToggleSelect) onToggleSelect(note.id);
@@ -67,6 +80,7 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
 
   return (
     <div
+      ref={cardRef}
       onClick={handleClick}
       className={
         'animate-slide-up flex cursor-pointer flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition-all dark:bg-gray-800/60 ' +

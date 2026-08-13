@@ -82,9 +82,12 @@ import { sortNotesByCreatedDesc } from '../lib/noteSort';
 import {
   clearNotesBootCache,
   clearNotesListCache,
+  compactNotesForListCache,
+  peekServerNotesCatalog,
   readNotesBootCache,
   readNotesListCache,
   rememberNotesBootCache,
+  rememberServerNotesCatalog,
   writeNotesListCache,
   NOTES_LIST_CACHE_KEY,
 } from '../lib/notesListCache';
@@ -1349,8 +1352,13 @@ function readBootNotesForPaint(): Note[] {
   const fromListCache = stripPermDeletedNotes(readNotesListCache(), tombstones);
   const fromMemory = stripPermDeletedNotes(readNotesBootCache(), tombstones);
   const fromIdb = stripPermDeletedNotes(peekPrefetchedNotes(), tombstones);
+  const fromCatalog = stripPermDeletedNotes(peekServerNotesCatalog(), tombstones);
   // Prefer richer bodies (IDB/memory) over compact list-cache shells when timestamps tie.
-  const merged = mergeNotesPreferRicher(fromLs, fromListCache, fromMemory, fromIdb).filter((note) => (
+  const merged = adoptCloudNoteBodies(
+    mergeNotesPreferRicher(fromLs, fromListCache, fromMemory, fromIdb, fromCatalog),
+    fromCatalog,
+    true,
+  ).filter((note) => (
     !(note.trashed && emptiedAt && entitySyncTime(note) <= emptiedAt)
   ));
   const sorted = sortNotesByCreatedDesc(merged);
@@ -3056,7 +3064,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const applyNotesSnapshot = (incoming: Note[]) => {
       if (cancelled || !incoming.length) return;
-      commitNotes(adoptCloudNoteBodies(notesRef.current, incoming));
+      rememberServerNotesCatalog(incoming);
+      commitNotes(adoptCloudNoteBodies(notesRef.current, incoming, true));
     };
 
     const hydrateMissingNoteBodies = async () => {
@@ -3092,14 +3101,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const have = new Set(notesRef.current.map((n) => Number(n.id)));
         const missingIds = keys.filter((id) => !have.has(id));
         if (missingIds.length) {
+          const incoming: Note[] = [];
           let cursor = 0;
           const worker = async () => {
             while (cursor < missingIds.length && !cancelled) {
               const one = await fetchNoteByIdCloud(user.uid, missingIds[cursor++]);
-              if (one) applyNotesSnapshot([one]);
+              if (one) incoming.push(one);
             }
           };
           await Promise.all(Array.from({ length: Math.min(6, missingIds.length) }, () => worker()));
+          if (incoming.length) applyNotesSnapshot(incoming);
         }
       } catch { /* ignore */ }
       if (!cancelled) await hydrateMissingNoteBodies();
@@ -5037,7 +5048,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Always send the latest structure from refs — a queued save captured before
     // create/delete must not overwrite the cloud array with a stale snapshot.
     if (safe.notes !== undefined) {
-      safe.notes = stripPermDeletedNotes(notesRef.current, permDeletedRef.current);
+      safe.notes = compactNotesForListCache(
+        stripPermDeletedNotes(notesRef.current, permDeletedRef.current),
+      );
     }
     if (safe.quizzes !== undefined) {
       safe.quizzes = stripPermDeletedQuizzes(quizzesRef.current, permDeletedRef.current);
@@ -5321,7 +5334,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       tokenUsage: tokenUsageRef.current,
       cloudSyncAt: Date.now(),
     };
-    if (nextNotes.length > 0 || !everHadNotesRef.current) body.notes = nextNotes;
+    if (nextNotes.length > 0 || !everHadNotesRef.current) {
+      body.notes = compactNotesForListCache(nextNotes);
+    }
     else recoveryLog('skipped wiping notes with empty local array');
     if (qList.length > 0 || !everHadQuizzesRef.current) body.quizzes = qList;
     else recoveryLog('skipped wiping quizzes with empty local array');
@@ -5473,6 +5488,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
     const tombstones = permDeletedRef.current;
     const remoteNotes = firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>);
+    if (remoteNotes.length) rememberServerNotesCatalog(remoteNotes);
     const remoteQuizzes = firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>);
     const remoteChats = firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>)
       .map((c) => ({ ...c, messages: c.messages ?? [] }));
@@ -5486,7 +5502,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       adoptCloudNoteBodies(
         mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
         remoteNotes,
-        false,
+        true,
       ),
       notesRef.current,
     );
