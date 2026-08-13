@@ -22,7 +22,7 @@ export function Sidebar({
   onMobileClose?: () => void;
 }) {
   const { t } = useLanguage();
-  const { notes, trashedQuizzes, quizSets, quizFolders, sidebarCounts } = useNotes();
+  const { notes, trashedQuizzes, quizSets, quizFolders } = useNotes();
   const { incompleteCount } = useTodos();
   const { user, hasPassword, isPlus, profilePhotoURL, signOut } = useAuth();
   const { dark, toggleDark, colorTheme, setColorTheme, colorThemes } = useTheme();
@@ -35,19 +35,18 @@ export function Sidebar({
   };
   const [collapsed, setCollapsed] = useState(false);
 
-  // Study/library badges come from durable sidebarCounts (first pixel = last session).
-  // Trash must match the trash page: live notes + quizzes + sets + folders.
+  // Badge = the same filter as the page. One notes list, both devices.
   const liveTrash = notes.filter((n) => n.trashed).length
     + trashedQuizzes.length
     + quizSets.filter((s) => s.trashed).length
     + quizFolders.filter((f) => f.trashed).length;
   const counts = {
-    home: sidebarCounts.home,
-    unread: sidebarCounts.unread,
-    read: sidebarCounts.read,
-    fav: sidebarCounts.fav,
+    home: notes.filter((n) => !n.archived && !n.trashed).length,
+    unread: notes.filter((n) => !n.read && !n.archived && !n.trashed).length,
+    read: notes.filter((n) => n.read && !n.archived && !n.trashed).length,
+    fav: notes.filter((n) => n.fav && !n.trashed).length,
     todo: incompleteCount,
-    archive: sidebarCounts.archive,
+    archive: notes.filter((n) => n.archived && !n.trashed).length,
     trash: liveTrash,
   };
 

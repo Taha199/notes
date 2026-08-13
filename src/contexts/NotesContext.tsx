@@ -486,7 +486,7 @@ function noteContentKey(note: Note) {
 }
 
 /** Cloud note HTML is the shared source. Local shells must not hide photos. */
-function adoptCloudNoteBodies(current: Note[], cloud: Note[]): Note[] {
+function adoptCloudNoteBodies(current: Note[], cloud: Note[], applyFlags = true): Note[] {
   const byId = new Map(current.map((n) => [Number(n.id), n]));
   for (const incoming of cloud) {
     const id = Number(incoming.id);
@@ -504,9 +504,24 @@ function adoptCloudNoteBodies(current: Note[], cloud: Note[]): Note[] {
     } else if (!localImg && (incoming.html || '').length > (cur.html || '').length) {
       next = { ...next, html: incoming.html, text: incoming.text || next.text };
     }
-    // Same notesById row as every other section — archive is only this flag.
-    if (!!incoming.archived !== !!next.archived) {
-      next = { ...next, archived: !!incoming.archived };
+    // notesById is the shared row — read/archive/fav/trash must match on every device.
+    if (
+      applyFlags
+      && (
+        !!incoming.archived !== !!next.archived
+        || !!incoming.read !== !!next.read
+        || !!incoming.fav !== !!next.fav
+        || !!incoming.trashed !== !!next.trashed
+      )
+    ) {
+      next = {
+        ...next,
+        archived: !!incoming.archived,
+        read: !!incoming.read,
+        fav: !!incoming.fav,
+        trashed: incoming.trashed,
+        deletedAt: incoming.deletedAt ?? next.deletedAt,
+      };
     }
     if (next !== cur) byId.set(id, next);
   }
@@ -5441,6 +5456,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       adoptCloudNoteBodies(
         mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
         remoteNotes,
+        false,
       ),
       notesRef.current,
     );
@@ -6184,6 +6200,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           existing
           && noteContentLength(existing) >= noteContentLength(note)
           && !!existing.archived === !!note.archived
+          && !!existing.read === !!note.read
+          && !!existing.fav === !!note.fav
+          && !!existing.trashed === !!note.trashed
         ) return;
       }
       notesByIdBuffer.push(note);
