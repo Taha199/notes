@@ -216,16 +216,25 @@ export function keepRicherNoteBody(existing: Note | undefined, incoming: Note): 
 
 /** Single-note cloud write — independent of the giant notes[] array. */
 export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
-  const weakHtml = !noteHasDisplayableImage(note.html) && (note.html || '').length < 400;
-  const payload = weakHtml ? { ...note, html: undefined } : note;
+  let toWrite = note;
+  if (!noteHasDisplayableImage(note.html)) {
+    const cloud = await fetchNoteByIdCloud(uid, Number(note.id));
+    if (cloud && noteHasDisplayableImage(cloud.html)) {
+      toWrite = { ...note, html: cloud.html, text: note.text || cloud.text };
+    } else if ((note.html || '').length < 400) {
+      toWrite = { ...note, html: undefined as unknown as string };
+    }
+  }
+  const payload = toWrite;
   try {
     await update(dbRef(database, `users/${uid}/notesById/${note.id}`), stripUndefined(payload));
     return true;
   } catch (err) {
     console.error('[itemsStore] notesById cloud write failed', err);
     try {
+      const omitHtml = payload.html === undefined;
       const res = await rtdbFetch(`/users/${uid}/notesById/${note.id}`, {
-        method: weakHtml ? 'PATCH' : 'PUT',
+        method: omitHtml ? 'PATCH' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(stripUndefined(payload)),
       }, 120_000);

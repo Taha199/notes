@@ -490,6 +490,26 @@ function pickBetterNote(local: Note, remote: Note) {
   if (local.trashed !== remote.trashed) return remote.trashed ? remote : local;
   const localAt = entitySyncTime(local);
   const remoteAt = entitySyncTime(remote);
+  // A newer text-only shell (hospital PC) must never beat an older copy that
+  // still has the photos — that is exactly the laptop-vs-hospital mismatch.
+  const localImg = noteHasDisplayableImage(local.html);
+  const remoteImg = noteHasDisplayableImage(remote.html);
+  if (localImg !== remoteImg) {
+    const photos = localImg ? local : remote;
+    const meta = localImg ? remote : local;
+    if (entitySyncTime(meta) <= entitySyncTime(photos)) return photos;
+    return {
+      ...photos,
+      read: meta.read,
+      fav: meta.fav,
+      archived: meta.archived,
+      trashed: meta.trashed,
+      deletedAt: meta.deletedAt,
+      lastEdited: meta.lastEdited || photos.lastEdited,
+      savedAt: meta.savedAt || photos.savedAt,
+      title: meta.title || photos.title,
+    };
+  }
   // Same body, different meta (read/fav/archived): newer savedAt wins. On a
   // tie prefer local so a just-toggled read isn't overwritten by a stale
   // cloud echo that still has the old flag and the same timestamp.
@@ -7528,9 +7548,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
       }
       const imageNotes = notesRef.current.filter((n) => noteHasDisplayableImage(n.html));
+      const pushedAt = new Date().toISOString();
       for (const note of imageNotes) {
         if (!userRef.current) return;
-        await persistNoteDurable(uid, note).catch(() => false);
+        await persistNoteDurable(uid, { ...note, savedAt: pushedAt }).catch(() => false);
       }
     } finally {
       endTrackedSave();

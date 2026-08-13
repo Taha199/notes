@@ -353,11 +353,16 @@ export function NoteEditorModal({ noteId, previousNoteId, nextNoteId, onChangeNo
 
   const save = () => {
     const liveHtml = htmlLiveRef.current;
+    // Hospital PCs often open a text-only shell of an image note. Saving that
+    // shell would wipe the photos from the cloud. Keep the richer body.
+    const htmlToSave = /<img\b[^>]*src=["'](?:data:image\/|https?:\/\/)/i.test(liveHtml)
+      ? liveHtml
+      : (/<img\b[^>]*src=["'](?:data:image\/|https?:\/\/)/i.test(note.html || '') ? note.html : liveHtml);
     // An image-only note is valid content; only skip when truly empty.
-    if (!hasRichContent(liveHtml) && !title.trim()) return;
-    const text = extractPlainText(liveHtml);
+    if (!hasRichContent(htmlToSave) && !title.trim()) return;
+    const text = extractPlainText(htmlToSave);
     const ts = nowStr();
-    updateNote(note.id, { title: title.trim(), html: liveHtml, text, lastEdited: ts, savedAt: new Date().toISOString() });
+    updateNote(note.id, { title: title.trim(), html: htmlToSave, text, lastEdited: ts, savedAt: new Date().toISOString() });
     setLastSavedAt(ts);
   };
 
