@@ -41,23 +41,22 @@ function saveQuizSelection(folderId: string | null, setId: string | null) {
   localStorage.setItem(QUIZ_SELECTION_KEY, JSON.stringify({ folderId, setId }));
 }
 
-type ItemSort = 'manual' | 'newest' | 'study';
+type ItemSort = 'manual' | 'newest' | 'oldest' | 'study';
 
-const ITEM_SORT_OPTIONS: { key: ItemSort; labelKey: 'quizSortManualFull' | 'quizSortNewest' | 'quizSortStudy'; shortKey: 'quizSortManualShort' | 'quizSortDateShort' | 'quizSortStudyShort' }[] = [
+const ITEM_SORT_OPTIONS: { key: ItemSort; labelKey: 'quizSortManualFull' | 'quizSortNewest' | 'quizSortOldest' | 'quizSortStudy'; shortKey: 'quizSortManualShort' | 'quizSortNewestShort' | 'quizSortOldestShort' | 'quizSortStudyShort' }[] = [
   { key: 'manual', labelKey: 'quizSortManualFull', shortKey: 'quizSortManualShort' },
-  { key: 'newest', labelKey: 'quizSortNewest', shortKey: 'quizSortDateShort' },
+  { key: 'newest', labelKey: 'quizSortNewest', shortKey: 'quizSortNewestShort' },
+  { key: 'oldest', labelKey: 'quizSortOldest', shortKey: 'quizSortOldestShort' },
   { key: 'study', labelKey: 'quizSortStudy', shortKey: 'quizSortStudyShort' },
 ];
 
 function loadItemSort(forSet: boolean): ItemSort {
   const key = forSet ? 'malacadhati_quiz_itemsort_set' : 'malacadhati_quiz_itemsort_notes';
   const stored = localStorage.getItem(key);
-  if (stored === 'oldest') return 'newest';
-  if (stored === 'manual' || stored === 'newest' || stored === 'study') return stored;
+  if (stored === 'manual' || stored === 'newest' || stored === 'oldest' || stored === 'study') return stored;
   if (!forSet) {
     const legacy = localStorage.getItem('malacadhati_quiz_itemsort');
-    if (legacy === 'oldest') return 'newest';
-    if (legacy === 'manual' || legacy === 'newest' || legacy === 'study') return legacy;
+    if (legacy === 'manual' || legacy === 'newest' || legacy === 'oldest' || legacy === 'study') return legacy;
   }
   return forSet ? 'manual' : 'newest';
 }
@@ -1577,11 +1576,9 @@ export function QuizPage({
 
   const orderedItems = useMemo(() => {
     if (itemSort === 'manual') return displayItems;
-    if (itemSort === 'newest') {
-      const sortFn = selectedSetId
-        ? (a: QuizItem, b: QuizItem) => quizItemCreatedAtMs(a) - quizItemCreatedAtMs(b)
-        : (a: QuizItem, b: QuizItem) => quizItemCreatedAtMs(b) - quizItemCreatedAtMs(a);
-      return [...displayItems].sort(sortFn);
+    if (itemSort === 'newest' || itemSort === 'oldest') {
+      const dir = itemSort === 'newest' ? -1 : 1;
+      return [...displayItems].sort((a, b) => dir * (quizItemCreatedAtMs(a) - quizItemCreatedAtMs(b)));
     }
     return [...displayItems].sort((a, b) => {
       const aStudied = currentProgress[a.id] === 'known' ? 1 : 0;
