@@ -174,7 +174,7 @@ function DeletedQuizCard({ icon, name, color, detail, createdAt, deletedAt, crea
 
 export function Dashboard() {
   const { t, lang } = useLanguage();
-  const { notes, drafts, trashedQuizzes, quizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder } = useNotes();
+  const { notes, drafts, trashedQuizzes, quizzes, quizSets, quizFolders, addDraft, emptyTrash, deleteMany, restoreQuiz, permDeleteQuiz, restoreQuizSet, permDeleteQuizSet, restoreQuizFolder, permDeleteQuizFolder, archiveFastNotes, hydrateArchiveNotes } = useNotes();
   const { show } = useToast();
   const [page, setPageState] = useState<Page>(() => pageFromPath(window.location.pathname));
   const setPage = useCallback((next: Page) => {
@@ -231,7 +231,18 @@ export function Dashboard() {
   const favArch = useMemo(() => notes.filter((n) => n.fav && n.archived && !n.trashed), [notes]);
   const allFav = useMemo(() => [...fav, ...favArch], [fav, favArch]);
   const read = useMemo(() => notes.filter((n) => n.read && !n.archived && !n.trashed), [notes]);
-  const archived = useMemo(() => notes.filter((n) => n.archived && !n.trashed), [notes]);
+  const liveArchived = useMemo(() => notes.filter((n) => n.archived && !n.trashed), [notes]);
+  const archived = useMemo(() => {
+    const byId = new Map<number, Note>();
+    for (const note of archiveFastNotes) byId.set(Number(note.id), note);
+    for (const note of liveArchived) byId.set(Number(note.id), note);
+    return [...byId.values()];
+  }, [archiveFastNotes, liveArchived]);
+
+  useEffect(() => {
+    if (page !== 'archive') return;
+    void hydrateArchiveNotes();
+  }, [hydrateArchiveNotes, page]);
   const trashed = useMemo(() => notes.filter((n) => n.trashed), [notes]);
   const favQuizIds = useMemo(() => {
     const favItems = quizSets.find((s) => s.id === FAVORITES_SET_ID)?.items ?? [];

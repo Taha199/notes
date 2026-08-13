@@ -246,6 +246,40 @@ export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
   }
 }
 
+export async function fetchNotesArchiveCloud(uid: string): Promise<Note[]> {
+  try {
+    const res = await rtdbFetch(`/users/${uid}/notesArchive`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data.filter((n): n is Note => !!n && typeof n === 'object' && n.id != null && !!n.archived);
+  } catch {
+    return [];
+  }
+}
+
+export async function putNotesArchiveCloud(uid: string, notes: Note[]): Promise<void> {
+  const compact = notes
+    .filter((n) => n.archived && !n.trashed)
+    .map((n) => ({
+      id: Number(n.id),
+      title: n.title || '',
+      text: (n.text || '').slice(0, 400),
+      html: '',
+      fav: !!n.fav,
+      read: !!n.read,
+      archived: true,
+      date: n.date || '',
+      lastEdited: n.lastEdited,
+      savedAt: n.savedAt,
+    }));
+  try {
+    await set(dbRef(database, `users/${uid}/notesArchive`), compact);
+  } catch (err) {
+    console.error('[itemsStore] notesArchive cloud write failed', err);
+  }
+}
+
 export async function fetchNoteByIdCloud(uid: string, id: number): Promise<Note | null> {
   try {
     const res = await rtdbFetch(`/users/${uid}/notesById/${id}`, undefined, 90_000);

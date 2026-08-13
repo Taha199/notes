@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { onChildAdded, onChildChanged, onChildRemoved, onValue, ref as dbRef, remove, set, update } from 'firebase/database';
 import type { Note, QuizItem, QuizSet, QuizFolder, ChatConversation } from '../types';
 import { database, FB_DB_URL } from '../lib/firebase';
@@ -47,7 +47,9 @@ import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import {
   applyDurableQuizItems,
   fetchNoteByIdCloud,
+  fetchNotesArchiveCloud,
   fetchNotesByIdCloud,
+  putNotesArchiveCloud,
   fetchQuizFoldersByIdCloud,
   fetchQuizItemsByIdCloud,
   fetchQuizSetsByIdCloud,
@@ -82,8 +84,10 @@ import {
   clearNotesBootCache,
   clearNotesListCache,
   readNotesBootCache,
+  readArchiveNotesCache,
   readNotesListCache,
   rememberNotesBootCache,
+  writeArchiveNotesCache,
   writeNotesListCache,
   NOTES_LIST_CACHE_KEY,
 } from '../lib/notesListCache';
@@ -1100,6 +1104,9 @@ interface NotesCtx {
   updateNote: (id: number, patch: Partial<Note>) => void;
   /** Pull one note body from notesById — used when a fresh PC painted an empty shell. */
   hydrateNote: (id: number) => Promise<void>;
+  /** Archive-page only: tiny list cache + notesArchive cloud. Does not touch other sections. */
+  archiveFastNotes: Note[];
+  hydrateArchiveNotes: () => Promise<void>;
   nowStr: () => string;
 }
 
@@ -1334,7 +1341,10 @@ function readBootNotesForPaint(): Note[] {
   const merged = mergeNotesPreferRicher(fromLs, fromListCache, fromMemory, fromIdb).filter((note) => (
     !(note.trashed && emptiedAt && entitySyncTime(note) <= emptiedAt)
   ));
-  const sorted = sortNotesByCreatedDesc(merged);
+  const have = new Set(merged.map((n) => Number(n.id)));
+  const archiveOnly = stripPermDeletedNotes(readArchiveNotesCache(), tombstones)
+    .filter((n) => n.archived && !n.trashed && !have.has(Number(n.id)));
+  const sorted = sortNotesByCreatedDesc(archiveOnly.length ? [...merged, ...archiveOnly] : merged);
   if (sorted.length) rememberNotesBootCache(sorted);
   return sorted;
 }
@@ -2213,6 +2223,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { t } = useLanguage();
   const [notes, setNotes] = useState<Note[]>(() => readBootNotesForPaint());
+  const [archiveFastNotes, setArchiveFastNotes] = useState<Note[]>(() => readArchiveNotesCache());
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
   const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
@@ -2341,6 +2352,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   } | null>(null);
   const instantDataSaveQueuedRef = useRef(false);
   const notesRef = useRef(notes);
+  const lastArchiveSigRef = useRef('');
   const quizzesRef = useRef(quizzes);
   const chatsRef = useRef(chats);
   const quizSetsRef = useRef(quizSets);
@@ -2425,6 +2437,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       return merged;
     });
   }, [notes, quizzes, quizSets, quizFolders, loaded, user]);
+
+  // Archive membership only — tiny LS + notesArchive node. Never part of boot sync.
+  useEffect(() => {
+    const archived = notes.filter((n) => n.archived && !n.trashed);
+    const sig = archived.map((n) => Number(n.id)).sort((a, b) => a - b).join(',');
+    if (sig === lastArchiveSigRef.current) return;
+    if (!sig && !lastArchiveSigRef.current) return;
+    lastArchiveSigRef.current = sig;
+    writeArchiveNotesCache(archived);
+    setArchiveFastNotes(archived.length ? archived : readArchiveNotesCache());
+    if (user?.uid) void putNotesArchiveCloud(user.uid, archived);
+  }, [notes, user?.uid]);
 
   const nowStr = () =>
     new Date().toLocaleString(t.dateLocale, {
@@ -6487,6 +6511,27 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (found) void putNoteLocal(found);
   };
 
+  const hydrateArchiveNotes = useCallback(async () => {
+    const adoptArchiveShells = (incoming: Note[]) => {
+      const archived = incoming.filter((n) => n.archived && !n.trashed);
+      if (!archived.length) return;
+      writeArchiveNotesCache(archived);
+      setArchiveFastNotes(archived);
+      const have = new Set(notesRef.current.map((n) => Number(n.id)));
+      const missing = archived.filter((n) => !have.has(Number(n.id)));
+      if (!missing.length) return;
+      const next = sortNotesByCreatedDesc([...notesRef.current, ...missing]);
+      notesRef.current = next;
+      setNotes(next);
+    };
+    const cached = readArchiveNotesCache();
+    if (cached.length) adoptArchiveShells(cached);
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    const cloud = await fetchNotesArchiveCloud(uid);
+    if (cloud.length) adoptArchiveShells(cloud);
+  }, []);
+
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
     const newId = Date.now();
     const now = new Date().toISOString();
@@ -8013,6 +8058,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         deleteMany,
         updateNote,
         hydrateNote,
+        archiveFastNotes,
+        hydrateArchiveNotes,
         nowStr,
         chats,
         saveChats,

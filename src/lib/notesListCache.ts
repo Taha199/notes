@@ -10,6 +10,7 @@ import type { Note } from '../types';
 import { writeTinyDurableValue } from './quizTrashTombstones';
 
 export const NOTES_LIST_CACHE_KEY = 'malacadhati_notes_list_cache';
+export const NOTES_ARCHIVE_CACHE_KEY = 'malacadhati_notes_archive_cache';
 
 /** In-memory last painted notes for this JS session (survives React remount). */
 let notesBootCache: Note[] | null = null;
@@ -92,6 +93,8 @@ export function writeNotesListCache(notes: Note[]): void {
     }
   }
   const merged = [...byId.values()];
+  const incomingArchived = notes.filter((n) => n.archived && !n.trashed);
+  if (incomingArchived.length) writeArchiveNotesCache(incomingArchived);
   const compact = compactNotesForListCache(merged);
   try {
     const json = JSON.stringify(compact);
@@ -103,9 +106,36 @@ export function writeNotesListCache(notes: Note[]): void {
   }
 }
 
+export function readArchiveNotesCache(): Note[] {
+  try {
+    const raw = localStorage.getItem(NOTES_ARCHIVE_CACHE_KEY);
+    if (!raw) {
+      return readNotesListCache().filter((n) => n.archived && !n.trashed);
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((n): n is Note => !!n && typeof n === 'object' && (n as Note).id != null && !!(n as Note).archived);
+  } catch {
+    return [];
+  }
+}
+
+export function writeArchiveNotesCache(notes: Note[]): void {
+  const archived = compactNotesForListCache(notes.filter((n) => n.archived && !n.trashed));
+  try {
+    const json = JSON.stringify(archived);
+    if (!writeTinyDurableValue(NOTES_ARCHIVE_CACHE_KEY, json)) {
+      localStorage.setItem(NOTES_ARCHIVE_CACHE_KEY, json);
+    }
+  } catch {
+    /* quota */
+  }
+}
+
 export function clearNotesListCache(): void {
   try {
     localStorage.removeItem(NOTES_LIST_CACHE_KEY);
+    localStorage.removeItem(NOTES_ARCHIVE_CACHE_KEY);
   } catch { /* ignore */ }
   clearNotesBootCache();
 }
