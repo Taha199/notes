@@ -221,8 +221,6 @@ export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
     const cloud = await fetchNoteByIdCloud(uid, Number(note.id));
     if (cloud && noteHasDisplayableImage(cloud.html)) {
       toWrite = { ...note, html: cloud.html, text: note.text || cloud.text };
-    } else if ((note.html || '').length < 400) {
-      toWrite = { ...note, html: undefined as unknown as string };
     }
   }
   const payload = toWrite;
@@ -243,6 +241,18 @@ export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
       console.error('[itemsStore] notesById REST fallback failed', err2);
       return false;
     }
+  }
+}
+
+export async function fetchNotesByIdKeysCloud(uid: string): Promise<number[]> {
+  try {
+    const res = await rtdbFetch(`/users/${uid}/notesById?shallow=true`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    return Object.keys(data as Record<string, unknown>).map(Number).filter(Number.isFinite);
+  } catch {
+    return [];
   }
 }
 

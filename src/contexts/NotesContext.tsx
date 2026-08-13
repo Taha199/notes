@@ -48,6 +48,7 @@ import {
   applyDurableQuizItems,
   fetchNoteByIdCloud,
   fetchNotesByIdCloud,
+  fetchNotesByIdKeysCloud,
   fetchQuizFoldersByIdCloud,
   fetchQuizItemsByIdCloud,
   fetchQuizSetsByIdCloud,
@@ -2576,12 +2577,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     const commitNotes = (snapshot: Note[], opts?: { paint?: boolean }) => {
       if (cancelled) return;
-      const mergedNotes = sortNotesByCreatedDesc(
+      let mergedNotes = sortNotesByCreatedDesc(
         stripPermDeletedNotes(snapshot, permDeletedRef.current).filter((note) => (
           !(note.trashed && emptiedAtBootLocal && entitySyncTime(note) <= emptiedAtBootLocal)
         )),
       );
       const prev = notesRef.current;
+      // A short local snapshot must not hide notes the other device already
+      // put in notesById (mobile 15 vs desktop 64).
+      if (prev.length > mergedNotes.length) {
+        const have = new Set(mergedNotes.map((n) => Number(n.id)));
+        const extra = prev.filter((n) => !have.has(Number(n.id)));
+        if (extra.length) {
+          mergedNotes = sortNotesByCreatedDesc([...mergedNotes, ...extra]);
+        }
+      }
       notesRef.current = mergedNotes;
       local = { ...local, notes: mergedNotes };
       rememberNotesBootCache(mergedNotes, true);
@@ -3075,6 +3085,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       try {
         const cloudNotes = await notesCloudPromise;
         if (!cancelled && cloudNotes.length) applyNotesSnapshot(cloudNotes);
+      } catch { /* ignore */ }
+      if (cancelled) return;
+      try {
+        const keys = await fetchNotesByIdKeysCloud(user.uid);
+        const have = new Set(notesRef.current.map((n) => Number(n.id)));
+        const missingIds = keys.filter((id) => !have.has(id));
+        if (missingIds.length) {
+          let cursor = 0;
+          const worker = async () => {
+            while (cursor < missingIds.length && !cancelled) {
+              const one = await fetchNoteByIdCloud(user.uid, missingIds[cursor++]);
+              if (one) applyNotesSnapshot([one]);
+            }
+          };
+          await Promise.all(Array.from({ length: Math.min(6, missingIds.length) }, () => worker()));
+        }
       } catch { /* ignore */ }
       if (!cancelled) await hydrateMissingNoteBodies();
     })();
@@ -4752,7 +4778,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (patch.notes !== undefined) {
       const remoteNotes = firebaseToArray<Note>(patch.notes as Note[] | Record<string, Note>);
       const merged = filterResurrectedTrash(
-        mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
+        adoptCloudNoteBodies(
+          mergeNotesForSync(notesRef.current, remoteNotes, tombstones),
+          remoteNotes,
+          true,
+        ),
         notesRef.current,
       );
       const json = JSON.stringify(merged);
@@ -5622,7 +5652,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const pullFromCloud = async (force = false) => {
     const u = userRef.current;
-    if (!u || !loadedRef.current || isApplyingRemoteRef.current) return;
+    if (!u || isApplyingRemoteRef.current) return;
+    if (!loadedRef.current && !force) return;
     if (force) {
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
@@ -5638,11 +5669,35 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!localDraftsEmpty && Date.now() - lastLocalSaveAt.current < 800) return;
     }
     try {
-      const [cloud, byIdSets, byIdFolders] = await Promise.all([
-        fetchCloudSyncBundle(u.uid),
+      const [cloud, byIdSets, byIdFolders, cloudNoteKeys] = await Promise.all([
+        loadedRef.current ? fetchCloudSyncBundle(u.uid) : Promise.resolve(null),
         fetchQuizSetsByIdCloud(u.uid),
         fetchQuizFoldersByIdCloud(u.uid),
+        fetchNotesByIdKeysCloud(u.uid),
       ]);
+      const have = new Set(notesRef.current.map((n) => Number(n.id)));
+      const missingIds = cloudNoteKeys.filter((id) => !have.has(id));
+      if (missingIds.length) {
+        const incoming: Note[] = [];
+        let cursor = 0;
+        const worker = async () => {
+          while (cursor < missingIds.length) {
+            const id = missingIds[cursor++];
+            const one = await fetchNoteByIdCloud(u.uid, id);
+            if (one) incoming.push(one);
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(6, missingIds.length) }, () => worker()));
+        if (incoming.length) {
+          const merged = sortNotesByCreatedDesc(
+            stripPermDeletedNotes(adoptCloudNoteBodies(notesRef.current, incoming, true), permDeletedRef.current),
+          );
+          notesRef.current = merged;
+          setNotes(merged);
+          writeNotesListCache(merged);
+          rememberNotesBootCache(merged, true);
+        }
+      }
       if (!cloud) return;
       if (byIdSets.length) {
         quizSetsByIdCacheRef.current = unionQuizSetsFromById(
@@ -5758,7 +5813,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   }, [user?.uid, draftsReady]);
 
   useEffect(() => {
-    if (!user || !loaded) return;
+    if (!user) return;
     const uid = user.uid;
     void pullFromCloud(true);
     const unsubPermDeleted = onValue(dbRef(database, `users/${uid}/permanentlyDeletedIds`), (snap) => {
@@ -6003,7 +6058,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // onValue would re-download every question on each keystroke.
     let quizItemApplyQueue: StoredQuizItem[] = [];
     const applyQuizItemsBatch = (durable: StoredQuizItem[]) => {
-      if (!loadedRef.current || !durable.length) return;
+      if (!durable.length) return;
       if (isApplyingRemoteRef.current) {
         // Never drop live keystrokes because another merge is in flight.
         quizItemApplyQueue.push(...durable);
@@ -6243,9 +6298,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const onHide = () => {
       if (document.visibilityState === 'hidden') flushPersist();
     };
+    const onOnline = () => pullIfNotJustPulled();
     document.addEventListener('visibilitychange', onVisible);
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('focus', onVisible);
+    window.addEventListener('online', onOnline);
     window.addEventListener('pagehide', flushPersist);
     pullTimer.current = window.setInterval(() => {
       if (document.visibilityState === 'visible') pullIfNotJustPulled();
@@ -6299,12 +6356,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onVisible);
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('focus', onVisible);
+      window.removeEventListener('online', onOnline);
       window.removeEventListener('pagehide', flushPersist);
       if (pullTimer.current) clearInterval(pullTimer.current);
       clearInterval(stuckTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, loaded]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user || !draftsReady) return;
@@ -6426,8 +6484,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       try {
         const durableOk = await persistNoteDurable(userRef.current?.uid, newNote).catch(() => false);
         await runInstantDataCloudSave({ notes: nextNotes }, { trackInFlight: false });
-        if (durableOk) saveFailedRef.current = false;
-        else saveFailedRef.current = true;
+        if (durableOk) {
+          saveFailedRef.current = false;
+          const syncedAt = Date.now();
+          lastLocalSaveAt.current = syncedAt;
+          setCloudSyncedAt(syncedAt);
+          safeSetItem(CLOUD_SYNCED_AT_KEY, String(syncedAt));
+        } else saveFailedRef.current = true;
       } catch {
         saveFailedRef.current = true;
       } finally {
