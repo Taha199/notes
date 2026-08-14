@@ -51,11 +51,14 @@ import {
   fetchNotesByIdKeysCloud,
   fetchQuizFoldersByIdCloud,
   fetchQuizItemsByIdCloud,
+  fetchQuizItemByIdCloud,
   fetchQuizSetsByIdCloud,
   getAllNotesLocal,
   getNoteLocal,
+  getQuizItemLocal,
   noteHasDisplayableImage,
   putNoteLocal,
+  putQuizItemLocal,
   peekPrefetchedNotes,
   prefetchAllNotesLocal,
   getAllQuizItemsLocal,
@@ -1226,6 +1229,8 @@ interface NotesCtx {
   updateNote: (id: number, patch: Partial<Note>) => void;
   /** Pull one note body from notesById — used when a fresh PC painted an empty shell. */
   hydrateNote: (id: number) => Promise<void>;
+  /** Pull missing question bodies for one set — catalog shells show count before HTML lands. */
+  hydrateQuizSet: (setId: string) => Promise<void>;
   nowStr: () => string;
 }
 
@@ -2494,6 +2499,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const chatsRef = useRef(chats);
   const quizSetsRef = useRef(quizSets);
   const quizFoldersRef = useRef(quizFolders);
+  const hydrateQuizSetInFlight = useRef<Set<string>>(new Set());
   /** Durable ById mirrors — union into every array apply so devices never diverge. */
   const quizSetsByIdCacheRef = useRef<QuizSet[]>([]);
   const quizFoldersByIdCacheRef = useRef<QuizFolder[]>([]);
@@ -6957,6 +6963,77 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (found) void putNoteLocal(found);
   };
 
+  const hydrateQuizSet = async (setId: string) => {
+    const uid = userRef.current?.uid;
+    if (!setId || hydrateQuizSetInFlight.current.has(setId)) return;
+    const set = quizSetsRef.current.find((s) => s.id === setId);
+    if (!set) return;
+    const orderIds = (set.itemsOrder?.length
+      ? set.itemsOrder
+      : (set.items ?? []).map((item) => item.id)
+    ).map(Number).filter(Number.isFinite);
+    if (!orderIds.length) return;
+    const hasBody = (item: QuizItem | undefined) => {
+      if (!item || item.trashed) return false;
+      return !!(
+        (item.question || '').trim()
+        || (item.answer || '').trim()
+        || (item.options ?? []).length
+        || (item.explanation || '').trim()
+      );
+    };
+    const missing = orderIds.filter((id) => !hasBody((set.items ?? []).find((item) => Number(item.id) === id)));
+    if (!missing.length) return;
+    hydrateQuizSetInFlight.current.add(setId);
+    try {
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < missing.length) {
+          const id = missing[cursor++];
+          const [local, cloud] = await Promise.all([
+            getQuizItemLocal(id),
+            uid ? fetchQuizItemByIdCloud(uid, id) : Promise.resolve(null),
+          ]);
+          const durable = [local, cloud].filter((row): row is StoredQuizItem => {
+            if (!row || row.id == null) return false;
+            if (permDeletedRef.current.quizzes.some((dead) => Number(dead) === Number(row.id))) return false;
+            return hasBody(row);
+          }).map((row) => ({ ...row, setId }));
+          if (!durable.length) continue;
+          const applied = applyDurableQuizItems(
+            quizzesRef.current,
+            quizSetsRef.current,
+            durable,
+          );
+          const nextQuizzes = honorQuizItemTrashTombstonesOnItems(
+            stripPermDeletedQuizzes(applied.quizzes, permDeletedRef.current),
+            quizItemTombstonesRef.current,
+          );
+          const nextSets = honorQuizItemTrashTombstones(
+            stripPermDeletedQuizSets(applied.sets, permDeletedRef.current),
+            quizItemTombstonesRef.current,
+          );
+          quizzesRef.current = nextQuizzes;
+          quizSetsRef.current = nextSets;
+          lastPaintedQuizSetsRef.current = nextSets;
+          setQuizzes(nextQuizzes);
+          setQuizSets(nextSets);
+          for (const row of durable) {
+            void putQuizItemLocal(row);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(6, missing.length) }, () => worker()));
+      if (!quizContentReadyRef.current) {
+        quizContentReadyRef.current = true;
+        quizAuthoritativeByIdSeenRef.current = true;
+        setQuizContentReady(true);
+      }
+    } finally {
+      hydrateQuizSetInFlight.current.delete(setId);
+    }
+  };
+
   const addQuiz = (item: Omit<QuizItem, 'id'>): number => {
     const newId = Date.now();
     const now = new Date().toISOString();
@@ -8537,6 +8614,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         deleteMany,
         updateNote,
         hydrateNote,
+        hydrateQuizSet,
         nowStr,
         chats,
         saveChats,

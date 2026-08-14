@@ -792,7 +792,7 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder, hydrateQuizSet } = useNotes();
   const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
   const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
@@ -1573,6 +1573,18 @@ export function QuizPage({
   const displayItems: QuizItem[] = selectedSet
     ? visibleQuizItems(selectedSet.items)
     : isNotesView ? quizzes : [];
+  const expectedSetCount = selectedSet ? countQuizSetQuestions(selectedSet) : 0;
+  const setBodiesLoading = !!selectedSet
+    && expectedSetCount > 0
+    && displayItems.length < expectedSetCount;
+  const setLoadPct = expectedSetCount > 0
+    ? Math.min(100, Math.round((displayItems.length / expectedSetCount) * 100))
+    : 100;
+
+  useEffect(() => {
+    if (!selectedSetId || !setBodiesLoading) return;
+    void hydrateQuizSet(selectedSetId);
+  }, [selectedSetId, setBodiesLoading, expectedSetCount, displayItems.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const orderedItems = useMemo(() => {
     if (itemSort === 'manual') return displayItems;
@@ -2077,11 +2089,23 @@ export function QuizPage({
             )}
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
               {selectedSet
-                ? `📂 ${selectedSet.name} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`
+                ? `📂 ${selectedSet.name} — ${setBodiesLoading ? expectedSetCount : displayItems.length} ${
+                    (setBodiesLoading ? expectedSetCount : displayItems.length) === 1
+                      ? t.quizQuestionOne
+                      : t.quizQuestionMany
+                  }`
                 : isFolderEmptyView
                   ? `📁 ${selectedFolder?.system === 'favorites' ? t.quizFavorites : selectedFolder?.system ? t.quizRestored : selectedFolder?.name ?? t.quizFolder} — ${t.quizSetsCount.replace('{n}', String(userSetsInFolder(selectedFolderId ?? '').length))}`
                   : `🧠 ${t.quizQuestionsFromNotes} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`}
-              {!isFolderEmptyView && knownCount > 0 && displayItems.length > 0 && (
+              {setBodiesLoading && (
+                <span className="ml-2 font-normal normal-case tracking-normal text-primary">
+                  · {t.quizLoadingSetProgress
+                    .replace('{loaded}', String(displayItems.length))
+                    .replace('{total}', String(expectedSetCount))
+                    .replace('{pct}', String(setLoadPct))}
+                </span>
+              )}
+              {!isFolderEmptyView && !setBodiesLoading && knownCount > 0 && displayItems.length > 0 && (
                 <span className="ml-2 font-normal text-emerald-500">· {knownCount}/{displayItems.length} {t.quizKnownProgress}</span>
               )}
             </span>
@@ -2198,6 +2222,23 @@ export function QuizPage({
           {/* Questions list */}
           <div className="flex flex-col gap-2">
             {orderedItems.map((item, index) => renderItemOrForm(item, index))}
+
+            {setBodiesLoading && (
+              <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-primary/25 bg-primary/5 px-6 py-10 dark:border-primary/30 dark:bg-primary/10">
+                <FilesLoadingIndicator
+                  text={t.quizLoadingSetProgress
+                    .replace('{loaded}', String(displayItems.length))
+                    .replace('{total}', String(expectedSetCount))
+                    .replace('{pct}', String(setLoadPct))}
+                />
+                <div className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-app-border/60 dark:bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+                    style={{ width: `${setLoadPct}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {openForms
               .filter((f) => f.itemId === null && (!currentFormsScopeKey || f.scopeKey === currentFormsScopeKey))

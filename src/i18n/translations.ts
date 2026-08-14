@@ -450,6 +450,7 @@ export interface Translation {
   quizAddQuestion: string;
   quizSetsLabel: string;
   quizLoadingQuestions: string;
+  quizLoadingSetProgress: string;
   quizSortManualShort: string;
   quizSortManual: string;
   quizSortName: string;
@@ -866,6 +867,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizAddQuestion: 'Add Question',
     quizSetsLabel: 'Sets',
     quizLoadingQuestions: 'Loading questions…',
+    quizLoadingSetProgress: 'Loading questions… {loaded}/{total} ({pct}%)',
     quizSortManualShort: 'Manual',
     quizSortManual: '✋ Manual order',
     quizSortName: '🔤 Name (A–Z)',
@@ -1280,6 +1282,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizAddQuestion: 'Lägg till fråga',
     quizSetsLabel: 'Set',
     quizLoadingQuestions: 'Laddar frågor…',
+    quizLoadingSetProgress: 'Laddar frågor… {loaded}/{total} ({pct}%)',
     quizSortManualShort: 'Egen',
     quizSortManual: '✋ Egen ordning',
     quizSortName: '🔤 Namn (A–Z)',

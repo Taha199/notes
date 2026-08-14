@@ -372,6 +372,26 @@ export async function getAllQuizItemsLocal(): Promise<StoredQuizItem[]> {
   return idbGetAll<StoredQuizItem>(QUIZ_STORE);
 }
 
+export async function getQuizItemLocal(id: number): Promise<StoredQuizItem | undefined> {
+  return idbGet<StoredQuizItem>(QUIZ_STORE, id);
+}
+
+export async function fetchQuizItemByIdCloud(
+  uid: string,
+  id: number,
+  timeoutMs = 45_000,
+): Promise<StoredQuizItem | null> {
+  try {
+    const res = await rtdbFetch(`/users/${uid}/quizItemsById/${id}`, undefined, timeoutMs);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || typeof data !== 'object' || (data as StoredQuizItem).id == null) return null;
+    return data as StoredQuizItem;
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteQuizItemLocal(id: number): Promise<void> {
   await idbDelete(QUIZ_STORE, id);
 }
