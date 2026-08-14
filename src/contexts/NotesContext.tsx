@@ -1073,14 +1073,25 @@ function unionQuizSetsFromById(
   return mergeQuizSetsForSync(base, byId, tombstones, { preferLocalOrder: true });
 }
 
-function mergeFoldersForSync(local: QuizFolder[], remote: QuizFolder[], tombstones: PermanentlyDeletedIds = emptyPermDeleted()) {
+function mergeFoldersForSync(
+  local: QuizFolder[],
+  remote: QuizFolder[],
+  tombstones: PermanentlyDeletedIds = emptyPermDeleted(),
+  opts?: { remoteIsAuthority?: boolean },
+) {
   const dead = new Set(tombstones.quizFolders);
   const remoteIds = new Set(remote.map((folder) => folder.id));
   const emptiedAt = readTrashEmptiedAt();
+  // When cloud ById / array was loaded, membership comes from remote — local-only
+  // live folders are ghosts (deleted elsewhere) and must not heal-push back.
+  const remoteIsAuthority = opts?.remoteIsAuthority ?? remote.length > 0;
   const map = new Map<string, QuizFolder>();
   for (const folder of local) {
     if (dead.has(folder.id)) continue;
     if (folder.trashed && !remoteIds.has(folder.id) && emptiedAt && entitySyncTime(folder) <= emptiedAt) {
+      continue;
+    }
+    if (remoteIsAuthority && !remoteIds.has(folder.id) && !folder.trashed && !folder.system) {
       continue;
     }
     // Keep local-only trashed folders (pending soft-delete not yet on the
@@ -2284,6 +2295,9 @@ function recoveredFolderNameFromLocal(folderId: string, setsInFolder: QuizSet[])
 
 function recoverMissingFoldersFromSets(folders: QuizFolder[], sets: QuizSet[]): QuizFolder[] {
   const known = new Map(folders.map((folder) => [folder.id, folder]));
+  const dead = new Set(readPermDeleted().quizFolders.map(String));
+  const softTombs = readTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY);
+  const emptiedAt = readTrashEmptiedAt();
   const referenced = new Set<string>();
   for (const set of sets) {
     if (!set.folderId || set.trashed) continue;
@@ -2294,6 +2308,13 @@ function recoverMissingFoldersFromSets(folders: QuizFolder[], sets: QuizSet[]): 
   const recovered = [...folders];
   for (const folderId of referenced) {
     if (known.has(folderId)) continue;
+    // Never invent a live folder for a permanently deleted / emptied / soft-trashed id.
+    if (dead.has(folderId)) continue;
+    const softAt = softTombs[folderId];
+    if (softAt !== undefined) {
+      if (emptiedAt && softAt <= emptiedAt) continue;
+      continue;
+    }
     const setsInFolder = sets.filter((set) => set.folderId === folderId && !set.trashed);
     const usedColors = [...folders, ...sets].map((item) => item.color).filter((color): color is string => !!color);
     // Derive createdAt from the sets that reference the folder instead of
@@ -2841,14 +2862,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
     const armQuizContentReadyTimeout = () => {
       if (cancelled || quizContentReadyRef.current || quizContentReadyTimer) return;
-      // Online: never timeout-reveal incomplete LS (classic 9→11 FOUC). Wait for
-      // ById / last-good IDB. Offline: reveal best local after a short grace.
+      // Online: short grace so shells/last-good paint while quizItemsById finishes.
+      // Offline: same path. Never hang the Quiz spinner on a slow hospital download.
       const online = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
-      if (online) return;
       quizContentReadyTimer = setTimeout(() => {
         quizContentReadyTimer = null;
         markQuizContentReady('timeout');
-      }, QUIZ_CONTENT_READY_TIMEOUT_MS);
+      }, online ? 6_000 : QUIZ_CONTENT_READY_TIMEOUT_MS);
     };
     // Only arm offline grace — last-good already set contentReady above when present.
     if (quizLocalReadyRef.current && !quizContentReadyRef.current) armQuizContentReadyTimeout();
@@ -2999,10 +3019,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         quizFolderTombstonesRef.current = mergeTombstoneMaps(quizFolderTombstonesRef.current, idbTombs.folders);
         noteTrashTombstonesRef.current = mergeTombstoneMaps(noteTrashTombstonesRef.current, idbTombs.notes ?? {});
         if (idbTombs.emptiedAt) writeTrashEmptiedAt(idbTombs.emptiedAt);
-        if (idbTombs.permDeletedQuizzes?.length || idbTombs.permDeletedSets?.length) {
+        if (idbTombs.permDeletedQuizzes?.length || idbTombs.permDeletedSets?.length || idbTombs.permDeletedFolders?.length) {
           permDeletedRef.current = addPermDeleted(permDeletedRef.current, {
             quizzes: idbTombs.permDeletedQuizzes,
             quizSets: idbTombs.permDeletedSets,
+            quizFolders: idbTombs.permDeletedFolders,
           });
           writePermDeleted(permDeletedRef.current);
         }
@@ -3312,7 +3333,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (cloudFoldersById.length) {
           quizFoldersByIdCacheRef.current = cloudFoldersById;
           const mergedFolders = applyTrashTombstones(
-            mergeFoldersForSync(quizFoldersRef.current, cloudFoldersById, permDeletedRef.current),
+            mergeFoldersForSync(quizFoldersRef.current, cloudFoldersById, permDeletedRef.current, {
+              remoteIsAuthority: true,
+            }),
             quizFolderTombstonesRef.current,
           );
           quizFoldersRef.current = mergedFolders;
@@ -3591,7 +3614,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const liveSets = quizSetsRef.current;
 
         let rawFolders = filterResurrectedTrash(
-          mergeFoldersForSync(liveFolders, mergeById(cloudFolders, dedicatedFolders, cloudFoldersById), tombstones),
+          mergeFoldersForSync(
+            liveFolders,
+            mergeById(cloudFolders, dedicatedFolders, cloudFoldersById),
+            tombstones,
+            { remoteIsAuthority: cloudFoldersById.length > 0 || !!(cloud && 'quizFolders' in cloud) },
+          ),
           liveFolders,
           quizFolderTombstonesRef.current,
         );
@@ -3622,13 +3650,13 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           rawSets = mergeSetsWithShellJournal(rawSets);
         }
         if (cloudFoldersById.length) {
-          rawFolders = mergeFoldersForSync(rawFolders, cloudFoldersById, tombstones);
+          rawFolders = mergeFoldersForSync(rawFolders, cloudFoldersById, tombstones, {
+            remoteIsAuthority: true,
+          });
         }
         let repairQuizStructure = false;
-        if (countUserQuizFolders(rawFolders) === 0 && liveFolders.some((folder) => !folder.system)) {
-          rawFolders = mergeById(rawFolders, liveFolders);
-          repairQuizStructure = true;
-        }
+        // Do NOT re-inject liveFolders when cloud folders are empty — that is how
+        // a long-deleted "mapp" on a work PC got written back to the cloud.
         if (countUserQuizSets(rawSets) === 0 && liveSets.some((set) => !set.system)) {
           rawSets = mergeById(rawSets, liveSets);
           repairQuizStructure = true;
@@ -3653,12 +3681,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           countUserQuizFolders(rawFolders) === 0
           && (cloudFoldersEmpty || dedicatedFoldersEmpty)
         ) {
-          const historyFolders = await fetchLatestFolderHistory(user.uid);
-          if (historyFolders) {
-            rawFolders = mergeById(rawFolders, historyFolders);
-            repairQuizStructure = true;
-            historyRepair = true;
-          }
+          // Do NOT auto-merge quizFoldersHistory — that resurrected long-deleted
+          // folders (e.g. "mapp") on work PCs. Explicit recover UI still can.
         }
 
         // Union local tombstones with cloud's (multi-device deletes) right before
@@ -3753,10 +3777,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           && liveNormalized >= maxKnownLive;
         const needsMembershipHeal = quizSetsRemoteMembershipIncomplete(quizSetsRef.current, cloudSets)
           || quizSetsMissingFromRemote(quizSetsRef.current, cloudSets);
+        // Never treat local-only folders as repair authority — that re-uploaded
+        // deleted folders from a stale work-PC cache.
         const needsRepair = notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
           || needsMembershipHeal
-          || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0)
-          || (cloudFoldersEmpty && dedicatedFoldersEmpty && liveFolders.length > 0);
+          || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0);
         recoveryLog('load complete', {
           notes: notes.length,
           quizzes: quizzes.length,
@@ -3773,7 +3798,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         markEverHadContent(notes, quizzes, quizSetsRef.current);
         if (needsRepair) {
           recoveryLog('repairing cloud from local/history');
-          const repairBody: Record<string, unknown> = { chats, quizFolders: normalizedFolders };
+          const repairBody: Record<string, unknown> = { chats };
+          // Folders: quizFoldersById is the source — never PATCH/PUT the array from
+          // a local ghost list (that resurrected deleted folders like "mapp").
           if (notesRef.current.length > 0) repairBody.notes = notesRef.current;
           if (quizzes.length > 0) repairBody.quizzes = quizzes;
           if (safeToPushQuizSets && countUserQuizSets(quizSetsRef.current) > 0) {
@@ -3791,13 +3818,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             void rtdbFetch(`/users/${user.uid}/quizSets`, {
               method: 'PUT',
               body: JSON.stringify(quizSetsRef.current),
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
-          if (repairQuizStructure || (cloudFoldersEmpty && dedicatedFoldersEmpty && liveFolders.length > 0)) {
-            void rtdbFetch(`/users/${user.uid}/quizFolders`, {
-              method: 'PUT',
-              body: JSON.stringify(normalizedFolders),
               headers: { 'Content-Type': 'application/json' },
             });
           }
@@ -5740,12 +5760,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       );
     }
     let mergedFolders = filterResurrectedTrash(
-      mergeFoldersForSync(quizFoldersRef.current, remoteFolders, tombstones),
+      mergeFoldersForSync(quizFoldersRef.current, remoteFolders, tombstones, {
+        remoteIsAuthority: quizFoldersByIdCacheRef.current.length > 0 || 'quizFolders' in cloud,
+      }),
       quizFoldersRef.current,
       quizFolderTombstonesRef.current,
     );
     if (quizFoldersByIdCacheRef.current.length) {
-      mergedFolders = mergeFoldersForSync(mergedFolders, quizFoldersByIdCacheRef.current, tombstones);
+      mergedFolders = mergeFoldersForSync(mergedFolders, quizFoldersByIdCacheRef.current, tombstones, {
+        remoteIsAuthority: true,
+      });
     }
     // Soft-deletes made on another device survive this pull even if the cloud
     // array it just fetched still carries a stale live copy of the row.
@@ -5766,8 +5790,6 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     mergedFolders = applyTrashTombstones(mergedFolders, quizFolderTombstonesRef.current, trashStamp);
     const healQuizSets = quizSetsMissingFromRemote(mergedSets, remoteSets)
       || quizSetsRemoteMembershipIncomplete(mergedSets, remoteSets);
-    const remoteFolderLive = new Set(remoteFolders.filter((f) => !f.trashed && !f.system).map((f) => f.id));
-    const healQuizFolders = mergedFolders.some((f) => !f.trashed && !f.system && !remoteFolderLive.has(f.id));
     const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
     const mergedDrafts = recentDraftEdit
       ? filterVisibleDrafts(draftsRef.current, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current)
@@ -5834,7 +5856,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       commitQuizSetsFromRemote(normalizedSets);
       changed = true;
     }
-    if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current) || healQuizFolders) {
+    if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
       quizFoldersRef.current = normalizedFolders;
       setQuizFolders(normalizedFolders);
       safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
@@ -5847,22 +5869,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       changed = true;
     }
     if (changed) recoveryLog('applied remote cloud snapshot');
-    // Publish union upward when cloud array was missing live sets/folders — never shrink.
+    // Publish union upward when cloud array was missing live sets — never shrink.
     // NEVER heal-push an empty quizSets[] (would wipe cloud). Empty local is not authority.
-    if (healQuizSets || healQuizFolders) {
-      const heal: { quizSets?: QuizSet[]; quizFolders?: QuizFolder[] } = {};
+    // NEVER heal-push quizFolders from local ghosts (resurrects deleted folders).
+    if (healQuizSets) {
       if (
-        healQuizSets
-        && hasAnyUserQuizSetRows(quizSetsRef.current)
+        hasAnyUserQuizSetRows(quizSetsRef.current)
         && countUserQuizSets(quizSetsRef.current) > 0
       ) {
-        heal.quizSets = quizSetsRef.current;
-      } else if (healQuizSets) {
+        queueMicrotask(() => scheduleInstantDataCloudSave({ quizSets: quizSetsRef.current }));
+      } else {
         recoveryLog('skipped empty quizSets heal-push over cloud');
-      }
-      if (healQuizFolders) heal.quizFolders = quizFoldersRef.current;
-      if (heal.quizSets || heal.quizFolders) {
-        queueMicrotask(() => scheduleInstantDataCloudSave(heal));
       }
     }
   };

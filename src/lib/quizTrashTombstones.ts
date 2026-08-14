@@ -137,19 +137,20 @@ export function writeTrashEmptiedAt(at: number): void {
   void persistAllTombstonesIdb();
 }
 
-function readPermDeletedLite(): { quizzes: number[]; quizSets: string[] } {
+function readPermDeletedLite(): { quizzes: number[]; quizSets: string[]; quizFolders: string[] } {
   try {
     const raw = localStorage.getItem(PERM_DELETED_KEY);
-    if (!raw) return { quizzes: [], quizSets: [] };
-    const parsed = JSON.parse(raw) as { quizzes?: unknown; quizSets?: unknown };
+    if (!raw) return { quizzes: [], quizSets: [], quizFolders: [] };
+    const parsed = JSON.parse(raw) as { quizzes?: unknown; quizSets?: unknown; quizFolders?: unknown };
     return {
       quizzes: Array.isArray(parsed.quizzes)
         ? [...new Set(parsed.quizzes.map(Number).filter(Number.isFinite))]
         : [],
       quizSets: Array.isArray(parsed.quizSets) ? [...new Set(parsed.quizSets.map(String))] : [],
+      quizFolders: Array.isArray(parsed.quizFolders) ? [...new Set(parsed.quizFolders.map(String))] : [],
     };
   } catch {
-    return { quizzes: [], quizSets: [] };
+    return { quizzes: [], quizSets: [], quizFolders: [] };
   }
 }
 
@@ -246,6 +247,7 @@ async function persistAllTombstonesIdb(): Promise<void> {
     emptiedAt: readTrashEmptiedAt(),
     permDeletedQuizzes: dead.quizzes,
     permDeletedSets: dead.quizSets,
+    permDeletedFolders: dead.quizFolders,
   };
   try {
     const db = await openTombstoneDb();
@@ -268,6 +270,7 @@ export async function readQuizTrashTombstonesIdb(): Promise<{
   emptiedAt?: number;
   permDeletedQuizzes?: number[];
   permDeletedSets?: string[];
+  permDeletedFolders?: string[];
 } | null> {
   try {
     const db = await openTombstoneDb();
@@ -286,6 +289,7 @@ export async function readQuizTrashTombstonesIdb(): Promise<{
       emptiedAt?: unknown;
       permDeletedQuizzes?: unknown;
       permDeletedSets?: unknown;
+      permDeletedFolders?: unknown;
     };
     return {
       items: normalizeTombstoneMap(obj.items),
@@ -297,6 +301,7 @@ export async function readQuizTrashTombstonesIdb(): Promise<{
         ? obj.permDeletedQuizzes.map(Number).filter(Number.isFinite)
         : [],
       permDeletedSets: Array.isArray(obj.permDeletedSets) ? obj.permDeletedSets.map(String) : [],
+      permDeletedFolders: Array.isArray(obj.permDeletedFolders) ? obj.permDeletedFolders.map(String) : [],
     };
   } catch {
     return null;
