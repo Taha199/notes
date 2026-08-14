@@ -225,6 +225,37 @@ function elementHasToggleMark(el: HTMLElement, cmd: string): boolean {
   return styleHasToggleMark(el.style, cmd);
 }
 
+/** True when this element introduces the mark vs its parent (inline or computed). */
+function elementIntroducesToggleMark(el: HTMLElement, cmd: string, boundary: Node): boolean {
+  if (elementHasToggleMark(el, cmd)) return true;
+  if (cmd !== 'bold' && cmd !== 'italic' && cmd !== 'underline' && cmd !== 'strikeThrough') return false;
+  const cs = window.getComputedStyle(el);
+  const parentEl = el.parentElement;
+  const parentCs = parentEl && parentEl !== boundary && boundary.contains(parentEl)
+    ? window.getComputedStyle(parentEl)
+    : null;
+  if (cmd === 'italic') {
+    const here = cs.fontStyle === 'italic' || cs.fontStyle === 'oblique';
+    const parent = parentCs ? (parentCs.fontStyle === 'italic' || parentCs.fontStyle === 'oblique') : false;
+    return here && !parent;
+  }
+  if (cmd === 'bold') {
+    const weight = (v: string) => v === 'bold' || v === 'bolder' || parseInt(v, 10) >= 600;
+    const here = weight(cs.fontWeight);
+    const parent = parentCs ? weight(parentCs.fontWeight) : false;
+    return here && !parent;
+  }
+  if (cmd === 'underline' || cmd === 'strikeThrough') {
+    const token = cmd === 'underline' ? 'underline' : 'line-through';
+    const here = (cs.textDecorationLine || cs.textDecoration || '').toLowerCase().includes(token);
+    const parent = parentCs
+      ? (parentCs.textDecorationLine || parentCs.textDecoration || '').toLowerCase().includes(token)
+      : false;
+    return here && !parent;
+  }
+  return false;
+}
+
 function unwrapToggleMarkElement(el: HTMLElement, cmd: string) {
   const tags = TOGGLE_MARK_TAGS[cmd] ?? [];
   const cfg = TOGGLE_STYLE_PROP[cmd];
@@ -243,6 +274,11 @@ function unwrapToggleMarkElement(el: HTMLElement, cmd: string) {
       .join(' ');
     el.style.textDecoration = next;
     if (!next) el.style.removeProperty('text-decoration');
+    // Computed-only decoration (no inline): force off so the toolbar can clear.
+    const still = (window.getComputedStyle(el).textDecorationLine || '').toLowerCase();
+    if (cfg.on.some((token) => still.includes(token))) {
+      el.style.textDecoration = 'none';
+    }
   } else if (cfg.prop === 'fontWeight') {
     el.style.fontWeight = cfg.off;
   } else if (cfg.prop === 'fontStyle') {
@@ -294,18 +330,13 @@ function stripToggleMarkInRange(range: Range, cmd: string) {
 }
 
 function nodeHasToggleMarkAncestor(node: Node, cmd: string, boundary: Node): boolean {
-  let el: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-  while (el && el !== boundary) {
-    if (el instanceof HTMLElement && elementHasToggleMark(el, cmd)) return true;
-    el = el.parentNode;
-  }
-  return false;
+  return !!findToggleMarkAncestor(node, cmd, boundary);
 }
 
 function findToggleMarkAncestor(node: Node, cmd: string, boundary: Node): HTMLElement | null {
   let el: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
   while (el && el !== boundary) {
-    if (el instanceof HTMLElement && elementHasToggleMark(el, cmd)) return el;
+    if (el instanceof HTMLElement && elementIntroducesToggleMark(el, cmd, boundary)) return el;
     el = el.parentNode;
   }
   return null;
@@ -4649,20 +4680,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       && sel.anchorNode
       && ed.contains(sel.anchorNode)
     );
-    // queryCommandState is document-global — only trust it when the live selection
-    // is inside THIS editor (quiz has Q+A editors side by side).
-    // Inside table cells it lies (UA <th> bold → queryCommandState('bold') stuck ON).
-    const inTableCell = !!(sel?.anchorNode && closestTableCell(sel.anchorNode));
+    // queryCommandState is document-global and stays sticky after unwrap — ignore it.
+    // Toolbar active state comes only from DOM marks at the caret.
     if (selInThisEditor) {
-      // DOM marks are source of truth. queryCommandState alone often stays ON after we
-      // unwrap spans (caret still "typed italic"), which made B/I/U/S look stuck.
       TOGGLE_COMMANDS.forEach((c) => {
         if (ed && sel?.anchorNode && nodeHasToggleMarkAncestor(sel.anchorNode, c, ed)) {
           active.add(c);
-          return;
-        }
-        if (!inTableCell && sel?.isCollapsed) {
-          try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
         }
       });
     }
@@ -4889,10 +4912,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
    * Same range resolution highlight uses: prefer the Range object returned by
    * restoreToolbarSelection (saved cell selection), not a second live re-query
    * that fails when focus briefly left the editor.
+   * Collapsed carets are valid — B/I/U/S must see them to unwrap marks at the caret.
    */
   const resolveToolbarFormatRange = (): Range | null => {
     const restored = restoreToolbarSelection();
-    if (restored && !restored.collapsed && !isTableToolbarFocusTarget(restored.commonAncestorContainer)) {
+    if (restored && !isTableToolbarFocusTarget(restored.commonAncestorContainer)) {
       return restored;
     }
     return resolveStyleTargetRange() ?? resolveFormatRange();
@@ -4922,14 +4946,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       sel?.removeAllRanges();
       try { sel?.addRange(snaps[snaps.length - 1]); } catch { /* ignore */ }
     }
-    if (turnOff) {
-      try {
-        if (document.queryCommandState(cmd)) {
-          document.execCommand('styleWithCSS', false, 'false');
-          document.execCommand(cmd, false);
-        }
-      } catch { /* ignore */ }
-    }
     blurTableToolbarFocus(ed);
     if (document.activeElement !== ed) ed.focus({ preventScroll: true });
   };
@@ -4951,18 +4967,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         const markEl = findToggleMarkAncestor(range.startContainer, cmd, ed);
         if (markEl) {
           pushUndoCheckpoint();
-          const caret = range.cloneRange();
+          const before = bookmarkEditorSelection(ed);
           unwrapToggleMarkElement(markEl, cmd);
-          const sel = window.getSelection();
-          sel?.removeAllRanges();
-          try { sel?.addRange(caret); } catch { /* ignore */ }
-          // Clear sticky browser typing-state so the toolbar button actually turns off.
-          try {
-            if (document.queryCommandState(cmd)) {
-              document.execCommand('styleWithCSS', false, 'false');
-              document.execCommand(cmd, false);
-            }
-          } catch { /* ignore */ }
+          if (before) restoreEditorSelection(ed, before);
+          else {
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            try { sel?.addRange(range.cloneRange()); } catch { /* ignore */ }
+          }
           blurTableToolbarFocus(ed);
           if (document.activeElement !== ed) ed.focus({ preventScroll: true });
           savedFormattingRange.current = null;
@@ -5007,15 +5019,25 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
     }
 
+    // Do not fall through to execCommand for B/I/U/S — it leaves sticky typing-state
+    // that keeps the toolbar button dark even when the DOM mark is gone (or re-applies it).
+    if (isToggle) {
+      blurTableToolbarFocus(ed);
+      if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+      saveSel();
+      readCommandState();
+      return;
+    }
+
     pushUndoCheckpoint();
-    // Collapsed caret (or non-toggle): execCommand for typing-state / legacy cmds.
+    // Non-toggle: execCommand for legacy cmds.
     // Re-apply restored caret if we have one.
     if (range) {
       const sel = window.getSelection();
       sel?.removeAllRanges();
       try { sel?.addRange(range.cloneRange()); } catch { /* ignore */ }
     }
-    document.execCommand('styleWithCSS', false, isToggle ? 'false' : 'true');
+    document.execCommand('styleWithCSS', false, 'true');
     document.execCommand(cmd, false, value);
     blurTableToolbarFocus(ed);
     saveSel();
