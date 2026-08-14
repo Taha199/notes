@@ -395,6 +395,100 @@ function stripInlineTextColor(root: ParentNode) {
   root.querySelectorAll?.('font[color]').forEach((node) => node.removeAttribute('color'));
 }
 
+type CopiedTextFormat = {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  fontSize: number | null;
+  color: string | null;
+  highlight: string | null;
+  align: 'left' | 'center' | 'right' | null;
+};
+
+function cssColorToHex(raw: string): string | null {
+  const v = raw.trim().toLowerCase();
+  if (!v || v === 'transparent' || v === 'rgba(0, 0, 0, 0)' || v === 'inherit' || v === 'initial') return null;
+  if (v.startsWith('#')) {
+    if (v.length === 4) {
+      return `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`.toUpperCase();
+    }
+    return v.length >= 7 ? v.slice(0, 7).toUpperCase() : null;
+  }
+  const m = v.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (!m) return null;
+  const hex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${hex(+m[1])}${hex(+m[2])}${hex(+m[3])}`.toUpperCase();
+}
+
+function sampleTextFormatFromRange(range: Range, ed: HTMLElement): CopiedTextFormat {
+  const node = range.startContainer;
+  const el = (node.nodeType === Node.TEXT_NODE ? node.parentElement : node) as HTMLElement | null;
+  const probe = el && ed.contains(el) ? el : ed;
+  const cs = window.getComputedStyle(probe);
+  const fw = cs.fontWeight;
+  const bold = fw === 'bold' || parseInt(fw, 10) >= 600
+    || rangeIsFullyToggleMarked(range, 'bold', ed);
+  const italic = cs.fontStyle === 'italic' || cs.fontStyle === 'oblique'
+    || rangeIsFullyToggleMarked(range, 'italic', ed);
+  const deco = (cs.textDecorationLine || cs.textDecoration || '').toLowerCase();
+  const underline = deco.includes('underline') || rangeIsFullyToggleMarked(range, 'underline', ed);
+  const strike = deco.includes('line-through') || rangeIsFullyToggleMarked(range, 'strikeThrough', ed);
+  const fontSize = Math.round(parseFloat(cs.fontSize)) || null;
+  const color = cssColorToHex(cs.color);
+  let highlight = cssColorToHex(cs.backgroundColor);
+  // Ignore page/editor background — only treat explicit highlight colors.
+  if (highlight) {
+    const parentBg = probe.parentElement ? cssColorToHex(window.getComputedStyle(probe.parentElement).backgroundColor) : null;
+    if (parentBg && parentBg === highlight) highlight = null;
+    if (highlight === '#FFFFFF' || highlight === '#FAFAFA' || highlight === '#F9FAFB') highlight = null;
+  }
+  const block = probe.closest('p, div, li, h1, h2, h3, h4, td, th, blockquote') as HTMLElement | null;
+  const alignRaw = (block ? window.getComputedStyle(block).textAlign : cs.textAlign).toLowerCase();
+  const align = alignRaw === 'center' || alignRaw === 'right' || alignRaw === 'left'
+    ? alignRaw
+    : alignRaw === 'start' ? 'left' : alignRaw === 'end' ? 'right' : null;
+  return { bold, italic, underline, strike, fontSize, color, highlight, align };
+}
+
+function stripPaintedFormatsInFragment(root: ParentNode) {
+  (['bold', 'italic', 'underline', 'strikeThrough'] as const).forEach((cmd) => {
+    stripToggleMarkInFragment(root, cmd);
+  });
+  stripInlineFontSize(root);
+  stripInlineTextColor(root);
+  root.querySelectorAll?.('[style]').forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    node.style.removeProperty('background-color');
+    node.style.removeProperty('background');
+    if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
+  });
+}
+
+function wrapRangeWithCopiedFormat(range: Range, fmt: CopiedTextFormat): HTMLSpanElement | null {
+  try {
+    const contents = range.extractContents();
+    stripPaintedFormatsInFragment(contents);
+    const span = document.createElement('span');
+    if (fmt.bold) span.style.fontWeight = '700';
+    if (fmt.italic) span.style.fontStyle = 'italic';
+    if (fmt.underline && fmt.strike) span.style.textDecoration = 'underline line-through';
+    else if (fmt.underline) span.style.textDecoration = 'underline';
+    else if (fmt.strike) span.style.textDecoration = 'line-through';
+    if (fmt.fontSize) {
+      span.style.fontSize = `${fmt.fontSize}px`;
+      span.style.lineHeight = '1.45';
+    }
+    if (fmt.color) span.style.color = fmt.color;
+    if (fmt.highlight) span.style.backgroundColor = fmt.highlight;
+    span.appendChild(contents);
+    range.insertNode(span);
+    return span;
+  } catch {
+    return null;
+  }
+}
+
 interface Props {
   html: string;
   onChange: (html: string) => void;
@@ -689,6 +783,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const pendingFontSize = useRef<number | null>(null);
   const [fontSize, setFontSizeState] = useState(15);
   const fontSizeRef = useRef(15);
+  const [copiedFormat, setCopiedFormat] = useState<CopiedTextFormat | null>(null);
+  const copiedFormatRef = useRef<CopiedTextFormat | null>(null);
   const fontInputFocused = useRef(false);
   const [sizeInput, setSizeInput] = useState('15');
   const setFontSize = (v: number) => { fontSizeRef.current = v; setFontSizeState(v); if (!fontInputFocused.current) setSizeInput(String(v)); };
@@ -5036,6 +5132,57 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
+  const copyTextFormat = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const range = resolveToolbarFormatRange() ?? resolveFormatRange();
+    if (!range) return;
+    const fmt = sampleTextFormatFromRange(range, ed);
+    copiedFormatRef.current = fmt;
+    setCopiedFormat(fmt);
+  };
+
+  const pasteTextFormat = () => {
+    const ed = editorRef.current;
+    const fmt = copiedFormatRef.current;
+    if (!ed || !fmt) return;
+    const range = resolveToolbarFormatRange();
+    if (!range || range.collapsed) return;
+    pushUndoCheckpoint();
+    const targets = collectFormatTargetRanges(range, ed);
+    if (!targets.length) return;
+    const snaps = targets.map((t) => t.cloneRange());
+    const spans: HTMLSpanElement[] = [];
+    for (let i = snaps.length - 1; i >= 0; i--) {
+      const wrapped = wrapRangeWithCopiedFormat(snaps[i], fmt);
+      if (wrapped) spans.unshift(wrapped);
+    }
+    selectSpansAfterFormat(spans);
+    if (fmt.align) {
+      savedFormattingRange.current = null;
+      // Re-select wrapped content then align the block(s).
+      if (spans.length) {
+        const sel = window.getSelection();
+        const r = document.createRange();
+        r.setStartBefore(spans[0]);
+        r.setEndAfter(spans[spans.length - 1]);
+        sel?.removeAllRanges();
+        try { sel?.addRange(r); } catch { /* ignore */ }
+        savedFormattingRange.current = r.cloneRange();
+      }
+      applyBlockAlignment(fmt.align);
+    }
+    blurTableToolbarFocus(ed);
+    if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+    savedFormattingRange.current = null;
+    if (fmt.fontSize) setFontSize(fmt.fontSize);
+    if (fmt.color) setBarColor(fmt.color);
+    if (fmt.highlight) setHlColor(fmt.highlight);
+    saveSel();
+    readCommandState();
+    emitHtml();
+  };
+
   const nextSz = (cur: number, d: number) => {
     if (d > 0) return SIZES.find((s) => s > cur) ?? SIZES[SIZES.length - 1];
     return [...SIZES].reverse().find((s) => s < cur) ?? SIZES[0];
@@ -5632,6 +5779,38 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); exec('italic'); }} title={t.titleItalic} className={btnCls(activeCmds.has('italic'))}><i>I</i></button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); exec('underline'); }} title={t.titleUnline} className={btnCls(activeCmds.has('underline'))}><u>U</u></button>
         <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); exec('strikeThrough'); }} title={t.titleStrike} className={btnCls(activeCmds.has('strikeThrough'))}><s>S</s></button>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); copyTextFormat(); }}
+          title={t.titleCopyFormat}
+          className={btnCls(!!copiedFormat)}
+          aria-pressed={!!copiedFormat}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 19l7-7 3 3-7 7-3-3z" />
+            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+            <path d="M2 2l7.586 7.586" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            if (!copiedFormatRef.current) return;
+            captureFormattingSelection();
+            pasteTextFormat();
+          }}
+          title={t.titlePasteFormat}
+          className={`${btnCls(false)} ${copiedFormat ? '' : 'opacity-40 pointer-events-none'}`}
+          aria-disabled={!copiedFormat}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 19l7-7 3 3-7 7-3-3z" />
+            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+            <path d="M2 2l7.586 7.586" />
+            <path d="M15 5l4 4" />
+          </svg>
+        </button>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
