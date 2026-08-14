@@ -469,19 +469,29 @@ function wrapRangeWithCopiedFormat(range: Range, fmt: CopiedTextFormat): HTMLSpa
   try {
     const contents = range.extractContents();
     stripPaintedFormatsInFragment(contents);
+    let inner: Node = contents;
+    const wrapMark = (cmd: 'bold' | 'italic' | 'underline' | 'strikeThrough') => {
+      const el = document.createElement('span');
+      el.setAttribute('data-note-mark', cmd);
+      if (cmd === 'bold') el.style.fontWeight = '700';
+      else if (cmd === 'italic') el.style.fontStyle = 'italic';
+      else if (cmd === 'underline') el.style.textDecoration = 'underline';
+      else el.style.textDecoration = 'line-through';
+      el.appendChild(inner);
+      inner = el;
+    };
+    if (fmt.bold) wrapMark('bold');
+    if (fmt.italic) wrapMark('italic');
+    if (fmt.underline) wrapMark('underline');
+    if (fmt.strike) wrapMark('strikeThrough');
     const span = document.createElement('span');
-    if (fmt.bold) span.style.fontWeight = '700';
-    if (fmt.italic) span.style.fontStyle = 'italic';
-    if (fmt.underline && fmt.strike) span.style.textDecoration = 'underline line-through';
-    else if (fmt.underline) span.style.textDecoration = 'underline';
-    else if (fmt.strike) span.style.textDecoration = 'line-through';
     if (fmt.fontSize) {
       span.style.fontSize = `${fmt.fontSize}px`;
       span.style.lineHeight = '1.45';
     }
     if (fmt.color) span.style.color = fmt.color;
     if (fmt.highlight) span.style.backgroundColor = fmt.highlight;
-    span.appendChild(contents);
+    span.appendChild(inner);
     range.insertNode(span);
     return span;
   } catch {
@@ -5132,9 +5142,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
+  const clearCopiedFormat = () => {
+    copiedFormatRef.current = null;
+    setCopiedFormat(null);
+  };
+
   const copyTextFormat = () => {
     const ed = editorRef.current;
     if (!ed) return;
+    // Second click clears — otherwise the brush looks permanently "stuck" on.
+    if (copiedFormatRef.current) {
+      clearCopiedFormat();
+      return;
+    }
     const range = resolveToolbarFormatRange() ?? resolveFormatRange();
     if (!range) return;
     const fmt = sampleTextFormatFromRange(range, ed);
@@ -5178,6 +5198,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (fmt.fontSize) setFontSize(fmt.fontSize);
     if (fmt.color) setBarColor(fmt.color);
     if (fmt.highlight) setHlColor(fmt.highlight);
+    // One-shot: clear after paste so the toolbar does not stay highlighted.
+    clearCopiedFormat();
     saveSel();
     readCommandState();
     emitHtml();
@@ -5623,6 +5645,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   }, [hlPalOpen]);
 
   useEffect(() => {
+    if (!copiedFormat) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      copiedFormatRef.current = null;
+      setCopiedFormat(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [copiedFormat]);
+
+  useEffect(() => {
     if (!listPalOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -5783,14 +5816,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           type="button"
           onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); copyTextFormat(); }}
           title={t.titleCopyFormat}
-          className={btnCls(!!copiedFormat)}
+          className={btnCls(false)}
           aria-pressed={!!copiedFormat}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M12 19l7-7 3 3-7 7-3-3z" />
-            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-            <path d="M2 2l7.586 7.586" />
-          </svg>
+          <span className="relative flex h-full w-full items-center justify-center">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 19l7-7 3 3-7 7-3-3z" />
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+              <path d="M2 2l7.586 7.586" />
+            </svg>
+            {copiedFormat && (
+              <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />
+            )}
+          </span>
         </button>
         <button
           type="button"
@@ -5976,6 +6014,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           }
         }}
         onKeyDown={(e) => {
+          if (e.key === 'Escape' && copiedFormatRef.current) {
+            clearCopiedFormat();
+            e.preventDefault();
+            return;
+          }
           if (NAV_KEYS.has(e.key)) clearPendingFontMarker();
           handleEditorBackspace(e);
           handleEditorDelete(e);
