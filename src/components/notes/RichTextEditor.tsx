@@ -302,6 +302,35 @@ function nodeHasToggleMarkAncestor(node: Node, cmd: string, boundary: Node): boo
   return false;
 }
 
+function findToggleMarkAncestor(node: Node, cmd: string, boundary: Node): HTMLElement | null {
+  let el: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (el && el !== boundary) {
+    if (el instanceof HTMLElement && elementHasToggleMark(el, cmd)) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+
+/** Expand a caret to the surrounding word so B/I/U/S can toggle without a drag-selection. */
+function expandCollapsedRangeToWord(range: Range, boundary: HTMLElement): Range | null {
+  if (!range.collapsed) return range.cloneRange();
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return null;
+  const text = node.textContent || '';
+  if (!text) return null;
+  const isWord = (ch: string) => /[^\s\u00A0.,;:!?()[\]{}"“”'‘’/\\|]/.test(ch);
+  let start = range.startOffset;
+  let end = range.startOffset;
+  while (start > 0 && isWord(text[start - 1]!)) start -= 1;
+  while (end < text.length && isWord(text[end]!)) end += 1;
+  if (start === end) return null;
+  const next = document.createRange();
+  next.setStart(node, start);
+  next.setEnd(node, end);
+  if (!boundary.contains(next.commonAncestorContainer)) return null;
+  return next;
+}
+
 function collectTextNodesInRange(range: Range): Text[] {
   if (range.collapsed) return [];
   const nodes: Text[] = [];
@@ -4625,17 +4654,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     // Inside table cells it lies (UA <th> bold → queryCommandState('bold') stuck ON).
     const inTableCell = !!(sel?.anchorNode && closestTableCell(sel.anchorNode));
     if (selInThisEditor) {
-      if (!inTableCell) {
-        TOGGLE_COMMANDS.forEach((c) => {
+      // DOM marks are source of truth. queryCommandState alone often stays ON after we
+      // unwrap spans (caret still "typed italic"), which made B/I/U/S look stuck.
+      TOGGLE_COMMANDS.forEach((c) => {
+        if (ed && sel?.anchorNode && nodeHasToggleMarkAncestor(sel.anchorNode, c, ed)) {
+          active.add(c);
+          return;
+        }
+        if (!inTableCell && sel?.isCollapsed) {
           try { if (document.queryCommandState(c)) active.add(c); } catch { /* noop */ }
-        });
-      }
-      // DOM marks (including data-note-mark spans) — trustworthy in table cells.
-      if (ed && sel?.anchorNode) {
-        TOGGLE_COMMANDS.forEach((c) => {
-          if (nodeHasToggleMarkAncestor(sel.anchorNode!, c, ed)) active.add(c);
-        });
-      }
+        }
+      });
     }
     // List button state is derived purely from the live DOM below — never seeded from
     // document.queryCommandState('insertUnorderedList'/'insertOrderedList'). We only ever
@@ -4662,9 +4691,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         }
       }
       const align = readAlignmentAtCaret(ed);
-      if (align === 'left') active.add('justifyLeft');
-      else if (align === 'center') active.add('justifyCenter');
-      else active.add('justifyRight');
+      // Only highlight non-default alignment — left is the normal state and looked
+      // permanently "stuck" active on almost every paragraph.
+      if (align === 'center') active.add('justifyCenter');
+      else if (align === 'right') active.add('justifyRight');
     }
     setActiveCmds(active);
     return active;
@@ -4892,6 +4922,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       sel?.removeAllRanges();
       try { sel?.addRange(snaps[snaps.length - 1]); } catch { /* ignore */ }
     }
+    if (turnOff) {
+      try {
+        if (document.queryCommandState(cmd)) {
+          document.execCommand('styleWithCSS', false, 'false');
+          document.execCommand(cmd, false);
+        }
+      } catch { /* ignore */ }
+    }
     blurTableToolbarFocus(ed);
     if (document.activeElement !== ed) ed.focus({ preventScroll: true });
   };
@@ -4906,25 +4944,66 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const range = resolveToolbarFormatRange();
     const isToggle = (TOGGLE_COMMANDS as readonly string[]).includes(cmd);
 
-    if (isToggle && range && !range.collapsed) {
-      const targets = collectFormatTargetRanges(range, ed);
-      if (targets.length > 0) {
-        pushUndoCheckpoint();
-        applyToggleMarkToTargets(cmd, targets, ed);
-        savedFormattingRange.current = null;
-        saveSel();
-        readCommandState();
-        emitHtml();
-        return;
-      }
-      // In-table non-collapsed selection with no targets: do NOT fall through to
-      // execCommand — it flips toolbar state without changing the DOM inside cells.
-      if (closestTableCell(range.commonAncestorContainer)
-        || closestTableCell(range.startContainer)
-        || collectTableCellsInRange(range, ed).length > 0) {
-        saveSel();
-        readCommandState();
-        return;
+    if (isToggle && range) {
+      // Caret inside formatted text: unwrap the mark (execCommand often leaves it on,
+      // so the toolbar button looks permanently stuck).
+      if (range.collapsed) {
+        const markEl = findToggleMarkAncestor(range.startContainer, cmd, ed);
+        if (markEl) {
+          pushUndoCheckpoint();
+          const caret = range.cloneRange();
+          unwrapToggleMarkElement(markEl, cmd);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          try { sel?.addRange(caret); } catch { /* ignore */ }
+          // Clear sticky browser typing-state so the toolbar button actually turns off.
+          try {
+            if (document.queryCommandState(cmd)) {
+              document.execCommand('styleWithCSS', false, 'false');
+              document.execCommand(cmd, false);
+            }
+          } catch { /* ignore */ }
+          blurTableToolbarFocus(ed);
+          if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+          savedFormattingRange.current = null;
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return;
+        }
+        const word = expandCollapsedRangeToWord(range, ed);
+        if (word && !word.collapsed) {
+          const targets = collectFormatTargetRanges(word, ed);
+          if (targets.length > 0) {
+            pushUndoCheckpoint();
+            applyToggleMarkToTargets(cmd, targets, ed);
+            savedFormattingRange.current = null;
+            saveSel();
+            readCommandState();
+            emitHtml();
+            return;
+          }
+        }
+      } else {
+        const targets = collectFormatTargetRanges(range, ed);
+        if (targets.length > 0) {
+          pushUndoCheckpoint();
+          applyToggleMarkToTargets(cmd, targets, ed);
+          savedFormattingRange.current = null;
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return;
+        }
+        // In-table non-collapsed selection with no targets: do NOT fall through to
+        // execCommand — it flips toolbar state without changing the DOM inside cells.
+        if (closestTableCell(range.commonAncestorContainer)
+          || closestTableCell(range.startContainer)
+          || collectTableCellsInRange(range, ed).length > 0) {
+          saveSel();
+          readCommandState();
+          return;
+        }
       }
     }
 
