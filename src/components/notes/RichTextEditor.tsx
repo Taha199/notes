@@ -17,7 +17,7 @@ import {
   NOTE_YT_REMOVE,
 } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, getTableColumnWidths, hitTableColumnResize, resizeAdjacentTableColumns, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, NOTE_TABLE_COL_RESIZE_HOVER, NOTE_TABLE_COL_RESIZING, type TableCellContext, type TableColumnResizeHit, type TableEditPosition } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, getTableColumnWidths, hitTableColumnResize, resizeAdjacentTableColumns, fitNoteTableFontSize, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, NOTE_TABLE_COL_RESIZE_HOVER, NOTE_TABLE_COL_RESIZING, type TableCellContext, type TableColumnResizeHit, type TableEditPosition } from '../../lib/noteTable';
 import {
   closestTableCell,
   collectFormatTargetRanges as collectFormatTargetRangesFromLib,
@@ -913,6 +913,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       syncVisibleTableWraps();
       return;
     }
+    if (ctx.table.isConnected) fitNoteTableFontSize(ctx.table);
     if (result && typeof result === 'object') {
       const next = resolveTableContextAt(ctx.table, result.rowIndex, result.colIndex, ed);
       if (next) {
@@ -1255,6 +1256,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       hit.table.classList.remove(NOTE_TABLE_COL_RESIZING);
       isResizingTableCol.current = false;
       if (moved) {
+        fitNoteTableFontSize(hit.table);
         emitHtml();
         syncVisibleTableWraps();
       }

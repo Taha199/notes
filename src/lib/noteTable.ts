@@ -3,6 +3,8 @@ export const NOTE_TABLE_WRAP = 'note-table-wrap';
 export const NOTE_TABLE_ACTIVE_WRAP = 'note-table-wrap--active';
 export const NOTE_TABLE_TOOLBAR_HOST = 'note-table-toolbar-host';
 export const NOTE_TABLE_BODY = 'note-table-body';
+export const NOTE_TABLE_BASE_FONT_PX = 15;
+export const NOTE_TABLE_MIN_FONT_PX = 9;
 
 export type TableCellContext = {
   table: HTMLTableElement;
@@ -134,6 +136,76 @@ export const TABLE_COLUMN_WIDTH_MIN = 10;
 function tableColumnCount(table: HTMLTableElement): number {
   const firstRow = tableRows(table)[0];
   return firstRow ? rowCells(firstRow).length : 0;
+}
+
+/** Suggested table font from column count + available width (no layout measure). */
+export function suggestedNoteTableFontPx(colCount: number, tableWidthPx: number): number {
+  if (colCount <= 0) return NOTE_TABLE_BASE_FONT_PX;
+  const width = Math.max(120, tableWidthPx || 480);
+  const avgCol = width / colCount;
+  // ~5.2px column width per 1px font keeps short Swedish labels readable.
+  let px = Math.floor(avgCol / 5.2);
+  px = Math.min(NOTE_TABLE_BASE_FONT_PX, Math.max(NOTE_TABLE_MIN_FONT_PX, px));
+  if (colCount >= 5) px = Math.min(px, 13);
+  if (colCount >= 6) px = Math.min(px, 11);
+  if (colCount >= 7) px = Math.min(px, 10);
+  if (colCount >= 8) px = Math.min(px, 9);
+  return px;
+}
+
+function shortTableCellForFit(cell: HTMLElement): boolean {
+  const text = (cell.innerText || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!text || text.length > 48) return false;
+  if (cell.querySelector('img, video, iframe, ul, ol, pre')) return false;
+  return true;
+}
+
+function shortCellOverflows(cell: HTMLElement): boolean {
+  if (!shortTableCellForFit(cell)) return false;
+  const prev = cell.style.whiteSpace;
+  cell.style.whiteSpace = 'nowrap';
+  const overflows = cell.scrollWidth > cell.clientWidth + 1;
+  if (prev) cell.style.whiteSpace = prev;
+  else cell.style.removeProperty('white-space');
+  return overflows;
+}
+
+function tableHasShortCellOverflow(table: HTMLTableElement): boolean {
+  return [...table.querySelectorAll<HTMLElement>('th, td')].some((cell) => shortCellOverflows(cell));
+}
+
+/**
+ * Shrink the whole table font so short labels fit without mid-word breaks.
+ * Writes inline font-size so edit + view modes stay in sync after save.
+ */
+export function fitNoteTableFontSize(table: HTMLTableElement): boolean {
+  if (!table.isConnected) return false;
+  const cols = tableColumnCount(table);
+  if (cols <= 0) return false;
+  const width = table.getBoundingClientRect().width
+    || table.parentElement?.getBoundingClientRect().width
+    || 480;
+  let px = suggestedNoteTableFontPx(cols, width);
+  const prev = table.style.fontSize;
+  table.style.fontSize = `${px}px`;
+  // Further shrink while short header/label cells still overflow horizontally.
+  while (px > NOTE_TABLE_MIN_FONT_PX && tableHasShortCellOverflow(table)) {
+    px -= 0.5;
+    table.style.fontSize = `${px}px`;
+  }
+  const next = `${px}px`;
+  if (prev === next) return false;
+  table.style.fontSize = next;
+  return true;
+}
+
+export function fitAllNoteTables(root: HTMLElement | null | undefined): boolean {
+  if (!root) return false;
+  let changed = false;
+  root.querySelectorAll(`table.${NOTE_TABLE_CLASS}`).forEach((node) => {
+    if (node instanceof HTMLTableElement && fitNoteTableFontSize(node)) changed = true;
+  });
+  return changed;
 }
 
 function parsePercentWidth(raw: string | null | undefined): number | null {
@@ -781,6 +853,7 @@ export function normalizeTablesInEditor(root: HTMLElement): boolean {
         changed = true;
       }
     }
+    if (fitNoteTableFontSize(table)) changed = true;
   });
   return changed;
 }

@@ -431,6 +431,25 @@ body {
   font-size: inherit;
 }
 
+.note-content table.note-table th,
+.note-content table.note-table td,
+[contenteditable] table.note-table th,
+[contenteditable] table.note-table td {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  min-width: 48px;
+  padding: 6px 8px;
+  /* Default only — toolbar alignment sets inline text-align (with !important) to override. */
+  text-align: start;
+  vertical-align: top;
+  user-select: text;
+  cursor: text;
+  /* Prefer wrapping at spaces — mid-word breaks look broken in narrow columns. */
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
 .note-content .note-table-wrap,
 [contenteditable] .note-table-wrap {
   display: block;
@@ -502,20 +521,6 @@ body {
   display: block;
   width: 100%;
   overflow-x: auto;
-}
-
-.note-content table.note-table th,
-.note-content table.note-table td,
-[contenteditable] table.note-table th,
-[contenteditable] table.note-table td {
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  min-width: 80px;
-  padding: 8px 10px;
-  /* Default only — toolbar alignment sets inline text-align (with !important) to override. */
-  text-align: start;
-  vertical-align: top;
-  user-select: text;
-  cursor: text;
 }
 
 /* Drag-resize: col-resize cursor only while hovering the vertical border hit-zone. */

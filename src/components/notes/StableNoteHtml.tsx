@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import { normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
+import { fitAllNoteTables, normalizeTablesInEditor } from '../../lib/noteTable';
 
 function stableHtmlEqual(a: string, b: string): boolean {
   if (a === b) return true;
@@ -23,7 +24,19 @@ export function StableNoteHtml({ html, className, dir = 'auto' }: StableNoteHtml
     lastHtmlRef.current = html;
     el.innerHTML = html;
     normalizeYouTubeEmbeds(el);
+    normalizeTablesInEditor(el);
+    fitAllNoteTables(el);
   }, [html]);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      fitAllNoteTables(el);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return <div ref={ref} dir={dir} className={className} />;
 }
