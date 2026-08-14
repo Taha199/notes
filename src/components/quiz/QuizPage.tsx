@@ -14,7 +14,7 @@ import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
-import { countVisibleQuizItems, quizItemCreatedAtMs, visibleQuizItems } from '../../lib/quizSort';
+import { countQuizSetQuestions, quizItemCreatedAtMs, visibleQuizItems } from '../../lib/quizSort';
 import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { FilesLoadingIndicator } from '../files/FilesLoadingIndicator';
@@ -296,7 +296,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                                   >
                                     <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
                                     <AutoFitText text={s.name} maxSize={13} minSize={9} className="flex-1 text-app-text dark:text-gray-100" />
-                                    <span className="text-[11px] text-app-text-secondary/40">{countVisibleQuizItems(s.items)} {t.quizItemsShort}</span>
+                                    <span className="text-[11px] text-app-text-secondary/40">{countQuizSetQuestions(s)} {t.quizItemsShort}</span>
                                   </button>
                                 ))}
                               </div>
@@ -1701,7 +1701,7 @@ export function QuizPage({
           return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
         }
         if (setSort === 'count') {
-          return countVisibleQuizItems(b.items) - countVisibleQuizItems(a.items);
+          return countQuizSetQuestions(b) - countQuizSetQuestions(a);
         }
         const aTime = Date.parse(a.createdAt || '') || 0;
         const bTime = Date.parse(b.createdAt || '') || 0;
@@ -1789,7 +1789,7 @@ export function QuizPage({
                   minSize={8}
                   className={'flex-1 ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}
                 />
-                <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{countVisibleQuizItems(s.items)}</span>
+                <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{countQuizSetQuestions(s)}</span>
               </button>
               {!s.system && (
                 <button

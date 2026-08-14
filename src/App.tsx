@@ -14,7 +14,7 @@ import { ImageLightbox } from './components/common/ImageLightbox';
 import { FloatingOtterSearch } from './components/common/FloatingOtterSearch';
 import { Dashboard } from './components/Dashboard';
 import { ArabicInputHost } from './components/keyboard/ArabicInputHost';
-import { hasNotesPrefetchSettled, prefetchAllNotesLocal, prefetchNotesCatalog } from './lib/itemsStore';
+import { hasNotesPrefetchSettled, prefetchAllNotesLocal, prefetchNotesCatalog, prefetchQuizCatalog } from './lib/itemsStore';
 
 function getUrlAction(): { mode: string | null; oobCode: string | null } {
   const p = new URLSearchParams(window.location.search);
@@ -56,7 +56,10 @@ function Root() {
     const timer = window.setTimeout(() => {
       if (!cancelled) setCatalogReady(true);
     }, 4000);
-    void prefetchNotesCatalog(user.uid).finally(() => {
+    void Promise.all([
+      prefetchNotesCatalog(user.uid),
+      prefetchQuizCatalog(user.uid),
+    ]).finally(() => {
       window.clearTimeout(timer);
       if (!cancelled) setCatalogReady(true);
     });

@@ -22,3 +22,10 @@ export function visibleQuizItems(items: QuizItem[] | undefined | null): QuizItem
 export function countVisibleQuizItems(items: QuizItem[] | undefined | null): number {
   return visibleQuizItems(items).length;
 }
+
+/** Sidebar count — prefer live items, else durable itemsOrder on empty shells. */
+export function countQuizSetQuestions(set: { items?: QuizItem[] | null; itemsOrder?: number[] | null }): number {
+  const live = countVisibleQuizItems(set.items);
+  if (live > 0) return live;
+  return (set.itemsOrder ?? []).length;
+}

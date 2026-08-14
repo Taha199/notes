@@ -64,6 +64,9 @@ import {
   persistNoteDurable,
   persistQuizItemDurable,
   persistQuizSetDurable,
+  peekQuizCatalog,
+  prefetchQuizCatalog,
+  writeQuizCatalogCloud,
   removeNoteDurable,
   removeQuizItemDurable,
   removeQuizSetDurable,
@@ -2818,6 +2821,36 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizLocalReadyRef.current = true;
       setQuizLocalReady(true);
     }
+    // Prefetched tiny quizCatalog (BootLoader) — same folder/set count on every device
+    // before the multi-MB quizSetsById tree lands.
+    {
+      const cat = peekQuizCatalog();
+      if (cat.folders.length || cat.sets.length) {
+        if (cat.folders.length) {
+          const mergedFolders = applyTrashTombstones(
+            mergeFoldersForSync(local.folders, cat.folders, permDeletedRef.current, {
+              remoteIsAuthority: true,
+            }),
+            quizFolderTombstonesRef.current,
+          );
+          local = { ...local, folders: mergedFolders };
+          quizFoldersRef.current = mergedFolders;
+          setQuizFolders(finalizeQuizFolders(mergedFolders, local.sets));
+        }
+        if (cat.sets.length) {
+          const mergedSets = preferRicherQuizSetsMembership(
+            honorQuizItemTrashTombstones(local.sets, quizItemTombstonesRef.current),
+            cat.sets,
+          );
+          local = { ...local, sets: mergedSets };
+          quizSetsRef.current = mergedSets;
+          setQuizSets(mergedSets);
+          lastPaintedQuizSetsRef.current = mergedSets;
+          quizLocalReadyRef.current = true;
+          setQuizLocalReady(true);
+        }
+      }
+    }
     const journalReady = loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
       local = applyRecentEditsToData(local, edits);
@@ -3224,10 +3257,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     // Start structure ById immediately (parallel with IDB item bodies) so empty LS
     // still hydrates set shells without waiting on giant quizItemsById.
-    const cloudStructurePromise = Promise.all([
-      fetchQuizSetsByIdCloud(user.uid),
-      fetchQuizFoldersByIdCloud(user.uid),
-    ]);
+    const foldersCloudPromise = fetchQuizFoldersByIdCloud(user.uid);
+    const setsCloudPromise = fetchQuizSetsByIdCloud(user.uid);
+    const cloudStructurePromise = Promise.all([setsCloudPromise, foldersCloudPromise]);
+    // Tiny catalog (folders + set shells) — paint sidebar before heavy ById finishes.
+    const quizCatalogPromise = prefetchQuizCatalog(user.uid);
     // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
     // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
     const notesCloudGenAtStart = notesCloudGenRef.current;
@@ -3295,6 +3329,51 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
+        // Tiny catalog first — sidebar folders/sets before multi-MB ById.
+        try {
+          const catalog = await quizCatalogPromise;
+          if (!cancelled && (catalog.folders.length || catalog.sets.length)) {
+            if (catalog.folders.length) {
+              const mergedFolders = applyTrashTombstones(
+                mergeFoldersForSync(quizFoldersRef.current, catalog.folders, permDeletedRef.current, {
+                  remoteIsAuthority: true,
+                }),
+                quizFolderTombstonesRef.current,
+              );
+              quizFoldersRef.current = mergedFolders;
+              setQuizFolders(finalizeQuizFolders(mergedFolders, quizSetsRef.current));
+              safeSetItem('malacadhati_quiz_folders', JSON.stringify(mergedFolders));
+            }
+            if (catalog.sets.length) {
+              const mergedSets = preferRicherQuizSetsMembership(
+                honorQuizItemTrashTombstones(quizSetsRef.current, quizItemTombstonesRef.current),
+                catalog.sets,
+              );
+              quizSetsRef.current = mergedSets;
+              setQuizSets(mergedSets);
+              lastPaintedQuizSetsRef.current = mergedSets;
+              writeQuizSetsShellJournal(mergedSets);
+              markQuizLocalReady();
+            }
+          }
+        } catch { /* ignore */ }
+
+        // Folders ById is tiny — paint as soon as it lands (do not wait on sets ById).
+        void foldersCloudPromise.then((cloudFoldersById) => {
+          if (cancelled || !cloudFoldersById.length) return;
+          quizFoldersByIdCacheRef.current = cloudFoldersById;
+          const mergedFolders = applyTrashTombstones(
+            mergeFoldersForSync(quizFoldersRef.current, cloudFoldersById, permDeletedRef.current, {
+              remoteIsAuthority: true,
+            }),
+            quizFolderTombstonesRef.current,
+          );
+          quizFoldersRef.current = mergedFolders;
+          setQuizFolders(finalizeQuizFolders(mergedFolders, quizSetsRef.current));
+          safeSetItem('malacadhati_quiz_folders', JSON.stringify(mergedFolders));
+          markQuizLocalReady();
+        });
+
         // Structure path: journal + IDB set shells only — not heavy item bodies.
         await Promise.all([journalReady, durableSetsReady]);
         if (cancelled) return;
@@ -3796,6 +3875,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           fromCloudHistory: historyRepair,
         });
         markEverHadContent(notes, quizzes, quizSetsRef.current);
+        // Keep the tiny sidebar catalog fresh so the next device paints folders/sets instantly.
+        void writeQuizCatalogCloud(user.uid, quizFoldersRef.current, quizSetsRef.current);
         if (needsRepair) {
           recoveryLog('repairing cloud from local/history');
           const repairBody: Record<string, unknown> = { chats };
@@ -3993,6 +4074,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   // question can vanish again with no refresh involved. Only a few one-off
   // recovery/backup paths rely on this PUT as their sole delivery mechanism, so
   // they keep skipDirectPut=false.
+  const scheduleQuizCatalogWrite = () => {
+    const uid = userRef.current?.uid;
+    if (!uid || !loadedRef.current) return;
+    void writeQuizCatalogCloud(uid, quizFoldersRef.current, quizSetsRef.current);
+  };
+
   const persistSets = (nextSets: QuizSet[], forceCloud = false, skipDirectPut = false) => {
     const painted = lastPaintedQuizSetsRef.current;
     const itemTrash = quizItemTombstonesRef.current;
@@ -4033,6 +4120,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizSetsListOrderRef.current ?? readQuizSetsListOrderLocal(),
     );
     safeSets = quizSetsRef.current;
+    scheduleQuizCatalogWrite();
     quizSetsByIdCacheRef.current = honorQuizItemTrashTombstones(
       preferRicherQuizSetsMembership(byIdHonored, safeSets),
       itemTrash,
@@ -4231,6 +4319,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const persistFolders = (nextFolders: QuizFolder[], forceCloud = false) => {
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     quizFoldersRef.current = nextFolders;
+    scheduleQuizCatalogWrite();
     persist({ quizFolders: nextFolders }, false);
     if (user && loadedRef.current && forceCloud) {
       markPushedData({ quizFolders: nextFolders });

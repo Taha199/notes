@@ -736,3 +736,99 @@ export function applyDurableQuizItems(
   });
   return { quizzes: nextQuizzes, sets: nextSets };
 }
+
+/** Tiny quiz sidebar catalog — folders + set shells (no question HTML). */
+export type QuizCatalog = {
+  folders: QuizFolder[];
+  sets: QuizSet[];
+};
+
+let quizCatalogMemory: QuizCatalog | null = null;
+
+export function compactQuizSetForCatalog(set: QuizSet): QuizSet {
+  return quizSetShell(set);
+}
+
+export function rememberQuizCatalog(catalog: QuizCatalog): void {
+  if (!catalog.folders.length && !catalog.sets.length) return;
+  quizCatalogMemory = {
+    folders: catalog.folders.filter((f) => f && f.id != null),
+    sets: catalog.sets
+      .filter((s) => s && s.id != null)
+      .map(compactQuizSetForCatalog),
+  };
+}
+
+export function peekQuizCatalog(): QuizCatalog {
+  return quizCatalogMemory
+    ? {
+        folders: [...quizCatalogMemory.folders],
+        sets: quizCatalogMemory.sets.map((s) => ({ ...s, items: s.items ?? [] })),
+      }
+    : { folders: [], sets: [] };
+}
+
+/** Fast membership list for Quiz sidebar — same idea as notes catalog. */
+export async function prefetchQuizCatalog(uid: string): Promise<QuizCatalog> {
+  try {
+    const res = await rtdbFetch(`/users/${uid}/quizCatalog`);
+    if (!res.ok) return peekQuizCatalog();
+    const data = await res.json();
+    if (!data || typeof data !== 'object') return peekQuizCatalog();
+    const foldersRaw = (data as { folders?: unknown }).folders;
+    const setsRaw = (data as { sets?: unknown }).sets;
+    const folders = (
+      Array.isArray(foldersRaw)
+        ? foldersRaw
+        : foldersRaw && typeof foldersRaw === 'object'
+          ? Object.values(foldersRaw as Record<string, QuizFolder>)
+          : []
+    ).filter((f): f is QuizFolder => !!f && typeof f === 'object' && (f as QuizFolder).id != null);
+    const sets = (
+      Array.isArray(setsRaw)
+        ? setsRaw
+        : setsRaw && typeof setsRaw === 'object'
+          ? Object.values(setsRaw as Record<string, QuizSet>)
+          : []
+    )
+      .filter((s): s is QuizSet => !!s && typeof s === 'object' && (s as QuizSet).id != null)
+      .map((s) => ({ ...compactQuizSetForCatalog(s), items: [] as QuizItem[] }));
+    const catalog = { folders, sets };
+    rememberQuizCatalog(catalog);
+    return catalog;
+  } catch {
+    return peekQuizCatalog();
+  }
+}
+
+/** Write tiny folder+set membership so every device paints the same sidebar fast. */
+export async function writeQuizCatalogCloud(
+  uid: string | null | undefined,
+  folders: QuizFolder[],
+  sets: QuizSet[],
+): Promise<void> {
+  if (!uid) return;
+  const catalog: QuizCatalog = {
+    folders: folders.filter((f) => f && !f.trashed),
+    sets: sets.filter((s) => s && !s.trashed).map(compactQuizSetForCatalog),
+  };
+  rememberQuizCatalog(catalog);
+  const payload = {
+    folders: catalog.folders,
+    sets: catalog.sets,
+    cloudSyncAt: Date.now(),
+  };
+  try {
+    await set(dbRef(database, `users/${uid}/quizCatalog`), stripUndefined(payload));
+  } catch {
+    try {
+      await rtdbFetch(`/users/${uid}/quizCatalog`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stripUndefined(payload)),
+      });
+    } catch {
+      /* best-effort */
+    }
+  }
+}
