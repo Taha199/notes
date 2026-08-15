@@ -1256,9 +1256,11 @@ function firebaseToArray<T>(data: T[] | Record<string, T> | null | undefined): T
 }
 
 function normalizeQuizSetRow(set: QuizSet): QuizSet {
+  // Prefer coerceQuizItems — preserves array identity when already clean (avoids
+  // re-render storms). firebaseToArray always .filter()s and allocates new arrays.
   return withCoercedQuizSetItems({
     ...set,
-    items: firebaseToArray<QuizItem>(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined),
+    items: coerceQuizItems(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined),
   });
 }
 

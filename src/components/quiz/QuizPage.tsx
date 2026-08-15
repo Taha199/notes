@@ -15,6 +15,7 @@ import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
 import { countQuizSetQuestions, quizItemCreatedAtMs, visibleQuizItems } from '../../lib/quizSort';
+import { coerceQuizItems } from '../../lib/quizSetMerge';
 import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { FilesLoadingIndicator } from '../files/FilesLoadingIndicator';
@@ -900,7 +901,7 @@ export function QuizPage({
 
   const buildCloudDraftForms = (scopeKey: string, setId: string | null): OpenQuestionForm[] => {
     const items = setId
-      ? (allQuizSetsRef.current.find((s) => s.id === setId)?.items ?? [])
+      ? coerceQuizItems(allQuizSetsRef.current.find((s) => s.id === setId)?.items)
       : quizzesRef.current.filter((q) => !q.trashed);
     return items
       .filter((item) => item.draft)
@@ -908,8 +909,8 @@ export function QuizPage({
         formId: `item-${item.id}`,
         scopeKey,
         itemId: item.id as number | null,
-        question: item.question,
-        answer: item.answer,
+        question: item.question ?? '',
+        answer: item.answer ?? '',
         saveStatus: 'saved' as const,
         options: item.options,
         correctIndexes: item.correctIndexes,
@@ -1134,7 +1135,7 @@ export function QuizPage({
     }
 
     const storedItem = setId
-      ? allQuizSetsRef.current.find((s) => s.id === setId)?.items?.find((i) => i.id === form.itemId)
+      ? coerceQuizItems(allQuizSetsRef.current.find((s) => s.id === setId)?.items).find((i) => i.id === form.itemId)
       : quizzesRef.current.find((item) => item.id === form.itemId);
     if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
       if (form.saveStatus !== 'saved') updateForm(formId, { saveStatus: 'saved' });
@@ -1313,7 +1314,7 @@ export function QuizPage({
       let foundSet: QuizSet | undefined;
       for (const set of allQuizSets) {
         if (set.trashed) continue;
-        if (set.items?.some((i) => i.id === focusItemId && !i.trashed)) {
+        if (coerceQuizItems(set.items).some((i) => i.id === focusItemId && !i.trashed)) {
           foundSet = set;
           break;
         }
@@ -1475,13 +1476,15 @@ export function QuizPage({
 
   const handleSpeak = (id: number) => {
     const item = selectedSet
-      ? (selectedSet.items ?? []).find((i) => i.id === id)
+      ? coerceQuizItems(selectedSet.items).find((i) => i.id === id)
       : quizzes.find((q) => q.id === id);
     if (!item) return;
     if (speakingId === id) { window.speechSynthesis.cancel(); setSpeakingId(null); return; }
     window.speechSynthesis.cancel();
     setSpeakingId(id);
-    const u = new SpeechSynthesisUtterance(item.question.replace(/<[^>]*>/g, '') + '. ' + item.answer.replace(/<[^>]*>/g, ''));
+    const q = (item.question || '').replace(/<[^>]*>/g, '');
+    const a = (item.answer || '').replace(/<[^>]*>/g, '');
+    const u = new SpeechSynthesisUtterance(`${q}. ${a}`);
     u.lang = navigator.language || 'sv-SE';
     u.onend = () => setSpeakingId(null);
     window.speechSynthesis.speak(u);
@@ -1489,10 +1492,11 @@ export function QuizPage({
 
   const startEdit = (item: QuizItem) => {
     if (openFormsRef.current.some((f) => f.itemId === item.id)) return;
+    const question = item.question || '';
     const stem = item.options && item.options.length
-      ? item.question.replace(/<div style="margin-top:6px">[\s\S]*$/, '')
-      : item.question;
-    addNewForm({ itemId: item.id, question: stem, answer: item.answer });
+      ? question.replace(/<div style="margin-top:6px">[\s\S]*$/, '')
+      : question;
+    addNewForm({ itemId: item.id, question: stem, answer: item.answer || '' });
   };
 
   const handleQuickCreateSet = () => {
@@ -1674,7 +1678,7 @@ export function QuizPage({
     if (currentFormsScopeKey && form.scopeKey !== currentFormsScopeKey) return null;
     const item = form.itemId
       ? (displayItems.find((i) => i.id === form.itemId)
-        ?? selectedSet?.items?.find((i) => i.id === form.itemId))
+        ?? coerceQuizItems(selectedSet?.items).find((i) => i.id === form.itemId))
       : undefined;
     const showNumber = questionNumber ?? (selectedSetId && form.itemId === null ? orderedItems.length + formIndex + 1 : null);
     return (
@@ -1803,7 +1807,7 @@ export function QuizPage({
               <span className="flex-shrink-0 select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100">{s.system === 'favorites' ? '⭐' : '⠿'}</span>
               <button onClick={() => selectQuizSet(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
                 <AutoFitText
-                  text={s.name}
+                  text={s.name || ''}
                   maxSize={13}
                   minSize={8}
                   className={'flex-1 ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}

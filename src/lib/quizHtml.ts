@@ -60,8 +60,8 @@ function looksLikeHtml(content: string): boolean {
  * Convert markdown-ish AI answers to editor HTML.
  * Passes through content that already contains real HTML tags.
  */
-export function mdToHtml(content: string): string {
-  if (!content) return content;
+export function mdToHtml(content: string | null | undefined): string {
+  if (content == null || content === '') return '';
   if (looksLikeHtml(content)) return content;
 
   const text = convertSimpleMath(content.replace(/\r\n/g, '\n').trim());

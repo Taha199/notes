@@ -14,7 +14,7 @@ const HIGHLIGHT_CLASS =
   ' [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100';
 
 function renderHtml(
-  content: string,
+  content: string | null | undefined,
   search: string,
   counter?: SearchHitCounter,
   activeSearchHitIndex?: number | null,

@@ -58,4 +58,9 @@ describe('mdToHtml', () => {
     expect(html).toContain('<li dir="auto">Först</li>');
     expect(html).toContain('<li dir="auto">Sedan</li>');
   });
+
+  it('returns empty string for null/undefined (shell quiz items)', () => {
+    expect(mdToHtml(undefined)).toBe('');
+    expect(mdToHtml(null)).toBe('');
+  });
 });

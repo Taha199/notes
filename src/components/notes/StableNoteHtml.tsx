@@ -8,7 +8,7 @@ function stableHtmlEqual(a: string, b: string): boolean {
 }
 
 interface StableNoteHtmlProps {
-  html: string;
+  html: string | null | undefined;
   className?: string;
   dir?: 'auto' | 'ltr' | 'rtl';
 }
@@ -17,16 +17,17 @@ interface StableNoteHtmlProps {
 export function StableNoteHtml({ html, className, dir = 'auto' }: StableNoteHtmlProps) {
   const ref = useRef<HTMLDivElement>(null);
   const lastHtmlRef = useRef('');
+  const safeHtml = html ?? '';
 
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || stableHtmlEqual(html, lastHtmlRef.current)) return;
-    lastHtmlRef.current = html;
-    el.innerHTML = html;
+    if (!el || stableHtmlEqual(safeHtml, lastHtmlRef.current)) return;
+    lastHtmlRef.current = safeHtml;
+    el.innerHTML = safeHtml;
     normalizeYouTubeEmbeds(el);
     normalizeTablesInEditor(el);
     fitAllNoteTables(el);
-  }, [html]);
+  }, [safeHtml]);
 
   useLayoutEffect(() => {
     const el = ref.current;

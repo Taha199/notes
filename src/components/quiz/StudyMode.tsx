@@ -8,8 +8,8 @@ function shuffleArr<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
 
-function stemOnly(html: string): string {
-  return html.replace(/<div style="margin-top:6px">[\s\S]*$/, '');
+function stemOnly(html: string | null | undefined): string {
+  return (html || '').replace(/<div style="margin-top:6px">[\s\S]*$/, '');
 }
 
 const MCQ_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];

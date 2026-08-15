@@ -234,7 +234,12 @@ export function Dashboard() {
   const archived = useMemo(() => notes.filter((n) => n.archived && !n.trashed), [notes]);
   const trashed = useMemo(() => notes.filter((n) => n.trashed), [notes]);
   const favQuizIds = useMemo(() => {
-    const favItems = quizSets.find((s) => s.id === FAVORITES_SET_ID)?.items ?? [];
+    const raw = quizSets.find((s) => s.id === FAVORITES_SET_ID)?.items;
+    const favItems = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === 'object'
+        ? Object.values(raw as Record<string, { favOf?: number }>)
+        : [];
     return new Set(favItems.map((i) => i.favOf).filter((x): x is number => x != null));
   }, [quizSets]);
   const globalSearchResults = useMemo(
