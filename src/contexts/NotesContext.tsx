@@ -1377,8 +1377,10 @@ const LOCAL_DATA_KEYS = [
 /** Tiny membership journal — survives when the full quizSets[] localStorage write hits QuotaExceeded. */
 function writeQuizSetsShellJournal(sets: QuizSet[]) {
   const shells = sets.map((set) => {
-    const itemsOrder = (set.items ?? []).length
-      ? (set.items ?? []).map((item) => item.id)
+    const list = coerceQuizItems(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined);
+    // Soft-deleted membership is known — never journal their ids as "still loading".
+    const itemsOrder = list.length
+      ? list.filter((item) => !item.trashed && !item.draft).map((item) => item.id)
       : (set.itemsOrder ?? []);
     return {
       ...set,
@@ -7023,7 +7025,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         || (item.explanation || '').trim()
       );
     };
-    const missing = orderIds.filter((id) => !hasBody(items.find((item) => Number(item.id) === id)));
+    const deadQuizzes = new Set(
+      (permDeletedRef.current.quizzes ?? []).map(Number).filter(Number.isFinite),
+    );
+    const itemTrash = quizItemTombstonesRef.current;
+    const isGone = (id: number) => {
+      if (deadQuizzes.has(id)) return true;
+      if (itemTrash[String(id)] != null) return true;
+      const row = items.find((item) => Number(item.id) === id);
+      return !!row?.trashed;
+    };
+    // Soft-deleted / tombstoned ids must not stay in the wait list (Loading 0/N).
+    const missing = orderIds.filter((id) => !isGone(id) && !hasBody(items.find((item) => Number(item.id) === id)));
+    if (orderIds.some(isGone)) {
+      const prunedOrder = orderIds.filter((id) => !isGone(id));
+      const nextSets = quizSetsRef.current.map((s) => (
+        s.id === setId ? { ...s, itemsOrder: prunedOrder } : s
+      ));
+      quizSetsRef.current = nextSets;
+      setQuizSets(nextSets);
+    }
     if (!missing.length) return;
     hydrateQuizSetInFlight.current.add(setId);
     try {
@@ -7127,12 +7148,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     let touchedSetId = fromSetId ?? null;
     let nextSets = quizSetsRef.current.map((set) => {
       if (set.id === FAVORITES_SET_ID) {
-        return { ...set, items: set.items.filter((q) => q.favOf !== id && q.id !== id) };
+        return {
+          ...set,
+          items: set.items.filter((q) => q.favOf !== id && q.id !== id),
+          itemsOrder: (set.itemsOrder ?? set.items.map((q) => q.id)).filter((oid) => Number(oid) !== Number(id)),
+        };
       }
       if (!set.items.some((q) => q.id === id)) {
         if (fromSetId && set.id === fromSetId) {
           touchedSetId = set.id;
-          return { ...set, updatedAt: trashAt, items: [...set.items, trashedItem] };
+          return {
+            ...set,
+            updatedAt: trashAt,
+            items: [...set.items, trashedItem],
+            // Soft-delete must not leave the id in itemsOrder (endless Loading 0/N).
+            itemsOrder: (set.itemsOrder ?? set.items.map((q) => q.id)).filter((oid) => Number(oid) !== Number(id)),
+          };
         }
         return set;
       }
@@ -7141,6 +7172,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ...set,
         updatedAt: trashAt,
         items: set.items.map((q) => (q.id === id ? trashedItem : q)),
+        itemsOrder: (set.itemsOrder ?? set.items.map((q) => q.id)).filter((oid) => Number(oid) !== Number(id)),
       };
     });
 
@@ -8011,7 +8043,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             : i
         ))
         : s.items.filter((i) => i.id !== itemId);
-      return { ...s, items, updatedAt: trashAt };
+      const itemsOrder = (s.itemsOrder ?? s.items.map((i) => i.id))
+        .filter((oid) => Number(oid) !== Number(itemId));
+      return { ...s, items, updatedAt: trashAt, itemsOrder };
     });
     quizItemTombstonesRef.current = markTrashTombstone(
       QUIZ_ITEM_TRASH_TOMBSTONE_KEY,

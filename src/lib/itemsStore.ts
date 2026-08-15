@@ -543,13 +543,14 @@ export async function fetchQuizItemsByIdCloud(uid: string): Promise<StoredQuizIt
 
 /** Slim set shell for IndexedDB — membership/metadata only (items live in quizItems). */
 function quizSetShell(set: QuizSet): QuizSet {
-  const itemsOrder = (set.items ?? []).length
-    ? (set.items ?? []).map((item) => item.id)
+  const items = Array.isArray(set.items) ? set.items : [];
+  const liveOrder = items.length
+    ? items.filter((item) => item && !item.trashed && !item.draft).map((item) => item.id)
     : (set.itemsOrder ?? []);
   return stripUndefined({
     ...set,
     items: [],
-    ...(itemsOrder.length ? { itemsOrder } : {}),
+    ...(liveOrder.length ? { itemsOrder: liveOrder } : {}),
   });
 }
 
