@@ -21,6 +21,7 @@ import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { FilesLoadingIndicator } from '../files/FilesLoadingIndicator';
 import { quizPatchChangesContent } from '../../lib/quizContent';
 import { hasRichContent } from '../../lib/richContent';
+import { safeLocalStorageSet } from '../../lib/safeStorage';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 /** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
@@ -39,7 +40,8 @@ function loadQuizSelection(): { folderId: string | null; setId: string | null } 
 }
 
 function saveQuizSelection(folderId: string | null, setId: string | null) {
-  localStorage.setItem(QUIZ_SELECTION_KEY, JSON.stringify({ folderId, setId }));
+  // Tiny payload — but any setItem throws QuotaExceeded when origin storage is full.
+  safeLocalStorageSet(QUIZ_SELECTION_KEY, JSON.stringify({ folderId, setId }));
 }
 
 type ItemSort = 'manual' | 'newest' | 'oldest' | 'study';
@@ -67,7 +69,7 @@ function loadProgress(): Record<string, Record<number, 'known' | 'learning'>> {
 }
 
 function saveProgress(all: Record<string, Record<number, 'known' | 'learning'>>) {
-  localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
+  safeLocalStorageSet(PROGRESS_KEY, JSON.stringify(all));
 }
 
 function loadHiddenAnswers(): Record<number, true> {
@@ -85,7 +87,7 @@ function loadHiddenAnswers(): Record<number, true> {
 }
 
 function saveHiddenAnswers(map: Record<number, true>) {
-  localStorage.setItem(HIDDEN_ANSWERS_KEY, JSON.stringify(map));
+  safeLocalStorageSet(HIDDEN_ANSWERS_KEY, JSON.stringify(map));
 }
 
 function normalizeQuizName(value: string) {
@@ -865,7 +867,7 @@ export function QuizPage({
   const changeItemSort = (mode: ItemSort) => {
     setItemSort(mode);
     const key = selectedSetId ? 'malacadhati_quiz_itemsort_set' : 'malacadhati_quiz_itemsort_notes';
-    localStorage.setItem(key, mode);
+    safeLocalStorageSet(key, mode);
     setItemSortMenuOpen(false);
   };
   // Multiple open question forms (new drafts + in-progress edits).
@@ -1432,7 +1434,11 @@ export function QuizPage({
 
   // Show/hide the sets sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem('malacadhati_quiz_sidebar') !== 'closed');
-  const toggleSidebar = () => setSidebarOpen((v) => { const n = !v; localStorage.setItem('malacadhati_quiz_sidebar', n ? 'open' : 'closed'); return n; });
+  const toggleSidebar = () => setSidebarOpen((v) => {
+    const n = !v;
+    safeLocalStorageSet('malacadhati_quiz_sidebar', n ? 'open' : 'closed');
+    return n;
+  });
   // Resizable width of the folders column
   const [folderColW, setFolderColW] = useState<number>(() => Number(localStorage.getItem('malacadhati_quiz_foldercol')) || 84);
   const startFolderResize = (e: React.MouseEvent) => {
@@ -1447,7 +1453,7 @@ export function QuizPage({
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      localStorage.setItem('malacadhati_quiz_foldercol', String(lastW));
+      safeLocalStorageSet('malacadhati_quiz_foldercol', String(lastW));
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -1464,7 +1470,7 @@ export function QuizPage({
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const changeSort = (mode: SetSortMode) => {
     setSetSort(mode);
-    localStorage.setItem('malacadhati_quiz_setsort', mode);
+    safeLocalStorageSet('malacadhati_quiz_setsort', mode);
     setSortMenuOpen(false);
   };
 

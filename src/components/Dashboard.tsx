@@ -17,6 +17,7 @@ import { FilesPage } from './files/FilesPage';
 import { ArabicKeyboardPage } from './keyboard/ArabicKeyboardPage';
 import { QuizPage } from './quiz/QuizPage';
 import { ErrorBoundary } from './common/ErrorBoundary';
+import { safeLocalStorageSet } from '../lib/safeStorage';
 import { TodoCalendarPage } from './todo/TodoCalendarPage';
 import { SettingsPage } from './settings/SettingsPage';
 import { DownloadPage } from './download/DownloadPage';
@@ -279,7 +280,7 @@ export function Dashboard() {
   }, [setPage]);
 
   const handleOpenQuizFromSearch = useCallback((itemId: number, setId?: string | null, folderId?: string | null) => {
-    localStorage.setItem(
+    safeLocalStorageSet(
       QUIZ_SELECTION_KEY,
       JSON.stringify({ folderId: setId ? (folderId ?? null) : null, setId: setId ?? null }),
     );

@@ -88,6 +88,7 @@ import {
 } from '../lib/recentEdits';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
 import { sortNotesByCreatedDesc } from '../lib/noteSort';
+import { safeLocalStorageSet } from '../lib/safeStorage';
 import {
   clearNotesBootCache,
   clearNotesListCache,
@@ -134,11 +135,9 @@ import {
  * this helper so a storage failure never blocks cloud sync.
  */
 function safeSetItem(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch (err) {
-    console.error('[localStorage] setItem failed for', key, err);
-  }
+  // Prunes disposable multi-MB caches on QuotaExceeded so tiny writes never
+  // throw and white-screen Quiz (Restored/Favourites selection save).
+  safeLocalStorageSet(key, value);
 }
 
 export interface Draft {

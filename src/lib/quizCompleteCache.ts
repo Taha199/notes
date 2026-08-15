@@ -21,6 +21,7 @@ import {
   unionQuizSetsForCommit,
 } from './quizSetMerge';
 import { honorQuizListsWithTrashTombstones, pruneQuizListsAgainstTrashState } from './quizTrashTombstones';
+import { safeLocalStorageRemove, safeLocalStorageSet } from './safeStorage';
 
 export { quizListsHaveNewerOrderStamps, quizListsHaveStrictlyNewerItems };
 
@@ -115,21 +116,11 @@ export function writeQuizCompleteCache(
     }
   }
   const snap = normalizeSnapshot(quizzes, sets);
-  try {
-    localStorage.setItem(QUIZ_COMPLETE_CACHE_LS_KEY, JSON.stringify(snap));
-    return true;
-  } catch (err) {
-    console.error('[quizCompleteCache] localStorage write failed', err);
-    return false;
-  }
+  return safeLocalStorageSet(QUIZ_COMPLETE_CACHE_LS_KEY, JSON.stringify(snap));
 }
 
 export function clearQuizCompleteCache(): void {
-  try {
-    localStorage.removeItem(QUIZ_COMPLETE_CACHE_LS_KEY);
-  } catch {
-    /* ignore */
-  }
+  safeLocalStorageRemove(QUIZ_COMPLETE_CACHE_LS_KEY);
   void clearQuizCompleteCacheIdb();
 }
 
