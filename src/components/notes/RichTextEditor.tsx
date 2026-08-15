@@ -404,17 +404,22 @@ function wrapRangeWithToggleMark(range: Range, cmd: string): HTMLElement | null 
     const contents = range.extractContents();
     stripToggleMarkInFragment(contents, cmd);
     const el = document.createElement('span');
-    el.setAttribute('data-note-mark', cmd);
-    if (cmd === 'bold') el.style.fontWeight = '700';
-    else if (cmd === 'italic') el.style.fontStyle = 'italic';
-    else if (cmd === 'underline') el.style.textDecoration = 'underline';
-    else if (cmd === 'strikeThrough') el.style.textDecoration = 'line-through';
+    applyToggleMarkAttrs(el, cmd);
     el.appendChild(contents);
     range.insertNode(el);
     return el;
   } catch {
     return null;
   }
+}
+
+/** Shared B/I/U/S span attrs — used for wrap and for pending typing markers. */
+function applyToggleMarkAttrs(el: HTMLElement, cmd: string) {
+  el.setAttribute('data-note-mark', cmd);
+  if (cmd === 'bold') el.style.fontWeight = '700';
+  else if (cmd === 'italic') el.style.fontStyle = 'italic';
+  else if (cmd === 'underline') el.style.textDecoration = 'underline';
+  else if (cmd === 'strikeThrough') el.style.textDecoration = 'line-through';
 }
 
 function wrapRangeWithHighlight(range: Range, color: string): HTMLSpanElement | null {
@@ -4996,6 +5001,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             return;
           }
         }
+        // Empty caret (new question / end of line): insert a typing marker so
+        // the button lights up and the next characters inherit B/I/U/S.
+        pushUndoCheckpoint();
+        setFutureToggleMark(cmd, range);
+        savedFormattingRange.current = null;
+        return;
       } else {
         const targets = collectFormatTargetRanges(range, ed);
         if (targets.length > 0) {
@@ -5022,10 +5033,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     // Do not fall through to execCommand for B/I/U/S — it leaves sticky typing-state
     // that keeps the toolbar button dark even when the DOM mark is gone (or re-applies it).
     if (isToggle) {
+      // No usable range yet (focus stolen): still arm a typing marker in this editor.
+      pushUndoCheckpoint();
       blurTableToolbarFocus(ed);
       if (document.activeElement !== ed) ed.focus({ preventScroll: true });
-      saveSel();
-      readCommandState();
+      restoreSel();
+      setFutureToggleMark(cmd, liveRange());
       return;
     }
 
@@ -5100,6 +5113,67 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     pendingFontSize.current = px;
     setFontSize(px);
     saveSel();
+    emitHtml();
+  };
+
+  /**
+   * Collapsed caret with no word to wrap: insert a ZWS mark span so B/I/U/S
+   * lights up on the toolbar and subsequent typing inherits the style
+   * (same idea as setFutureFontSize — without sticky execCommand typing-state).
+   */
+  const setFutureToggleMark = (cmd: string, atRange?: Range | null) => {
+    const ed = editorRef.current;
+    if (!ed || !(TOGGLE_COMMANDS as readonly string[]).includes(cmd)) return;
+    if (document.activeElement !== ed) {
+      ed.focus({ preventScroll: true });
+      restoreSel();
+    }
+    const sel = window.getSelection();
+    let range = atRange?.cloneRange()
+      ?? (sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null);
+    if (!range || !ed.contains(range.commonAncestorContainer)) {
+      range = document.createRange();
+      const block = ed.lastElementChild instanceof HTMLElement ? ed.lastElementChild : ed;
+      range.selectNodeContents(block);
+      range.collapse(false);
+    }
+    if (!range.collapsed) {
+      saveSel();
+      readCommandState();
+      return;
+    }
+    if (range.startContainer === ed) {
+      const lastChild = ed.lastChild;
+      if (lastChild) {
+        range = document.createRange();
+        range.selectNodeContents(lastChild);
+        range.collapse(false);
+      }
+    }
+    if (findToggleMarkAncestor(range.startContainer, cmd, ed)) {
+      saveSel();
+      readCommandState();
+      return;
+    }
+    const span = document.createElement('span');
+    applyToggleMarkAttrs(span, cmd);
+    const zws = document.createTextNode('\u200B');
+    span.appendChild(zws);
+    try {
+      range.insertNode(span);
+    } catch {
+      const block = getLineBlock(range.startContainer, ed) ?? ed;
+      block.appendChild(span);
+    }
+    const next = document.createRange();
+    next.setStart(zws, zws.length);
+    next.collapse(true);
+    sel?.removeAllRanges();
+    try { sel?.addRange(next); } catch { /* ignore */ }
+    blurTableToolbarFocus(ed);
+    if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+    saveSel();
+    readCommandState();
     emitHtml();
   };
 
