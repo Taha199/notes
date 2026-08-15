@@ -342,6 +342,64 @@ function findToggleMarkAncestor(node: Node, cmd: string, boundary: Node): HTMLEl
   return null;
 }
 
+function toggleMarkVisibleText(el: HTMLElement): string {
+  return (el.textContent || '').replace(/[\u200B\uFEFF]/g, '').trim();
+}
+
+/**
+ * Collapsed caret inside B/I/U/S: leave already-typed text alone and exit the mark
+ * so the toolbar turns off and further typing is plain. Empty pending markers are removed.
+ */
+function exitToggleMarkAtCaret(markEl: HTMLElement, range: Range, cmd: string): void {
+  if (!toggleMarkVisibleText(markEl)) {
+    unwrapToggleMarkElement(markEl, cmd);
+    return;
+  }
+
+  const before = document.createRange();
+  before.selectNodeContents(markEl);
+  before.setEnd(range.startContainer, range.startOffset);
+  const atStart = before.toString().replace(/[\u200B\uFEFF]/g, '').length === 0;
+
+  const after = document.createRange();
+  after.selectNodeContents(markEl);
+  after.setStart(range.startContainer, range.startOffset);
+  const atEnd = after.toString().replace(/[\u200B\uFEFF]/g, '').length === 0;
+
+  const parent = markEl.parentNode;
+  if (!parent) return;
+
+  const placeInZws = (spot: Text) => {
+    const next = document.createRange();
+    next.setStart(spot, spot.length);
+    next.collapse(true);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    try { sel?.addRange(next); } catch { /* ignore */ }
+  };
+
+  if (atEnd || atStart) {
+    const spot = document.createTextNode('\u200B');
+    parent.insertBefore(spot, atEnd ? markEl.nextSibling : markEl);
+    placeInZws(spot);
+    return;
+  }
+
+  // Mid-mark: keep both sides formatted, put an unmarked caret gap between them.
+  const tailRange = document.createRange();
+  tailRange.setStart(range.startContainer, range.startOffset);
+  tailRange.setEnd(markEl, markEl.childNodes.length);
+  const tailFrag = tailRange.extractContents();
+  const rest = markEl.cloneNode(false) as HTMLElement;
+  rest.appendChild(tailFrag);
+  const spot = document.createTextNode('\u200B');
+  parent.insertBefore(spot, markEl.nextSibling);
+  parent.insertBefore(rest, spot.nextSibling);
+  if (!toggleMarkVisibleText(markEl)) unwrapToggleMarkElement(markEl, cmd);
+  if (!toggleMarkVisibleText(rest)) unwrapToggleMarkElement(rest, cmd);
+  placeInZws(spot);
+}
+
 /** Expand a caret to the surrounding word so B/I/U/S can toggle without a drag-selection. */
 function expandCollapsedRangeToWord(range: Range, boundary: HTMLElement): Range | null {
   if (!range.collapsed) return range.cloneRange();
@@ -4971,15 +5029,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (range.collapsed) {
         const markEl = findToggleMarkAncestor(range.startContainer, cmd, ed);
         if (markEl) {
+          // Stop typing with this mark — do NOT unwrap real text (that wiped italic
+          // off the word the user just typed when they only wanted the button off).
           pushUndoCheckpoint();
-          const before = bookmarkEditorSelection(ed);
-          unwrapToggleMarkElement(markEl, cmd);
-          if (before) restoreEditorSelection(ed, before);
-          else {
-            const sel = window.getSelection();
-            sel?.removeAllRanges();
-            try { sel?.addRange(range.cloneRange()); } catch { /* ignore */ }
-          }
+          exitToggleMarkAtCaret(markEl, range, cmd);
           blurTableToolbarFocus(ed);
           if (document.activeElement !== ed) ed.focus({ preventScroll: true });
           savedFormattingRange.current = null;
