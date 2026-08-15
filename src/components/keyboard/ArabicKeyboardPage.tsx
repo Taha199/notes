@@ -121,17 +121,29 @@ export function ArabicKeyboardPage() {
             type="button"
             onClick={openGoogle}
             disabled={!query}
-            className="rounded-xl border border-app-border px-3.5 py-2 text-[13px] font-semibold text-app-text hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-100"
+            title={t.arabicKbOpenGoogle}
+            aria-label={t.arabicKbOpenGoogle}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-app-border hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
           >
-            {t.arabicKbOpenGoogle}
+            <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+              <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303C33.654 32.657 29.223 36 24 36c-5.522 0-10-4.478-10-10s4.478-10 10-10c2.426 0 4.652.867 6.375 2.301l5.975-5.975C33.642 9.053 29.028 7 24 7 13.507 7 5 15.507 5 26s8.507 19 19 19 19-8.507 19-19c0-1.341-.138-2.65-.389-3.917z" />
+              <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 16.108 18.961 13 24 13c2.426 0 4.652.867 6.375 2.301l5.975-5.975C33.642 9.053 29.028 7 24 7c-7.682 0-14.344 4.337-17.694 10.691z" />
+              <path fill="#4CAF50" d="M24 45c5.097 0 9.621-1.948 13.094-5.094l-6.057-4.909C29.223 36 24.723 37 24 37c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 41.556 16.227 45 24 45z" />
+              <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.057 4.909C35.852 41.09 41 36 41 26c0-1.341-.138-2.65-.389-3.917z" />
+            </svg>
           </button>
           <button
             type="button"
             onClick={openYouTube}
             disabled={!query}
-            className="rounded-xl border border-app-border px-3.5 py-2 text-[13px] font-semibold text-app-text hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-100"
+            title={t.arabicKbOpenYouTube}
+            aria-label={t.arabicKbOpenYouTube}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-app-border hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10"
           >
-            {t.arabicKbOpenYouTube}
+            <svg width="22" height="16" viewBox="0 0 24 17" aria-hidden="true">
+              <path fill="#FF0000" d="M23.5 2.7A3 3 0 0 0 21.4.6C19.5.1 12 .1 12 .1s-7.5 0-9.4.5A3 3 0 0 0 .5 2.7 31.5 31.5 0 0 0 0 8.5a31.5 31.5 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1 31.5 31.5 0 0 0 .5-5.8 31.5 31.5 0 0 0-.5-5.8z" />
+              <path fill="#fff" d="M9.6 12.1V4.9l6.3 3.6-6.3 3.6z" />
+            </svg>
           </button>
           <button
             type="button"
