@@ -22,7 +22,7 @@
 import { ref as dbRef, remove, set, update } from 'firebase/database';
 import type { Note, QuizFolder, QuizItem, QuizSet } from '../types';
 import { database } from './firebase';
-import { applyQuizItemsOrder } from './quizSetMerge';
+import { applyQuizItemsOrder, coerceQuizItems } from './quizSetMerge';
 import { rtdbFetch } from './rtdb';
 import { rememberServerNotesCatalog, peekServerNotesCatalog } from './notesListCache';
 import { isNoteTrashTombstoned } from './quizTrashTombstones';
@@ -683,7 +683,10 @@ export function applyDurableQuizItems(
 ): { quizzes: QuizItem[]; sets: import('../types').QuizSet[] } {
   if (!durable.length) return { quizzes, sets };
   let nextQuizzes = quizzes;
-  let nextSets = sets;
+  let nextSets = sets.map((set) => ({
+    ...set,
+    items: coerceQuizItems(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined),
+  }));
 
   for (const item of durable) {
     const { setId, ...quiz } = item;
@@ -694,16 +697,17 @@ export function applyDurableQuizItems(
         ? nextQuizzes.map((q) => (q.id === bare.id ? { ...q, ...bare } : q))
         : [...nextQuizzes, bare];
       nextSets = nextSets.map((set) => {
-        if (setId && set.id !== setId && !set.items.some((i) => i.id === bare.id)) return set;
-        if (!set.items.some((i) => i.id === bare.id)) {
+        const items = coerceQuizItems(set.items);
+        if (setId && set.id !== setId && !items.some((i) => i.id === bare.id)) return set;
+        if (!items.some((i) => i.id === bare.id)) {
           if (setId && set.id === setId) {
-            return { ...set, items: [...set.items, bare] };
+            return { ...set, items: [...items, bare] };
           }
           return set;
         }
         return {
           ...set,
-          items: set.items.map((i) => (i.id === bare.id ? { ...i, ...bare } : i)),
+          items: items.map((i) => (i.id === bare.id ? { ...i, ...bare } : i)),
         };
       });
       continue;
@@ -711,7 +715,8 @@ export function applyDurableQuizItems(
 
     let matchedInSet = false;
     nextSets = nextSets.map((set) => {
-      const existing = set.items.find((i) => i.id === bare.id);
+      const items = coerceQuizItems(set.items);
+      const existing = items.find((i) => i.id === bare.id);
       if (existing) {
         matchedInSet = true;
         // Soft-delete always wins over a live durable copy. Restore writes
@@ -728,16 +733,16 @@ export function applyDurableQuizItems(
         }
         return {
           ...set,
-          items: set.items.map((i) => (i.id === bare.id ? bare : i)),
+          items: items.map((i) => (i.id === bare.id ? bare : i)),
         };
       }
       if (setId && set.id === setId) {
         // Keep-more-data: a newer set shell (rename / partial array) must never
         // block re-attaching a live durable item that is missing from items[].
         matchedInSet = true;
-        return { ...set, items: [...set.items, bare] };
+        return { ...set, items: [...items, bare] };
       }
-      return set;
+      return set.items === items ? set : { ...set, items };
     });
 
     if (!matchedInSet) {
@@ -763,8 +768,11 @@ export function applyDurableQuizItems(
   // IDB/cloud item bodies arrive in store / Object.values order. Re-apply any
   // durable Manual itemsOrder stamped on the set shell so refresh cannot scramble.
   nextSets = nextSets.map((set) => {
-    if (!set.itemsOrder?.length || !(set.items ?? []).length) return set;
-    const ordered = applyQuizItemsOrder(set.items ?? [], set.itemsOrder);
+    const items = coerceQuizItems(set.items);
+    if (!set.itemsOrder?.length || !items.length) {
+      return set.items === items ? set : { ...set, items };
+    }
+    const ordered = applyQuizItemsOrder(items, set.itemsOrder);
     if (ordered === set.items) return set;
     return { ...set, items: ordered };
   });

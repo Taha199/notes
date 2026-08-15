@@ -16,6 +16,7 @@ import { SeoHead } from './common/SeoHead';
 import { FilesPage } from './files/FilesPage';
 import { ArabicKeyboardPage } from './keyboard/ArabicKeyboardPage';
 import { QuizPage } from './quiz/QuizPage';
+import { ErrorBoundary } from './common/ErrorBoundary';
 import { TodoCalendarPage } from './todo/TodoCalendarPage';
 import { SettingsPage } from './settings/SettingsPage';
 import { DownloadPage } from './download/DownloadPage';
@@ -417,10 +418,12 @@ export function Dashboard() {
           {!showGlobalSearch && page === 'arabicKb' && <ArabicKeyboardPage />}
           {!showGlobalSearch && page === 'todo' && <TodoCalendarPage search={search} />}
           {!showGlobalSearch && page === 'quiz' && (
-            <QuizPage
-              focusItemId={quizFocusItemId}
-              onFocusHandled={handleQuizFocusHandled}
-            />
+            <ErrorBoundary label="quiz">
+              <QuizPage
+                focusItemId={quizFocusItemId}
+                onFocusHandled={handleQuizFocusHandled}
+              />
+            </ErrorBoundary>
           )}
           {!showGlobalSearch && page === 'download' && <DownloadPage />}
           {!showGlobalSearch && page === 'settings' && <SettingsPage />}

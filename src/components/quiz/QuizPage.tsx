@@ -15,7 +15,7 @@ import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
 import { countQuizSetQuestions, quizItemCreatedAtMs, visibleQuizItems } from '../../lib/quizSort';
-import { coerceQuizItems } from '../../lib/quizSetMerge';
+import { coerceQuizItems, withCoercedQuizSetItems } from '../../lib/quizSetMerge';
 import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { FilesLoadingIndicator } from '../files/FilesLoadingIndicator';
@@ -794,9 +794,18 @@ export function QuizPage({
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
   const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder, hydrateQuizSet } = useNotes();
-  const trashedFolderIds = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
-  const quizSets = allQuizSets.filter((set) => !set.trashed && !(set.folderId && trashedFolderIds.has(set.folderId)));
+  // Coerce Firebase object-shaped items[] before any render path touches .map/.filter.
+  const quizSets = useMemo(() => {
+    const trashedFolders = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
+    return allQuizSets
+      .filter((set) => !set.trashed && !(set.folderId && trashedFolders.has(set.folderId)))
+      .map(withCoercedQuizSetItems);
+  }, [allQuizSets, allQuizFolders]);
+  const trashedFolderIds = useMemo(
+    () => new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id)),
+    [allQuizFolders],
+  );
   const savedSelection = useMemo(() => loadQuizSelection(), []);
   const [selectedSetId, setSelectedSetId] = useState<string | null>(() => savedSelection.setId);
   const selectedSetIdRef = useRef<string | null>(selectedSetId);
@@ -1582,7 +1591,14 @@ export function QuizPage({
   const selectedFolder = selectedFolderId ? allQuizFolders.find((f) => f.id === selectedFolderId) : undefined;
   const selectedSet: QuizSet | undefined = selectedSetId ? quizSets.find((s) => s.id === selectedSetId) : undefined;
   const displayItems: QuizItem[] = selectedSet
-    ? visibleQuizItems(selectedSet.items)
+    ? visibleQuizItems(selectedSet.items).map((item) => ({
+        ...item,
+        question: typeof item.question === 'string' ? item.question : item.question == null ? '' : String(item.question),
+        answer: typeof item.answer === 'string' ? item.answer : item.answer == null ? '' : String(item.answer),
+        explanation: typeof item.explanation === 'string' || item.explanation == null
+          ? item.explanation
+          : String(item.explanation),
+      }))
     : isNotesView ? quizzes : [];
   const expectedSetCount = selectedSet ? countQuizSetQuestions(selectedSet) : 0;
   const setBodiesLoading = !!selectedSet

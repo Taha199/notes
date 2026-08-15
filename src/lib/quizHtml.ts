@@ -62,9 +62,12 @@ function looksLikeHtml(content: string): boolean {
  */
 export function mdToHtml(content: string | null | undefined): string {
   if (content == null || content === '') return '';
-  if (looksLikeHtml(content)) return content;
+  // Firebase / shell rows sometimes store non-strings — never call .replace on them.
+  const raw = typeof content === 'string' ? content : String(content);
+  if (!raw) return '';
+  if (looksLikeHtml(raw)) return raw;
 
-  const text = convertSimpleMath(content.replace(/\r\n/g, '\n').trim());
+  const text = convertSimpleMath(raw.replace(/\r\n/g, '\n').trim());
   if (!text) return '';
 
   const lines = text.split('\n');
