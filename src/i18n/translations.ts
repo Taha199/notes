@@ -422,6 +422,9 @@ export interface Translation {
   quizEdit: string;
   quizMoveToSet: string;
   quizMoveToSetTitle: string;
+  quizCopyToSetTitle: string;
+  quizKeepCopyHere: string;
+  quizKeepCopyHereHint: string;
   quizNoSetsInFolder: string;
   quizSetsWord: string;
   quizItemsShort: string;
@@ -839,6 +842,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizEdit: 'Edit',
     quizMoveToSet: 'Move to set',
     quizMoveToSetTitle: 'Move to set',
+    quizCopyToSetTitle: 'Copy to set',
+    quizKeepCopyHere: 'Keep a copy here',
+    quizKeepCopyHereHint: 'Leave the original question in this set and add a copy to the destination.',
     quizNoSetsInFolder: 'No sets in this folder',
     quizSetsWord: 'sets',
     quizItemsShort: 'items',
@@ -1254,6 +1260,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizEdit: 'Redigera',
     quizMoveToSet: 'Flytta till set',
     quizMoveToSetTitle: 'Flytta till set',
+    quizCopyToSetTitle: 'Kopiera till set',
+    quizKeepCopyHere: 'Behåll en kopia här',
+    quizKeepCopyHereHint: 'Lämna originalfrågan i detta set och lägg till en kopia i destinationen.',
     quizNoSetsInFolder: 'Inga set i den här mappen',
     quizSetsWord: 'set',
     quizItemsShort: 'st',

@@ -109,7 +109,7 @@ interface QuizItemRowProps {
   progressMap?: Record<number, 'known' | 'learning'>;
   sets?: QuizSet[];
   folders?: QuizFolder[];
-  onMoveToSet?: (setId: string) => void;
+  onMoveToSet?: (setId: string, keepCopy: boolean) => void;
   hideAnswers?: boolean;
   /** Per-item hide preference (independent of set-level hide). */
   answerHidden?: boolean;
@@ -124,6 +124,7 @@ interface QuizItemRowProps {
 const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition }: QuizItemRowProps) {
   const { t } = useLanguage();
   const [moveOpen, setMoveOpen] = useState(false);
+  const [keepCopy, setKeepCopy] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [targetPos, setTargetPos] = useState('');
@@ -260,7 +261,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
           {onMoveToSet && sets && sets.length > 0 && (
             <>
               <button
-                onClick={() => { setMoveOpen(true); setActiveFolderId(null); }}
+                onClick={() => { setMoveOpen(true); setKeepCopy(false); setActiveFolderId(null); }}
                 title={t.quizMoveToSet}
                 className="text-[13px] text-app-text-secondary/40 transition-colors hover:text-primary"
               >📂</button>
@@ -268,9 +269,23 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setMoveOpen(false)}>
                   <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
-                      <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">{t.quizMoveToSetTitle}</p>
+                      <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">
+                        {keepCopy ? t.quizCopyToSetTitle : t.quizMoveToSetTitle}
+                      </p>
                       <button onClick={() => setMoveOpen(false)} className="text-app-text-secondary/50 hover:text-app-text">✕</button>
                     </div>
+                    <label className="flex cursor-pointer items-start gap-2.5 border-b border-app-border/60 bg-app-bg/50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+                      <input
+                        type="checkbox"
+                        checked={keepCopy}
+                        onChange={(e) => setKeepCopy(e.target.checked)}
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-[12px] font-medium text-app-text dark:text-gray-100">{t.quizKeepCopyHere}</span>
+                        <span className="mt-0.5 block text-[10px] leading-snug text-app-text-secondary/55">{t.quizKeepCopyHereHint}</span>
+                      </span>
+                    </label>
                     <div className="max-h-[420px] overflow-y-auto">
                       {/* Folders and their sets */}
                       {(folders ?? []).map((f) => {
@@ -294,7 +309,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                                 ) : fSets.map((s) => (
                                   <button
                                     key={s.id}
-                                    onClick={() => { onMoveToSet(s.id); setMoveOpen(false); }}
+                                    onClick={() => { onMoveToSet(s.id, keepCopy); setMoveOpen(false); }}
                                     className="flex w-full items-center gap-3 border-b border-app-border/20 px-6 py-2.5 text-left transition-colors last:border-b-0 hover:bg-primary/5 dark:border-white/5 dark:hover:bg-primary/10"
                                   >
                                     <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
@@ -1675,8 +1690,11 @@ export function QuizPage({
         onSetStatus={setItemStatus}
         sets={quizSets.filter((s) => s.id !== selectedSetId && !!s.folderId && !s.system)}
         folders={quizFolders}
-        onMoveToSet={(setId) => {
-          addItemToSet(setId, { ...item });
+        onMoveToSet={(setId, keepCopy) => {
+          // Strip identity/meta so the destination gets a fresh item.
+          const { id, favOf, draft, trashed, deletedAt, ...rest } = item;
+          addItemToSet(setId, { ...rest });
+          if (keepCopy) return;
           if (selectedSetId) removeItemFromSet(selectedSetId, item.id);
           else deleteQuiz(item.id);
         }}
