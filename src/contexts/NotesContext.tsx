@@ -38,6 +38,9 @@ import {
   quizItemSyncTime,
   quizSetsListOrderIds,
   normalizeQuizSetsListOrder,
+  coerceQuizItems,
+  coerceQuizSetsList,
+  withCoercedQuizSetItems,
   shouldHydrateQuizSetsUi,
   unionQuizSetsForCommit,
   quizSetsSoftTrashExplainsShrink,
@@ -420,6 +423,15 @@ function stripPermDeletedQuizSets(sets: QuizSet[], tombstones: PermanentlyDelete
       continue;
     }
     const items = set.items ?? [];
+    if (!Array.isArray(items)) {
+      changed = true;
+      next.push({
+        ...set,
+        items: Object.values(items as Record<string, QuizItem>).filter(Boolean)
+          .filter((item) => !deadQuizzes.has(Number(item.id))),
+      });
+      continue;
+    }
     if (!items.some((item) => deadQuizzes.has(Number(item.id)))) {
       next.push(set);
       continue;
@@ -1241,6 +1253,17 @@ function firebaseToArray<T>(data: T[] | Record<string, T> | null | undefined): T
   if (Array.isArray(data)) return data.filter(Boolean);
   if (typeof data === 'object') return Object.values(data).filter(Boolean);
   return [];
+}
+
+function normalizeQuizSetRow(set: QuizSet): QuizSet {
+  return withCoercedQuizSetItems({
+    ...set,
+    items: firebaseToArray<QuizItem>(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined),
+  });
+}
+
+function normalizeQuizSetsRows(sets: QuizSet[]): QuizSet[] {
+  return coerceQuizSetsList(sets.map(normalizeQuizSetRow));
 }
 
 function mergeById<T extends { id: string }>(...lists: T[][]): T[] {
@@ -2364,7 +2387,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const [notes, setNotes] = useState<Note[]>(() => readBootNotesForPaint());
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [quizzes, setQuizzes] = useState<QuizItem[]>([]);
-  const [quizSets, setQuizSets] = useState<QuizSet[]>([]);
+  const [quizSets, setQuizSetsState] = useState<QuizSet[]>([]);
   const [quizFolders, setQuizFolders] = useState<QuizFolder[]>(() => {
     try {
       const raw = readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? [];
@@ -2498,6 +2521,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const quizzesRef = useRef(quizzes);
   const chatsRef = useRef(chats);
   const quizSetsRef = useRef(quizSets);
+  /** Coerce Firebase object-shaped items[] so Favourites/Restored never crash on .map/.filter. */
+  const setQuizSets = (
+    update: QuizSet[] | ((prev: QuizSet[]) => QuizSet[]),
+  ) => {
+    if (typeof update === 'function') {
+      setQuizSetsState((prev) => {
+        const next = normalizeQuizSetsRows(update(prev));
+        quizSetsRef.current = next;
+        return next;
+      });
+      return;
+    }
+    const next = normalizeQuizSetsRows(update);
+    quizSetsRef.current = next;
+    setQuizSetsState(next);
+  };
   const quizFoldersRef = useRef(quizFolders);
   const hydrateQuizSetInFlight = useRef<Set<string>>(new Set());
   /** Durable ById mirrors — union into every array apply so devices never diverge. */
@@ -6968,9 +7007,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!setId || hydrateQuizSetInFlight.current.has(setId)) return;
     const set = quizSetsRef.current.find((s) => s.id === setId);
     if (!set) return;
+    const items = coerceQuizItems(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined);
     const orderIds = (set.itemsOrder?.length
       ? set.itemsOrder
-      : (set.items ?? []).map((item) => item.id)
+      : items.map((item) => item.id)
     ).map(Number).filter(Number.isFinite);
     if (!orderIds.length) return;
     const hasBody = (item: QuizItem | undefined) => {
@@ -6982,7 +7022,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         || (item.explanation || '').trim()
       );
     };
-    const missing = orderIds.filter((id) => !hasBody((set.items ?? []).find((item) => Number(item.id) === id)));
+    const missing = orderIds.filter((id) => !hasBody(items.find((item) => Number(item.id) === id)));
     if (!missing.length) return;
     hydrateQuizSetInFlight.current.add(setId);
     try {

@@ -15,16 +15,21 @@ export function isVisibleQuizItem(item: QuizItem): boolean {
   return !item.trashed && !item.draft;
 }
 
-export function visibleQuizItems(items: QuizItem[] | undefined | null): QuizItem[] {
-  return (items ?? []).filter(isVisibleQuizItem);
+export function visibleQuizItems(items: QuizItem[] | Record<string, QuizItem> | undefined | null): QuizItem[] {
+  const list = Array.isArray(items)
+    ? items
+    : items && typeof items === 'object'
+      ? Object.values(items)
+      : [];
+  return list.filter(Boolean).filter(isVisibleQuizItem);
 }
 
-export function countVisibleQuizItems(items: QuizItem[] | undefined | null): number {
+export function countVisibleQuizItems(items: QuizItem[] | Record<string, QuizItem> | undefined | null): number {
   return visibleQuizItems(items).length;
 }
 
 /** Sidebar count — prefer live items, else durable itemsOrder on empty shells. */
-export function countQuizSetQuestions(set: { items?: QuizItem[] | null; itemsOrder?: number[] | null }): number {
+export function countQuizSetQuestions(set: { items?: QuizItem[] | Record<string, QuizItem> | null; itemsOrder?: number[] | null }): number {
   const live = countVisibleQuizItems(set.items);
   if (live > 0) return live;
   return (set.itemsOrder ?? []).length;

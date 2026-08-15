@@ -565,7 +565,14 @@ export async function getAllQuizSetsLocal(): Promise<QuizSet[]> {
   const rows = await idbGetAll<QuizSet>(QUIZ_SETS_STORE);
   return rows
     .filter((s) => s && typeof s === 'object' && s.id != null)
-    .map((set) => ({ ...set, items: set.items ?? [] }));
+    .map((set) => ({
+      ...set,
+      items: Array.isArray(set.items)
+        ? set.items
+        : set.items && typeof set.items === 'object'
+          ? Object.values(set.items as Record<string, QuizItem>)
+          : [],
+    }));
 }
 
 export async function deleteQuizSetLocal(id: string): Promise<void> {
@@ -635,7 +642,14 @@ export async function fetchQuizSetsByIdCloud(uid: string): Promise<QuizSet[]> {
     if (!data || typeof data !== 'object') return [];
     return Object.values(data as Record<string, QuizSet>)
       .filter((s) => s && typeof s === 'object' && s.id != null)
-      .map((set) => ({ ...set, items: set.items ?? [] }));
+      .map((set) => ({
+      ...set,
+      items: Array.isArray(set.items)
+        ? set.items
+        : set.items && typeof set.items === 'object'
+          ? Object.values(set.items as Record<string, QuizItem>).filter(Boolean)
+          : [],
+    }));
   } catch {
     return [];
   }

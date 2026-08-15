@@ -7,6 +7,44 @@
  */
 import type { QuizItem, QuizSet } from '../types';
 
+/**
+ * Firebase RTDB often stores arrays as objects (`{ "0": … }`). Calling
+ * `.map`/`.filter`/`.find` on that shape crashes the Quiz page (Favourites /
+ * Restored are frequent offenders). Always coerce before iterating.
+ */
+export function coerceQuizItems(
+  items: QuizItem[] | Record<string, QuizItem> | null | undefined,
+): QuizItem[] {
+  if (!items) return [];
+  if (Array.isArray(items)) {
+    let needsFilter = false;
+    for (let i = 0; i < items.length; i += 1) {
+      if (!items[i]) {
+        needsFilter = true;
+        break;
+      }
+    }
+    return needsFilter ? items.filter(Boolean) : items;
+  }
+  if (typeof items === 'object') return Object.values(items).filter(Boolean);
+  return [];
+}
+
+export function withCoercedQuizSetItems(set: QuizSet): QuizSet {
+  const items = coerceQuizItems(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined);
+  return items === set.items ? set : { ...set, items };
+}
+
+export function coerceQuizSetsList(sets: QuizSet[]): QuizSet[] {
+  let changed = false;
+  const next = sets.map((set) => {
+    const normalized = withCoercedQuizSetItems(set);
+    if (normalized !== set) changed = true;
+    return normalized;
+  });
+  return changed ? next : sets;
+}
+
 export function quizItemSyncTime(item: QuizItem) {
   return Date.parse(item.updatedAt || item.createdAt || '') || 0;
 }
@@ -26,7 +64,7 @@ export function quizSetListOrderTime(set: QuizSet) {
 /** Item ids in Manual order — from itemsOrder stamp or live items[]. */
 export function quizSetItemsOrderIds(set: QuizSet): number[] {
   if (set.itemsOrder?.length) return set.itemsOrder.slice();
-  return (set.items ?? []).map((item) => item.id);
+  return coerceQuizItems(set.items as QuizItem[] | Record<string, QuizItem> | null | undefined).map((item) => item.id);
 }
 
 /** Durable Manual SET LIST order — survives ById Object.values scramble. */
@@ -606,17 +644,18 @@ export function preferRicherQuizSetsMembership(
   const byId = new Map<string, QuizSet>();
   for (const set of primary) {
     if (!set?.id) continue;
-    byId.set(set.id, { ...set, items: set.items ?? [] });
+    byId.set(set.id, withCoercedQuizSetItems(set));
   }
   for (const source of richerSources) {
     for (const set of source) {
       if (!set?.id) continue;
       const existing = byId.get(set.id);
+      const incoming = withCoercedQuizSetItems(set);
       byId.set(
         set.id,
         existing
-          ? pickBetterQuizSet(existing, { ...set, items: set.items ?? [] })
-          : { ...set, items: set.items ?? [] },
+          ? pickBetterQuizSet(existing, incoming)
+          : incoming,
       );
     }
   }

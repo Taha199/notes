@@ -819,7 +819,12 @@ export function QuizPage({
   const [dragOverFolderSortId, setDragOverFolderSortId] = useState<string | null>(null);
   // Favorites are persisted as copies inside the system "Favoriter" set.
   // favs = the set of ORIGINAL item ids that have a copy there.
-  const favItems = allQuizSets.find((s) => s.id === FAVORITES_SET_ID)?.items ?? [];
+  const favItemsRaw = allQuizSets.find((s) => s.id === FAVORITES_SET_ID)?.items;
+  const favItems: QuizItem[] = Array.isArray(favItemsRaw)
+    ? favItemsRaw
+    : favItemsRaw && typeof favItemsRaw === 'object'
+      ? Object.values(favItemsRaw as Record<string, QuizItem>).filter(Boolean)
+      : [];
   const favs = useMemo(
     () => new Set(favItems.map((i) => i.favOf).filter((x): x is number => x != null)),
     [favItems]
@@ -1129,7 +1134,7 @@ export function QuizPage({
     }
 
     const storedItem = setId
-      ? allQuizSetsRef.current.find((s) => s.id === setId)?.items.find((i) => i.id === form.itemId)
+      ? allQuizSetsRef.current.find((s) => s.id === setId)?.items?.find((i) => i.id === form.itemId)
       : quizzesRef.current.find((item) => item.id === form.itemId);
     if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
       if (form.saveStatus !== 'saved') updateForm(formId, { saveStatus: 'saved' });
@@ -1469,7 +1474,9 @@ export function QuizPage({
   };
 
   const handleSpeak = (id: number) => {
-    const item = selectedSet ? selectedSet.items.find((i) => i.id === id) : quizzes.find((q) => q.id === id);
+    const item = selectedSet
+      ? (selectedSet.items ?? []).find((i) => i.id === id)
+      : quizzes.find((q) => q.id === id);
     if (!item) return;
     if (speakingId === id) { window.speechSynthesis.cancel(); setSpeakingId(null); return; }
     window.speechSynthesis.cancel();
@@ -1710,7 +1717,7 @@ export function QuizPage({
     ? quizSets
     : [...quizSets].sort((a, b) => {
         if (setSort === 'name') {
-          return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+          return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
         }
         if (setSort === 'count') {
           return countQuizSetQuestions(b) - countQuizSetQuestions(a);
