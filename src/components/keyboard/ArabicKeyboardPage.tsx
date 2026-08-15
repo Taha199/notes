@@ -4,6 +4,21 @@ import { useToast } from '../../contexts/ToastContext';
 import { arabicFromCode, insertAtCursor } from '../../lib/arabicKeyboard';
 import { ArabicOnScreenKeyboard } from './ArabicOnScreenKeyboard';
 
+function openSearchTab(url: string) {
+  const tab = window.open(url, '_blank', 'noopener,noreferrer');
+  if (tab) {
+    tab.opener = null;
+    return;
+  }
+  const link = document.createElement('a');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 export function ArabicKeyboardPage() {
   const { t } = useLanguage();
   const { show } = useToast();
@@ -56,6 +71,16 @@ export function ArabicKeyboardPage() {
     }
   };
 
+  const query = text.trim();
+  const openGoogle = () => {
+    if (!query) return;
+    openSearchTab(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
+  };
+  const openYouTube = () => {
+    if (!query) return;
+    openSearchTab(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`);
+  };
+
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5" dir="rtl">
       <div className="rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-900/70">
@@ -91,6 +116,22 @@ export function ArabicKeyboardPage() {
             className="rounded-xl bg-primary px-3.5 py-2 text-[13px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40"
           >
             {t.arabicKbCopy}
+          </button>
+          <button
+            type="button"
+            onClick={openGoogle}
+            disabled={!query}
+            className="rounded-xl border border-app-border px-3.5 py-2 text-[13px] font-semibold text-app-text hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-100"
+          >
+            {t.arabicKbOpenGoogle}
+          </button>
+          <button
+            type="button"
+            onClick={openYouTube}
+            disabled={!query}
+            className="rounded-xl border border-app-border px-3.5 py-2 text-[13px] font-semibold text-app-text hover:bg-app-bg disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-100"
+          >
+            {t.arabicKbOpenYouTube}
           </button>
           <button
             type="button"

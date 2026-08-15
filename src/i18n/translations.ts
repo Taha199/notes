@@ -144,6 +144,8 @@ export interface Translation {
   arabicKbCopy: string;
   arabicKbClear: string;
   arabicKbCopied: string;
+  arabicKbOpenGoogle: string;
+  arabicKbOpenYouTube: string;
   arabicKbToggleOn: string;
   arabicKbToggleOff: string;
   arabicKbOptionalHint: string;
@@ -662,6 +664,8 @@ export const LANGS: Record<Lang, Translation> = {
     arabicKbCopy: 'Copy',
     arabicKbClear: 'Clear',
     arabicKbCopied: 'Copied',
+    arabicKbOpenGoogle: 'Google',
+    arabicKbOpenYouTube: 'YouTube',
     arabicKbToggleOn: 'Turn on Arabic keyboard',
     arabicKbToggleOff: 'Turn off',
     arabicKbOptionalHint: 'Drag to move · type in any field',
@@ -1080,6 +1084,8 @@ export const LANGS: Record<Lang, Translation> = {
     arabicKbCopy: 'Kopiera',
     arabicKbClear: 'Rensa',
     arabicKbCopied: 'Kopierat',
+    arabicKbOpenGoogle: 'Google',
+    arabicKbOpenYouTube: 'YouTube',
     arabicKbToggleOn: 'Slå på arabiskt tangentbord',
     arabicKbToggleOff: 'Stäng av',
     arabicKbOptionalHint: 'Dra för att flytta · skriv i valfritt fält',
