@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNotes, FAVORITES_SET_ID } from '../../contexts/NotesContext';
 import { AppRichTextEditor } from '../notes/AppRichTextEditor';
 import { answerQuestion } from '../../lib/gemini';
@@ -265,8 +266,8 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                 title={t.quizMoveToSet}
                 className="text-[13px] text-app-text-secondary/40 transition-colors hover:text-primary"
               >📂</button>
-              {moveOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setMoveOpen(false)}>
+              {moveOpen && createPortal(
+                <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setMoveOpen(false)}>
                   <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-gray-900" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between border-b border-app-border px-4 py-3 dark:border-white/10">
                       <p className="text-[13px] font-semibold text-app-text dark:text-gray-100">
@@ -324,7 +325,8 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                       })}
                     </div>
                   </div>
-                </div>
+                </div>,
+                document.body,
               )}
             </>
           )}
