@@ -1823,10 +1823,11 @@ export function QuizPage({
         onDragEnd={() => { dragSetId.current = null; setDragOverSetId(null); setDragOverFolderId(null); setDragOverFolderSortId(null); }}
         style={dragOverSetId === s.id ? { outline: '2px solid var(--color-primary)', outlineOffset: '-2px', borderRadius: '8px' } : undefined}
       >
-        {renamingSetId === s.id ? (
+        {renamingSetId === s.id && selectedSetId !== s.id ? (
           <div className="flex items-center gap-1 rounded-xl bg-white px-2 py-1.5 dark:bg-white/5">
             <input
               autoFocus
+              data-quiz-rename-input="1"
               value={renameVal}
               onChange={(e) => setRenameVal(e.target.value)}
               onKeyDown={(e) => {
@@ -2145,34 +2146,56 @@ export function QuizPage({
                 <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <span aria-hidden>📂</span>
                   {renamingSetId === selectedSet.id ? (
-                    <input
-                      autoFocus
-                      value={renameVal}
-                      onChange={(e) => setRenameVal(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitSetName(selectedSet);
-                        if (e.key === 'Escape') setRenamingSetId(null);
-                      }}
-                      onBlur={() => commitSetName(selectedSet)}
-                      className="min-w-0 max-w-[min(100%,18rem)] rounded-lg border border-primary/40 bg-white px-2 py-0.5 text-[12px] font-semibold normal-case tracking-normal text-app-text outline-none ring-2 ring-primary/15 dark:border-primary/50 dark:bg-gray-900 dark:text-gray-100"
-                      aria-label={t.quizRename}
-                    />
+                    <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                      <input
+                        autoFocus
+                        data-quiz-rename-input="1"
+                        value={renameVal}
+                        onChange={(e) => setRenameVal(e.target.value)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitSetName(selectedSet);
+                          }
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setRenamingSetId(null);
+                          }
+                        }}
+                        onBlur={() => commitSetName(selectedSet)}
+                        className="min-w-[8rem] max-w-[min(100%,28rem)] flex-1 rounded-lg border border-primary/50 bg-white px-2.5 py-1 text-[13px] font-semibold normal-case tracking-normal text-app-text outline-none ring-2 ring-primary/20 dark:border-primary/50 dark:bg-gray-900 dark:text-gray-100"
+                        aria-label={t.quizRename}
+                      />
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => commitSetName(selectedSet)}
+                        className="rounded-md px-1.5 py-1 text-[12px] font-bold text-primary"
+                        title={t.quizRename}
+                      >✓</button>
+                    </span>
                   ) : (
                     <button
                       type="button"
                       disabled={!!selectedSet.system}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         if (selectedSet.system) return;
-                        setRenamingSetId(selectedSet.id);
                         setRenameVal(selectedSet.name);
+                        setRenamingSetId(selectedSet.id);
                       }}
                       title={selectedSet.system ? undefined : t.quizRename}
-                      className={'min-w-0 truncate rounded-md px-1 py-0.5 text-left normal-case tracking-normal transition ' +
+                      className={'group/rename inline-flex min-w-0 max-w-full items-center gap-1 rounded-lg px-1.5 py-0.5 text-left text-[13px] font-semibold normal-case tracking-normal transition ' +
                         (selectedSet.system
-                          ? 'cursor-default'
-                          : 'hover:bg-app-bg hover:text-primary dark:hover:bg-white/5')}
+                          ? 'cursor-default text-app-text dark:text-gray-200'
+                          : 'cursor-text text-app-text hover:bg-primary/10 hover:text-primary dark:text-gray-100 dark:hover:bg-primary/15')}
                     >
-                      {selectedSet.name}
+                      <span className="min-w-0 truncate">{selectedSet.name}</span>
+                      {!selectedSet.system && (
+                        <span className="shrink-0 text-[11px] opacity-40 transition group-hover/rename:opacity-80" aria-hidden>✏️</span>
+                      )}
                     </button>
                   )}
                   <span className="font-bold normal-case tracking-normal text-app-text-secondary/70 dark:text-gray-500">
