@@ -27,6 +27,7 @@ import { filterNotesBySearch, normalizeSearch, noteMatchesSearch, nextSearchHitI
 import { buildGlobalSearchResults, buildGlobalSearchHitStarts } from '../lib/globalSearch';
 import { GlobalSearchResults } from './search/GlobalSearchResults';
 import { AiBackNotice } from './common/AiBackNotice';
+import { KeepGoingNotice } from './common/KeepGoingNotice';
 
 const QUIZ_SELECTION_KEY = 'malacadhati_quiz_selection';
 
@@ -352,6 +353,7 @@ export function Dashboard() {
           onNewNote={handleNewNote}
           onOpenMenu={() => setMobileMenuOpen(true)}
         />
+        <KeepGoingNotice />
         <AiBackNotice />
 
         <div className="flex-1 overflow-y-auto">
