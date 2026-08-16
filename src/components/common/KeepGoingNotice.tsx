@@ -3,30 +3,24 @@ import { useLanguage } from '../../contexts/LanguageContext';
 
 /** Visible for ~24h from ship (until end of Mon 17 Aug 2026 local). */
 const KEEP_GOING_NOTICE_UNTIL = Date.parse('2026-08-17T23:59:59+02:00');
-const DISMISS_KEY = 'malacadhati_keep_going_dismissed';
 
 export function KeepGoingNotice() {
   const { lang } = useLanguage();
-  const [visible, setVisible] = useState(() => {
-    if (Date.now() > KEEP_GOING_NOTICE_UNTIL) return false;
-    try {
-      return localStorage.getItem(DISMISS_KEY) !== '1';
-    } catch {
-      return true;
-    }
-  });
+  // Session-only dismiss — every refresh shows the banner again.
+  const [dismissed, setDismissed] = useState(false);
+  const [active, setActive] = useState(() => Date.now() <= KEEP_GOING_NOTICE_UNTIL);
 
   useEffect(() => {
     if (Date.now() > KEEP_GOING_NOTICE_UNTIL) {
-      setVisible(false);
+      setActive(false);
       return;
     }
     const ms = KEEP_GOING_NOTICE_UNTIL - Date.now();
-    const timer = window.setTimeout(() => setVisible(false), ms);
+    const timer = window.setTimeout(() => setActive(false), ms);
     return () => window.clearTimeout(timer);
   }, []);
 
-  if (!visible) return null;
+  if (!active || dismissed) return null;
 
   const dismissLabel = lang === 'sv' ? 'Stäng' : 'Dismiss';
 
@@ -42,12 +36,7 @@ export function KeepGoingNotice() {
       </p>
       <button
         type="button"
-        onClick={() => {
-          setVisible(false);
-          try {
-            localStorage.setItem(DISMISS_KEY, '1');
-          } catch { /* ignore */ }
-        }}
+        onClick={() => setDismissed(true)}
         aria-label={dismissLabel}
         className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-amber-800/70 transition hover:bg-amber-200/60 hover:text-amber-950 dark:text-amber-200/70 dark:hover:bg-amber-500/20 dark:hover:text-amber-50"
       >
