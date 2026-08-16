@@ -2141,15 +2141,50 @@ export function QuizPage({
               </button>
             )}
             <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
-              {selectedSet
-                ? `📂 ${selectedSet.name} — ${setBodiesLoading ? expectedSetCount : displayItems.length} ${
-                    (setBodiesLoading ? expectedSetCount : displayItems.length) === 1
+              {selectedSet ? (
+                <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  <span aria-hidden>📂</span>
+                  {renamingSetId === selectedSet.id ? (
+                    <input
+                      autoFocus
+                      value={renameVal}
+                      onChange={(e) => setRenameVal(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitSetName(selectedSet);
+                        if (e.key === 'Escape') setRenamingSetId(null);
+                      }}
+                      onBlur={() => commitSetName(selectedSet)}
+                      className="min-w-0 max-w-[min(100%,18rem)] rounded-lg border border-primary/40 bg-white px-2 py-0.5 text-[12px] font-semibold normal-case tracking-normal text-app-text outline-none ring-2 ring-primary/15 dark:border-primary/50 dark:bg-gray-900 dark:text-gray-100"
+                      aria-label={t.quizRename}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!!selectedSet.system}
+                      onClick={() => {
+                        if (selectedSet.system) return;
+                        setRenamingSetId(selectedSet.id);
+                        setRenameVal(selectedSet.name);
+                      }}
+                      title={selectedSet.system ? undefined : t.quizRename}
+                      className={'min-w-0 truncate rounded-md px-1 py-0.5 text-left normal-case tracking-normal transition ' +
+                        (selectedSet.system
+                          ? 'cursor-default'
+                          : 'hover:bg-app-bg hover:text-primary dark:hover:bg-white/5')}
+                    >
+                      {selectedSet.name}
+                    </button>
+                  )}
+                  <span className="font-bold normal-case tracking-normal text-app-text-secondary/70 dark:text-gray-500">
+                    — {setBodiesLoading ? expectedSetCount : displayItems.length}{' '}
+                    {(setBodiesLoading ? expectedSetCount : displayItems.length) === 1
                       ? t.quizQuestionOne
-                      : t.quizQuestionMany
-                  }`
-                : isFolderEmptyView
-                  ? `📁 ${selectedFolder?.system === 'favorites' ? t.quizFavorites : selectedFolder?.system ? t.quizRestored : selectedFolder?.name ?? t.quizFolder} — ${t.quizSetsCount.replace('{n}', String(userSetsInFolder(selectedFolderId ?? '').length))}`
-                  : `🧠 ${t.quizQuestionsFromNotes} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`}
+                      : t.quizQuestionMany}
+                  </span>
+                </span>
+              ) : isFolderEmptyView
+                ? `📁 ${selectedFolder?.system === 'favorites' ? t.quizFavorites : selectedFolder?.system ? t.quizRestored : selectedFolder?.name ?? t.quizFolder} — ${t.quizSetsCount.replace('{n}', String(userSetsInFolder(selectedFolderId ?? '').length))}`
+                : `🧠 ${t.quizQuestionsFromNotes} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`}
               {setBodiesLoading && (
                 <span className="ml-2 font-normal normal-case tracking-normal text-primary">
                   · {t.quizLoadingSetProgress
