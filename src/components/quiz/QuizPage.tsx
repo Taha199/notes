@@ -1436,9 +1436,20 @@ export function QuizPage({
     });
   }, [allQuizSets, quizzes, selectedSetId, selectedFolderId, quizLocalReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Rename set
+  // Rename set — place controls whether the input shows in the sidebar list or the header.
   const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
+  const [renameSetPlace, setRenameSetPlace] = useState<'sidebar' | 'header' | null>(null);
   const [renameVal, setRenameVal] = useState('');
+
+  const startRenameSet = (set: QuizSet, place: 'sidebar' | 'header') => {
+    setRenameVal(set.name);
+    setRenamingSetId(set.id);
+    setRenameSetPlace(place);
+  };
+  const stopRenameSet = () => {
+    setRenamingSetId(null);
+    setRenameSetPlace(null);
+  };
 
   // Folders (OneNote-style notebooks)
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
@@ -1548,7 +1559,7 @@ export function QuizPage({
       return;
     }
     renameQuizSet(set.id, name);
-    setRenamingSetId(null);
+    stopRenameSet();
   };
 
   const commitFolderName = (folderId: string, fallbackName: string) => {
@@ -1823,7 +1834,7 @@ export function QuizPage({
         onDragEnd={() => { dragSetId.current = null; setDragOverSetId(null); setDragOverFolderId(null); setDragOverFolderSortId(null); }}
         style={dragOverSetId === s.id ? { outline: '2px solid var(--color-primary)', outlineOffset: '-2px', borderRadius: '8px' } : undefined}
       >
-        {renamingSetId === s.id && selectedSetId !== s.id ? (
+        {renamingSetId === s.id && renameSetPlace === 'sidebar' ? (
           <div className="flex items-center gap-1 rounded-xl bg-white px-2 py-1.5 dark:bg-white/5">
             <input
               autoFocus
@@ -1832,7 +1843,7 @@ export function QuizPage({
               onChange={(e) => setRenameVal(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') commitSetName(s);
-                if (e.key === 'Escape') setRenamingSetId(null);
+                if (e.key === 'Escape') stopRenameSet();
               }}
               onBlur={() => commitSetName(s)}
               className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none dark:text-gray-200"
@@ -2132,7 +2143,7 @@ export function QuizPage({
           <>
           {/* Header */}
           <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
-            {isNarrow && selectedSetId && renamingSetId !== selectedSetId && (
+            {isNarrow && selectedSetId && renameSetPlace !== 'header' && (
               <button
                 type="button"
                 onClick={() => selectQuizSet(null)}
@@ -2141,7 +2152,7 @@ export function QuizPage({
                 ← {t.quizSetsLabel}
               </button>
             )}
-            {selectedSet && renamingSetId === selectedSet.id ? (
+            {selectedSet && renamingSetId === selectedSet.id && renameSetPlace === 'header' ? (
               <div className="flex w-full min-w-0 basis-full items-center gap-2">
                 {isNarrow && (
                   <button
@@ -2163,10 +2174,10 @@ export function QuizPage({
                       e.preventDefault();
                       commitSetName(selectedSet);
                     }
-                    if (e.key === 'Escape') {
-                      e.preventDefault();
-                      setRenamingSetId(null);
-                    }
+                      if (e.key === 'Escape') {
+                            e.preventDefault();
+                            stopRenameSet();
+                          }
                   }}
                   onBlur={() => commitSetName(selectedSet)}
                   ref={(el) => {
@@ -2207,8 +2218,7 @@ export function QuizPage({
                       e.preventDefault();
                       e.stopPropagation();
                       if (selectedSet.system) return;
-                      setRenameVal(selectedSet.name);
-                      setRenamingSetId(selectedSet.id);
+                      startRenameSet(selectedSet, 'header');
                     }}
                     title={selectedSet.system ? undefined : t.quizRename}
                     className={'group/rename inline-flex min-w-0 max-w-full items-center gap-1 rounded-lg px-1.5 py-0.5 text-left text-[13px] font-semibold normal-case tracking-normal transition ' +
@@ -2244,7 +2254,7 @@ export function QuizPage({
               )}
             </span>
             )}
-            {!isFolderEmptyView && displayItems.length > 0 && renamingSetId !== selectedSetId && (
+            {!isFolderEmptyView && displayItems.length > 0 && renameSetPlace !== 'header' && (
               <div className="flex items-center gap-1.5">
                 {/* Hide/show answers toggle */}
                 <button
@@ -2428,7 +2438,10 @@ export function QuizPage({
             <button
               onClick={() => {
                 const s = quizSets.find((x) => x.id === ctxMenu.setId);
-                if (s) { setRenamingSetId(s.id); setRenameVal(s.name); selectQuizSet(s.id); }
+                if (s) {
+                  selectQuizSet(s.id);
+                  startRenameSet(s, 'sidebar');
+                }
                 closeCtxMenu();
               }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
