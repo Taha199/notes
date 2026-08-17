@@ -1114,7 +1114,9 @@ function mergeFoldersForSync(
       continue;
     }
     if (remoteIsAuthority && !remoteIds.has(folder.id) && !folder.trashed && !folder.system) {
-      continue;
+      // Keep local-only folders that were created/renamed here but not yet on cloud.
+      const snap = readLocalJson<Record<string, string>>(FOLDER_NAMES_SNAPSHOT_KEY) ?? {};
+      if (!snap[folder.id]) continue;
     }
     // Keep local-only trashed folders (pending soft-delete not yet on the
     // remote array) so they persist through sync instead of resurrecting.
@@ -2348,9 +2350,13 @@ function healCorruptedFolderNames(folders: QuizFolder[], sets: QuizSet[]): QuizF
   let changed = false;
   const next = folders.map((folder) => {
     if (folder.system || folder.trashed) return folder;
+    const snapName = snapshot[folder.id]?.trim();
+    if (snapName && !isGenericRecoveredFolderName(snapName) && isGenericRecoveredFolderName(String(folder.name ?? ''))) {
+      changed = true;
+      return { ...folder, name: snapName, updatedAt: new Date().toISOString() };
+    }
     const setsInFolder = sets.filter((set) => set.folderId === folder.id && !set.trashed);
     if (!folderNameLooksCorrupted(folder, setsInFolder)) return folder;
-    const snapName = snapshot[folder.id]?.trim();
     if (snapName && snapName !== String(folder.name ?? '').trim()) {
       changed = true;
       return { ...folder, name: snapName, updatedAt: new Date().toISOString() };
@@ -2428,11 +2434,17 @@ function isGenericRecoveredFolderName(name: string) {
 }
 
 function recoveredFolderNameFromLocal(folderId: string, setsInFolder: QuizSet[]): string {
+  const snapshot = readLocalJson<Record<string, string>>(FOLDER_NAMES_SNAPSHOT_KEY) ?? {};
+  const snapName = snapshot[folderId]?.trim();
+  if (snapName && !isGenericRecoveredFolderName(snapName)) {
+    return snapName;
+  }
   const localFolders = readLocalJson<QuizFolder[]>('malacadhati_quiz_folders') ?? [];
   const localFolder = localFolders.find((folder) => folder.id === folderId);
   if (localFolder?.name && !isGenericRecoveredFolderName(localFolder.name)) {
     return localFolder.name;
   }
+  if (setsInFolder.length === 0) return 'Ny mapp';
   return inferRecoveredFolderName(setsInFolder);
 }
 

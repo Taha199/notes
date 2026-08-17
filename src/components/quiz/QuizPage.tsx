@@ -812,7 +812,7 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, repairQuizFolderNames, corruptedQuizFolderNameCount, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder, hydrateQuizSet } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder, hydrateQuizSet } = useNotes();
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed && !!folder?.id && typeof folder.name === 'string');
   // Coerce Firebase object-shaped items[] before any render path touches .map/.filter.
   const quizSets = useMemo(() => {
@@ -1454,7 +1454,6 @@ export function QuizPage({
   // Folders (OneNote-style notebooks)
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderRenameVal, setFolderRenameVal] = useState('');
-  const [repairingFolderNames, setRepairingFolderNames] = useState(false);
   const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number; flip?: boolean } | null>(null);
   const [folderColorPicker, setFolderColorPicker] = useState(false);
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<{ id: string; name: string } | null>(null);
@@ -1588,18 +1587,6 @@ export function QuizPage({
       setRenamingFolderId(folder.id);
       setFolderRenameVal(name);
     });
-  };
-
-  const corruptedFolderNames = corruptedQuizFolderNameCount();
-  const handleRepairFolderNames = async () => {
-    setRepairingFolderNames(true);
-    try {
-      const fixed = await repairQuizFolderNames();
-      if (fixed > 0) show(t.quizFolderNamesRepaired.replace('{n}', String(fixed)));
-      else show(t.quizNoMoreFoldersFound);
-    } finally {
-      setRepairingFolderNames(false);
-    }
   };
 
   // Context menu
@@ -1935,20 +1922,6 @@ export function QuizPage({
             className="flex h-6 w-6 items-center justify-center rounded-lg text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
           >«</button>
         </div>
-
-        {corruptedFolderNames > 0 && (
-          <div className="mx-2 mb-2 rounded-xl border border-amber-300/60 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-950 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-100">
-            <p>{t.quizFolderNamesRepairBanner}</p>
-            <button
-              type="button"
-              disabled={repairingFolderNames}
-              onClick={() => { void handleRepairFolderNames(); }}
-              className="mt-1.5 font-semibold text-primary hover:underline disabled:opacity-50"
-            >
-              {repairingFolderNames ? '…' : t.quizFolderNamesRepairBtn}
-            </button>
-          </div>
-        )}
 
         {/* Questions from Notes — full-width special row */}
         <button
