@@ -1812,78 +1812,124 @@ export function QuizPage({
 
   const renderSetRow = (s: QuizSet) => {
     const { known, total } = progressForSet(s.id);
+    const setAccent = s.color || '#9ca3af';
+    const isSelected = selectedSetId === s.id;
+    const isEditing = renamingSetId === s.id && renameSetPlace === 'sidebar';
+    const questionCount = countQuizSetQuestions(s);
     return (
-      <div
-        key={s.id}
-        className="group mb-0.5"
-        draggable={!s.system}
-        onDragStart={(e) => {
-          dragSetId.current = s.id;
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', s.id);
-        }}
-        onDragOver={(e) => { e.preventDefault(); setDragOverSetId(s.id); }}
-        onDragLeave={() => setDragOverSetId(null)}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (dragSetId.current && dragSetId.current !== s.id) {
-            reorderQuizSets(dragSetId.current, s.id);
-            if (setSort !== 'manual') changeSort('manual');
-          }
-          dragSetId.current = null;
-          setDragOverSetId(null);
-        }}
-        onDragEnd={() => { dragSetId.current = null; setDragOverSetId(null); setDragOverFolderId(null); setDragOverFolderSortId(null); }}
-        style={dragOverSetId === s.id ? { outline: '2px solid var(--color-primary)', outlineOffset: '-2px', borderRadius: '8px' } : undefined}
-      >
-        {renamingSetId === s.id && renameSetPlace === 'sidebar' ? (
-          <div className="flex items-center gap-1 rounded-xl bg-white px-2 py-1.5 dark:bg-white/5">
+      <div key={s.id} className="group/st relative">
+        {isEditing ? (
+          <div
+            className="relative mx-1.5 my-0.5 rounded-lg bg-gray-100/90 py-2 pl-3 pr-2 dark:bg-white/10"
+            style={{ boxShadow: `inset 4px 0 0 0 ${setAccent}` }}
+          >
             <input
-              autoFocus
               data-quiz-rename-input="1"
               value={renameVal}
               onChange={(e) => setRenameVal(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') commitSetName(s);
-                if (e.key === 'Escape') stopRenameSet();
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitSetName(s);
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  stopRenameSet();
+                }
               }}
               onBlur={() => commitSetName(s)}
-              className="min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none dark:text-gray-200"
+              ref={(el) => {
+                if (!el || el.dataset.focusedOnce === '1') return;
+                el.dataset.focusedOnce = '1';
+                requestAnimationFrame(() => {
+                  el.focus();
+                  el.select();
+                });
+              }}
+              className="w-full rounded-md border-2 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-app-text shadow-sm outline-none dark:bg-gray-900 dark:text-gray-100"
+              style={{ borderColor: setAccent }}
+              aria-label={t.quizRename}
             />
-            <button onMouseDown={(e) => e.preventDefault()} onClick={() => commitSetName(s)} className="text-[10px] text-primary">✓</button>
           </div>
         ) : (
           <div
-            onContextMenu={(e) => { if (!s.system) openCtxMenu(e, s.id); }}
-            className={'relative flex w-full flex-col overflow-hidden rounded-lg text-left text-[13px] font-medium transition-all ' +
-              (selectedSetId === s.id ? 'bg-primary/10 dark:bg-primary/20' : 'hover:bg-white dark:hover:bg-white/5')}
+            draggable={!s.system}
+            onDragStart={(e) => {
+              if (s.system) return;
+              dragSetId.current = s.id;
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', s.id);
+            }}
+            onDragOver={(e) => {
+              if (!dragSetId.current) return;
+              e.preventDefault();
+              setDragOverSetId(s.id);
+            }}
+            onDragLeave={() => setDragOverSetId(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragSetId.current && dragSetId.current !== s.id) {
+                reorderQuizSets(dragSetId.current, s.id);
+                if (setSort !== 'manual') changeSort('manual');
+              }
+              dragSetId.current = null;
+              setDragOverSetId(null);
+            }}
+            onDragEnd={() => {
+              dragSetId.current = null;
+              setDragOverSetId(null);
+              setDragOverFolderId(null);
+              setDragOverFolderSortId(null);
+            }}
+            className={'relative mx-1 my-0.5 w-[calc(100%-0.5rem)] rounded-lg py-2.5 pl-3 pr-1 text-left transition-all ' +
+              (dragOverSetId === s.id && dragSetId.current
+                ? 'bg-primary/10 ring-2 ring-inset ring-primary/70 dark:bg-primary/20'
+                : isSelected
+                  ? 'bg-gray-100 ring-1 ring-inset ring-gray-200 dark:bg-white/10 dark:ring-white/10'
+                  : 'hover:bg-white dark:hover:bg-white/5')}
+            style={isSelected ? { boxShadow: `inset 4px 0 0 0 ${setAccent}` } : undefined}
           >
-            <span className="absolute inset-y-0 left-0 w-[5px] rounded-r-sm" style={{ backgroundColor: s.color || '#9ca3af' }} />
-            <div className="flex w-full items-center">
-              <span className="flex-shrink-0 select-none pl-1.5 text-[13px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover:opacity-100">{s.system === 'favorites' ? '⭐' : '⠿'}</span>
-              <button onClick={() => selectQuizSet(s.id)} className="flex flex-1 items-center gap-2 py-2.5 pl-1.5 pr-2 min-w-0">
-                <AutoFitText
-                  text={s.name || ''}
-                  maxSize={13}
-                  minSize={8}
-                  className={'flex-1 ' + (selectedSetId === s.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}
-                />
-                <span className="text-[11px] text-app-text-secondary/60 dark:text-gray-500">{countQuizSetQuestions(s)}</span>
-              </button>
-              {!s.system && (
-                <button
-                  onClick={(e) => openCtxMenu(e, s.id)}
-                  className="mr-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-[13px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border hover:text-app-text group-hover:opacity-100 dark:hover:bg-white/10"
-                  title={t.quizOptions}
-                >···</button>
-              )}
-            </div>
+            {!isSelected && (
+              <span className="absolute inset-y-1 left-0 w-1 rounded-r-sm" style={{ backgroundColor: setAccent }} />
+            )}
+            {!s.system && (
+              <span className="absolute right-1 bottom-1 select-none text-[12px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover/st:opacity-100">⠿</span>
+            )}
+            <button
+              type="button"
+              onClick={() => selectQuizSet(s.id)}
+              onDoubleClick={(e) => {
+                if (s.system) return;
+                e.preventDefault();
+                e.stopPropagation();
+                startRenameSet(s, 'sidebar');
+              }}
+              onContextMenu={(e) => { if (!s.system) openCtxMenu(e, s.id); }}
+              className="block w-full text-left"
+            >
+              <AutoFitText
+                text={s.name || ''}
+                maxSize={11}
+                minSize={7}
+                className={'block w-full font-semibold ' + (isSelected ? 'text-app-text dark:text-gray-100' : 'text-app-text dark:text-gray-200')}
+              />
+              <span className="block text-[9px] text-app-text-secondary/50">{questionCount}</span>
+            </button>
+            {!s.system && (
+              <button
+                type="button"
+                onClick={(e) => openCtxMenu(e, s.id)}
+                className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded text-[10px] leading-none text-app-text-secondary/40 opacity-0 transition-opacity hover:bg-app-border group-hover/st:opacity-100"
+                title={t.quizOptions}
+              >···</button>
+            )}
             {total > 0 && known > 0 && (
-              <div className="mb-1.5 flex items-center gap-2 pl-10 pr-3">
+              <div className="mt-1 flex items-center gap-2 pr-2 pl-0.5">
                 <div className="h-1 flex-1 rounded-full bg-app-border dark:bg-white/10">
                   <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${(known / total) * 100}%` }} />
                 </div>
-                <span className="text-[9px] text-emerald-500 font-semibold">{known}/{total}</span>
+                <span className="text-[9px] font-semibold text-emerald-500">{known}/{total}</span>
               </div>
             )}
           </div>
