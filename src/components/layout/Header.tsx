@@ -1,5 +1,5 @@
 import type { Page } from '../../types';
-import { useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { CloudSavedAtLabel } from '../common/CloudSavedAtLabel';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
@@ -12,9 +12,9 @@ const ICONS: Record<Page, string> = {
 
 const navBtn = 'flex h-7 w-7 items-center justify-center rounded-lg border border-app-border text-app-text-secondary transition-colors hover:bg-app-bg hover:text-app-text disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
 
-const SEARCH_DEBOUNCE_MS = 180;
+const SEARCH_DEBOUNCE_MS = 280;
 
-export function Header({
+export const Header = memo(function Header({
   page,
   search,
   onSearchChange,
@@ -37,20 +37,45 @@ export function Header({
 }) {
   const { t } = useLanguage();
   const { enabled: arabicOn, toggle: toggleArabic } = useArabicInput();
-  const [draft, setDraft] = useState(search);
+  const [draft, setDraft] = useState('');
+  const debounceRef = useRef<number | null>(null);
 
+  const emitSearch = useCallback((value: string) => {
+    onSearchChange(value);
+  }, [onSearchChange]);
+
+  // Sync only when search is cleared externally (navigation, open result, etc.).
   useEffect(() => {
-    setDraft(search);
+    if (search === '') setDraft('');
   }, [search]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => onSearchChange(draft), SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [draft, onSearchChange]);
+  const scheduleSearch = useCallback((value: string) => {
+    if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      debounceRef.current = null;
+      emitSearch(value);
+    }, SEARCH_DEBOUNCE_MS);
+  }, [emitSearch]);
+
+  const flushSearch = useCallback(() => {
+    if (debounceRef.current != null) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    emitSearch(draft);
+  }, [draft, emitSearch]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setDraft(value);
+    scheduleSearch(value);
+  };
 
   const clearSearch = () => {
+    if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
+    debounceRef.current = null;
     setDraft('');
-    onSearchChange('');
+    emitSearch('');
   };
 
   const hasSearch = normalizeSearch(draft).length > 0;
@@ -84,9 +109,10 @@ export function Header({
           <div className="relative min-w-0 flex-1 md:w-[180px] md:focus-within:w-[220px]">
             <input
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={handleInputChange}
               onKeyDown={(e) => {
                 if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                flushSearch();
                 if (searchHitTotal === 0) return;
                 e.preventDefault();
                 if (e.shiftKey) onSearchHitPrev?.();
@@ -144,4 +170,4 @@ export function Header({
       </div>
     </div>
   );
-}
+});

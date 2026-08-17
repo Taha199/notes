@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import type { Page, Note, NoteViewMode } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useNotes, FAVORITES_SET_ID } from '../contexts/NotesContext';
@@ -196,8 +196,9 @@ export function Dashboard() {
     setPage(next);
   }, [setPage]);
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const handleSearchChange = useCallback((value: string) => {
-    setSearch(value);
+    startTransition(() => setSearch(value));
   }, []);
   const [activeSearchHit, setActiveSearchHit] = useState(0);
   const [openNoteId, setOpenNoteId] = useState<number | null>(null);
@@ -213,7 +214,7 @@ export function Dashboard() {
   const [confirmQuizTrash, setConfirmQuizTrash] = useState<{ type: 'set' | 'folder' | 'question'; id: string | number } | null>(null);
   const [noteViewMode, setNoteViewMode] = useState<NoteViewMode>(() => readNoteViewMode());
   const [quizFocusItemId, setQuizFocusItemId] = useState<number | null>(null);
-  const hasSearch = normalizeSearch(search).length > 0;
+  const hasSearch = normalizeSearch(deferredSearch).length > 0;
   const showGlobalSearch = hasSearch && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb';
 
   const handleNoteViewMode = useCallback((mode: NoteViewMode) => {
@@ -249,17 +250,17 @@ export function Dashboard() {
     return new Set(favItems.map((i) => i.favOf).filter((x): x is number => x != null));
   }, [quizSets]);
   const globalSearchResults = useMemo(
-    () => (showGlobalSearch ? buildGlobalSearchResults(notes, quizzes, quizSets, quizFolders, search, t, favQuizIds) : []),
-    [showGlobalSearch, notes, quizzes, quizSets, quizFolders, search, t, favQuizIds],
+    () => (showGlobalSearch ? buildGlobalSearchResults(notes, quizzes, quizSets, quizFolders, deferredSearch, t, favQuizIds) : []),
+    [showGlobalSearch, notes, quizzes, quizSets, quizFolders, deferredSearch, t, favQuizIds],
   );
   const searchHitMeta = useMemo(
-    () => (showGlobalSearch ? buildGlobalSearchHitStarts(globalSearchResults, search) : { starts: {}, total: 0 }),
-    [showGlobalSearch, globalSearchResults, search],
+    () => (showGlobalSearch ? buildGlobalSearchHitStarts(globalSearchResults, deferredSearch) : { starts: {}, total: 0 }),
+    [showGlobalSearch, globalSearchResults, deferredSearch],
   );
 
   useEffect(() => {
     setActiveSearchHit(0);
-  }, [search, page]);
+  }, [deferredSearch, page]);
 
   useEffect(() => {
     if (!hasSearch || searchHitMeta.total === 0) return;
@@ -271,7 +272,7 @@ export function Dashboard() {
     requestAnimationFrame(() => {
       document.querySelector(`[data-search-hit="${safeIndex}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
-  }, [activeSearchHit, hasSearch, searchHitMeta.total, search, noteViewMode]);
+  }, [activeSearchHit, hasSearch, searchHitMeta.total, deferredSearch, noteViewMode]);
 
   const moveSearchHit = useCallback((direction: 1 | -1) => {
     if (!searchHitMeta.total) return;
@@ -300,12 +301,12 @@ export function Dashboard() {
   const trashedQuizQuestions = trashedQuizzes;
   const trashedQuizSets = useMemo(() => quizSets.filter((set) => set.trashed), [quizSets]);
   const trashedQuizFolders = useMemo(() => quizFolders.filter((folder) => folder.trashed), [quizFolders]);
-  const visibleTrashedNotes = useMemo(() => trashed.filter((note) => noteMatchesSearch(note, search)), [search, trashed]);
+  const visibleTrashedNotes = useMemo(() => trashed.filter((note) => noteMatchesSearch(note, deferredSearch)), [deferredSearch, trashed]);
   const visibleTrashedSets = useMemo(() => {
-    const query = normalizeSearch(search);
+    const query = normalizeSearch(deferredSearch);
     return query ? trashedQuizSets.filter((set) => normalizeSearch(set.name).includes(query)) : trashedQuizSets;
-  }, [search, trashedQuizSets]);
-  const visibleTrashedFolders = useMemo(() => trashedQuizFolders.filter((folder) => normalizeSearch(folder.name).includes(normalizeSearch(search))), [search, trashedQuizFolders]);
+  }, [deferredSearch, trashedQuizSets]);
+  const visibleTrashedFolders = useMemo(() => trashedQuizFolders.filter((folder) => normalizeSearch(folder.name).includes(normalizeSearch(deferredSearch))), [deferredSearch, trashedQuizFolders]);
   const trashTotal = trashed.length + trashedQuizQuestions.length + trashedQuizSets.length + trashedQuizFolders.length;
   const trashCopy = lang === 'sv'
     ? { notes: 'Anteckningar', sets: 'Sets', folders: 'Mappar', questions: 'Frågor', restore: 'Återställ', delete: 'Radera permanent', questionsUnit: 'frågor', folderSets: 'sets', created: 'Skapad', deletedAt: 'Raderad', deleted: 'Radera permanent?', empty: 'Papperskorgen är tom', emptyConfirm: 'Radera allt i papperskorgen permanent?' }
@@ -319,8 +320,8 @@ export function Dashboard() {
         : page === 'archive' ? archived
           : page === 'fav' ? allFav
             : active;
-    return sortNotesByCreatedDesc(hasSearch ? filterNotesBySearch(source, search) : source);
-  }, [active, allFav, archived, globalSearchResults, hasSearch, page, read, search, showGlobalSearch, unread]);
+    return sortNotesByCreatedDesc(hasSearch ? filterNotesBySearch(source, deferredSearch) : source);
+  }, [active, allFav, archived, globalSearchResults, hasSearch, page, read, deferredSearch, showGlobalSearch, unread]);
   const openNoteIndex = openNoteId === null ? -1 : navigableNotes.findIndex((note) => note.id === openNoteId);
   const previousNoteId = openNoteIndex > 0 ? navigableNotes[openNoteIndex - 1]?.id : undefined;
   const nextNoteId = openNoteIndex >= 0 && openNoteIndex < navigableNotes.length - 1 ? navigableNotes[openNoteIndex + 1]?.id : undefined;
@@ -367,7 +368,7 @@ export function Dashboard() {
               </div>
               <GlobalSearchResults
                 results={globalSearchResults}
-                search={search}
+                search={deferredSearch}
                 searchHitStarts={searchHitMeta.starts}
                 activeSearchHitIndex={activeSearchHit}
                 emptyText={t.emptySearch}
@@ -420,9 +421,9 @@ export function Dashboard() {
             </div>
           )}
 
-          {!showGlobalSearch && page === 'files' && <FilesPage search={search} />}
+          {!showGlobalSearch && page === 'files' && <FilesPage search={deferredSearch} />}
           {!showGlobalSearch && page === 'arabicKb' && <ArabicKeyboardPage />}
-          {!showGlobalSearch && page === 'todo' && <TodoCalendarPage search={search} />}
+          {!showGlobalSearch && page === 'todo' && <TodoCalendarPage search={deferredSearch} />}
           {!showGlobalSearch && page === 'quiz' && (
             <ErrorBoundary label="quiz">
               <QuizPage
