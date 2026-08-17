@@ -1454,6 +1454,7 @@ export function QuizPage({
   // Folders (OneNote-style notebooks)
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderRenameVal, setFolderRenameVal] = useState('');
+  const folderRenameViaSubmitRef = useRef(false);
   const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number; flip?: boolean } | null>(null);
   const [folderColorPicker, setFolderColorPicker] = useState(false);
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<{ id: string; name: string } | null>(null);
@@ -1580,10 +1581,20 @@ export function QuizPage({
     const duplicate = allQuizFolders.some((folder) => folder.id !== folderId && normalizeQuizName(folder.name) === normalizeQuizName(name));
     if (duplicate) {
       setNameAlert('folder');
+      folderRenameViaSubmitRef.current = false;
       return;
     }
     renameQuizFolder(folderId, name);
     setRenamingFolderId(null);
+    setFolderRenameVal('');
+  };
+
+  const handleFolderRenameBlur = (folderId: string, fallbackName: string) => {
+    if (folderRenameViaSubmitRef.current) {
+      folderRenameViaSubmitRef.current = false;
+      return;
+    }
+    commitFolderName(folderId, fallbackName);
   };
 
   const createFolder = () => {
@@ -2068,9 +2079,16 @@ export function QuizPage({
                 return (
                 <div key={f.id} className="group/fl relative">
                   {isEditing ? (
-                    <div
+                    <form
                       className="relative mx-1.5 my-0.5 rounded-lg bg-gray-100/90 py-2 pl-3 pr-2 dark:bg-white/10"
                       style={{ boxShadow: `inset 4px 0 0 0 ${folderAccent}` }}
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        folderRenameViaSubmitRef.current = true;
+                        commitFolderName(f.id, f.name);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
                     >
                       <input
                         data-quiz-folder-rename-input="1"
@@ -2078,16 +2096,14 @@ export function QuizPage({
                         onChange={(e) => setFolderRenameVal(e.target.value)}
                         onKeyDown={(e) => {
                           e.stopPropagation();
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            commitFolderName(f.id, f.name);
-                          }
                           if (e.key === 'Escape') {
                             e.preventDefault();
+                            folderRenameViaSubmitRef.current = false;
                             setRenamingFolderId(null);
+                            setFolderRenameVal('');
                           }
                         }}
-                        onBlur={() => commitFolderName(f.id, f.name)}
+                        onBlur={() => handleFolderRenameBlur(f.id, f.name)}
                         ref={(el) => {
                           if (!el || el.dataset.focusedOnce === '1') return;
                           el.dataset.focusedOnce = '1';
@@ -2100,7 +2116,7 @@ export function QuizPage({
                         style={{ borderColor: folderAccent }}
                         aria-label={t.quizRename}
                       />
-                    </div>
+                    </form>
                   ) : (
                     <button
                       draggable={!f.system && !isEditing}
