@@ -1488,18 +1488,31 @@ export function QuizPage({
   };
 
   // Sort the sets list
-  type SetSortMode = 'manual' | 'name' | 'count' | 'newest' | 'oldest';
-  const [setSort, setSetSort] = useState<SetSortMode>(() => {
+  type ListSortMode = 'manual' | 'name' | 'count' | 'newest' | 'oldest';
+  const [setSort, setSetSort] = useState<ListSortMode>(() => {
     const saved = localStorage.getItem('malacadhati_quiz_setsort');
     return saved === 'name' || saved === 'count' || saved === 'newest' || saved === 'oldest' || saved === 'manual'
       ? saved
       : 'manual';
   });
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const changeSort = (mode: SetSortMode) => {
+  const changeSort = (mode: ListSortMode) => {
     setSetSort(mode);
     safeLocalStorageSet('malacadhati_quiz_setsort', mode);
     setSortMenuOpen(false);
+  };
+
+  const [folderSort, setFolderSort] = useState<ListSortMode>(() => {
+    const saved = localStorage.getItem('malacadhati_quiz_foldersort');
+    return saved === 'name' || saved === 'count' || saved === 'newest' || saved === 'oldest' || saved === 'manual'
+      ? saved
+      : 'manual';
+  });
+  const [folderSortMenuOpen, setFolderSortMenuOpen] = useState(false);
+  const changeFolderSort = (mode: ListSortMode) => {
+    setFolderSort(mode);
+    safeLocalStorageSet('malacadhati_quiz_foldersort', mode);
+    setFolderSortMenuOpen(false);
   };
 
   const toggleFav = (item: QuizItem) => {
@@ -1786,6 +1799,29 @@ export function QuizPage({
         return setSort === 'newest' ? bTime - aTime : aTime - bTime;
       });
 
+  const countQuestionsInFolder = (folderId: string) => (
+    quizSets
+      .filter((s) => s.folderId === folderId && !s.system)
+      .reduce((sum, s) => sum + countQuizSetQuestions(s), 0)
+  );
+
+  const systemFolders = quizFolders.filter((f) => f.system);
+  const userFolders = quizFolders.filter((f) => !f.system);
+  const sortedUserFolders = folderSort === 'manual'
+    ? userFolders
+    : [...userFolders].sort((a, b) => {
+        if (folderSort === 'name') {
+          return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
+        }
+        if (folderSort === 'count') {
+          return countQuestionsInFolder(b.id) - countQuestionsInFolder(a.id);
+        }
+        const aTime = Date.parse(a.createdAt || '') || 0;
+        const bTime = Date.parse(b.createdAt || '') || 0;
+        return folderSort === 'newest' ? bTime - aTime : aTime - bTime;
+      });
+  const sortedFolders = [...systemFolders, ...sortedUserFolders];
+
   const progressForSet = (setId: string | null) => {
     const key = setId ?? 'all';
     const prog = allProgress[key] ?? {};
@@ -1985,11 +2021,47 @@ export function QuizPage({
 
           {/* Left column: Folders */}
           <div className="flex flex-shrink-0 flex-col" style={{ width: folderColW }}>
+            <div className="relative flex items-center justify-between px-2 py-1.5">
+              <p className="text-[9px] font-bold uppercase tracking-widest text-app-text-secondary/50 dark:text-gray-600">{t.quizFoldersLabel}</p>
+              <button
+                type="button"
+                onClick={() => setFolderSortMenuOpen((v) => !v)}
+                className="flex h-5 items-center gap-1 rounded-md px-1 text-[9px] font-semibold text-app-text-secondary/60 transition-colors hover:bg-white hover:text-primary dark:hover:bg-white/10"
+              >⇅ {
+                folderSort === 'name' ? t.quizSortAz
+                  : folderSort === 'count' ? t.quizSortHash
+                    : folderSort === 'newest' ? t.quizSortNewestShort
+                      : folderSort === 'oldest' ? t.quizSortOldestShort
+                        : t.quizSortManualShort
+              }</button>
+              {folderSortMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setFolderSortMenuOpen(false)} />
+                  <div className="absolute right-1 top-7 z-50 w-44 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
+                    {([
+                      { key: 'manual' as const, label: t.quizSortManual },
+                      { key: 'name' as const, label: t.quizSortName },
+                      { key: 'count' as const, label: t.quizSortCount },
+                      { key: 'newest' as const, label: t.quizSortNewest },
+                      { key: 'oldest' as const, label: t.quizSortOldest },
+                    ]).map((o) => (
+                      <button
+                        key={o.key}
+                        type="button"
+                        onClick={() => changeFolderSort(o.key)}
+                        className={'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' +
+                          (folderSort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')}
+                      >{o.label}{folderSort === o.key && ' ✓'}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             <div className="flex-1 overflow-y-auto py-1">
-              {quizFolders.length === 0 && (
+              {sortedFolders.length === 0 && (
                 <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">{t.quizNoFolders}</p>
               )}
-              {quizFolders.map((f) => {
+              {sortedFolders.map((f) => {
                 const folderAccent = f.color || '#9ca3af';
                 const isSelected = selectedFolderId === f.id;
                 const isEditing = renamingFolderId === f.id;
@@ -2080,7 +2152,8 @@ export function QuizPage({
                         e.preventDefault();
                         e.stopPropagation();
                         const folderId = dragFolderId.current || e.dataTransfer.getData('application/x-quiz-folder');
-                        if (folderId && folderId !== f.id && quizFolders.some((row) => row.id === folderId)) {
+                        if (folderId && folderId !== f.id && sortedFolders.some((row) => row.id === folderId)) {
+                          if (folderSort !== 'manual') changeFolderSort('manual');
                           reorderQuizFolders(folderId, f.id);
                           dragFolderId.current = null;
                           setDragOverFolderSortId(null);
