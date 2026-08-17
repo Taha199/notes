@@ -1,4 +1,5 @@
 import type { Page } from '../../types';
+import { useEffect, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { CloudSavedAtLabel } from '../common/CloudSavedAtLabel';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
@@ -11,10 +12,12 @@ const ICONS: Record<Page, string> = {
 
 const navBtn = 'flex h-7 w-7 items-center justify-center rounded-lg border border-app-border text-app-text-secondary transition-colors hover:bg-app-bg hover:text-app-text disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
 
+const SEARCH_DEBOUNCE_MS = 180;
+
 export function Header({
   page,
   search,
-  setSearch,
+  onSearchChange,
   searchHitTotal = 0,
   searchHitCurrent = 0,
   onSearchHitPrev,
@@ -24,7 +27,7 @@ export function Header({
 }: {
   page: Page;
   search: string;
-  setSearch: (s: string) => void;
+  onSearchChange: (value: string) => void;
   searchHitTotal?: number;
   searchHitCurrent?: number;
   onSearchHitPrev?: () => void;
@@ -34,7 +37,23 @@ export function Header({
 }) {
   const { t } = useLanguage();
   const { enabled: arabicOn, toggle: toggleArabic } = useArabicInput();
-  const hasSearch = normalizeSearch(search).length > 0;
+  const [draft, setDraft] = useState(search);
+
+  useEffect(() => {
+    setDraft(search);
+  }, [search]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => onSearchChange(draft), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [draft, onSearchChange]);
+
+  const clearSearch = () => {
+    setDraft('');
+    onSearchChange('');
+  };
+
+  const hasSearch = normalizeSearch(draft).length > 0;
   const titles: Record<Page, string> = {
     home: t.pageHome, fav: t.pageFav, todo: t.pageTodo, unread: t.pageUnread, read: t.pageRead, library: t.pageLib, files: t.pageFiles, arabicKb: t.pageArabicKb, archive: t.pageArch, trash: t.pageTrash, quiz: 'Quiz', download: t.pageDownload, settings: t.settingsTitle, admin: t.adminTitle,
   };
@@ -64,8 +83,8 @@ export function Header({
         <div className="flex min-w-0 flex-1 items-center gap-1.5 md:flex-none">
           <div className="relative min-w-0 flex-1 md:w-[180px] md:focus-within:w-[220px]">
             <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
                 if (searchHitTotal === 0) return;
@@ -74,12 +93,12 @@ export function Header({
                 else onSearchHitNext?.();
               }}
               placeholder={t.searchPh}
-              className={'w-full rounded-xl border border-app-border bg-app-bg py-2 pl-3 text-[13.5px] text-app-text outline-none transition-all placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:bg-white focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:border-primary/50 dark:focus:bg-gray-800 dark:focus:ring-primary/20 ' + (search ? 'pr-16' : 'pr-9')}
+              className={'w-full rounded-xl border border-app-border bg-app-bg py-2 pl-3 text-[13.5px] text-app-text outline-none transition-[width,border-color,background-color,box-shadow] placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:bg-white focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:border-primary/50 dark:focus:bg-gray-800 dark:focus:ring-primary/20 ' + (draft ? 'pr-16' : 'pr-9')}
             />
-            {search && (
+            {draft && (
               <button
                 type="button"
-                onClick={() => setSearch('')}
+                onClick={clearSearch}
                 aria-label={t.clearSearch}
                 title={t.clearSearch}
                 className="absolute right-9 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-app-text-secondary transition-colors hover:bg-app-border/40 hover:text-app-text dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100"

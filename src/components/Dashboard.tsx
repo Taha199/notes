@@ -196,6 +196,9 @@ export function Dashboard() {
     setPage(next);
   }, [setPage]);
   const [search, setSearch] = useState('');
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value);
+  }, []);
   const [activeSearchHit, setActiveSearchHit] = useState(0);
   const [openNoteId, setOpenNoteId] = useState<number | null>(null);
   const [showSetPassword, setShowSetPassword] = useState(false);
@@ -345,7 +348,7 @@ export function Dashboard() {
         <Header
           page={page}
           search={search}
-          setSearch={setSearch}
+          onSearchChange={handleSearchChange}
           searchHitTotal={searchHitMeta.total}
           searchHitCurrent={searchHitMeta.total > 0 ? activeSearchHit + 1 : 0}
           onSearchHitPrev={() => moveSearchHit(-1)}
