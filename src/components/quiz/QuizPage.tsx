@@ -1970,20 +1970,44 @@ export function QuizPage({
               {quizFolders.length === 0 && (
                 <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">{t.quizNoFolders}</p>
               )}
-              {quizFolders.map((f) => (
+              {quizFolders.map((f) => {
+                const folderAccent = f.color || '#9ca3af';
+                const isSelected = selectedFolderId === f.id;
+                const isEditing = renamingFolderId === f.id;
+                return (
                 <div key={f.id} className="group/fl relative">
-                  {renamingFolderId === f.id ? (
-                    <div className="px-2 py-1.5">
+                  {isEditing ? (
+                    <div
+                      className="relative mx-1.5 my-0.5 rounded-lg bg-gray-100/90 py-2 pl-3 pr-2 dark:bg-white/10"
+                      style={{ boxShadow: `inset 4px 0 0 0 ${folderAccent}` }}
+                    >
                       <input
-                        autoFocus
+                        data-quiz-folder-rename-input="1"
                         value={folderRenameVal}
                         onChange={(e) => setFolderRenameVal(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') commitFolderName(f.id, f.name);
-                          if (e.key === 'Escape') setRenamingFolderId(null);
+                          e.stopPropagation();
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitFolderName(f.id, f.name);
+                          }
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setRenamingFolderId(null);
+                          }
                         }}
                         onBlur={() => commitFolderName(f.id, f.name)}
-                        className="w-full bg-transparent text-[11px] font-semibold text-app-text outline-none dark:text-gray-100"
+                        ref={(el) => {
+                          if (!el || el.dataset.focusedOnce === '1') return;
+                          el.dataset.focusedOnce = '1';
+                          requestAnimationFrame(() => {
+                            el.focus();
+                            el.select();
+                          });
+                        }}
+                        className="w-full rounded-md border-2 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-app-text shadow-sm outline-none dark:bg-gray-900 dark:text-gray-100"
+                        style={{ borderColor: folderAccent }}
+                        aria-label={t.quizRename}
                       />
                     </div>
                   ) : (
@@ -1996,6 +2020,13 @@ export function QuizPage({
                         e.dataTransfer.setData('application/x-quiz-folder', f.id);
                       }}
                       onClick={() => selectFolder(f.id)}
+                      onDoubleClick={(e) => {
+                        if (f.system) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setRenamingFolderId(f.id);
+                        setFolderRenameVal(f.name);
+                      }}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -2048,16 +2079,19 @@ export function QuizPage({
                         setDragOverFolderSortId(null);
                       }}
                       onDragEnd={() => { dragFolderId.current = null; setDragOverFolderSortId(null); }}
-                      className={'relative w-full py-2.5 pl-3 pr-1 text-left transition-all ' +
+                      className={'relative mx-1 my-0.5 w-[calc(100%-0.5rem)] rounded-lg py-2.5 pl-3 pr-1 text-left transition-all ' +
                         (dragOverFolderSortId === f.id
                           ? 'bg-primary/10 ring-2 ring-inset ring-primary/70 dark:bg-primary/20'
                           : dragOverFolderId === f.id
                             ? 'bg-primary/20 ring-2 ring-inset ring-primary dark:bg-primary/30'
-                            : selectedFolderId === f.id
-                              ? 'bg-primary/10 dark:bg-primary/20'
+                            : isSelected
+                              ? 'bg-gray-100 ring-1 ring-inset ring-gray-200 dark:bg-white/10 dark:ring-white/10'
                               : 'hover:bg-white dark:hover:bg-white/5')}
+                      style={isSelected ? { boxShadow: `inset 4px 0 0 0 ${folderAccent}` } : undefined}
                     >
-                      <span className="absolute inset-y-0 left-0 w-[3px]" style={{ backgroundColor: f.color || '#9ca3af' }} />
+                      {!isSelected && (
+                        <span className="absolute inset-y-1 left-0 w-1 rounded-r-sm" style={{ backgroundColor: folderAccent }} />
+                      )}
                       {!f.system && (
                         <span className="absolute right-1 bottom-1 select-none text-[12px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover/fl:opacity-100">⠿</span>
                       )}
@@ -2065,7 +2099,7 @@ export function QuizPage({
                         text={f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
                         maxSize={11}
                         minSize={7}
-                        className={'block w-full font-semibold ' + (selectedFolderId === f.id ? 'text-primary' : 'text-app-text dark:text-gray-200')}
+                        className={'block w-full font-semibold ' + (isSelected ? 'text-app-text dark:text-gray-100' : 'text-app-text dark:text-gray-200')}
                       />
                       <span className="block text-[9px] text-app-text-secondary/50">{t.quizSetsCount.replace('{n}', String(userSetsInFolder(f.id).length))}</span>
                       {!f.system && (
@@ -2077,7 +2111,8 @@ export function QuizPage({
                     </button>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
             <button
               type="button"
