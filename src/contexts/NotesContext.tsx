@@ -1101,7 +1101,12 @@ function mergeFoldersForSync(
   const emptiedAt = readTrashEmptiedAt();
   // When cloud ById / array was loaded, membership comes from remote — local-only
   // live folders are ghosts (deleted elsewhere) and must not heal-push back.
-  const remoteIsAuthority = opts?.remoteIsAuthority ?? remote.length > 0;
+  const remoteLiveCount = remote.filter((folder) => !folder.trashed && !folder.system).length;
+  const localLiveCount = local.filter((folder) => !folder.trashed && !folder.system).length;
+  // quizCatalog and other partial remotes must not drop live local folders — that
+  // triggered recoverMissingFoldersFromSets to rename every mapp after its first set.
+  const remoteIsAuthority = opts?.remoteIsAuthority
+    ?? (remote.length > 0 && remoteLiveCount >= localLiveCount);
   const map = new Map<string, QuizFolder>();
   for (const folder of local) {
     if (dead.has(folder.id)) continue;
@@ -1138,6 +1143,12 @@ function mergeFoldersForSync(
     seen.add(merged.id);
   }
   return ordered;
+}
+
+function foldersRemoteLooksComplete(remote: QuizFolder[], local: QuizFolder[]): boolean {
+  const remoteLive = remote.filter((folder) => !folder.trashed && !folder.system).length;
+  const localLive = local.filter((folder) => !folder.trashed && !folder.system).length;
+  return remoteLive >= localLive;
 }
 
 export interface RecoverableCloudSummary {
@@ -1204,6 +1215,8 @@ interface NotesCtx {
   restoreQuizFolder: (id: string) => void;
   permDeleteQuizFolder: (id: string) => void;
   recoverQuizFolders: () => Promise<number>;
+  repairQuizFolderNames: () => Promise<number>;
+  corruptedQuizFolderNameCount: () => number;
   listQuizFolderBackups: () => Promise<{ key: string; label: string; folderCount: number }[]>;
   restoreQuizFolderBackup: (key: string) => Promise<number>;
   hasQuizFolderBackups: () => Promise<boolean>;
@@ -2296,15 +2309,111 @@ function initializeQuizColors<T extends { id: string; color?: string; colorIniti
   });
 }
 
+const FOLDER_NAMES_SNAPSHOT_KEY = 'malacadhati_quiz_folder_names_v1';
+
+function isQuizFolderRow(row: unknown): row is QuizFolder {
+  if (!row || typeof row !== 'object') return false;
+  const r = row as Record<string, unknown>;
+  if (typeof r.id !== 'string' || !r.id) return false;
+  if (r.items != null) return false;
+  if (r.folderId != null) return false;
+  return typeof r.name === 'string' && typeof r.createdAt === 'string';
+}
+
+function sanitizeQuizFolders(folders: QuizFolder[]): QuizFolder[] {
+  return folders.filter(isQuizFolderRow);
+}
+
+function snapshotFolderNames(folders: QuizFolder[]) {
+  const snap: Record<string, string> = {};
+  for (const folder of folders) {
+    if (folder.system || folder.trashed) continue;
+    const name = folder.name?.trim();
+    if (!name) continue;
+    snap[folder.id] = name;
+  }
+  if (Object.keys(snap).length) safeSetItem(FOLDER_NAMES_SNAPSHOT_KEY, JSON.stringify(snap));
+}
+
+function folderNameLooksCorrupted(folder: QuizFolder, setsInFolder: QuizSet[]): boolean {
+  const name = folder.name.trim();
+  if (!name || !setsInFolder.length) return false;
+  const setNames = new Set(setsInFolder.map((set) => set.name.trim()).filter(Boolean));
+  if (!setNames.has(name)) return false;
+  return setsInFolder.length > 1 || /^✅/.test(name) || name.includes('🦦');
+}
+
+function healCorruptedFolderNames(folders: QuizFolder[], sets: QuizSet[]): QuizFolder[] {
+  const snapshot = readLocalJson<Record<string, string>>(FOLDER_NAMES_SNAPSHOT_KEY) ?? {};
+  let changed = false;
+  const next = folders.map((folder) => {
+    if (folder.system || folder.trashed) return folder;
+    const setsInFolder = sets.filter((set) => set.folderId === folder.id && !set.trashed);
+    if (!folderNameLooksCorrupted(folder, setsInFolder)) return folder;
+    const snapName = snapshot[folder.id]?.trim();
+    if (snapName && snapName !== folder.name.trim()) {
+      changed = true;
+      return { ...folder, name: snapName, updatedAt: new Date().toISOString() };
+    }
+    return folder;
+  });
+  return changed ? next : folders;
+}
+
+async function fetchFolderNameHistory(uid: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  try {
+    const res = await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory.json?shallow=true`);
+    const keys = Object.keys((await res.json()) || {}).sort().reverse();
+    for (const key of keys.slice(0, 20)) {
+      const folders = sanitizeQuizFolders(firebaseToArray<QuizFolder>(
+        await fetch(`${FB_DB_URL}/users/${uid}/quizFoldersHistory/${key}.json`).then((r) => r.json()),
+      ));
+      for (const folder of folders) {
+        if (folder.system || !folder.name?.trim()) continue;
+        if (!out[folder.id]) out[folder.id] = folder.name.trim();
+      }
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
+function applyFolderNameHistory(
+  folders: QuizFolder[],
+  sets: QuizSet[],
+  history: Record<string, string>,
+): QuizFolder[] {
+  const snapshot = readLocalJson<Record<string, string>>(FOLDER_NAMES_SNAPSHOT_KEY) ?? {};
+  const names = { ...history, ...snapshot };
+  let changed = false;
+  const next = folders.map((folder) => {
+    if (folder.system || folder.trashed) return folder;
+    const setsInFolder = sets.filter((set) => set.folderId === folder.id && !set.trashed);
+    if (!folderNameLooksCorrupted(folder, setsInFolder)) return folder;
+    const goodName = names[folder.id]?.trim();
+    if (!goodName || goodName === folder.name.trim()) return folder;
+    changed = true;
+    return { ...folder, name: goodName, updatedAt: new Date().toISOString() };
+  });
+  return changed ? next : folders;
+}
+
+function countCorruptedQuizFolderNames(folders: QuizFolder[], sets: QuizSet[]): number {
+  return folders.filter((folder) => {
+    if (folder.system || folder.trashed) return false;
+    const setsInFolder = sets.filter((set) => set.folderId === folder.id && !set.trashed);
+    return folderNameLooksCorrupted(folder, setsInFolder);
+  }).length;
+}
+
 function inferRecoveredFolderName(sets: QuizSet[]): string {
   const blob = sets
     .flatMap((set) => [set.name, ...(set.items ?? []).map((item) => `${item.question} ${item.answer}`)])
     .join(' ')
     .toLowerCase();
   if (blob.includes('sepsis')) return 'sepsis';
-  const setNames = [...new Set(sets.map((set) => set.name.trim()).filter(Boolean))];
-  if (setNames.length === 1) return setNames[0];
-  if (setNames.length > 1) return setNames[0];
+  // Never name a folder after a quiz set — that renamed every mapp to its first set
+  // (including ✅ study markers baked into set names) after a partial catalog merge.
   return 'Återställd mapp';
 }
 
@@ -2375,9 +2484,11 @@ function autoRestoreReferencedTrashedFolders(folders: QuizFolder[], _sets: QuizS
 }
 
 function finalizeQuizFolders(folders: QuizFolder[], sets: QuizSet[]): QuizFolder[] {
-  const merged = recoverMissingFoldersFromSets(folders, sets);
+  const sanitized = sanitizeQuizFolders(folders);
+  const merged = recoverMissingFoldersFromSets(sanitized, sets);
   const restored = autoRestoreReferencedTrashedFolders(merged, sets);
-  return ensureRestoredFolder(initializeQuizColors(restored));
+  const initialized = ensureRestoredFolder(initializeQuizColors(restored));
+  return healCorruptedFolderNames(initialized, sets);
 }
 
 function nextId() {
@@ -2877,7 +2988,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (cat.folders.length) {
           const mergedFolders = applyTrashTombstones(
             mergeFoldersForSync(local.folders, cat.folders, permDeletedRef.current, {
-              remoteIsAuthority: true,
+              remoteIsAuthority: false,
             }),
             quizFolderTombstonesRef.current,
           );
@@ -3384,7 +3495,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             if (catalog.folders.length) {
               const mergedFolders = applyTrashTombstones(
                 mergeFoldersForSync(quizFoldersRef.current, catalog.folders, permDeletedRef.current, {
-                  remoteIsAuthority: true,
+                  remoteIsAuthority: false,
                 }),
                 quizFolderTombstonesRef.current,
               );
@@ -3412,7 +3523,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizFoldersByIdCacheRef.current = cloudFoldersById;
           const mergedFolders = applyTrashTombstones(
             mergeFoldersForSync(quizFoldersRef.current, cloudFoldersById, permDeletedRef.current, {
-              remoteIsAuthority: true,
+              remoteIsAuthority: foldersRemoteLooksComplete(cloudFoldersById, quizFoldersRef.current),
             }),
             quizFolderTombstonesRef.current,
           );
@@ -3461,7 +3572,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           quizFoldersByIdCacheRef.current = cloudFoldersById;
           const mergedFolders = applyTrashTombstones(
             mergeFoldersForSync(quizFoldersRef.current, cloudFoldersById, permDeletedRef.current, {
-              remoteIsAuthority: true,
+              remoteIsAuthority: foldersRemoteLooksComplete(cloudFoldersById, quizFoldersRef.current),
             }),
             quizFolderTombstonesRef.current,
           );
@@ -3778,7 +3889,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
         if (cloudFoldersById.length) {
           rawFolders = mergeFoldersForSync(rawFolders, cloudFoldersById, tombstones, {
-            remoteIsAuthority: true,
+            remoteIsAuthority: foldersRemoteLooksComplete(cloudFoldersById, rawFolders),
           });
         }
         let repairQuizStructure = false;
@@ -3892,8 +4003,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           }
         }
         persistLastGoodIfComplete(quizzesRef.current, quizSetsRef.current);
+        snapshotFolderNames(normalizedFolders);
         setQuizFolders(normalizedFolders);
         safeSetItem('malacadhati_quiz_folders', JSON.stringify(normalizedFolders));
+        void fetchFolderNameHistory(user.uid).then((history) => {
+          if (cancelled) return;
+          const repaired = finalizeQuizFolders(
+            applyFolderNameHistory(normalizedFolders, quizSetsRef.current, history),
+            quizSetsRef.current,
+          );
+          if (JSON.stringify(repaired) === JSON.stringify(normalizedFolders)) return;
+          quizFoldersRef.current = repaired;
+          setQuizFolders(repaired);
+          safeSetItem('malacadhati_quiz_folders', JSON.stringify(repaired));
+          snapshotFolderNames(repaired);
+          pushQuizFolderStructure(repaired);
+        });
         markQuizContentReady(quizAuthoritativeByIdSeenRef.current ? 'byid' : 'fallback');
 
         const liveNormalized = countLiveQuizItems(quizSetsRef.current);
@@ -4343,47 +4468,53 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   /** Instant create/delete/rename for folders: ById + dedicated quizFolders set. */
   const pushQuizFolderStructure = (nextFolders: QuizFolder[], changed?: QuizFolder | QuizFolder[]) => {
-    quizFoldersRef.current = nextFolders;
-    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    const changedList = changed ? (Array.isArray(changed) ? changed : [changed]) : [];
+    const sanitized = sanitizeQuizFolders(nextFolders);
+    quizFoldersRef.current = sanitized;
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(sanitized));
+    snapshotFolderNames(sanitized);
+    const changedList = changed ? (Array.isArray(changed) ? changed : [changed]).filter(isQuizFolderRow) : [];
     for (const row of changedList) pushQuizFolderById(row);
+    scheduleQuizCatalogWrite();
     const u = userRef.current;
     if (!u || !loadedRef.current) return;
-    markPushedData({ quizFolders: nextFolders });
+    markPushedData({ quizFolders: sanitized });
     beginTrackedSave();
-    void set(dbRef(database, `users/${u.uid}/quizFolders`), nextFolders)
+    void set(dbRef(database, `users/${u.uid}/quizFolders`), sanitized)
       .catch((err) => {
         console.error('[cloud-save] quizFolders structure set failed', err);
         return rtdbFetch(`/users/${u.uid}/quizFolders`, {
           method: 'PUT',
-          body: JSON.stringify(nextFolders),
+          body: JSON.stringify(sanitized),
           headers: { 'Content-Type': 'application/json' },
         });
       })
       .finally(() => endTrackedSave());
+    void appendFolderHistory(u.uid, sanitized);
     bumpCloudSyncAt();
   };
 
   const persistFolders = (nextFolders: QuizFolder[], forceCloud = false) => {
-    safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    quizFoldersRef.current = nextFolders;
+    const sanitized = sanitizeQuizFolders(nextFolders);
+    safeSetItem('malacadhati_quiz_folders', JSON.stringify(sanitized));
+    quizFoldersRef.current = sanitized;
+    snapshotFolderNames(sanitized);
     scheduleQuizCatalogWrite();
-    persist({ quizFolders: nextFolders }, false);
+    persist({ quizFolders: sanitized }, false);
     if (user && loadedRef.current && forceCloud) {
-      markPushedData({ quizFolders: nextFolders });
+      markPushedData({ quizFolders: sanitized });
       // SDK set on the dedicated node — more reliable for realtime listeners than
       // only nesting quizFolders inside a parent update() (which mobile sometimes missed).
-      void set(dbRef(database, `users/${user.uid}/quizFolders`), nextFolders).catch((err) => {
+      void set(dbRef(database, `users/${user.uid}/quizFolders`), sanitized).catch((err) => {
         console.error('[cloud-save] quizFolders set failed', err);
         void rtdbFetch(`/users/${user.uid}/quizFolders`, {
           method: 'PUT',
-          body: JSON.stringify(nextFolders),
+          body: JSON.stringify(sanitized),
           headers: { 'Content-Type': 'application/json' },
         }).catch(() => {});
       });
       // Per-id mirror — same pattern as quizItemsById; survives array LWW races.
-      void update(dbRef(database, `users/${user.uid}/quizFoldersById`), foldersToFirebaseMap(nextFolders)).catch(() => {});
-      void appendFolderHistory(user.uid, nextFolders);
+      void update(dbRef(database, `users/${user.uid}/quizFoldersById`), foldersToFirebaseMap(sanitized)).catch(() => {});
+      void appendFolderHistory(user.uid, sanitized);
     }
   };
 
@@ -4641,7 +4772,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const applyRemoteFolderById = (raw: unknown) => {
     if (!loadedRef.current || !raw || typeof raw !== 'object') return;
-    const folder = raw as QuizFolder;
+    if (!isQuizFolderRow(raw)) return;
+    const folder = raw;
     if (!folder.id) return;
     rememberRemoteFolderInCache(folder);
     // Queue UI apply while array merges hold the lock so creates/deletes are not overwritten.
@@ -5905,7 +6037,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
     if (quizFoldersByIdCacheRef.current.length) {
       mergedFolders = mergeFoldersForSync(mergedFolders, quizFoldersByIdCacheRef.current, tombstones, {
-        remoteIsAuthority: true,
+        remoteIsAuthority: foldersRemoteLooksComplete(quizFoldersByIdCacheRef.current, quizFoldersRef.current),
       });
     }
     // Soft-deletes made on another device survive this pull even if the cloud
@@ -7689,6 +7821,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     return after.filter((folder) => !before.has(folder.id)).length;
   };
 
+  const repairQuizFolderNames = async (): Promise<number> => {
+    if (!user) return 0;
+    const sets = quizSetsRef.current;
+    const history = await fetchFolderNameHistory(user.uid);
+    const before = countCorruptedQuizFolderNames(quizFoldersRef.current, sets);
+    const repaired = finalizeQuizFolders(
+      applyFolderNameHistory(quizFoldersRef.current, sets, history),
+      sets,
+    );
+    if (JSON.stringify(repaired) === JSON.stringify(quizFoldersRef.current)) return 0;
+    setQuizFolders(repaired);
+    pushQuizFolderStructure(repaired);
+    const after = countCorruptedQuizFolderNames(repaired, sets);
+    return Math.max(0, before - after);
+  };
+
+  const corruptedQuizFolderNameCount = () => (
+    countCorruptedQuizFolderNames(quizFoldersRef.current, quizSetsRef.current)
+  );
+
   const listQuizFolderBackups = async (): Promise<{ key: string; label: string; folderCount: number }[]> => {
     if (!user) return [];
     try {
@@ -8654,6 +8806,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         restoreQuizFolder,
         permDeleteQuizFolder,
         recoverQuizFolders,
+        repairQuizFolderNames,
+        corruptedQuizFolderNameCount,
         listQuizFolderBackups,
         restoreQuizFolderBackup,
         hasQuizFolderBackups,

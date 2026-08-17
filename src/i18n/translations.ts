@@ -560,6 +560,9 @@ export interface Translation {
   quizMissingFoldersRestored: string;
   quizNoMoreFoldersFound: string;
   quizSearchMissingFolders: string;
+  quizFolderNamesRepairBanner: string;
+  quizFolderNamesRepairBtn: string;
+  quizFolderNamesRepaired: string;
   quizRecoveryBanner: string;
   quizRecoveryRestoreBtn: string;
   quizRecoveryRestored: string;
@@ -982,6 +985,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizMissingFoldersRestored: '↩ {n} missing folders restored',
     quizNoMoreFoldersFound: 'No more folders found',
     quizSearchMissingFolders: 'Search for missing folders',
+    quizFolderNamesRepairBanner: 'Some folder names look wrong (copied from set names). Restore the correct names from backup.',
+    quizFolderNamesRepairBtn: 'Fix folder names',
+    quizFolderNamesRepaired: '↩ Fixed {n} folder names',
     quizRecoveryBanner: 'Your quiz folders look empty, but a cloud backup exists. Restore it with one click.',
     quizRecoveryRestoreBtn: 'Restore from backup',
     quizRecoveryRestored: '↩ Restored {n} items from backup',
@@ -1402,6 +1408,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizMissingFoldersRestored: '↩ {n} saknade mappar återställda',
     quizNoMoreFoldersFound: 'Inga fler mappar hittades',
     quizSearchMissingFolders: 'Sök efter saknade mappar',
+    quizFolderNamesRepairBanner: 'Vissa mappnamn ser fel ut (kopierade från set-namn). Återställ rätt namn från backup.',
+    quizFolderNamesRepairBtn: 'Återställ mappnamn',
+    quizFolderNamesRepaired: '↩ {n} mappnamn återställda',
     quizRecoveryBanner: 'Dina quiz-mappar verkar tomma, men en molnsäkerhetskopia finns. Återställ med ett klick.',
     quizRecoveryRestoreBtn: 'Återställ från backup',
     quizRecoveryRestored: '↩ {n} objekt återställda från backup',
