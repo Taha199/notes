@@ -2336,7 +2336,7 @@ function snapshotFolderNames(folders: QuizFolder[]) {
 }
 
 function folderNameLooksCorrupted(folder: QuizFolder, setsInFolder: QuizSet[]): boolean {
-  const name = folder.name.trim();
+  const name = String(folder.name ?? '').trim();
   if (!name || !setsInFolder.length) return false;
   const setNames = new Set(setsInFolder.map((set) => set.name.trim()).filter(Boolean));
   if (!setNames.has(name)) return false;
@@ -2351,7 +2351,7 @@ function healCorruptedFolderNames(folders: QuizFolder[], sets: QuizSet[]): QuizF
     const setsInFolder = sets.filter((set) => set.folderId === folder.id && !set.trashed);
     if (!folderNameLooksCorrupted(folder, setsInFolder)) return folder;
     const snapName = snapshot[folder.id]?.trim();
-    if (snapName && snapName !== folder.name.trim()) {
+    if (snapName && snapName !== String(folder.name ?? '').trim()) {
       changed = true;
       return { ...folder, name: snapName, updatedAt: new Date().toISOString() };
     }
@@ -2399,7 +2399,7 @@ function applyFolderNameHistory(
 }
 
 function countCorruptedQuizFolderNames(folders: QuizFolder[], sets: QuizSet[]): number {
-  return folders.filter((folder) => {
+  return sanitizeQuizFolders(folders).filter((folder) => {
     if (folder.system || folder.trashed) return false;
     const setsInFolder = sets.filter((set) => set.folderId === folder.id && !set.trashed);
     return folderNameLooksCorrupted(folder, setsInFolder);
@@ -7666,7 +7666,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       color,
       colorInitialized: true,
     };
-    const next = [...quizFoldersRef.current, folder];
+    const next = sanitizeQuizFolders([...quizFoldersRef.current, folder]);
     quizFoldersRef.current = next;
     setQuizFolders(next);
     pushQuizFolderStructure(next, folder);
@@ -7700,23 +7700,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const reorderQuizFolders = (dragId: string, targetId: string) => {
-    setQuizFolders((prev) => {
-      const drag = prev.find((f) => f.id === dragId);
-      const target = prev.find((f) => f.id === targetId);
-      if (!drag || !target || drag.system || target.system || dragId === targetId) return prev;
-      const systemFolders = prev.filter((f) => f.system);
-      const normalFolders = prev.filter((f) => !f.system);
-      const from = normalFolders.findIndex((f) => f.id === dragId);
-      const to = normalFolders.findIndex((f) => f.id === targetId);
-      if (from < 0 || to < 0) return prev;
-      const stamp = nowStr();
-      const [item] = normalFolders.splice(from, 1);
-      normalFolders.splice(to, 0, { ...item, orderUpdatedAt: stamp });
-      const next = [...systemFolders, ...normalFolders];
-      persistFolders(next, true);
-      scheduleInstantDataCloudSave({ quizFolders: next });
-      return next;
-    });
+    const prev = quizFoldersRef.current;
+    const drag = prev.find((f) => f.id === dragId);
+    const target = prev.find((f) => f.id === targetId);
+    if (!drag || !target || drag.system || target.system || dragId === targetId) return;
+    const systemFolders = prev.filter((f) => f.system);
+    const normalFolders = prev.filter((f) => !f.system);
+    const from = normalFolders.findIndex((f) => f.id === dragId);
+    const to = normalFolders.findIndex((f) => f.id === targetId);
+    if (from < 0 || to < 0) return;
+    const stamp = nowStr();
+    const [item] = normalFolders.splice(from, 1);
+    if (!item?.id) return;
+    normalFolders.splice(to, 0, { ...item, orderUpdatedAt: stamp });
+    const next = sanitizeQuizFolders([...systemFolders, ...normalFolders]);
+    if (JSON.stringify(next) === JSON.stringify(prev)) return;
+    quizFoldersRef.current = next;
+    setQuizFolders(next);
+    pushQuizFolderStructure(next);
   };
 
   const deleteQuizFolder = (id: string) => {

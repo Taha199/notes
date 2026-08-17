@@ -813,7 +813,7 @@ export function QuizPage({
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
   const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, repairQuizFolderNames, corruptedQuizFolderNameCount, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder, hydrateQuizSet } = useNotes();
-  const quizFolders = allQuizFolders.filter((folder) => !folder.trashed);
+  const quizFolders = allQuizFolders.filter((folder) => !folder.trashed && !!folder?.id && typeof folder.name === 'string');
   // Coerce Firebase object-shaped items[] before any render path touches .map/.filter.
   const quizSets = useMemo(() => {
     const trashedFolders = new Set(allQuizFolders.filter((folder) => folder.trashed).map((folder) => folder.id));
@@ -2012,7 +2012,7 @@ export function QuizPage({
                     </div>
                   ) : (
                     <button
-                      draggable={!f.system}
+                      draggable={!f.system && !isEditing}
                       onDragStart={(e) => {
                         if (f.system) return;
                         dragFolderId.current = f.id;
@@ -2061,7 +2061,7 @@ export function QuizPage({
                         e.preventDefault();
                         e.stopPropagation();
                         const folderId = dragFolderId.current || e.dataTransfer.getData('application/x-quiz-folder');
-                        if (folderId) {
+                        if (folderId && folderId !== f.id && quizFolders.some((row) => row.id === folderId)) {
                           reorderQuizFolders(folderId, f.id);
                           dragFolderId.current = null;
                           setDragOverFolderSortId(null);
