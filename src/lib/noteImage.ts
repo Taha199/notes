@@ -1,6 +1,4 @@
 export const NOTE_IMG_FRAME = 'note-img-frame';
-export const NOTE_IMG_ROW = 'note-img-row';
-export const NOTE_IMG_SIDE_CARET = 'note-img-side-caret';
 export const NOTE_IMG_TOOLBAR = 'note-img-frame__toolbar';
 export const NOTE_IMG_TOOLBAR_HOST = 'note-img-frame__toolbar-host';
 
