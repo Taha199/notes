@@ -223,6 +223,28 @@ body {
   display: list-item;
 }
 
+.note-content .note-img-row,
+[contenteditable] .note-img-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.note-content .note-img-row > .note-img-frame,
+[contenteditable] .note-img-row > .note-img-frame {
+  margin-top: 0;
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
+
+.note-content .note-img-side-caret,
+[contenteditable] .note-img-side-caret {
+  flex: 1 1 auto;
+  min-width: 1ch;
+  min-height: 1.2em;
+}
+
 .note-content .note-img-frame,
 [contenteditable] .note-img-frame {
   position: relative;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } fr
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useToast } from '../../contexts/ToastContext';
-import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
+import { NOTE_IMG_FRAME, NOTE_IMG_ROW, NOTE_IMG_SIDE_CARET, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { compressImageForInline } from '../../lib/imageCompress';
 import { emitEditorImageSwap, uploadEditorImage } from '../../lib/imageUpload';
 import { auth } from '../../lib/firebase';
@@ -881,8 +881,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const removeImageBlock = (img: HTMLImageElement) => {
     const frame = img.closest(`.${NOTE_IMG_FRAME}`);
     if (frame?.parentNode) {
+      const row = frame.closest(`.${NOTE_IMG_ROW}`);
       const after = frame.nextSibling;
       frame.parentNode.removeChild(frame);
+      if (row instanceof HTMLElement) {
+        const caret = row.querySelector(`:scope > .${NOTE_IMG_SIDE_CARET}`);
+        if (caret instanceof HTMLElement) {
+          caret.classList.remove(NOTE_IMG_SIDE_CARET);
+          row.parentNode?.insertBefore(caret, row);
+        }
+        row.remove();
+        return;
+      }
       if (after?.nodeName === 'BR' && after.parentNode) after.parentNode.removeChild(after);
     } else {
       const next = img.nextSibling;
@@ -3195,6 +3205,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         el = el.parentElement;
         continue;
       }
+      if (el.classList.contains(NOTE_IMG_ROW)) {
+        el = el.parentElement;
+        continue;
+      }
       if (el.tagName === 'CENTER') return el;
       // Prefer the list item over ChatGPT's nested <p>/<div> inside <li>.
       if (el.tagName === 'LI') return el;
@@ -3292,6 +3306,42 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     sel?.removeAllRanges();
     sel?.addRange(range);
     savedRange.current = range.cloneRange();
+  };
+
+  const imageMoveUnit = (frame: HTMLElement): HTMLElement => (
+    frame.closest(`.${NOTE_IMG_ROW}`) instanceof HTMLElement
+      ? frame.closest(`.${NOTE_IMG_ROW}`) as HTMLElement
+      : frame
+  );
+
+  const ensureImageSideCaret = (frame: HTMLElement): HTMLElement => {
+    const parent = frame.parentElement;
+    let row = parent?.classList.contains(NOTE_IMG_ROW) ? parent : null;
+    if (!row) {
+      row = document.createElement('div');
+      row.className = NOTE_IMG_ROW;
+      row.setAttribute('dir', 'auto');
+      frame.parentNode?.insertBefore(row, frame);
+      row.appendChild(frame);
+    }
+    const existing = row.querySelector(`:scope > .${NOTE_IMG_SIDE_CARET}`);
+    if (existing instanceof HTMLElement) {
+      if (!(existing.textContent ?? '').replace(/\u200B/g, '').trim() && !existing.querySelector('br')) {
+        existing.innerHTML = '<br>';
+      }
+      return existing;
+    }
+    const caret = document.createElement('div');
+    caret.className = NOTE_IMG_SIDE_CARET;
+    caret.setAttribute('dir', 'auto');
+    caret.innerHTML = '<br>';
+    row.appendChild(caret);
+    return caret;
+  };
+
+  const placeCaretBesideImage = (frame: HTMLElement) => {
+    const caret = ensureImageSideCaret(frame);
+    placeCaretInBlock(caret, true);
   };
 
   const handleCenteredLineClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -3540,7 +3590,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const extractEmbedFromTextBlock = (frame: HTMLElement, ed: HTMLElement): HTMLElement => {
     const parent = frame.parentElement;
     if (!parent || parent === ed || !ed.contains(frame)) return frame;
-    if (parent.classList.contains(NOTE_IMG_FRAME) || parent.classList.contains(NOTE_YT_FRAME)) return frame;
+    if (parent.classList.contains(NOTE_IMG_FRAME) || parent.classList.contains(NOTE_YT_FRAME) || parent.classList.contains(NOTE_IMG_ROW)) return frame;
 
     const hasOther = [...parent.childNodes].some((n) => nodeIsNonEmbedContent(n, frame));
     if (!hasOther) return frame;
@@ -3611,23 +3661,24 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const ed = editorRef.current;
     if (!ed) return;
     const frame = ensureImageFrame(img, ed);
-    const parent = frame.parentElement;
+    const unit = imageMoveUnit(frame);
+    const parent = unit.parentElement;
     if (!parent) return;
     const siblings = Array.from(parent.children).filter((n): n is HTMLElement => n instanceof HTMLElement);
-    const idx = siblings.indexOf(frame);
+    const idx = siblings.indexOf(unit);
     if (idx < 0) return;
 
     if (direction === 'up') {
       if (idx <= 0) {
-        insertEmptyLineAboveBlock(ed, frame);
+        insertEmptyLineAboveBlock(ed, unit);
         requestAnimationFrame(() => {
           if (img.isConnected) setHoveredImg(syncHoveredImg(img, ensureImageFrame(img, ed)));
         });
         return;
       }
-      parent.insertBefore(frame, siblings[idx - 1]);
+      parent.insertBefore(unit, siblings[idx - 1]);
     } else if (idx < siblings.length - 1) {
-      parent.insertBefore(siblings[idx + 1], frame);
+      parent.insertBefore(siblings[idx + 1], unit);
     } else {
       const tail = document.createElement('div');
       tail.setAttribute('dir', 'auto');
@@ -3891,7 +3942,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!prev?.classList.contains(NOTE_IMG_FRAME) && !prev?.classList.contains(NOTE_YT_FRAME)) return;
     e.preventDefault();
     ed.focus({ preventScroll: true });
-    placeCaretImmediatelyAfter(prev);
+    if (prev.classList.contains(NOTE_IMG_FRAME)) placeCaretBesideImage(prev);
+    else placeCaretImmediatelyAfter(prev);
     saveSel();
   };
 
@@ -4302,6 +4354,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
       clearPendingFontMarker();
 
+      const sideCaret = (sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement)
+        ?.closest(`.${NOTE_IMG_SIDE_CARET}`);
+      if (sideCaret instanceof HTMLElement && ed.contains(sideCaret)) {
+        const row = sideCaret.closest(`.${NOTE_IMG_ROW}`);
+        const newBlock = document.createElement('div');
+        newBlock.setAttribute('dir', 'auto');
+        newBlock.innerHTML = '<br>';
+        row?.parentNode?.insertBefore(newBlock, row.nextSibling);
+        placeCaretInBlock(newBlock, true);
+        finishNewLineEditing(ed);
+        return true;
+      }
+
       // Still has an embed (or is an embed sibling caret) — never split through it.
       const liveBlock = getLineBlock(sel.anchorNode, ed) ?? block;
       if (
@@ -4415,20 +4480,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     savedRange.current = range.cloneRange();
   };
 
-  const placeCaretAfterRemovedImageLine = (next: Element | null, imageFrame: HTMLElement) => {
-    if (
-      next instanceof HTMLElement
-      && next.tagName !== 'HR'
-      && !next.classList.contains(NOTE_IMG_FRAME)
-      && !next.classList.contains(NOTE_YT_FRAME)
-      && !isEmptyTextLine(next)
-    ) {
-      placeCaretInBlock(next, true);
-      return;
-    }
-    placeCaretImmediatelyAfter(imageFrame);
-  };
-
   const runEditorBackspace = (e: { key: string; preventDefault: () => void; nativeEvent?: { isComposing?: boolean } }) => {
     if (e.key !== 'Backspace' || e.nativeEvent?.isComposing) return false;
     const ed = editorRef.current;
@@ -4458,10 +4509,24 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return false;
     }
 
-    // Line under an image: Backspace removes that line, never the image.
-    // Native editing deletes the contenteditable=false frame instead.
+    // Line under an image: Backspace puts the caret beside the image.
     {
       const line = getLineBlock(range.startContainer, ed);
+      if (line?.classList.contains(NOTE_IMG_SIDE_CARET)) {
+        e.preventDefault();
+        if (isEmptyTextLine(line) && isCaretAtStartOfBlock(line, range)) {
+          const row = line.closest(`.${NOTE_IMG_ROW}`);
+          const prevBlock = row?.previousElementSibling;
+          if (prevBlock instanceof HTMLElement && !prevBlock.classList.contains(NOTE_IMG_FRAME)) {
+            placeCaretInBlock(prevBlock, false);
+          }
+        }
+        hideImageToolbar();
+        saveSel();
+        readCommandState();
+        emitHtml();
+        return handled();
+      }
       if (
         line
         && line.tagName !== 'LI'
@@ -4470,13 +4535,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         && isCaretAtStartOfBlock(line, range)
       ) {
         const prev = previousContentElement(line);
-        if (prev?.classList.contains(NOTE_IMG_FRAME)) {
+        const prevFrame = prev?.classList.contains(NOTE_IMG_FRAME)
+          ? prev
+          : prev?.classList.contains(NOTE_IMG_ROW)
+            ? prev.querySelector(`:scope > .${NOTE_IMG_FRAME}`)
+            : null;
+        if (prevFrame instanceof HTMLElement) {
           e.preventDefault();
-          if (isEmptyTextLine(line)) {
-            const next = line.nextElementSibling;
-            line.remove();
-            placeCaretAfterRemovedImageLine(next, prev);
-          }
+          if (isEmptyTextLine(line)) line.remove();
+          placeCaretBesideImage(prevFrame);
           hideImageToolbar();
           saveSel();
           readCommandState();
@@ -4488,13 +4555,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (container instanceof HTMLElement && range.collapsed) {
         const before = container.childNodes[range.startOffset - 1];
         const after = container.childNodes[range.startOffset];
-        if (before instanceof HTMLElement && before.classList.contains(NOTE_IMG_FRAME)) {
+        const beforeFrame = before instanceof HTMLElement && before.classList.contains(NOTE_IMG_FRAME)
+          ? before
+          : before instanceof HTMLElement && before.classList.contains(NOTE_IMG_ROW)
+            ? before.querySelector(`:scope > .${NOTE_IMG_FRAME}`)
+            : null;
+        if (beforeFrame instanceof HTMLElement) {
           e.preventDefault();
-          if (after instanceof HTMLElement && isEmptyTextLine(after)) {
-            const next = after.nextElementSibling;
-            after.remove();
-            placeCaretAfterRemovedImageLine(next, before);
-          }
+          if (after instanceof HTMLElement && isEmptyTextLine(after)) after.remove();
+          placeCaretBesideImage(beforeFrame);
           hideImageToolbar();
           saveSel();
           readCommandState();
