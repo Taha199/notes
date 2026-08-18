@@ -14,7 +14,6 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
-import { exportQuizSetToPdf } from '../../lib/exportQuizSetPdf';
 import { countQuizSetQuestions, quizItemCreatedAtMs, visibleQuizItems } from '../../lib/quizSort';
 import { coerceQuizItems, withCoercedQuizSetItems } from '../../lib/quizSetMerge';
 import { SITE_URL } from '../../lib/seo';
@@ -1468,6 +1467,7 @@ export function QuizPage({
 
   // Show/hide the sets sidebar
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => localStorage.getItem('malacadhati_quiz_sidebar') !== 'closed');
+  const [pdfExporting, setPdfExporting] = useState(false);
   const toggleSidebar = () => setSidebarOpen((v) => {
     const n = !v;
     safeLocalStorageSet('malacadhati_quiz_sidebar', n ? 'open' : 'closed');
@@ -2499,22 +2499,30 @@ export function QuizPage({
                 </div>
                 {/* Study buttons */}
                 <button
+                  type="button"
+                  disabled={pdfExporting || orderedItems.filter((item) => !item.draft).length === 0}
                   onClick={() => {
                     const title = selectedSet?.name ?? t.quizQuestionsFromNotes;
                     const items = orderedItems.filter((item) => !item.draft);
-                    exportQuizSetToPdf(title, items, {
-                      question: t.quizQuestionLabel,
-                      answer: t.quizAnswerLabel,
-                      explanation: t.quizExplanationLabel,
-                      generatedOn: t.quizPdfGeneratedOn,
-                      brandName: t.appName,
-                      website: new URL(SITE_URL).host,
-                    });
+                    setPdfExporting(true);
+                    void import('../../lib/exportQuizSetPdf').then(({ exportQuizSetToPdf }) => (
+                      exportQuizSetToPdf(title, items, {
+                        question: t.quizQuestionLabel,
+                        answer: t.quizAnswerLabel,
+                        explanation: t.quizExplanationLabel,
+                        generatedOn: t.quizPdfGeneratedOn,
+                        brandName: t.appName,
+                        website: new URL(SITE_URL).host,
+                        questionCount: items.length === 1 ? t.quizQuestionOne : t.quizQuestionMany,
+                      })
+                    )).catch(() => {
+                      show(t.filesDownloadFailed);
+                    }).finally(() => setPdfExporting(false));
                   }}
-                  className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-3 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
+                  className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-3 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-border/40 disabled:cursor-wait disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
                   title={t.quizDownloadPdf}
                 >
-                  {t.quizDownloadPdf}
+                  {pdfExporting ? '…' : t.quizDownloadPdf}
                 </button>
                 <button
                   onClick={() => { setStudyDeck(null); setStudyMode('flashcard'); }}
