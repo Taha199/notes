@@ -17,25 +17,132 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-function htmlToPlain(content: string): string {
-  const wrap = document.createElement('div');
-  wrap.innerHTML = mdToHtml(content);
-  const walk = (node: Node): string => {
-    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
-    if (!(node instanceof HTMLElement)) return '';
-    const tag = node.tagName;
-    if (tag === 'BR') return '\n';
-    if (tag === 'IMG') return '';
-    const parts = Array.from(node.childNodes).map(walk).join('');
-    if (tag === 'TD' || tag === 'TH') return `${parts.trim()}  `;
-    if (tag === 'TR') return `${parts.trim()}\n`;
-    if (tag === 'LI') return `• ${parts.trim()}\n`;
-    if (tag === 'P' || tag === 'DIV' || tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'TABLE') {
-      return `${parts.trim()}\n`;
-    }
-    return parts;
+/** Helvetica/WinAnsi cannot draw emoji; strip them so they do not become Ø>ÞÁ. */
+function pdfSafeText(s: string): string {
+  return s
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/[\uFE0F\u200D]/g, '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function cellPlain(cell: HTMLElement): string {
+  const clone = cell.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+  return pdfSafeText(clone.textContent || '');
+}
+
+type PdfTable = {
+  header: string[] | null;
+  body: string[][];
+  weights: number[];
+};
+
+type PdfBlock =
+  | { type: 'text'; text: string }
+  | { type: 'table'; table: PdfTable }
+  | { type: 'image'; url: string };
+
+function colWeights(table: HTMLTableElement, colCount: number): number[] {
+  const cols = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+  if (cols.length === colCount) {
+    const widths = cols.map((col) => {
+      const raw = (col as HTMLElement).style.width || col.getAttribute('width') || '';
+      const num = parseFloat(raw);
+      return Number.isFinite(num) && num > 0 ? num : 0;
+    });
+    const sum = widths.reduce((a, b) => a + b, 0);
+    if (sum > 0) return widths.map((w) => w / sum);
+  }
+  return Array.from({ length: colCount }, () => 1 / colCount);
+}
+
+function parseHtmlTable(table: HTMLTableElement): PdfTable {
+  const raw = Array.from(table.rows).map((tr) => Array.from(tr.cells).map((cell) => cellPlain(cell)));
+  const colCount = Math.max(1, ...raw.map((row) => row.length));
+  const padded = raw.map((row) => {
+    const next = row.slice();
+    while (next.length < colCount) next.push('');
+    return next;
+  }).filter((row) => row.some((cell) => cell.length > 0));
+  if (padded.length === 0) {
+    return { header: null, body: [], weights: [1] };
+  }
+  const firstCells = Array.from(table.rows[0]?.cells ?? []);
+  const headerIsTh = firstCells.length > 0 && firstCells.every((cell) => cell.tagName === 'TH');
+  return {
+    header: headerIsTh ? padded[0] : null,
+    body: headerIsTh ? padded.slice(1) : padded,
+    weights: colWeights(table, colCount),
   };
-  return walk(wrap).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function parseBlocks(html: string): PdfBlock[] {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const out: PdfBlock[] = [];
+
+  const pushText = (value: string) => {
+    const text = pdfSafeText(value);
+    if (text) out.push({ type: 'text', text });
+  };
+
+  const walk = (node: Node) => {
+    if (node instanceof HTMLTableElement) {
+      const table = parseHtmlTable(node);
+      if (table.header || table.body.length > 0) out.push({ type: 'table', table });
+      return;
+    }
+    if (node instanceof HTMLImageElement) {
+      const src = node.currentSrc || node.src || '';
+      if (src.startsWith('data:image')) out.push({ type: 'image', url: src });
+      return;
+    }
+    if (!(node instanceof HTMLElement)) {
+      if (node.nodeType === Node.TEXT_NODE) pushText(node.textContent || '');
+      return;
+    }
+    if (node.classList.contains('note-table-wrap') || node.classList.contains('note-table-body')) {
+      Array.from(node.childNodes).forEach(walk);
+      return;
+    }
+    if (node.querySelector('table, img')) {
+      Array.from(node.childNodes).forEach(walk);
+      return;
+    }
+    if (node.tagName === 'LI') {
+      pushText(`• ${node.textContent || ''}`);
+      return;
+    }
+    if (node.tagName === 'BR') {
+      return;
+    }
+    pushText(node.innerText || node.textContent || '');
+  };
+
+  Array.from(wrap.childNodes).forEach(walk);
+  if (out.length === 0) pushText(wrap.innerText || '');
+  return out;
+}
+
+function htmlToPlain(content: string): string {
+  return parseBlocks(prepareContentHtml(content))
+    .map((block) => {
+      if (block.type === 'text') return block.text;
+      if (block.type === 'table') {
+        const rows = [...(block.table.header ? [block.table.header] : []), ...block.table.body];
+        return rows.map((row) => row.filter(Boolean).join('  |  ')).join('\n');
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function contentHasTable(item: QuizItem): boolean {
+  return /<table/i.test(`${item.question}\n${item.answer}\n${item.explanation ?? ''}`);
 }
 
 async function inlineImages(root: HTMLElement) {
@@ -70,6 +177,68 @@ function waitForImages(root: HTMLElement): Promise<void> {
   })).then(() => undefined);
 }
 
+const PDF_TABLE_CSS = `
+.note-content table, .note-content table.note-table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  table-layout: auto !important;
+  font-size: 12px !important;
+}
+.note-content th, .note-content td,
+.note-content table.note-table th, .note-content table.note-table td {
+  border: 1px solid #d1d5db !important;
+  padding: 6px 8px !important;
+  vertical-align: top !important;
+  text-align: left !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  hyphens: manual !important;
+  background: #fff !important;
+}
+.note-content th, .note-content table.note-table th {
+  background: #e8eef5 !important;
+  font-weight: 700 !important;
+}
+.note-content .note-table-wrap {
+  display: block !important;
+  overflow: visible !important;
+  max-width: 100% !important;
+  margin: 8px 0 !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+}
+`;
+
+function styleTablesInline(root: HTMLElement) {
+  root.querySelectorAll('table').forEach((table) => {
+    const el = table as HTMLTableElement;
+    el.style.width = '100%';
+    el.style.borderCollapse = 'collapse';
+    el.style.tableLayout = 'auto';
+    el.style.fontSize = '12px';
+    el.querySelectorAll('th, td').forEach((cell) => {
+      const td = cell as HTMLElement;
+      td.style.border = '1px solid #d1d5db';
+      td.style.padding = '6px 8px';
+      td.style.verticalAlign = 'top';
+      td.style.textAlign = 'left';
+      td.style.overflowWrap = 'anywhere';
+      td.style.wordBreak = 'break-word';
+      td.style.background = td.tagName === 'TH' ? '#e8eef5' : '#fff';
+      if (td.tagName === 'TH') td.style.fontWeight = '700';
+    });
+  });
+  root.querySelectorAll('.note-table-wrap').forEach((wrap) => {
+    const el = wrap as HTMLElement;
+    el.style.overflow = 'visible';
+    el.style.maxWidth = '100%';
+    el.style.border = '1px solid #d1d5db';
+    el.style.borderRadius = '8px';
+    el.style.background = '#fff';
+  });
+}
+
 function prepareContentHtml(raw: string): string {
   const wrap = document.createElement('div');
   wrap.innerHTML = mdToHtml(raw);
@@ -84,6 +253,7 @@ function prepareContentHtml(raw: string): string {
     img.style.maxWidth = '100%';
     img.style.height = 'auto';
   });
+  styleTablesInline(wrap);
   return wrap.innerHTML;
 }
 
@@ -94,6 +264,7 @@ const BRAND = {
   text: [31, 41, 55] as const,
   textSecondary: [107, 114, 128] as const,
   border: [229, 231, 235] as const,
+  headerBg: [232, 238, 245] as const,
   white: [255, 255, 255] as const,
 };
 
@@ -106,6 +277,7 @@ const NUM_COL_W = 11;
 const BODY_LINE = 4.4;
 const LABEL_LINE = 3.2;
 const CAPTURE_WIDTH = 860;
+const PT_TO_MM = 0.352778;
 
 type Rgb = readonly [number, number, number];
 
@@ -114,10 +286,11 @@ function buildCardElement(
   item: QuizItem,
   labels: { question: string; answer: string; explanation: string },
 ): HTMLElement {
+  const stacked = contentHasTable(item);
   const card = document.createElement('div');
   card.style.cssText = [
-    'width:860px',
-    'overflow:hidden',
+    `width:${CAPTURE_WIDTH}px`,
+    'overflow:visible',
     'border:1px solid #e5e7eb',
     'border-radius:14px',
     'background:#fff',
@@ -126,24 +299,16 @@ function buildCardElement(
     'box-shadow:inset 4px 0 0 0 #6c63ff',
   ].join(';');
 
-  const grid = document.createElement('div');
-  grid.style.cssText = 'display:grid;grid-template-columns:minmax(0,0.8fr) minmax(0,1.2fr);align-items:stretch';
-
-  const questionCol = document.createElement('div');
-  questionCol.style.cssText = 'min-width:0;padding:16px 18px;background:#fff';
-  questionCol.innerHTML = `
+  const questionHtml = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
       <span style="display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:6px;background:#f0efff;color:#6c63ff;font-size:12px;font-weight:800">${index + 1}</span>
       <span style="font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9ca3af">${labels.question}</span>
     </div>
     <div class="note-content" dir="auto" style="font-size:14px;font-weight:600;line-height:1.65">${prepareContentHtml(item.question)}</div>
   `;
-
-  const answerCol = document.createElement('div');
-  answerCol.style.cssText = 'min-width:0;padding:16px 20px 16px 18px;background:#f8fafc;border-left:1px solid #e5e7eb';
   let answerHtml = `
     <div style="margin-bottom:8px;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#6c63ff">${labels.answer}</div>
-    <div class="note-content" dir="auto" style="font-size:14px;line-height:1.7">${prepareContentHtml(item.answer)}</div>
+    <div class="note-content" dir="auto" style="font-size:13px;line-height:1.55">${prepareContentHtml(item.answer)}</div>
   `;
   if (item.explanation?.trim()) {
     answerHtml += `
@@ -153,6 +318,22 @@ function buildCardElement(
       </div>
     `;
   }
+
+  if (stacked) {
+    const col = document.createElement('div');
+    col.style.cssText = 'min-width:0;padding:16px 18px;background:#fff';
+    col.innerHTML = `${questionHtml}<div style="margin-top:14px;padding-top:12px;border-top:1px solid #e5e7eb">${answerHtml}</div>`;
+    card.appendChild(col);
+    return card;
+  }
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:minmax(0,0.8fr) minmax(0,1.2fr);align-items:stretch';
+  const questionCol = document.createElement('div');
+  questionCol.style.cssText = 'min-width:0;padding:16px 18px;background:#fff';
+  questionCol.innerHTML = questionHtml;
+  const answerCol = document.createElement('div');
+  answerCol.style.cssText = 'min-width:0;padding:16px 20px 16px 18px;background:#f8fafc;border-left:1px solid #e5e7eb';
   answerCol.innerHTML = answerHtml;
   grid.append(questionCol, answerCol);
   card.appendChild(grid);
@@ -250,7 +431,7 @@ export async function exportQuizSetToPdf(
       ctx.drawImage(canvas, 0, srcY, canvas.width, slicePx, 0, 0, canvas.width, slicePx);
       const sliceMm = slicePx / pxPerMm;
       try {
-        doc.addImage(slice.toDataURL('image/jpeg', 0.8), 'JPEG', MARGIN, y, imgW, sliceMm);
+        doc.addImage(slice.toDataURL('image/jpeg', 0.82), 'JPEG', MARGIN, y, imgW, sliceMm);
       } catch {
         doc.addImage(slice.toDataURL('image/png'), 'PNG', MARGIN, y, imgW, sliceMm);
       }
@@ -267,7 +448,140 @@ export async function exportQuizSetToPdf(
     return { qW, aW: inner - qW - 2 };
   };
 
-  const drawTextFallback = (index: number, item: QuizItem, imageUrls: string[]) => {
+  const drawPdfTable = (table: PdfTable, x: number, width: number) => {
+    const colCount = table.weights.length;
+    if (colCount === 0) return;
+    const fontSize = colCount >= 4 ? 7.5 : colCount === 3 ? 8 : 9;
+    const lineH = fontSize * PT_TO_MM * 1.28;
+    const pad = 1.4;
+    const widths = table.weights.map((w) => w * width);
+
+    const wrappedRow = (cells: string[]) => cells.map((cell, i) => {
+      doc.setFontSize(fontSize);
+      return doc.splitTextToSize(cell || ' ', Math.max(8, widths[i] - pad * 2)) as string[];
+    });
+
+    const rowHeight = (lines: string[][]) => {
+      const maxLines = Math.max(1, ...lines.map((cell) => cell.length));
+      return maxLines * lineH + pad * 2;
+    };
+
+    const paintRow = (cells: string[], header: boolean) => {
+      const lines = wrappedRow(cells);
+      let h = rowHeight(lines);
+      if (y + h > contentBottom && y > MARGIN + 6) {
+        newPage();
+        if (!header && table.header) {
+          paintRow(table.header, true);
+        }
+      }
+      h = rowHeight(lines);
+      let cx = x;
+      lines.forEach((cellLines, i) => {
+        const w = widths[i];
+        if (header) {
+          setFill(BRAND.headerBg);
+          doc.rect(cx, y, w, h, 'F');
+        } else {
+          setFill(BRAND.white);
+          doc.rect(cx, y, w, h, 'F');
+        }
+        setDraw(BRAND.border);
+        doc.setLineWidth(0.2);
+        doc.rect(cx, y, w, h, 'S');
+        doc.setFont('helvetica', header ? 'bold' : 'normal');
+        doc.setFontSize(fontSize);
+        setColor(BRAND.text);
+        const textY = y + pad + fontSize * PT_TO_MM * 0.85;
+        doc.text(cellLines, cx + pad, textY);
+        cx += w;
+      });
+      y += h;
+    };
+
+    if (table.header) paintRow(table.header, true);
+    table.body.forEach((row) => paintRow(row, false));
+  };
+
+  const drawImages = (urls: string[]) => {
+    for (const url of urls) {
+      try {
+        const imgW = Math.min(contentWidth, 80);
+        const imgH = 48;
+        ensureSpace(imgH + 4);
+        doc.addImage(url, url.includes('png') ? 'PNG' : 'JPEG', MARGIN, y, imgW, imgH);
+        y += imgH + 4;
+      } catch {
+        /* skip broken image */
+      }
+    }
+  };
+
+  const drawBlocks = (blocks: PdfBlock[], x: number, width: number, fontSize: number) => {
+    for (const block of blocks) {
+      if (block.type === 'text') {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(fontSize);
+        setColor(BRAND.text);
+        const lines = doc.splitTextToSize(block.text || ' ', width) as string[];
+        const h = Math.max(BODY_LINE, lines.length * BODY_LINE);
+        ensureSpace(h + 1);
+        lines.forEach((line: string, i: number) => doc.text(line, x, y + 3.2 + i * BODY_LINE));
+        y += h + 1;
+      } else if (block.type === 'table') {
+        ensureSpace(16);
+        drawPdfTable(block.table, x, width);
+        y += 2;
+      } else {
+        drawImages([block.url]);
+      }
+    }
+  };
+
+  const drawNativeItem = (index: number, item: QuizItem, extraImages: string[]) => {
+    const qBlocks = parseBlocks(prepareContentHtml(item.question));
+    const aBlocks = parseBlocks(prepareContentHtml(item.answer));
+    const eBlocks = item.explanation?.trim()
+      ? parseBlocks(prepareContentHtml(item.explanation))
+      : [];
+    const stacked = qBlocks.some((b) => b.type === 'table')
+      || aBlocks.some((b) => b.type === 'table')
+      || eBlocks.some((b) => b.type === 'table');
+
+    if (stacked) {
+      ensureSpace(28);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      setColor(BRAND.primary);
+      doc.text(String(index + 1), MARGIN, y + 4);
+      doc.setFontSize(6.5);
+      setColor(BRAND.textSecondary);
+      doc.text(labels.question.toUpperCase(), MARGIN + 8, y + 4);
+      y += 7;
+      drawBlocks(qBlocks.filter((b) => b.type !== 'image'), MARGIN, contentWidth, 10);
+      y += 2;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      setColor(BRAND.primary);
+      ensureSpace(8);
+      doc.text(labels.answer.toUpperCase(), MARGIN, y + 3);
+      y += 6;
+      drawBlocks(aBlocks, MARGIN, contentWidth, 9);
+      if (eBlocks.length > 0) {
+        y += 2;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.5);
+        setColor([180, 83, 9]);
+        ensureSpace(8);
+        doc.text(labels.explanation.toUpperCase(), MARGIN, y + 3);
+        y += 6;
+        drawBlocks(eBlocks, MARGIN, contentWidth, 8);
+      }
+      drawImages(extraImages);
+      y += CARD_GAP;
+      return;
+    }
+
     const { qW, aW } = colWidths();
     doc.setFontSize(8.5);
     const qLines = doc.splitTextToSize(htmlToPlain(item.question) || ' ', qW);
@@ -308,18 +622,7 @@ export async function exportQuizSetToPdf(
     doc.setFontSize(9);
     aLines.forEach((line: string, i: number) => doc.text(line, aX, textY + i * BODY_LINE));
     y += cardH + CARD_GAP;
-
-    for (const url of imageUrls) {
-      try {
-        const imgW = Math.min(contentWidth, 80);
-        const imgH = 48;
-        ensureSpace(imgH + 4);
-        doc.addImage(url, url.includes('png') ? 'PNG' : 'JPEG', MARGIN, y, imgW, imgH);
-        y += imgH + 4;
-      } catch {
-        /* skip broken image */
-      }
-    }
+    drawImages(extraImages);
   };
 
   const host = document.createElement('div');
@@ -331,43 +634,63 @@ export async function exportQuizSetToPdf(
     `width:${CAPTURE_WIDTH}px`,
     'background:#fff',
     'color:#1f2937',
-    'z-index:-1',
+    'z-index:0',
     'pointer-events:none',
-    'opacity:1',
   ].join(';');
+  const hostStyle = document.createElement('style');
+  hostStyle.textContent = PDF_TABLE_CSS;
+  host.appendChild(hostStyle);
   document.body.appendChild(host);
+
+  const snapshotCard = async (card: HTMLElement) => {
+    const opts = {
+      backgroundColor: '#ffffff',
+      scale: 1.6,
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+      width: CAPTURE_WIDTH,
+      windowWidth: CAPTURE_WIDTH,
+      scrollX: 0,
+      scrollY: 0,
+      onclone: (cloned: Document) => {
+        cloned.documentElement.classList.remove('dark');
+        cloned.body.classList.remove('dark');
+        const style = cloned.createElement('style');
+        style.textContent = PDF_TABLE_CSS;
+        cloned.head.appendChild(style);
+        const clonedCard = cloned.querySelector('[data-quiz-pdf-host]') ?? cloned.body;
+        if (clonedCard instanceof HTMLElement) styleTablesInline(clonedCard);
+      },
+    } as const;
+    return html2canvas(card, opts);
+  };
 
   drawHeader();
 
   try {
     for (let i = 0; i < items.length; i += 1) {
-      const card = buildCardElement(i, items[i], labels);
-      host.replaceChildren(card);
+      const item = items[i];
+      const card = buildCardElement(i, item, labels);
+      host.replaceChildren(hostStyle, card);
       await inlineImages(host);
       await waitForImages(host);
+      styleTablesInline(card);
       const imageUrls = Array.from(host.querySelectorAll('img'))
         .map((img) => img.src)
         .filter((src) => src.startsWith('data:image'));
+      if (contentHasTable(item)) {
+        // Tables must be drawn as a real grid. html2canvas often flattens them
+        // into a text blob and Helvetica turns emoji into garbage (Ø>ÞÁ).
+        drawNativeItem(i, item, imageUrls);
+        continue;
+      }
       try {
-        const canvas = await html2canvas(card, {
-          backgroundColor: '#ffffff',
-          scale: 1.5,
-          useCORS: true,
-          allowTaint: false,
-          logging: false,
-          width: CAPTURE_WIDTH,
-          windowWidth: CAPTURE_WIDTH,
-          scrollX: 0,
-          scrollY: 0,
-          onclone: (cloned) => {
-            cloned.documentElement.classList.remove('dark');
-            cloned.body.classList.remove('dark');
-          },
-        });
+        const canvas = await snapshotCard(card);
         addCanvas(canvas);
       } catch (err) {
-        console.warn('[quiz pdf] snapshot failed, using text fallback', err);
-        drawTextFallback(i, items[i], imageUrls);
+        console.warn('[quiz pdf] snapshot failed, using native fallback', err);
+        drawNativeItem(i, item, imageUrls);
       }
     }
   } finally {
