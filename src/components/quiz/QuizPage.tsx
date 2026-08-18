@@ -1454,7 +1454,12 @@ export function QuizPage({
   // Folders (OneNote-style notebooks)
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderRenameVal, setFolderRenameVal] = useState('');
-  const folderRenameViaSubmitRef = useRef(false);
+  const folderRenameValRef = useRef('');
+  folderRenameValRef.current = folderRenameVal;
+  const renamingFolderIdRef = useRef<string | null>(null);
+  renamingFolderIdRef.current = renamingFolderId;
+  const folderRenameInputRef = useRef<HTMLInputElement | null>(null);
+  const finishFolderRenameRef = useRef<() => void>(() => {});
   const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number; flip?: boolean } | null>(null);
   const [folderColorPicker, setFolderColorPicker] = useState(false);
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<{ id: string; name: string } | null>(null);
@@ -1576,26 +1581,69 @@ export function QuizPage({
     stopRenameSet();
   };
 
-  const commitFolderName = (folderId: string, fallbackName: string) => {
-    const name = folderRenameVal.trim().replace(/\s+/g, ' ') || fallbackName;
-    const duplicate = allQuizFolders.some((folder) => folder.id !== folderId && normalizeQuizName(folder.name) === normalizeQuizName(name));
-    if (duplicate) {
-      setNameAlert('folder');
-      folderRenameViaSubmitRef.current = false;
-      return;
-    }
-    renameQuizFolder(folderId, name);
+  const stopFolderRename = () => {
+    renamingFolderIdRef.current = null;
     setRenamingFolderId(null);
     setFolderRenameVal('');
   };
 
-  const handleFolderRenameBlur = (folderId: string, fallbackName: string) => {
-    if (folderRenameViaSubmitRef.current) {
-      folderRenameViaSubmitRef.current = false;
-      return;
+  const commitFolderName = (folderId: string, fallbackName: string) => {
+    if (renamingFolderIdRef.current !== folderId) return;
+    const name = String(folderRenameValRef.current ?? '').trim().replace(/\s+/g, ' ') || fallbackName;
+    const duplicate = quizFolders.some((folder) => (
+      folder.id !== folderId
+      && !folder.system
+      && typeof folder.name === 'string'
+      && normalizeQuizName(folder.name) === normalizeQuizName(name)
+    ));
+    if (duplicate) {
+      setNameAlert('folder');
+    } else if (name) {
+      renameQuizFolder(folderId, name);
     }
-    commitFolderName(folderId, fallbackName);
+    stopFolderRename();
   };
+
+  finishFolderRenameRef.current = () => {
+    const folderId = renamingFolderIdRef.current;
+    if (!folderId) return;
+    const fallback = quizFolders.find((folder) => folder.id === folderId)?.name
+      || folderRenameValRef.current
+      || t.quizNewFolder;
+    commitFolderName(folderId, fallback);
+  };
+
+  useEffect(() => {
+    if (!renamingFolderId) return;
+    const input = folderRenameInputRef.current;
+    input?.focus();
+    input?.select();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        stopFolderRename();
+        return;
+      }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      e.stopPropagation();
+      finishFolderRenameRef.current();
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target;
+      if (target instanceof Element && target.closest('[data-quiz-folder-rename]')) return;
+      finishFolderRenameRef.current();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, [renamingFolderId]);
 
   const createFolder = () => {
     const base = t.quizNewFolder;
@@ -2079,44 +2127,22 @@ export function QuizPage({
                 return (
                 <div key={f.id} className="group/fl relative">
                   {isEditing ? (
-                    <form
+                    <div
+                      data-quiz-folder-rename="1"
                       className="relative mx-1.5 my-0.5 rounded-lg bg-gray-100/90 py-2 pl-3 pr-2 dark:bg-white/10"
                       style={{ boxShadow: `inset 4px 0 0 0 ${folderAccent}` }}
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        folderRenameViaSubmitRef.current = true;
-                        commitFolderName(f.id, f.name);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
                     >
                       <input
+                        ref={folderRenameInputRef}
                         data-quiz-folder-rename-input="1"
                         value={folderRenameVal}
                         onChange={(e) => setFolderRenameVal(e.target.value)}
-                        onKeyDown={(e) => {
-                          e.stopPropagation();
-                          if (e.key === 'Escape') {
-                            e.preventDefault();
-                            folderRenameViaSubmitRef.current = false;
-                            setRenamingFolderId(null);
-                            setFolderRenameVal('');
-                          }
-                        }}
-                        onBlur={() => handleFolderRenameBlur(f.id, f.name)}
-                        ref={(el) => {
-                          if (!el || el.dataset.focusedOnce === '1') return;
-                          el.dataset.focusedOnce = '1';
-                          requestAnimationFrame(() => {
-                            el.focus();
-                            el.select();
-                          });
-                        }}
+                        onBlur={() => commitFolderName(f.id, f.name)}
                         className="w-full rounded-md border-2 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-app-text shadow-sm outline-none dark:bg-gray-900 dark:text-gray-100"
                         style={{ borderColor: folderAccent }}
                         aria-label={t.quizRename}
                       />
-                    </form>
+                    </div>
                   ) : (
                     <button
                       draggable={!f.system && !isEditing}
