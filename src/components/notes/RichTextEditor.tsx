@@ -4381,6 +4381,34 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     finishNewLineEditing(ed);
   };
 
+  const previousContentElement = (el: HTMLElement): HTMLElement | null => {
+    let node = el.previousElementSibling;
+    while (node instanceof HTMLElement && node.tagName === 'BR') {
+      node = node.previousElementSibling;
+    }
+    return node instanceof HTMLElement ? node : null;
+  };
+
+  const placeCaretAfterRemovedImageLine = (next: Element | null, imageFrame: HTMLElement) => {
+    let target = next instanceof HTMLElement ? next : null;
+    if (target?.tagName === 'HR') {
+      target = target.nextElementSibling instanceof HTMLElement ? target.nextElementSibling : null;
+    }
+    if (
+      target
+      && !target.classList.contains(NOTE_IMG_FRAME)
+      && !target.classList.contains(NOTE_YT_FRAME)
+    ) {
+      placeCaretInBlock(target, true);
+      return;
+    }
+    const line = document.createElement('div');
+    line.setAttribute('dir', 'auto');
+    line.innerHTML = '<br>';
+    imageFrame.insertAdjacentElement('afterend', line);
+    placeCaretInBlock(line, true);
+  };
+
   const runEditorBackspace = (e: { key: string; preventDefault: () => void; nativeEvent?: { isComposing?: boolean } }) => {
     if (e.key !== 'Backspace' || e.nativeEvent?.isComposing) return false;
     const ed = editorRef.current;
@@ -4410,6 +4438,52 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return false;
     }
 
+    // Line under an image: Backspace removes that line, never the image.
+    // Native editing deletes the contenteditable=false frame instead.
+    {
+      const line = getLineBlock(range.startContainer, ed);
+      if (
+        line
+        && line.tagName !== 'LI'
+        && !line.closest('li')
+        && !line.classList.contains(NOTE_IMG_FRAME)
+        && isCaretAtStartOfBlock(line, range)
+      ) {
+        const prev = previousContentElement(line);
+        if (prev?.classList.contains(NOTE_IMG_FRAME)) {
+          e.preventDefault();
+          if (isEmptyTextLine(line)) {
+            const next = line.nextElementSibling;
+            line.remove();
+            placeCaretAfterRemovedImageLine(next, prev);
+          }
+          hideImageToolbar();
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return handled();
+        }
+      }
+      const container = range.startContainer;
+      if (container instanceof HTMLElement && range.collapsed) {
+        const before = container.childNodes[range.startOffset - 1];
+        const after = container.childNodes[range.startOffset];
+        if (before instanceof HTMLElement && before.classList.contains(NOTE_IMG_FRAME)) {
+          e.preventDefault();
+          if (after instanceof HTMLElement && isEmptyTextLine(after)) {
+            const next = after.nextElementSibling;
+            after.remove();
+            placeCaretAfterRemovedImageLine(next, before);
+          }
+          hideImageToolbar();
+          saveSel();
+          readCommandState();
+          emitHtml();
+          return handled();
+        }
+      }
+    }
+
     // Selected YouTube embed: Backspace removes only the video.
     const selectedYt = selectedYtFrameRef.current;
     if (selectedYt?.isConnected && ed.contains(selectedYt)) {
@@ -4421,10 +4495,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       return handled();
     }
 
-    // Selected image frame: Backspace removes only the image (checkpoint already pushed).
+    // Selected image frame: Backspace removes only the image — not when the
+    // caret is already on a different text line (that path is handled above).
     {
       const selectedFrame = activeFrameRef.current;
-      if (selectedFrame?.isConnected && ed.contains(selectedFrame)) {
+      const caretLine = getLineBlock(range.startContainer, ed);
+      const caretOnSelectedImage = !caretLine || selectedFrame?.contains(range.startContainer);
+      if (selectedFrame?.isConnected && ed.contains(selectedFrame) && caretOnSelectedImage) {
         const img = selectedFrame.querySelector(':scope > img');
         if (img instanceof HTMLImageElement) {
           e.preventDefault();
