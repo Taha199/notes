@@ -3879,6 +3879,22 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     emitHtml();
   };
 
+  const handleDividerMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!editable || e.button !== 0) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const hr = target.closest('hr');
+    if (!(hr instanceof HTMLElement) || !ed.contains(hr)) return;
+    const prev = previousContentElement(hr);
+    if (!prev?.classList.contains(NOTE_IMG_FRAME) && !prev?.classList.contains(NOTE_YT_FRAME)) return;
+    e.preventDefault();
+    ed.focus({ preventScroll: true });
+    placeCaretImmediatelyAfter(prev);
+    saveSel();
+  };
+
   const applyBlockAlignment = (align: BlockAlign) => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -4389,24 +4405,28 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return node instanceof HTMLElement ? node : null;
   };
 
+  const placeCaretImmediatelyAfter = (frame: HTMLElement) => {
+    const range = document.createRange();
+    range.setStartAfter(frame);
+    range.collapse(true);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    savedRange.current = range.cloneRange();
+  };
+
   const placeCaretAfterRemovedImageLine = (next: Element | null, imageFrame: HTMLElement) => {
-    let target = next instanceof HTMLElement ? next : null;
-    if (target?.tagName === 'HR') {
-      target = target.nextElementSibling instanceof HTMLElement ? target.nextElementSibling : null;
-    }
     if (
-      target
-      && !target.classList.contains(NOTE_IMG_FRAME)
-      && !target.classList.contains(NOTE_YT_FRAME)
+      next instanceof HTMLElement
+      && next.tagName !== 'HR'
+      && !next.classList.contains(NOTE_IMG_FRAME)
+      && !next.classList.contains(NOTE_YT_FRAME)
+      && !isEmptyTextLine(next)
     ) {
-      placeCaretInBlock(target, true);
+      placeCaretInBlock(next, true);
       return;
     }
-    const line = document.createElement('div');
-    line.setAttribute('dir', 'auto');
-    line.innerHTML = '<br>';
-    imageFrame.insertAdjacentElement('afterend', line);
-    placeCaretInBlock(line, true);
+    placeCaretImmediatelyAfter(imageFrame);
   };
 
   const runEditorBackspace = (e: { key: string; preventDefault: () => void; nativeEvent?: { isComposing?: boolean } }) => {
@@ -4499,8 +4519,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     // caret is already on a different text line (that path is handled above).
     {
       const selectedFrame = activeFrameRef.current;
-      const caretLine = getLineBlock(range.startContainer, ed);
-      const caretOnSelectedImage = !caretLine || selectedFrame?.contains(range.startContainer);
+      const caretOnSelectedImage = !!selectedFrame?.contains(range.startContainer);
       if (selectedFrame?.isConnected && ed.contains(selectedFrame) && caretOnSelectedImage) {
         const img = selectedFrame.querySelector(':scope > img');
         if (img instanceof HTMLImageElement) {
@@ -6280,6 +6299,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             }
           }
           handleYouTubeEmbedMouseDown(e);
+          handleDividerMouseDown(e);
           handleCenteredLineClick(e);
           clearPendingFontMarker();
           requestAnimationFrame(() => sanitizeCaretFontContext(ed));
