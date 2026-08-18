@@ -1981,7 +1981,7 @@ export function QuizPage({
               (dragOverSetId === s.id && dragSetId.current
                 ? 'bg-primary/10 ring-2 ring-inset ring-primary/70 dark:bg-primary/20'
                 : isSelected
-                  ? 'bg-gray-100 ring-1 ring-inset ring-gray-200 dark:bg-white/10 dark:ring-white/10'
+                  ? 'bg-gray-200 ring-2 ring-inset ring-gray-300 shadow-sm dark:bg-white/20 dark:ring-white/25'
                   : 'hover:bg-white dark:hover:bg-white/5')}
             style={isSelected ? { boxShadow: `inset 4px 0 0 0 ${setAccent}` } : undefined}
           >
@@ -2219,7 +2219,7 @@ export function QuizPage({
                           : dragOverFolderId === f.id
                             ? 'bg-primary/20 ring-2 ring-inset ring-primary dark:bg-primary/30'
                             : isSelected
-                              ? 'bg-gray-100 ring-1 ring-inset ring-gray-200 dark:bg-white/10 dark:ring-white/10'
+                              ? 'bg-gray-200 ring-2 ring-inset ring-gray-300 shadow-sm dark:bg-white/20 dark:ring-white/25'
                               : 'hover:bg-white dark:hover:bg-white/5')}
                       style={isSelected ? { boxShadow: `inset 4px 0 0 0 ${folderAccent}` } : undefined}
                     >
