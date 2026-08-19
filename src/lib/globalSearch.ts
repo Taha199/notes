@@ -51,7 +51,7 @@ export function getQuizSearchPlainText(item: QuizItem) {
 export function quizMatchesSearch(item: QuizItem, search: string) {
   const query = normalizeSearch(search);
   if (!query) return true;
-  const haystack = normalizeSearch(getQuizSearchPlainText(item));
+  const haystack = quizSearchHaystack(item);
   return query.split(/\s+/).filter(Boolean).every((token) => haystack.includes(token));
 }
 
@@ -81,7 +81,32 @@ type CollectedQuiz = {
   fromNotes: boolean;
 };
 
-function collectQuizItems(quizzes: QuizItem[], quizSets: QuizSet[]): CollectedQuiz[] {
+export type { CollectedQuiz };
+
+type HaystackCacheEntry = { key: string; haystack: string };
+const quizHaystackCache = new WeakMap<QuizItem, HaystackCacheEntry>();
+
+function quizHaystackKey(item: QuizItem) {
+  return [
+    item.id,
+    item.noteTitle ?? '',
+    item.question ?? '',
+    item.answer ?? '',
+    item.explanation ?? '',
+    ...(item.options ?? []),
+  ].join('\0');
+}
+
+function quizSearchHaystack(item: QuizItem) {
+  const key = quizHaystackKey(item);
+  const cached = quizHaystackCache.get(item);
+  if (cached?.key === key) return cached.haystack;
+  const haystack = normalizeSearch(getQuizSearchPlainText(item));
+  quizHaystackCache.set(item, { key, haystack });
+  return haystack;
+}
+
+export function collectQuizItems(quizzes: QuizItem[], quizSets: QuizSet[]): CollectedQuiz[] {
   const seen = new Set<number>();
   const results: CollectedQuiz[] = [];
 
@@ -128,6 +153,7 @@ export function buildGlobalSearchResults(
   search: string,
   t: Translation,
   favQuizIds: Set<number>,
+  collectedQuizzes?: CollectedQuiz[],
 ): GlobalSearchResult[] {
   const query = normalizeSearch(search);
   if (!query) return [];
@@ -137,6 +163,7 @@ export function buildGlobalSearchResults(
   );
 
   const results: GlobalSearchResult[] = [];
+  const quizItems = collectedQuizzes ?? collectQuizItems(quizzes, quizSets);
 
   for (const note of notes) {
     if (!noteMatchesSearch(note, search)) continue;
@@ -156,7 +183,7 @@ export function buildGlobalSearchResults(
     });
   }
 
-  for (const { item, setId, setName, folderId, fromNotes } of collectQuizItems(quizzes, quizSets)) {
+  for (const { item, setId, setName, folderId, fromNotes } of quizItems) {
     if (!quizMatchesSearch(item, search)) continue;
     const isFavorite = favQuizIds.has(item.id) || favQuizIds.has(item.favOf ?? -1) || setId === FAVORITES_SET_ID;
     let categoryLabel: string;

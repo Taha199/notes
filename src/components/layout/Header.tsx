@@ -12,7 +12,7 @@ const ICONS: Record<Page, string> = {
 
 const navBtn = 'flex h-7 w-7 items-center justify-center rounded-lg border border-app-border text-app-text-secondary transition-colors hover:bg-app-bg hover:text-app-text disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
 
-const SEARCH_DEBOUNCE_MS = 280;
+const SEARCH_DEBOUNCE_MS = 420;
 
 export const Header = memo(function Header({
   page,

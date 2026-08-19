@@ -21,9 +21,21 @@ export function decodeBasicEntities(value: string) {
 
 export type SearchHitCounter = { value: number };
 
+type HaystackCacheEntry = { key: string; haystack: string };
+const noteHaystackCache = new WeakMap<Note, HaystackCacheEntry>();
+
+function noteHaystackKey(note: Note) {
+  return `${note.title ?? ''}\0${note.text ?? ''}\0${note.html ?? ''}\0${note.date ?? ''}`;
+}
+
 function noteSearchHaystack(note: Note) {
+  const key = noteHaystackKey(note);
+  const cached = noteHaystackCache.get(note);
+  if (cached?.key === key) return cached.haystack;
   const plainHtml = decodeBasicEntities(note.html.replace(/<[^>]*>/g, ' '));
-  return normalizeSearch([note.title, note.text, plainHtml, note.date].join(' '));
+  const haystack = normalizeSearch([note.title, note.text, plainHtml, note.date].join(' '));
+  noteHaystackCache.set(note, { key, haystack });
+  return haystack;
 }
 
 export function noteMatchesSearch(note: Note, search: string) {

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { NoteViewMode, Page } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { HighlightedText } from '../common/HighlightedText';
@@ -50,7 +51,7 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
-export function GlobalSearchResults({
+export const GlobalSearchResults = memo(function GlobalSearchResults({
   results,
   search,
   searchHitStarts,
@@ -178,4 +179,4 @@ export function GlobalSearchResults({
       })}
     </div>
   );
-}
+});

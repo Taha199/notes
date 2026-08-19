@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState, useMemo } from 'react';
 import type { Note, NoteViewMode } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { HighlightedText } from '../common/HighlightedText';
-import { getNoteSearchPlainText, highlightHtmlContent, type SearchHitCounter } from '../../lib/noteSearch';
+import { getNoteSearchPlainText, highlightHtmlContent, countSearchMatchesInText, type SearchHitCounter } from '../../lib/noteSearch';
 
 interface Props {
   note: Note;
@@ -75,6 +75,15 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
   const hitCounter: SearchHitCounter = { value: searchHitStart };
   const previewHtml = note.html || `<p>${bodyText}</p>`;
   const bodyPreview = hasSearch ? bodyText : bodyText.slice(0, 220);
+  const titleHitCount = useMemo(
+    () => (hasSearch && note.title ? countSearchMatchesInText(note.title, search) : 0),
+    [hasSearch, note.title, search],
+  );
+  const highlightedPreviewHtml = useMemo(() => {
+    if (!hasSearch) return previewHtml;
+    const counter: SearchHitCounter = { value: searchHitStart + titleHitCount };
+    return highlightHtmlContent(previewHtml, search, counter, activeSearchHitIndex);
+  }, [hasSearch, previewHtml, search, searchHitStart, titleHitCount, activeSearchHitIndex]);
   const favSearchHit =
     ' [&_.note-search-hit]:!rounded-sm [&_.note-search-hit]:!bg-orange-500 [&_.note-search-hit]:!px-0.5 [&_.note-search-hit]:!font-semibold [&_.note-search-hit]:!text-white [&_.note-search-hit]:shadow-sm dark:[&_.note-search-hit]:!bg-orange-400 dark:[&_.note-search-hit]:!text-white [&_.note-search-hit--active]:!bg-orange-600 [&_.note-search-hit--active]:!text-white [&_.note-search-hit--active]:!shadow-md dark:[&_.note-search-hit--active]:!bg-orange-300 dark:[&_.note-search-hit--active]:!text-gray-900';
 
@@ -120,9 +129,7 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
             <div
               className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_.note-img-frame]:cursor-zoom-in [&_.note-img-frame]:max-w-full [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:max-h-none [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:cursor-zoom-in [&_.note-img-frame_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
               dangerouslySetInnerHTML={{
-                __html: hasSearch
-                  ? highlightHtmlContent(previewHtml, search, hitCounter, activeSearchHitIndex)
-                  : previewHtml,
+                __html: highlightedPreviewHtml,
               }}
             />
           ) : (
