@@ -218,9 +218,14 @@ export function Dashboard() {
     const favItems = Array.isArray(raw)
       ? raw
       : raw && typeof raw === 'object'
-        ? Object.values(raw as Record<string, { favOf?: number }>)
+        ? Object.values(raw as Record<string, { favOf?: number; trashed?: boolean }>)
         : [];
-    return new Set(favItems.map((i) => i.favOf).filter((x): x is number => x != null));
+    return new Set(
+      favItems
+        .filter((i) => i && !i.trashed)
+        .map((i) => i.favOf)
+        .filter((x): x is number => x != null),
+    );
   }, [quizSets]);
   const hasSearch = normalizeSearch(search).length > 0;
   const showGlobalSearch = hasSearch && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb';

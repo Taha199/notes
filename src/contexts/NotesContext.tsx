@@ -8177,7 +8177,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = quizSetsRef.current.map((s) => {
       if (s.id !== setId) return s;
       found = true;
-      return { ...s, items: [...s.items, newItem], updatedAt: now };
+      let items = s.items;
+      if (setId === FAVORITES_SET_ID && item.favOf != null) {
+        items = items.filter((i) => !(i.trashed && i.favOf === item.favOf));
+      }
+      return { ...s, items: [...items, newItem], updatedAt: now };
     });
     if (!found) {
       console.error('[addItemToSet] quiz set not found:', setId);

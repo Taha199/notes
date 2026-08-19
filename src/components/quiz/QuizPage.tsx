@@ -247,7 +247,13 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
               aria-pressed={!!answerHidden}
             >{answerHidden ? '👁️' : '🙈'}</button>
           )}
-          <button onClick={() => onToggleFav(item)} className={'text-base transition-colors ' + ((favs.has(item.id) || item.favOf != null) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')} title={t.quizFavorite}>★</button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleFav(item); }}
+            className={'text-base transition-colors ' + ((favs.has(item.id) || item.favOf != null) ? 'text-amber-400' : 'text-app-text-secondary/40 hover:text-amber-400')}
+            title={t.quizFavorite}
+            aria-pressed={favs.has(item.id) || item.favOf != null}
+          >★</button>
           <button
             onClick={() => onSpeak(item.id)}
             className={'transition-colors ' + (speakingId === item.id ? 'text-primary' : 'text-app-text-secondary/40 hover:text-primary')}
@@ -354,7 +360,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
   && prev.hideAnswers === next.hideAnswers
   && prev.answerHidden === next.answerHidden
   && prev.speakingId === next.speakingId
-  && prev.favs.has(prev.item.id) === next.favs.has(next.item.id)
+  && (prev.favs.has(prev.item.id) || prev.item.favOf != null) === (next.favs.has(next.item.id) || next.item.favOf != null)
   && prev.progressMap?.[prev.item.id] === next.progressMap?.[next.item.id]
   && prev.questionNumber === next.questionNumber
   && prev.canReorder === next.canReorder
@@ -853,9 +859,10 @@ export function QuizPage({
     : favItemsRaw && typeof favItemsRaw === 'object'
       ? Object.values(favItemsRaw as Record<string, QuizItem>).filter(Boolean)
       : [];
+  const liveFavItems = useMemo(() => favItems.filter((i) => !i.trashed), [favItems]);
   const favs = useMemo(
-    () => new Set(favItems.map((i) => i.favOf).filter((x): x is number => x != null)),
-    [favItems]
+    () => new Set(liveFavItems.map((i) => i.favOf).filter((x): x is number => x != null)),
+    [liveFavItems],
   );
   const [speakingId, setSpeakingId] = useState<number | null>(null);
   const [allProgress, setAllProgress] = useState<Record<string, Record<number, 'known' | 'learning'>>>(loadProgress);
@@ -1524,7 +1531,7 @@ export function QuizPage({
   const toggleFav = (item: QuizItem) => {
     // Inside the Favorites set: the card itself is the copy — remove it.
     if (item.favOf != null) { removeItemFromSet(FAVORITES_SET_ID, item.id); return; }
-    const existing = favItems.find((i) => i.favOf === item.id);
+    const existing = liveFavItems.find((i) => i.favOf === item.id);
     if (existing) {
       removeItemFromSet(FAVORITES_SET_ID, existing.id);
     } else {
