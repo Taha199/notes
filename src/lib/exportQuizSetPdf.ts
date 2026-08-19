@@ -304,7 +304,9 @@ function buildCardElement(
       <span style="display:inline-flex;min-width:22px;height:22px;align-items:center;justify-content:center;border-radius:6px;background:#f0efff;color:#6c63ff;font-size:12px;font-weight:800">${index + 1}</span>
       <span style="font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9ca3af">${labels.question}</span>
     </div>
-    <div class="note-content" dir="auto" style="font-size:14px;font-weight:600;line-height:1.65">${prepareContentHtml(item.question)}</div>
+    <div style="border:1px solid #c7c2ff;border-radius:12px;background:#f6f4ff;padding:12px 14px;box-shadow:inset 3px 0 0 0 #6c63ff">
+      <div class="note-content" dir="auto" style="font-size:14px;font-weight:600;line-height:1.65">${prepareContentHtml(item.question)}</div>
+    </div>
   `;
   let answerHtml = `
     <div style="margin-bottom:8px;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#6c63ff">${labels.answer}</div>
@@ -538,6 +540,54 @@ export async function exportQuizSetToPdf(
     }
   };
 
+  const estimateBlocksHeight = (blocks: PdfBlock[], width: number, fontSize: number) => {
+    let total = 0;
+    for (const block of blocks) {
+      if (block.type === 'text') {
+        doc.setFontSize(fontSize);
+        const lines = doc.splitTextToSize(block.text || ' ', width) as string[];
+        total += Math.max(BODY_LINE, lines.length * BODY_LINE) + 1;
+      } else if (block.type === 'table') {
+        total += 16;
+      }
+    }
+    return Math.max(total, 8);
+  };
+
+  const drawFramedQuestion = (index: number, blocks: PdfBlock[]) => {
+    const framePad = 4.5;
+    const innerX = MARGIN + framePad + 1.5;
+    const innerW = contentWidth - framePad * 2 - 1.5;
+    const fontSize = 10.5;
+    const qBlocks = blocks.filter((b) => b.type !== 'image');
+
+    ensureSpace(24);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    setColor(BRAND.primary);
+    doc.text(String(index + 1), MARGIN, y + 4);
+    doc.setFontSize(6.5);
+    setColor(BRAND.textSecondary);
+    doc.text(labels.question.toUpperCase(), MARGIN + 8, y + 4);
+    y += 7;
+
+    const innerH = estimateBlocksHeight(qBlocks, innerW, fontSize);
+    ensureSpace(innerH + framePad * 2 + 6);
+    const frameY = y;
+    const frameH = innerH + framePad * 2;
+
+    setFill(BRAND.bg);
+    setDraw(BRAND.primary);
+    doc.setLineWidth(0.45);
+    doc.roundedRect(MARGIN, frameY, contentWidth, frameH, 3, 3, 'FD');
+    setFill(BRAND.primary);
+    doc.roundedRect(MARGIN, frameY, 1.2, frameH, 3, 3, 'F');
+
+    y = frameY + framePad;
+    drawBlocks(qBlocks, innerX, innerW, fontSize);
+    y = Math.max(y, frameY + frameH) + 5;
+  };
+
   const drawNativeItem = (index: number, item: QuizItem, extraImages: string[]) => {
     const qBlocks = parseBlocks(prepareContentHtml(item.question));
     const aBlocks = parseBlocks(prepareContentHtml(item.answer));
@@ -549,17 +599,7 @@ export async function exportQuizSetToPdf(
       || eBlocks.some((b) => b.type === 'table');
 
     if (stacked) {
-      ensureSpace(28);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      setColor(BRAND.primary);
-      doc.text(String(index + 1), MARGIN, y + 4);
-      doc.setFontSize(6.5);
-      setColor(BRAND.textSecondary);
-      doc.text(labels.question.toUpperCase(), MARGIN + 8, y + 4);
-      y += 7;
-      drawBlocks(qBlocks.filter((b) => b.type !== 'image'), MARGIN, contentWidth, 10);
-      y += 2;
+      drawFramedQuestion(index, qBlocks);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(6.5);
       setColor(BRAND.primary);
