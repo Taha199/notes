@@ -22,6 +22,7 @@ import { FilesLoadingIndicator } from '../files/FilesLoadingIndicator';
 import { quizPatchChangesContent } from '../../lib/quizContent';
 import { hasRichContent } from '../../lib/richContent';
 import { safeLocalStorageSet } from '../../lib/safeStorage';
+import { findQuizItemSource } from '../../lib/quizItemSource';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 /** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
@@ -119,9 +120,16 @@ interface QuizItemRowProps {
   questionNumber?: number;
   totalQuestions?: number;
   onMoveToPosition?: (targetPosition: number) => void;
+  sourceLocation?: {
+    folderName: string | null;
+    setName: string | null;
+    setId: string | null;
+    fromNotes: boolean;
+  } | null;
+  onOpenSource?: () => void;
 }
 
-const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition }: QuizItemRowProps) {
+const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition, sourceLocation, onOpenSource }: QuizItemRowProps) {
   const { t } = useLanguage();
   const [moveOpen, setMoveOpen] = useState(false);
   const [keepCopy, setKeepCopy] = useState(false);
@@ -181,6 +189,32 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
             </div>
           )}
           <div className="flex min-w-0 flex-col items-start overflow-x-hidden px-5 py-4">
+            {sourceLocation && (sourceLocation.folderName || sourceLocation.setName) && (
+              <p className="mb-2 w-full px-0.5 text-[11px] text-app-text-secondary/70 dark:text-gray-500">
+                {sourceLocation.folderName && (
+                  <span>{sourceLocation.folderName}</span>
+                )}
+                {sourceLocation.folderName && sourceLocation.setName && (
+                  <span className="mx-1.5 text-app-text-secondary/35 dark:text-gray-600">·</span>
+                )}
+                {sourceLocation.setName && (
+                  onOpenSource && (sourceLocation.setId || sourceLocation.fromNotes) ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenSource();
+                      }}
+                      className="font-semibold text-primary/90 transition-colors hover:text-primary hover:underline dark:text-primary/80"
+                    >
+                      {sourceLocation.setName}
+                    </button>
+                  ) : (
+                    <span className="font-semibold">{sourceLocation.setName}</span>
+                  )
+                )}
+              </p>
+            )}
             <span className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase text-app-text-secondary/45">
               {t.quizQuestionLabel}
               {studyMore && (
@@ -365,6 +399,10 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
   && prev.questionNumber === next.questionNumber
   && prev.canReorder === next.canReorder
   && prev.totalQuestions === next.totalQuestions
+  && prev.sourceLocation?.setId === next.sourceLocation?.setId
+  && prev.sourceLocation?.setName === next.sourceLocation?.setName
+  && prev.sourceLocation?.folderName === next.sourceLocation?.folderName
+  && prev.sourceLocation?.fromNotes === next.sourceLocation?.fromNotes
 ));
 
 const OPT_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
@@ -1013,6 +1051,50 @@ export function QuizPage({
     switchFormsScope(setId, folderId);
     setSelectedFolderId(folderId);
     setSelectedSetId(setId);
+  };
+
+  const scrollToQuizItem = (itemId: number) => {
+    let cancelled = false;
+    let attempts = 0;
+    let retryTimer = 0;
+
+    const tryScroll = () => {
+      if (cancelled) return;
+      const el = document.getElementById(`quiz-item-${itemId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2', 'ring-primary/50');
+        window.setTimeout(() => {
+          el.classList.remove('ring-2', 'ring-primary/50');
+        }, 1600);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 24) retryTimer = window.setTimeout(tryScroll, 50);
+    };
+
+    const scrollTimer = window.setTimeout(tryScroll, 80);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(retryTimer);
+    };
+  };
+
+  const openQuestionSource = (sourceItemId: number) => {
+    const orphan = quizzes.find((q) => q.id === sourceItemId && !q.trashed);
+    if (orphan) {
+      selectQuizFolder(null, null);
+    } else {
+      for (const set of allQuizSets) {
+        if (set.trashed) continue;
+        if (coerceQuizItems(set.items).some((i) => i.id === sourceItemId && !i.trashed)) {
+          selectQuizFolder(set.folderId ?? null, set.id);
+          break;
+        }
+      }
+    }
+    scrollToQuizItem(sourceItemId);
   };
 
   const updateForm = (formId: string, patch: Partial<Omit<OpenQuestionForm, 'formId' | 'scopeKey'>>) => {
@@ -1767,6 +1849,18 @@ export function QuizPage({
 
   const renderItem = (item: QuizItem, visualIndex: number) => {
     const questionNumber = visualIndex + 1;
+    const sourceItemId = selectedSetId === FAVORITES_SET_ID ? item.favOf ?? null : null;
+    const source = sourceItemId
+      ? findQuizItemSource(sourceItemId, allQuizSets, allQuizFolders, quizzes)
+      : null;
+    const sourceLocation = source && (source.folderName || source.setName)
+      ? {
+          folderName: source.folderName,
+          setName: source.setName ?? (source.fromNotes ? t.searchCategoryQuiz : null),
+          setId: source.setId,
+          fromNotes: source.fromNotes,
+        }
+      : null;
     return (
       <QuizItemRow
         key={`${item.id}-${item.updatedAt || ''}-${(item.question || '').length}-${(item.answer || '').length}`}
@@ -1796,6 +1890,8 @@ export function QuizPage({
         questionNumber={questionNumber}
         totalQuestions={orderedItems.length}
         onMoveToPosition={(targetPosition) => handleMoveToPosition(item.id, targetPosition)}
+        sourceLocation={sourceLocation}
+        onOpenSource={sourceItemId ? () => openQuestionSource(sourceItemId) : undefined}
       />
     );
   };
