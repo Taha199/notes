@@ -226,8 +226,32 @@ function elementHasToggleMark(el: HTMLElement, cmd: string): boolean {
   return styleHasToggleMark(el.style, cmd);
 }
 
+/** Explicit inline style that cancels a mark (overrides a bold/italic ancestor). */
+function elementCancelsToggleMark(el: HTMLElement, cmd: string): boolean {
+  const cfg = TOGGLE_STYLE_PROP[cmd];
+  if (!cfg) return false;
+  const raw = ((el.style as unknown as Record<string, string>)[cfg.prop] || '').toLowerCase().trim();
+  if (!raw) return false;
+  if (cmd === 'bold') {
+    const n = parseInt(raw, 10);
+    return raw === 'normal' || raw === 'lighter' || (!Number.isNaN(n) && n < 600);
+  }
+  if (cmd === 'italic') return raw === 'normal';
+  if (cmd === 'underline' || cmd === 'strikeThrough') {
+    return raw === 'none';
+  }
+  return false;
+}
+
+function applyToggleMarkOffAttrs(el: HTMLElement, cmd: string) {
+  if (cmd === 'bold') el.style.fontWeight = 'normal';
+  else if (cmd === 'italic') el.style.fontStyle = 'normal';
+  else if (cmd === 'underline' || cmd === 'strikeThrough') el.style.textDecoration = 'none';
+}
+
 /** True when this element introduces the mark vs its parent (inline or computed). */
 function elementIntroducesToggleMark(el: HTMLElement, cmd: string, boundary: Node): boolean {
+  if (elementCancelsToggleMark(el, cmd)) return false;
   if (elementHasToggleMark(el, cmd)) return true;
   if (cmd !== 'bold' && cmd !== 'italic' && cmd !== 'underline' && cmd !== 'strikeThrough') return false;
   const cs = window.getComputedStyle(el);
@@ -295,6 +319,19 @@ function unwrapToggleMarkElement(el: HTMLElement, cmd: string) {
   }
 }
 
+function rangeFullyContainsNode(range: Range, node: Node): boolean {
+  const probe = document.createRange();
+  try {
+    probe.selectNodeContents(node);
+  } catch {
+    return false;
+  }
+  return (
+    range.compareBoundaryPoints(Range.START_TO_START, probe) <= 0
+    && range.compareBoundaryPoints(Range.END_TO_END, probe) >= 0
+  );
+}
+
 /** Strip B/I/U/S markup inside a DocumentFragment before re-wrapping. */
 function stripToggleMarkInFragment(root: ParentNode, cmd: string) {
   const hit = new Set<HTMLElement>();
@@ -307,11 +344,30 @@ function stripToggleMarkInFragment(root: ParentNode, cmd: string) {
   });
 }
 
-/** Strip B/I/U/S markup inside a range when toggle-off is requested. */
-function stripToggleMarkInRange(range: Range, cmd: string) {
+/** Wrap selection in an explicit "mark off" span (overrides parent bold/italic/etc.). */
+function forceClearToggleMarkInRange(range: Range, cmd: string): HTMLElement | null {
+  try {
+    const contents = range.extractContents();
+    stripToggleMarkInFragment(contents, cmd);
+    const el = document.createElement('span');
+    applyToggleMarkOffAttrs(el, cmd);
+    el.appendChild(contents);
+    range.insertNode(el);
+    return el;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Strip B/I/U/S inside a range when toggle-off is requested.
+ * Unwraps marks fully inside the selection; if a bold ancestor still covers the
+ * selection (or only computed weight remains), wraps with an explicit off style.
+ */
+function stripToggleMarkInRange(range: Range, cmd: string, boundary: Node): HTMLElement | null {
   const root = range.commonAncestorContainer;
   const rootEl = root.nodeType === Node.TEXT_NODE ? root.parentElement : (root instanceof Element ? root : null);
-  if (!rootEl) return;
+  if (!rootEl) return null;
 
   const candidates = new Set<HTMLElement>();
   if (rootEl instanceof HTMLElement && elementHasToggleMark(rootEl, cmd)) candidates.add(rootEl);
@@ -325,9 +381,38 @@ function stripToggleMarkInRange(range: Range, cmd: string) {
     if (elementHasToggleMark(node, cmd)) candidates.add(node);
   });
 
-  [...candidates]
+  // Toolbar detects bold via computed style / ancestors; strip must use the same path
+  // or toggle-off no-ops while the B button stays lit.
+  const texts = collectTextNodesInRange(range);
+  if (texts.length === 0) {
+    const mark = findToggleMarkAncestor(range.startContainer, cmd, boundary);
+    if (mark) candidates.add(mark);
+  } else {
+    texts.forEach((t) => {
+      const mark = findToggleMarkAncestor(t, cmd, boundary);
+      if (mark) candidates.add(mark);
+    });
+  }
+
+  let needsForce = false;
+  const unwrapList: HTMLElement[] = [];
+  candidates.forEach((el) => {
+    if (rangeFullyContainsNode(range, el)) unwrapList.push(el);
+    else needsForce = true;
+  });
+
+  unwrapList
     .sort((a, b) => (a.contains(b) ? 1 : b.contains(a) ? -1 : 0))
     .forEach((el) => unwrapToggleMarkElement(el, cmd));
+
+  try {
+    if (needsForce || rangeIsFullyToggleMarked(range, cmd, boundary)) {
+      return forceClearToggleMarkInRange(range, cmd);
+    }
+  } catch {
+    /* range may be invalid after unwrap */
+  }
+  return null;
 }
 
 function nodeHasToggleMarkAncestor(node: Node, cmd: string, boundary: Node): boolean {
@@ -337,7 +422,11 @@ function nodeHasToggleMarkAncestor(node: Node, cmd: string, boundary: Node): boo
 function findToggleMarkAncestor(node: Node, cmd: string, boundary: Node): HTMLElement | null {
   let el: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
   while (el && el !== boundary) {
-    if (el instanceof HTMLElement && elementIntroducesToggleMark(el, cmd, boundary)) return el;
+    if (el instanceof HTMLElement) {
+      // Inner font-weight:normal (etc.) wins over an outer bold ancestor.
+      if (elementCancelsToggleMark(el, cmd)) return null;
+      if (elementIntroducesToggleMark(el, cmd, boundary)) return el;
+    }
     el = el.parentNode;
   }
   return null;
@@ -4843,10 +4932,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       && ed.contains(sel.anchorNode)
     );
     // queryCommandState is document-global and stays sticky after unwrap — ignore it.
-    // Toolbar active state comes only from DOM marks at the caret.
-    if (selInThisEditor) {
+    // Toolbar active state comes only from DOM marks at the caret / selection.
+    if (selInThisEditor && sel?.rangeCount && ed) {
+      const range = sel.getRangeAt(0);
       TOGGLE_COMMANDS.forEach((c) => {
-        if (ed && sel?.anchorNode && nodeHasToggleMarkAncestor(sel.anchorNode, c, ed)) {
+        if (!range.collapsed) {
+          if (rangeIsFullyToggleMarked(range, c, ed)) active.add(c);
+        } else if (sel.anchorNode && nodeHasToggleMarkAncestor(sel.anchorNode, c, ed)) {
           active.add(c);
         }
       });
@@ -5100,7 +5192,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const snaps = targets.map((t) => t.cloneRange());
     snaps.forEach((sub) => {
       if (turnOff) {
-        stripToggleMarkInRange(sub, cmd);
+        const cleared = stripToggleMarkInRange(sub, cmd, ed);
+        if (cleared) wrapped.push(cleared);
       } else {
         const el = wrapRangeWithToggleMark(sub, cmd);
         if (el) wrapped.push(el);
