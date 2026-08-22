@@ -1545,9 +1545,20 @@ export function QuizPage({
   const folderRenameValRef = useRef('');
   folderRenameValRef.current = folderRenameVal;
   const renamingFolderIdRef = useRef<string | null>(null);
-  renamingFolderIdRef.current = renamingFolderId;
+  const folderRenameClosingRef = useRef(false);
   const folderRenameInputRef = useRef<HTMLInputElement | null>(null);
   const finishFolderRenameRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    // Keep ref in sync from state only — never overwrite an intentional close
+    // mid-commit (parent setQuizFolders can re-render before setState(null)).
+    if (folderRenameClosingRef.current) {
+      if (renamingFolderId != null) setRenamingFolderId(null);
+      renamingFolderIdRef.current = null;
+      return;
+    }
+    renamingFolderIdRef.current = renamingFolderId;
+  }, [renamingFolderId]);
   const [folderCtxMenu, setFolderCtxMenu] = useState<{ folderId: string; x: number; y: number; flip?: boolean } | null>(null);
   const [folderColorPicker, setFolderColorPicker] = useState(false);
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<{ id: string; name: string } | null>(null);
@@ -1671,12 +1682,21 @@ export function QuizPage({
   };
 
   const stopFolderRename = () => {
+    folderRenameClosingRef.current = true;
     renamingFolderIdRef.current = null;
     setRenamingFolderId(null);
     setFolderRenameVal('');
   };
 
+  const beginFolderRename = (folderId: string, name: string) => {
+    folderRenameClosingRef.current = false;
+    renamingFolderIdRef.current = folderId;
+    setRenamingFolderId(folderId);
+    setFolderRenameVal(name);
+  };
+
   const commitFolderName = (folderId: string, fallbackName: string) => {
+    if (folderRenameClosingRef.current) return;
     if (renamingFolderIdRef.current !== folderId) return;
     const name = String(folderRenameValRef.current ?? '').trim().replace(/\s+/g, ' ') || fallbackName;
     const duplicate = quizFolders.some((folder) => (
@@ -1685,17 +1705,19 @@ export function QuizPage({
       && typeof folder.name === 'string'
       && normalizeQuizName(folder.name) === normalizeQuizName(name)
     ));
+    // Close the editor first so a cloud/parent re-render cannot leave the
+    // input stuck open after Enter (save already happened / will happen).
+    stopFolderRename();
     if (duplicate) {
       setNameAlert('folder');
-    } else if (name) {
-      renameQuizFolder(folderId, name);
+      return;
     }
-    stopFolderRename();
+    if (name) renameQuizFolder(folderId, name);
   };
 
   finishFolderRenameRef.current = () => {
     const folderId = renamingFolderIdRef.current;
-    if (!folderId) return;
+    if (!folderId || folderRenameClosingRef.current) return;
     const fallback = quizFolders.find((folder) => folder.id === folderId)?.name
       || folderRenameValRef.current
       || t.quizNewFolder;
@@ -1708,28 +1730,13 @@ export function QuizPage({
     input?.focus();
     input?.select();
 
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        stopFolderRename();
-        return;
-      }
-      if (e.key !== 'Enter') return;
-      e.preventDefault();
-      e.stopPropagation();
-      finishFolderRenameRef.current();
-    };
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target;
       if (target instanceof Element && target.closest('[data-quiz-folder-rename]')) return;
       finishFolderRenameRef.current();
     };
-    document.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('pointerdown', onPointerDown, true);
     };
   }, [renamingFolderId]);
@@ -1745,8 +1752,7 @@ export function QuizPage({
     const folder = addQuizFolder(name);
     selectQuizFolder(folder.id, null);
     requestAnimationFrame(() => {
-      setRenamingFolderId(folder.id);
-      setFolderRenameVal(name);
+      beginFolderRename(folder.id, name);
     });
   };
 
@@ -2230,22 +2236,35 @@ export function QuizPage({
                 return (
                 <div key={f.id} className="group/fl relative">
                   {isEditing ? (
-                    <div
+                    <form
                       data-quiz-folder-rename="1"
                       className="relative mx-1.5 my-0.5 rounded-lg bg-gray-100/90 py-2 pl-3 pr-2 dark:bg-white/10"
                       style={{ boxShadow: `inset 4px 0 0 0 ${folderAccent}` }}
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        commitFolderName(f.id, f.name);
+                      }}
                     >
                       <input
                         ref={folderRenameInputRef}
                         data-quiz-folder-rename-input="1"
                         value={folderRenameVal}
                         onChange={(e) => setFolderRenameVal(e.target.value)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            stopFolderRename();
+                          }
+                        }}
                         onBlur={() => commitFolderName(f.id, f.name)}
                         className="w-full rounded-md border-2 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-app-text shadow-sm outline-none dark:bg-gray-900 dark:text-gray-100"
                         style={{ borderColor: folderAccent }}
                         aria-label={t.quizRename}
                       />
-                    </div>
+                    </form>
                   ) : (
                     <button
                       draggable={!f.system && !isEditing}
@@ -2260,8 +2279,7 @@ export function QuizPage({
                         if (f.system) return;
                         e.preventDefault();
                         e.stopPropagation();
-                        setRenamingFolderId(f.id);
-                        setFolderRenameVal(f.name);
+                        beginFolderRename(f.id, f.name);
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault();
@@ -2829,7 +2847,7 @@ export function QuizPage({
           <div className="fixed inset-0 z-40" onClick={() => { setFolderCtxMenu(null); setFolderColorPicker(false); }} onContextMenu={(e) => { e.preventDefault(); setFolderCtxMenu(null); }} />
           <div className="fixed z-50 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800" style={folderCtxMenu.flip ? { bottom: folderCtxMenu.y, left: folderCtxMenu.x } : { top: folderCtxMenu.y, left: folderCtxMenu.x }}>
             <button
-              onClick={() => { const f = quizFolders.find((x) => x.id === folderCtxMenu.folderId); if (f) { setRenamingFolderId(f.id); setFolderRenameVal(f.name); } setFolderCtxMenu(null); }}
+              onClick={() => { const f = quizFolders.find((x) => x.id === folderCtxMenu.folderId); if (f) beginFolderRename(f.id, f.name); setFolderCtxMenu(null); }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
             >{t.quizRename}</button>
             <button
