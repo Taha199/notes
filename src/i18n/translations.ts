@@ -441,6 +441,7 @@ export interface Translation {
   quizQuestionsFromNotes: string;
   quizQuestionOne: string;
   quizQuestionMany: string;
+  quizScrollToLast: string;
   quizKnownProgress: string;
   quizHideAnswers: string;
   quizShowAnswers: string;
@@ -867,6 +868,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizQuestionsFromNotes: 'Questions from Notes',
     quizQuestionOne: 'question',
     quizQuestionMany: 'questions',
+    quizScrollToLast: 'Go to last question',
     quizKnownProgress: 'known',
     quizHideAnswers: 'Hide answers',
     quizShowAnswers: 'Show answers',
@@ -1291,6 +1293,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizQuestionsFromNotes: 'Frågor från anteckningar',
     quizQuestionOne: 'fråga',
     quizQuestionMany: 'frågor',
+    quizScrollToLast: 'Gå till sista frågan',
     quizKnownProgress: 'kan',
     quizHideAnswers: 'Dölj svar',
     quizShowAnswers: 'Visa svar',

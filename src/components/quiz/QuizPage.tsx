@@ -1832,6 +1832,12 @@ export function QuizPage({
     });
   }, [displayItems, itemSort, currentProgress, selectedSetId]);
 
+  const scrollToLastQuestion = () => {
+    const last = orderedItems[orderedItems.length - 1];
+    if (!last) return;
+    scrollToQuizItem(last.id);
+  };
+
   const studyItems = useMemo(() => orderedItems.filter((item) => !item.draft), [orderedItems]);
 
   const canReorder = orderedItems.length > 1 && (!!selectedSetId || isNotesView);
@@ -2520,11 +2526,28 @@ export function QuizPage({
                   className="shrink-0 rounded-md px-2 py-1.5 text-[14px] font-bold text-primary"
                   title={t.quizRename}
                 >✓</button>
-                <span className="shrink-0 text-[11px] font-bold normal-case tracking-normal text-app-text-secondary/70 dark:text-gray-500">
-                  — {setBodiesLoading ? expectedSetCount : displayItems.length}{' '}
-                  {(setBodiesLoading ? expectedSetCount : displayItems.length) === 1
-                    ? t.quizQuestionOne
-                    : t.quizQuestionMany}
+                <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-bold normal-case tracking-normal text-app-text-secondary/70 dark:text-gray-500">
+                  <span>
+                    — {setBodiesLoading ? expectedSetCount : displayItems.length}{' '}
+                    {(setBodiesLoading ? expectedSetCount : displayItems.length) === 1
+                      ? t.quizQuestionOne
+                      : t.quizQuestionMany}
+                  </span>
+                  {orderedItems.length > 1 && (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={scrollToLastQuestion}
+                      title={t.quizScrollToLast}
+                      aria-label={t.quizScrollToLast}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-app-text-secondary/55 transition hover:bg-primary/10 hover:text-primary dark:hover:bg-primary/15"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M12 5v14" />
+                        <path d="m19 12-7 7-7-7" />
+                      </svg>
+                    </button>
+                  )}
                 </span>
               </div>
             ) : (
@@ -2552,16 +2575,50 @@ export function QuizPage({
                       <span className="shrink-0 text-[11px] opacity-40 transition group-hover/rename:opacity-80" aria-hidden>✏️</span>
                     )}
                   </button>
-                  <span className="font-bold normal-case tracking-normal text-app-text-secondary/70 dark:text-gray-500">
-                    — {setBodiesLoading ? expectedSetCount : displayItems.length}{' '}
-                    {(setBodiesLoading ? expectedSetCount : displayItems.length) === 1
-                      ? t.quizQuestionOne
-                      : t.quizQuestionMany}
+                  <span className="inline-flex items-center gap-1 font-bold normal-case tracking-normal text-app-text-secondary/70 dark:text-gray-500">
+                    <span>
+                      — {setBodiesLoading ? expectedSetCount : displayItems.length}{' '}
+                      {(setBodiesLoading ? expectedSetCount : displayItems.length) === 1
+                        ? t.quizQuestionOne
+                        : t.quizQuestionMany}
+                    </span>
+                    {orderedItems.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={scrollToLastQuestion}
+                        title={t.quizScrollToLast}
+                        aria-label={t.quizScrollToLast}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-app-text-secondary/55 transition hover:bg-primary/10 hover:text-primary dark:hover:bg-primary/15"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M12 5v14" />
+                          <path d="m19 12-7 7-7-7" />
+                        </svg>
+                      </button>
+                    )}
                   </span>
                 </span>
               ) : isFolderEmptyView
                 ? `📁 ${selectedFolder?.system === 'favorites' ? t.quizFavorites : selectedFolder?.system ? t.quizRestored : selectedFolder?.name ?? t.quizFolder} — ${t.quizSetsCount.replace('{n}', String(userSetsInFolder(selectedFolderId ?? '').length))}`
-                : `🧠 ${t.quizQuestionsFromNotes} — ${displayItems.length} ${displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}`}
+                : (
+                  <span className="inline-flex flex-wrap items-center gap-1 normal-case tracking-normal">
+                    <span>🧠 {t.quizQuestionsFromNotes} — {displayItems.length} {displayItems.length === 1 ? t.quizQuestionOne : t.quizQuestionMany}</span>
+                    {orderedItems.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={scrollToLastQuestion}
+                        title={t.quizScrollToLast}
+                        aria-label={t.quizScrollToLast}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-app-text-secondary/55 transition hover:bg-primary/10 hover:text-primary dark:hover:bg-primary/15"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M12 5v14" />
+                          <path d="m19 12-7 7-7-7" />
+                        </svg>
+                      </button>
+                    )}
+                  </span>
+                )}
               {setBodiesLoading && (
                 <span className="ml-2 font-normal normal-case tracking-normal text-primary">
                   · {t.quizLoadingSetProgress
