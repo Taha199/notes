@@ -8,6 +8,18 @@ export const BULLET_PREFIX_RE =
 
 const PSEUDO_LIST_BLOCK_TAGS = new Set(['DIV', 'P', 'H1', 'H2', 'H3']);
 const STRONG_BULLET_RE = /[\uF0B7\uF0A7\u2022\u2023\u2043\u2219\u2024\u25E6\u25AA\u25CF\u25CB•●◦▪▫‣⁃·∙・*○■□➢➤]/;
+/** Hyphen/plus — keep as normal typing; only paste/toolbar should make real lists. */
+const WEAK_TYPED_LIST_MARKER_RE = /[-–—+]/;
+
+/** True for ChatGPT-style • markers that should auto-promote; false for typed "-" / "+". */
+export function isStrongPseudoBulletMarker(marker: string): boolean {
+  return STRONG_BULLET_RE.test(marker);
+}
+
+/** Typed "-" under a paragraph must stay plain text, not turn into a list. */
+export function isWeakTypedListMarker(marker: string): boolean {
+  return WEAK_TYPED_LIST_MARKER_RE.test(marker) && !STRONG_BULLET_RE.test(marker);
+}
 
 /** True when caret sits inside the leading "• " zone (so Backspace can remove the bullet). */
 export function isCaretInBulletPrefixZone(block: HTMLElement, range: Range): boolean {

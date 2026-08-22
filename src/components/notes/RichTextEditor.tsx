@@ -42,6 +42,7 @@ import {
   insertParagraphAboveList,
   isolateCaretLineForList,
   isCaretInBulletPrefixZone,
+  isWeakTypedListMarker,
   mergeListWithNeighbors,
   normalizePseudoListsInHtmlString,
   proseAnchorToKeepOutOfList,
@@ -2691,7 +2692,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const block = getLineBlock(range.startContainer, ed);
     if (!block || block.tagName === 'LI' || block.closest('li')) return false;
     const match = getBlockPrefixMatch(block);
-    if (!match) return false;
+    if (!match || isWeakTypedListMarker(match[0])) return false;
 
     const afterPrefix = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim();
     // Empty "•" line, or caret in the "• " zone / start → remove the stuck bullet marker.
@@ -2777,7 +2778,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const block = getLineBlock(range.startContainer, ed);
     if (block && block.tagName !== 'LI' && !block.closest('li')) {
       const match = getBlockPrefixMatch(block);
-      if (match) {
+      // A typed "-" is normal text, not a stuck bullet to strip.
+      if (match && !isWeakTypedListMarker(match[0])) {
         const afterPrefix = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').replace(/\u200B/g, '').replace(/\u00a0/g, ' ').trim();
         if (!afterPrefix) return true;
       }
@@ -2869,7 +2871,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const continuePseudoListOnEnter = (block: HTMLElement, range: Range): boolean => {
     const match = getBlockPrefixMatch(block);
-    if (!match || isNumberedPrefix(match)) return false;
+    // Typed "-" / "+" must stay plain text — only real • markers continue as lists.
+    if (!match || isNumberedPrefix(match) || isWeakTypedListMarker(match[0])) return false;
 
     const contentText = (block.textContent ?? '').replace(BULLET_PREFIX_RE, '').trim();
     if (!contentText) {
@@ -4868,7 +4871,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         if (canOutdentListItem(li)) active.add('canOutdentList');
       } else {
         const block = getLineBlock(sel.anchorNode, ed);
-        if (block && block.tagName !== 'LI' && !block.closest('li') && getBlockPrefixMatch(block)) {
+        const prefix = block && block.tagName !== 'LI' && !block.closest('li')
+          ? getBlockPrefixMatch(block)
+          : null;
+        // Do not light up the list button for a typed "-" — only real • / lists.
+        if (prefix && !isWeakTypedListMarker(prefix[0])) {
           active.add('insertUnorderedList');
         }
       }
@@ -6422,13 +6429,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
             });
             live.querySelectorAll('ul, ol').forEach((list) => list.setAttribute('dir', 'auto'));
             stripEmptyFontSpans(live);
-            const promoted = promotePseudoListsToNative(live);
+            // Do NOT promote typed "-" / pseudo markers here — lists are created
+            // only via the toolbar or paste. Auto-convert on every keystroke made
+            // a hyphen under a paragraph turn into a bullet list.
             const listsCleared = cleanupOrphanEmptyLists(live);
             const ytChanged = normalizeYouTubeEmbeds(live);
             syncYouTubeRemoveChrome(live);
             const linkChanged = normalizeAutoLinks(live);
             const tableChanged = normalizeTablesInEditor(live);
-            if (promoted || listsCleared || ytChanged || linkChanged || tableChanged) {
+            if (listsCleared || ytChanged || linkChanged || tableChanged) {
               readCommandState();
               emitHtml();
             }

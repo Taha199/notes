@@ -13,6 +13,7 @@ import {
   extractListItemToRootParagraph,
   getStuckInnerBlockInListItem,
   inferPlainListType,
+  isWeakTypedListMarker,
   plainTextToMixedHtml,
   isCaretAtStartOfBlock,
   isCaretInBulletPrefixZone,
@@ -290,6 +291,14 @@ describe('listEditorBehavior', () => {
   it('BULLET_PREFIX_RE matches pseudo bullets', () => {
     expect('• test'.match(BULLET_PREFIX_RE)?.[0]).toBe('• ');
     expect('1. test'.match(BULLET_PREFIX_RE)?.[0]).toBe('1. ');
+  });
+
+  it('isWeakTypedListMarker treats hyphen/plus as plain typing markers', () => {
+    expect(isWeakTypedListMarker('- ')).toBe(true);
+    expect(isWeakTypedListMarker('– ')).toBe(true);
+    expect(isWeakTypedListMarker('+ ')).toBe(true);
+    expect(isWeakTypedListMarker('• ')).toBe(false);
+    expect(isWeakTypedListMarker('1. ')).toBe(false);
   });
 
   it('shouldRemoveOrphanEmptyLists keeps multi-item lists when all items are empty', () => {
