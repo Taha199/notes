@@ -268,11 +268,20 @@ body {
   max-height: none !important;
   margin: 0;
   border-radius: 0;
+  transform-origin: top center;
+  transition: transform 0.12s ease;
 }
 
 /* Soft height cap for legacy bare images (overridden by the frame rule above). */
 .note-content img {
   max-height: 280px;
+}
+
+/* Shrink image toward the top while selected so the overlay toolbar fits in the
+   freed visual space without changing the frame's layout box (no text jump). */
+.note-content .note-img-frame--active:not(.note-img-frame--resizing) > img,
+[contenteditable] .note-img-frame--active:not(.note-img-frame--resizing) > img {
+  transform: scale(var(--note-img-select-scale, 0.9));
 }
 
 /* Host stays in the frame for structure/serialize stripping; the real toolbar is

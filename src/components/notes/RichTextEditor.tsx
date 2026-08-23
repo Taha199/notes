@@ -805,14 +805,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
     });
     // Ephemeral selection chrome must not persist into saved HTML.
-    const clearedFrames: { frame: HTMLElement; active: boolean; resizing: boolean }[] = [];
+    const clearedFrames: { frame: HTMLElement; scale: string; active: boolean; resizing: boolean }[] = [];
     ed.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
       const active = node.classList.contains('note-img-frame--active');
       const resizing = node.classList.contains('note-img-frame--resizing');
-      const hadScale = !!node.style.getPropertyValue('--note-img-select-scale');
-      if (!active && !resizing && !hadScale) return;
-      clearedFrames.push({ frame: node, active, resizing });
+      const scale = node.style.getPropertyValue('--note-img-select-scale');
+      if (!active && !resizing && !scale) return;
+      clearedFrames.push({ frame: node, scale, active, resizing });
       node.classList.remove('note-img-frame--active', 'note-img-frame--resizing');
       node.style.removeProperty('--note-img-select-scale');
     });
@@ -849,9 +849,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       }
       parent.appendChild(host);
     });
-    clearedFrames.forEach(({ frame, active, resizing }) => {
+    clearedFrames.forEach(({ frame, scale, active, resizing }) => {
       if (active) frame.classList.add('note-img-frame--active');
       if (resizing) frame.classList.add('note-img-frame--resizing');
+      if (scale) frame.style.setProperty('--note-img-select-scale', scale);
     });
     clearedYt.forEach((frame) => frame.classList.add('note-yt-frame--active'));
     // Guarantee any pasted "• …" / "1. …" pseudo-lists persist as real ul/ol.
@@ -1051,42 +1052,47 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     el: img,
     frame,
     host: getToolbarHost(frame),
-    // Prefer the frame (selection border). Live re-read in portals; this is a seed.
-    rect: frame.getBoundingClientRect(),
+    rect: img.getBoundingClientRect(),
   });
 
+  /** Toolbar is ~38px tall; scale image so that space opens at the bottom for the overlay. */
+  const NOTE_IMG_TOOLBAR_RESERVE_PX = 38;
   /** Full bar: 10×28px buttons + 2 dividers + gaps + padding. Below this, collapse into overflow. */
   const NOTE_IMG_TOOLBAR_FULL_MIN_PX = 324;
-  const NOTE_IMG_TOOLBAR_BAR_H = 36;
 
   const clearImageSelectionChrome = (frame: HTMLElement | null) => {
     if (!frame) return;
     frame.classList.remove('note-img-frame--active', 'note-img-frame--resizing');
-    // Legacy select-scale chrome — strip if present on older sessions.
     frame.style.removeProperty('--note-img-select-scale');
   };
 
-  /** Live viewport box for image chrome (toolbar + resize handles). */
-  const readImageChromeRect = (frame: HTMLElement, img: HTMLImageElement): DOMRect => {
-    const fr = frame.getBoundingClientRect();
-    if (fr.width >= 8 && fr.height >= 8) return fr;
-    return img.getBoundingClientRect();
+  const applyImageSelectScale = (img: HTMLImageElement, frame: HTMLElement) => {
+    // offsetHeight ignores CSS transform, so re-entry while scaled stays stable.
+    const layoutH = img.offsetHeight || img.getBoundingClientRect().height;
+    const scale = layoutH > 0
+      ? Math.max(0.72, Math.min(1, (layoutH - NOTE_IMG_TOOLBAR_RESERVE_PX) / layoutH))
+      : 0.9;
+    frame.style.setProperty('--note-img-select-scale', String(scale));
   };
 
   const refreshHoveredImgChrome = () => {
     const img = hoveredImgElRef.current;
     const frame = activeFrameRef.current;
     if (!img?.isConnected || !frame?.isConnected) return;
+    if (!imgResizeModeRef.current) applyImageSelectScale(img, frame);
     setHoveredImg(syncHoveredImg(img, frame));
   };
 
   const toggleImgResizeMode = () => {
     setImgResizeMode((v) => {
       const next = !v;
-      activeFrameRef.current?.classList.toggle('note-img-frame--resizing', next);
+      const frame = activeFrameRef.current;
+      if (frame) {
+        frame.classList.toggle('note-img-frame--resizing', next);
+        if (!next && hoveredImgElRef.current) applyImageSelectScale(hoveredImgElRef.current, frame);
+      }
       return next;
     });
-    // Layout can settle a frame after the resizing class toggles.
     requestAnimationFrame(() => refreshHoveredImgChrome());
   };
 
@@ -1270,6 +1276,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (activeFrameRef.current && activeFrameRef.current !== frame) {
       clearImageSelectionChrome(activeFrameRef.current);
     }
+    applyImageSelectScale(img, frame);
     frame.classList.add('note-img-frame--active');
     if (imgResizeModeRef.current) frame.classList.add('note-img-frame--resizing');
     activeFrameRef.current = frame;
@@ -5957,6 +5964,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       isResizingImg.current = false;
       if (resizeStarted) {
         const frame = ensureImageFrame(img, ed);
+        applyImageSelectScale(img, frame);
         setHoveredImg(syncHoveredImg(img, frame));
         emitHtml();
       }
@@ -6890,12 +6898,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       {editable && hoveredImg && createPortal((() => {
         const imgBtn = 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[11px] text-app-text hover:bg-primary/10 dark:text-gray-100';
         const imgMenuBtn = 'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-app-text hover:bg-app-bg dark:text-gray-100 dark:hover:bg-white/5';
-        const fr = readImageChromeRect(hoveredImg.frame, hoveredImg.el);
-        // Portaled bar sits above the image (below if there is no room) — never over mid-image.
-        const above = fr.top - NOTE_IMG_TOOLBAR_BAR_H - 8;
-        const top = above >= 8
-          ? above
-          : Math.min(fr.bottom + 8, Math.max(8, window.innerHeight - NOTE_IMG_TOOLBAR_BAR_H - 8));
+        const fr = hoveredImg.frame.getBoundingClientRect();
+        const top = Math.max(8, fr.bottom - NOTE_IMG_TOOLBAR_RESERVE_PX);
         const compact = fr.width < NOTE_IMG_TOOLBAR_FULL_MIN_PX;
         const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
         const leave = (e: React.MouseEvent) => {
@@ -7030,7 +7034,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           Portaled to <body> so position:fixed is viewport-relative even inside
           transformed ancestors (modals/cards), keeping handles glued to the edges. */}
       {editable && hoveredImg && imgResizeMode && createPortal((() => {
-        const r = readImageChromeRect(hoveredImg.frame, hoveredImg.el);
+        const r = hoveredImg.el.getBoundingClientRect();
         const keep = () => { setHoveredImg(syncHoveredImg(hoveredImg.el, hoveredImg.frame)); };
         const leave = () => { if (!isResizingImg.current && !imgOverflowOpenRef.current) hideImageToolbar(); };
         const base = 'flex items-center justify-center rounded-full border-2 border-white bg-primary text-white shadow-lg';
