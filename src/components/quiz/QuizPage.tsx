@@ -23,6 +23,7 @@ import { quizPatchChangesContent } from '../../lib/quizContent';
 import { hasRichContent } from '../../lib/richContent';
 import { safeLocalStorageSet } from '../../lib/safeStorage';
 import { findQuizItemSource } from '../../lib/quizItemSource';
+import { getQuizSetColorOptions } from '../../lib/quizColors';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 /** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
@@ -833,16 +834,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
 }
 
 function getSetColors(t: ReturnType<typeof useLanguage>['t']) {
-  return [
-    { name: t.quizColorDefault, value: '' },
-    { name: t.quizColorPurple, value: '#8b5cf6' },
-    { name: t.quizColorBlue, value: '#3b82f6' },
-    { name: t.quizColorGreen, value: '#10b981' },
-    { name: t.quizColorYellow, value: '#f59e0b' },
-    { name: t.quizColorRed, value: '#ef4444' },
-    { name: t.quizColorPink, value: '#ec4899' },
-    { name: t.quizColorCyan, value: '#06b6d4' },
-  ];
+  return getQuizSetColorOptions(t.quizColorDefault);
 }
 
 export function QuizPage({
@@ -2842,12 +2834,13 @@ export function QuizPage({
               <span className="text-app-text-secondary/50">{showColorPicker ? '▾' : '›'}</span>
             </button>
             {showColorPicker && (
-              <div className="flex flex-wrap gap-1.5 px-4 py-2">
+              <div className="max-h-36 overflow-y-auto px-4 py-2">
+                <div className="flex flex-wrap gap-1.5">
                 {setColors.map((c) => {
                   const active = (quizSets.find((x) => x.id === ctxMenu.setId)?.color ?? '') === c.value;
                   return (
                     <button
-                      key={c.name}
+                      key={c.value || 'default'}
                       title={c.name}
                       onClick={() => { setQuizSetColor(ctxMenu.setId, c.value); closeCtxMenu(); }}
                       className={'flex h-6 w-6 items-center justify-center rounded-full border transition-all ' +
@@ -2858,6 +2851,7 @@ export function QuizPage({
                     </button>
                   );
                 })}
+                </div>
               </div>
             )}
             <button
@@ -2915,12 +2909,13 @@ export function QuizPage({
               <span className="text-app-text-secondary/50">{folderColorPicker ? '▾' : '›'}</span>
             </button>
             {folderColorPicker && (
-              <div className="flex flex-wrap gap-1.5 px-4 py-2">
+              <div className="max-h-36 overflow-y-auto px-4 py-2">
+                <div className="flex flex-wrap gap-1.5">
                 {setColors.map((c) => {
                   const active = (quizFolders.find((x) => x.id === folderCtxMenu.folderId)?.color ?? '') === c.value;
                   return (
                     <button
-                      key={c.name}
+                      key={c.value || 'default'}
                       title={c.name}
                       onClick={() => { setQuizFolderColor(folderCtxMenu.folderId, c.value); setFolderCtxMenu(null); }}
                       className={'flex h-6 w-6 items-center justify-center rounded-full border transition-all ' + (active ? 'border-app-text ring-2 ring-primary/40 dark:border-white' : 'border-app-border dark:border-white/20')}
@@ -2928,6 +2923,7 @@ export function QuizPage({
                     >{!c.value && <span className="text-[10px] text-app-text-secondary">✕</span>}</button>
                   );
                 })}
+                </div>
               </div>
             )}
             <div className="my-1 h-px bg-app-border dark:bg-white/10" />

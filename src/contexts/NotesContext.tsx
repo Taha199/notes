@@ -89,6 +89,7 @@ import {
 import { extractPlainText, hasRichContent } from '../lib/richContent';
 import { sortNotesByCreatedDesc } from '../lib/noteSort';
 import { safeLocalStorageSet } from '../lib/safeStorage';
+import { QUIZ_SET_COLORS } from '../lib/quizColors';
 import {
   clearNotesBootCache,
   clearNotesListCache,
@@ -1778,7 +1779,7 @@ async function fetchLatestFolderHistory(uid: string): Promise<QuizFolder[] | nul
   }
 }
 
-const AUTO_QUIZ_COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#10b981', '#ec4899', '#06b6d4', '#f97316'];
+const AUTO_QUIZ_COLORS = [...QUIZ_SET_COLORS];
 const RESTORED_FOLDER_ID = 'system-restored-sets';
 const RESTORED_QUESTIONS_SET_ID = 'system-restored-questions';
 export const FAVORITES_FOLDER_ID = 'system-favorites';
