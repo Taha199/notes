@@ -3,6 +3,7 @@ import { onValue, ref as dbRef } from 'firebase/database';
 import { useAuth } from '../../contexts/AuthContext';
 import { ADMIN_EMAIL, database } from '../../lib/firebase';
 import { getRtdbAuthToken, waitForAuthUser } from '../../lib/rtdb';
+import { fetchRegistrationEnabled } from '../../lib/platformConfig';
 import { MAX_STORAGE_LIMIT_MB, MIN_STORAGE_LIMIT_MB, plusStorageLimitForToggle, storageLimitPresetsMB } from '../../lib/storageQuota';
 
 interface UserRow {
@@ -118,6 +119,7 @@ export function AdminPanel() {
   const [confirmDelete, setConfirmDelete] = useState<UserRow | null>(null);
   const [editingLimitUid, setEditingLimitUid] = useState<string | null>(null);
   const [limitInput, setLimitInput] = useState('');
+  const [registrationOpen, setRegistrationOpen] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   const presenceRef = useRef<Record<string, PresenceEntry> | null>(null);
 
@@ -186,6 +188,11 @@ export function AdminPanel() {
       if (!silent) setLoading(false);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void fetchRegistrationEnabled().then(setRegistrationOpen);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (authLoading || !isAdmin || !user) return;
@@ -335,6 +342,29 @@ export function AdminPanel() {
     }
   };
 
+  const toggleRegistration = async () => {
+    setBusy('platform');
+    try {
+      const token = await getRtdbAuthToken();
+      if (!token) throw new Error('no-auth');
+      const next = !registrationOpen;
+      const res = await fetch('/api/admin-platform-config', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ registrationEnabled: next }),
+      });
+      if (!res.ok) throw new Error('toggle-failed');
+      setRegistrationOpen(next);
+    } catch (e) {
+      console.error('toggleRegistration failed', e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const usagePct = (row: UserRow) => Math.min(100, (row.bytes / (row.storageLimitMB * 1024 * 1024)) * 100);
 
   return (
@@ -357,6 +387,27 @@ export function AdminPanel() {
           className="rounded-xl border border-app-border px-4 py-2 text-sm font-medium text-app-text-secondary transition hover:bg-app-bg dark:border-white/10 dark:text-gray-400"
         >
           🔄 Uppdatera nu
+        </button>
+      </div>
+
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-app-border bg-white px-4 py-3.5 shadow-sm dark:border-white/10 dark:bg-gray-900">
+        <div>
+          <p className="text-sm font-semibold text-app-text dark:text-gray-100">Nya konton</p>
+          <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
+            {registrationOpen
+              ? 'Öppet — nya användare kan skapa konto'
+              : 'Stängt — registrering och nya Google-konton blockeras'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void toggleRegistration()}
+          disabled={busy === 'platform'}
+          className={'rounded-xl px-4 py-2 text-sm font-semibold transition ' + (registrationOpen
+            ? 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+            : 'border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300')}
+        >
+          {busy === 'platform' ? '…' : registrationOpen ? 'Stäng registrering' : 'Öppna registrering'}
         </button>
       </div>
 

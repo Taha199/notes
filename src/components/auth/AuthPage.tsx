@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { fetchRegistrationEnabled } from '../../lib/platformConfig';
 import { AuthBackground } from './AuthBackground';
 import { AuthCard } from './AuthCard';
 import { FeatureCards } from './FeatureCards';
@@ -23,6 +24,7 @@ const ERROR_KEYS: Record<string, string> = {
   'auth/use-google-then-set-password': 'authErrUseGoogleThenSetPassword',
   'auth/account-exists-use-password': 'authErrAccountExistsUsePassword',
   'auth/password-belongs-other-account': 'authErrPasswordBelongsOther',
+  'auth/registration-disabled': 'authErrRegistrationDisabled',
   'send-failed': 'authErrSendFail',
   'email-config-missing': 'authErrEmailConfig',
   'email-send-failed': 'authErrSendFail',
@@ -39,8 +41,21 @@ export function AuthPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRegistrationEnabled().then((open) => {
+      if (!cancelled) {
+        setRegistrationOpen(open);
+        if (!open) setMode('login');
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const switchMode = (m: Mode) => {
+    if (m === 'signup' && !registrationOpen) return;
     setMode(m);
     setError(null);
     setSuccess(null);
@@ -144,26 +159,38 @@ export function AuthPage() {
               </div>
 
               {/* Pill tabs */}
-              <div className="relative mt-7 grid grid-cols-2 rounded-2xl bg-app-bg p-1 dark:bg-white/5">
-                <div
-                  className="absolute inset-y-1 w-[calc(50%-4px)] rounded-xl bg-white shadow-md transition-transform duration-300 ease-out dark:bg-gray-800"
-                  style={{ transform: mode === 'login' ? 'translateX(4px)' : 'translateX(calc(100% + 4px))' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => switchMode('login')}
-                  className={'relative z-10 rounded-xl py-2.5 text-sm font-semibold transition-colors ' + (mode === 'login' ? 'text-primary' : 'text-app-text-secondary')}
-                >
+              {registrationOpen ? (
+                <div className="relative mt-7 grid grid-cols-2 rounded-2xl bg-app-bg p-1 dark:bg-white/5">
+                  <div
+                    className="absolute inset-y-1 w-[calc(50%-4px)] rounded-xl bg-white shadow-md transition-transform duration-300 ease-out dark:bg-gray-800"
+                    style={{ transform: mode === 'login' ? 'translateX(4px)' : 'translateX(calc(100% + 4px))' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => switchMode('login')}
+                    className={'relative z-10 rounded-xl py-2.5 text-sm font-semibold transition-colors ' + (mode === 'login' ? 'text-primary' : 'text-app-text-secondary')}
+                  >
+                    {t.authLogin}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchMode('signup')}
+                    className={'relative z-10 rounded-xl py-2.5 text-sm font-semibold transition-colors ' + (mode === 'signup' ? 'text-primary' : 'text-app-text-secondary')}
+                  >
+                    {t.authSignup}
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-7 rounded-2xl bg-app-bg px-4 py-2.5 text-center text-sm font-semibold text-primary dark:bg-white/5">
                   {t.authLogin}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => switchMode('signup')}
-                  className={'relative z-10 rounded-xl py-2.5 text-sm font-semibold transition-colors ' + (mode === 'signup' ? 'text-primary' : 'text-app-text-secondary')}
-                >
-                  {t.authSignup}
-                </button>
-              </div>
+                </div>
+              )}
+
+              {!registrationOpen && (
+                <div className="mt-4 animate-fade-in rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-center text-sm font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                  {t.authRegistrationClosed}
+                </div>
+              )}
 
               {error && (
                 <div className="mt-5 animate-fade-in rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-center text-sm font-medium text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">

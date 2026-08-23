@@ -292,6 +292,8 @@ export interface Translation {
   authErrSendFail: string;
   authErrEmailConfig: string;
   authErrRateLimited: string;
+  authRegistrationClosed: string;
+  authErrRegistrationDisabled: string;
   featNotesTitle: string;
   featNotesSub: string;
   featCloudTitle: string;
@@ -728,6 +730,8 @@ export const LANGS: Record<Lang, Translation> = {
     authErrSendFail: 'Could not send email, check the address',
     authErrEmailConfig: 'Email service is not configured. Contact support.',
     authErrRateLimited: 'Please wait a minute before requesting another email.',
+    authRegistrationClosed: 'New account registration is currently closed. Existing users can still sign in.',
+    authErrRegistrationDisabled: 'New account registration is currently closed.',
     featNotesTitle: '📝 Quick Notes', featNotesSub: 'Save ideas in seconds',
     featCloudTitle: '☁️ Cloud Sync', featCloudSub: 'Access your notes everywhere',
     featSecureTitle: '🔒 Secure Storage', featSecureSub: 'Your data is protected and backed up',
@@ -1153,6 +1157,8 @@ export const LANGS: Record<Lang, Translation> = {
     authErrSendFail: 'Kunde inte skicka e-post, kontrollera adressen',
     authErrEmailConfig: 'E-posttjänsten är inte konfigurerad. Kontakta support.',
     authErrRateLimited: 'Vänta en minut innan du begär ett nytt mejl.',
+    authRegistrationClosed: 'Registrering av nya konton är tillfälligt stängd. Befintliga användare kan fortfarande logga in.',
+    authErrRegistrationDisabled: 'Registrering av nya konton är tillfälligt stängd.',
     featNotesTitle: '📝 Snabba anteckningar', featNotesSub: 'Spara idéer på några sekunder',
     featCloudTitle: '☁️ Molnsynkronisering', featCloudSub: 'Kom åt dina anteckningar överallt',
     featSecureTitle: '🔒 Säker lagring', featSecureSub: 'Dina data skyddas och säkerhetskopieras',

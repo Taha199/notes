@@ -13,6 +13,12 @@
         ".write": "auth != null && auth.uid == $uid",
         ".validate": "newData.hasChildren(['lastSeen']) && newData.child('lastSeen').isNumber()"
       }
+    },
+    "platform": {
+      "config": {
+        ".read": true,
+        ".write": false
+      }
     }
   }
 }

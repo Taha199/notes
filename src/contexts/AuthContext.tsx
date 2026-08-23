@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  getAdditionalUserInfo,
   signOut as fbSignOut,
   confirmPasswordReset as fbConfirmPasswordReset,
   verifyPasswordResetCode as fbVerifyPasswordResetCode,
@@ -18,6 +19,7 @@ import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { onDisconnect, ref as dbRef, set } from 'firebase/database';
 import { auth, database, googleProvider, EmailAuthProvider, FB_DB_URL, storage } from '../lib/firebase';
 import { rtdbFetch } from '../lib/rtdb';
+import { fetchRegistrationEnabled } from '../lib/platformConfig';
 import { hasAiAccess, isPlusUser } from '../lib/userPlan';
 
 async function sendVerificationEmailDirect(email: string): Promise<void> {
@@ -264,6 +266,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw authError('auth/use-google-then-set-password');
       }
 
+      if (!(await fetchRegistrationEnabled())) {
+        throw authError('auth/registration-disabled');
+      }
+
       try {
         await createUserWithEmailAndPassword(auth, normalized, pass);
         await sendVerificationEmailDirect(normalized);
@@ -287,7 +293,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     signInGoogle: async () => {
       try {
-        await signInWithPopup(auth, googleProvider);
+        const result = await signInWithPopup(auth, googleProvider);
+        const info = getAdditionalUserInfo(result);
+        if (info?.isNewUser && !(await fetchRegistrationEnabled())) {
+          await deleteUser(result.user);
+          throw authError('auth/registration-disabled');
+        }
       } catch (e) {
         const code = (e as { code?: string })?.code;
         // Password account already owns this email — sign in with email/password
