@@ -24,6 +24,7 @@ import { hasRichContent } from '../../lib/richContent';
 import { safeLocalStorageSet } from '../../lib/safeStorage';
 import { findQuizItemSource } from '../../lib/quizItemSource';
 import { getQuizSetColorOptions } from '../../lib/quizColors';
+import { QuizColorPickerGrid } from './QuizColorPickerGrid';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 /** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
@@ -2810,7 +2811,7 @@ export function QuizPage({
         <>
           <div className="fixed inset-0 z-40" onClick={closeCtxMenu} onContextMenu={(e) => { e.preventDefault(); closeCtxMenu(); }} />
           <div
-            className="fixed z-50 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
+            className={'fixed z-50 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800 ' + (showColorPicker ? 'w-[220px]' : 'min-w-[160px]')}
             style={ctxMenu.flip ? { bottom: ctxMenu.y, left: ctxMenu.x } : { top: ctxMenu.y, left: ctxMenu.x }}
           >
             <button
@@ -2834,25 +2835,11 @@ export function QuizPage({
               <span className="text-app-text-secondary/50">{showColorPicker ? '▾' : '›'}</span>
             </button>
             {showColorPicker && (
-              <div className="max-h-36 overflow-y-auto px-4 py-2">
-                <div className="flex flex-wrap gap-1.5">
-                {setColors.map((c) => {
-                  const active = (quizSets.find((x) => x.id === ctxMenu.setId)?.color ?? '') === c.value;
-                  return (
-                    <button
-                      key={c.value || 'default'}
-                      title={c.name}
-                      onClick={() => { setQuizSetColor(ctxMenu.setId, c.value); closeCtxMenu(); }}
-                      className={'flex h-6 w-6 items-center justify-center rounded-full border transition-all ' +
-                        (active ? 'border-app-text ring-2 ring-primary/40 dark:border-white' : 'border-app-border dark:border-white/20')}
-                      style={c.value ? { backgroundColor: c.value } : undefined}
-                    >
-                      {!c.value && <span className="text-[10px] text-app-text-secondary">✕</span>}
-                    </button>
-                  );
-                })}
-                </div>
-              </div>
+              <QuizColorPickerGrid
+                colors={setColors}
+                activeValue={quizSets.find((x) => x.id === ctxMenu.setId)?.color ?? ''}
+                onPick={(value) => { setQuizSetColor(ctxMenu.setId, value); closeCtxMenu(); }}
+              />
             )}
             <button
               onClick={() => setMoveMenuForSet((v) => (v === ctxMenu.setId ? null : ctxMenu.setId))}
@@ -2896,7 +2883,7 @@ export function QuizPage({
       {folderCtxMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setFolderCtxMenu(null); setFolderColorPicker(false); }} onContextMenu={(e) => { e.preventDefault(); setFolderCtxMenu(null); }} />
-          <div className="fixed z-50 min-w-[160px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800" style={folderCtxMenu.flip ? { bottom: folderCtxMenu.y, left: folderCtxMenu.x } : { top: folderCtxMenu.y, left: folderCtxMenu.x }}>
+          <div className={'fixed z-50 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800 ' + (folderColorPicker ? 'w-[220px]' : 'min-w-[160px]')} style={folderCtxMenu.flip ? { bottom: folderCtxMenu.y, left: folderCtxMenu.x } : { top: folderCtxMenu.y, left: folderCtxMenu.x }}>
             <button
               onClick={() => { const f = quizFolders.find((x) => x.id === folderCtxMenu.folderId); if (f) beginFolderRename(f.id, f.name); setFolderCtxMenu(null); }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
@@ -2909,22 +2896,11 @@ export function QuizPage({
               <span className="text-app-text-secondary/50">{folderColorPicker ? '▾' : '›'}</span>
             </button>
             {folderColorPicker && (
-              <div className="max-h-36 overflow-y-auto px-4 py-2">
-                <div className="flex flex-wrap gap-1.5">
-                {setColors.map((c) => {
-                  const active = (quizFolders.find((x) => x.id === folderCtxMenu.folderId)?.color ?? '') === c.value;
-                  return (
-                    <button
-                      key={c.value || 'default'}
-                      title={c.name}
-                      onClick={() => { setQuizFolderColor(folderCtxMenu.folderId, c.value); setFolderCtxMenu(null); }}
-                      className={'flex h-6 w-6 items-center justify-center rounded-full border transition-all ' + (active ? 'border-app-text ring-2 ring-primary/40 dark:border-white' : 'border-app-border dark:border-white/20')}
-                      style={c.value ? { backgroundColor: c.value } : undefined}
-                    >{!c.value && <span className="text-[10px] text-app-text-secondary">✕</span>}</button>
-                  );
-                })}
-                </div>
-              </div>
+              <QuizColorPickerGrid
+                colors={setColors}
+                activeValue={quizFolders.find((x) => x.id === folderCtxMenu.folderId)?.color ?? ''}
+                onPick={(value) => { setQuizFolderColor(folderCtxMenu.folderId, value); setFolderCtxMenu(null); }}
+              />
             )}
             <div className="my-1 h-px bg-app-border dark:bg-white/10" />
             <button
