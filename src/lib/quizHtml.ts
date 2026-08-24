@@ -44,6 +44,29 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/**
+ * Decode common entities that arrive as plain text (AI / paste / Firebase shells).
+ * Without this, escapeHtml turns `&nbsp;` into `&amp;nbsp;` and the UI shows the
+ * literal characters "&nbsp;" until the user re-saves through the rich editor.
+ */
+function decodeBasicEntities(text: string): string {
+  return text
+    .replace(/&amp;/gi, '&')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#160;/g, ' ')
+    .replace(/&#x0*a0;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&#39;/g, "'");
+}
+
+/** Undo one level of double-encoding in already-HTML quiz bodies (`&amp;nbsp;` → `&nbsp;`). */
+function fixDoubleEncodedEntities(html: string): string {
+  return html.replace(/&amp;(nbsp|#160|#x0*a0|lt|gt|quot|apos|amp);/gi, '&$1;');
+}
+
 /** Bold / italic; bullet markers are handled at block level. */
 function formatInline(text: string): string {
   return text
@@ -65,9 +88,9 @@ export function mdToHtml(content: string | null | undefined): string {
   // Firebase / shell rows sometimes store non-strings — never call .replace on them.
   const raw = typeof content === 'string' ? content : String(content);
   if (!raw) return '';
-  if (looksLikeHtml(raw)) return raw;
+  if (looksLikeHtml(raw)) return fixDoubleEncodedEntities(raw);
 
-  const text = convertSimpleMath(raw.replace(/\r\n/g, '\n').trim());
+  const text = convertSimpleMath(decodeBasicEntities(raw.replace(/\r\n/g, '\n')).trim());
   if (!text) return '';
 
   const lines = text.split('\n');

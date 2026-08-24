@@ -63,4 +63,17 @@ describe('mdToHtml', () => {
     expect(mdToHtml(undefined)).toBe('');
     expect(mdToHtml(null)).toBe('');
   });
+
+  it('does not show literal &nbsp; for plain-text entities', () => {
+    const html = mdToHtml('P.g.a. det höga motståndet i benmärgen.&nbsp;');
+    expect(html).not.toContain('&amp;nbsp;');
+    expect(html).not.toContain('&nbsp;');
+    expect(html).toContain('benmärgen.');
+    expect(html).toBe('<div dir="auto">P.g.a. det höga motståndet i benmärgen.</div>');
+  });
+
+  it('fixes double-encoded entities inside existing HTML', () => {
+    const html = mdToHtml('<div dir="auto">benmärgen.&amp;nbsp;</div>');
+    expect(html).toBe('<div dir="auto">benmärgen.&nbsp;</div>');
+  });
 });
