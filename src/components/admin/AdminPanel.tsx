@@ -348,7 +348,7 @@ export function AdminPanel() {
       const token = await getRtdbAuthToken();
       if (!token) throw new Error('no-auth');
       const next = !registrationOpen;
-      const res = await fetch('/api/admin-platform-config', {
+      const res = await fetch('/api/platform-config', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
