@@ -98,6 +98,7 @@ export interface Translation {
   secRead: string;
   secArch: string;
   tagFav: string;
+  tagPinned: string;
   tagRead: string;
   tagUnread: string;
   tagArch: string;
@@ -213,12 +214,16 @@ export interface Translation {
   titlePermDel: string;
   titleFavAdd: string;
   titleFavRem: string;
+  titlePinAdd: string;
+  titlePinRem: string;
   tAddNote: string;
   tMoved: string;
   tArched: string;
   tRestored: string;
   tFavAdd: string;
   tFavRem: string;
+  tPinAdd: string;
+  tPinRem: string;
   tRead: string;
   tUnread: string;
   tSaved: string;
@@ -651,7 +656,7 @@ export const LANGS: Record<Lang, Translation> = {
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
-    tagFav: '⭐ Favourite', tagRead: '✓ Read', tagUnread: '📖 Unread', tagArch: '🗄 Archived',
+    tagFav: '⭐ Favourite', tagPinned: '📌 Pinned', tagRead: '✓ Read', tagUnread: '📖 Unread', tagArch: '🗄 Archived',
     emptyNotes: 'No notes here',
     emptyReadHint: 'New notes stay on Home (drafts) until you tap Save Note, then appear in Notes to Study. Mark a note as studied to see it here.',
     homeSavedNotesHint: 'You have saved notes in Notes Library and Notes to Study.',
@@ -691,8 +696,9 @@ export const LANGS: Record<Lang, Translation> = {
     titleBulletList: 'Bullet list', titleNumberedList: 'Numbered list', titleRemoveList: 'Remove list', titleSubList: 'Sub-list', titleOutdentSubList: 'Back to parent list',
     titleUnarch: 'Unarchive', titleDone: 'Mark as Read', titleUnread: 'Move to Unread', titleArch: 'Archive',
     titleDel: 'Delete', titleRestore: 'Restore', titlePermDel: 'Delete Permanently', titleFavAdd: 'Add to Favourites', titleFavRem: 'Remove from Favourites',
+    titlePinAdd: 'Pin to top', titlePinRem: 'Unpin',
     tAddNote: 'Note added', tMoved: 'Moved to trash', tArched: 'Moved to archive', tRestored: 'Restored to active',
-    tFavAdd: 'Added to favourites ★', tFavRem: 'Removed from favourites', tRead: 'Marked as read ✓', tUnread: 'Moved back to unread',
+    tFavAdd: 'Added to favourites ★', tFavRem: 'Removed from favourites', tPinAdd: 'Pinned to top 📌', tPinRem: 'Unpinned', tRead: 'Marked as read ✓', tUnread: 'Moved back to unread',
     tSaved: 'Changes saved', tTrashEmpty: 'Trash emptied', tDelSel: 'Deleted', tRestored2: 'Restored',
     tPermDel: 'Permanently deleted', tCantEmpty: 'Text cannot be empty', tStudied: 'Marked as read & archived ✓', tUnstudied: 'Marked as unstudied ↩',
     tUnarch: 'Restored to active notes',
@@ -1078,7 +1084,7 @@ export const LANGS: Record<Lang, Translation> = {
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
-    tagFav: '⭐ Favorit', tagRead: '✓ Läst', tagUnread: '📖 Oläst', tagArch: '🗄 Arkiverad',
+    tagFav: '⭐ Favorit', tagPinned: '📌 Fäst', tagRead: '✓ Läst', tagUnread: '📖 Oläst', tagArch: '🗄 Arkiverad',
     emptyNotes: 'Inga anteckningar här',
     emptyReadHint: 'Nya anteckningar finns på Hem (utkast) tills du trycker Spara. Därefter visas de under Att studera. Markera som studerad för att se dem här.',
     homeSavedNotesHint: 'Du har sparade anteckningar i Anteckningsbiblioteket och Att studera.',
@@ -1118,8 +1124,9 @@ export const LANGS: Record<Lang, Translation> = {
     titleBulletList: 'Punktlista', titleNumberedList: 'Numrerad lista', titleRemoveList: 'Ta bort lista', titleSubList: 'Underlista', titleOutdentSubList: 'Tillbaka till överliggande lista',
     titleUnarch: 'Avarkivera', titleDone: 'Markera som Läst', titleUnread: 'Flytta till Olästa', titleArch: 'Arkivera',
     titleDel: 'Radera', titleRestore: 'Återställ', titlePermDel: 'Radera Permanent', titleFavAdd: 'Lägg till Favoriter', titleFavRem: 'Ta bort från Favoriter',
+    titlePinAdd: 'Fäst överst', titlePinRem: 'Ta bort fästning',
     tAddNote: 'Anteckning tillagd', tMoved: 'Flyttad till papperskorg', tArched: 'Flyttad till arkiv', tRestored: 'Återställd till aktiva',
-    tFavAdd: 'Tillagd i favoriter ★', tFavRem: 'Borttagen från favoriter', tRead: 'Markerad som läst ✓', tUnread: 'Tillbaka till olästa',
+    tFavAdd: 'Tillagd i favoriter ★', tFavRem: 'Borttagen från favoriter', tPinAdd: 'Fäst överst 📌', tPinRem: 'Fästning borttagen', tRead: 'Markerad som läst ✓', tUnread: 'Tillbaka till olästa',
     tSaved: 'Ändringar sparade', tTrashEmpty: 'Papperskorgen tömd', tDelSel: 'Raderade', tRestored2: 'Återställd',
     tPermDel: 'Permanent raderad', tCantEmpty: 'Text kan inte vara tom', tStudied: 'Markerad som läst och arkiverad ✓', tUnstudied: 'Markerad som ostuderad ↩',
     tUnarch: 'Återställd till aktiva anteckningar',

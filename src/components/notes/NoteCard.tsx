@@ -26,6 +26,12 @@ function favBtnClass(active: boolean) {
     : 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-500 dark:hover:border-amber-500/40 dark:hover:bg-amber-500/10 dark:hover:text-amber-300';
 }
 
+function pinBtnClass(active: boolean) {
+  return active
+    ? '!border-sky-400 !bg-sky-100 !text-sky-600 shadow-sm shadow-sky-300/50 ring-1 ring-sky-300/50 dark:!border-sky-500/60 dark:!bg-sky-500/25 dark:!text-sky-300 dark:shadow-sky-500/20 dark:ring-sky-500/30'
+    : 'hover:border-sky-300 hover:bg-sky-50 hover:text-sky-600 dark:hover:border-sky-500/40 dark:hover:bg-sky-500/10 dark:hover:text-sky-300';
+}
+
 function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: React.MouseEvent) => void; title?: string; children: React.ReactNode; className?: string }) {
   return (
     <button
@@ -46,7 +52,7 @@ function ActionBtn({ onClick, title, children, className = '' }: { onClick: (e: 
 
 export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHitIndex = null, onOpen, viewMode = 'grid', selectMode, selected, onToggleSelect, seq }: Props) {
   const { t, lang } = useLanguage();
-  const { toggleRead, toggleUnread, toggleFav, archive, unarchive, trash, restore, permDelete, hydrateNote } = useNotes();
+  const { toggleRead, toggleUnread, toggleFav, togglePin, archive, unarchive, trash, restore, permDelete, hydrateNote } = useNotes();
   const { show } = useToast();
   const [confirmPermDel, setConfirmPermDel] = useState(false);
   const expanded = viewMode === 'expanded';
@@ -94,7 +100,9 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
       className={
         'animate-slide-up flex cursor-pointer flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition-all dark:bg-gray-800/60 ' +
         (expanded ? 'hover:shadow-md' : 'h-full hover:-translate-y-0.5 hover:shadow-lg') +
-        (note.fav && !isTrash
+        (note.pinned && !isTrash
+          ? 'border-sky-300 bg-gradient-to-br from-sky-50 to-white dark:border-sky-500/40 dark:from-sky-500/10'
+          : note.fav && !isTrash
           ? 'border-amber-300 bg-gradient-to-br from-amber-50 to-white dark:border-amber-500/40 dark:from-amber-500/10'
           : 'border-app-border dark:border-white/10') +
         (note.fav && !isTrash && hasSearch ? favSearchHit : '') +
@@ -120,11 +128,27 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
           </span>
         )}
         <div className="min-w-0 flex-1">
-          {note.title && (
-            <p className={'text-sm font-semibold ' + (expanded ? 'mb-2' : hasSearch ? '' : 'truncate') + ' ' + (note.fav ? 'text-amber-900 dark:text-amber-300' : 'text-app-text dark:text-gray-100')}>
-              <HighlightedText text={note.title} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
-            </p>
-          )}
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              {note.title && (
+                <p className={'text-sm font-semibold ' + (expanded ? 'mb-2' : hasSearch ? '' : 'truncate') + ' ' + (note.pinned ? 'text-sky-900 dark:text-sky-300' : note.fav ? 'text-amber-900 dark:text-amber-300' : 'text-app-text dark:text-gray-100')}>
+                  <HighlightedText text={note.title} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
+                </p>
+              )}
+            </div>
+            {!isTrash && (
+              <ActionBtn
+                title={note.pinned ? t.titlePinRem : t.titlePinAdd}
+                className={pinBtnClass(!!note.pinned)}
+                onClick={() => {
+                  togglePin(note.id);
+                  show(note.pinned ? t.tPinRem : t.tPinAdd);
+                }}
+              >
+                <span className={note.pinned ? 'text-[14px] leading-none' : ''}>📌</span>
+              </ActionBtn>
+            )}
+          </div>
           {expanded ? (
             <div
               className="note-content text-[14px] leading-relaxed text-app-text-secondary dark:text-gray-300 [&_.note-img-frame]:cursor-zoom-in [&_.note-img-frame]:max-w-full [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:max-h-none [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:cursor-zoom-in [&_.note-img-frame_img]:object-contain [&_p]:mb-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
@@ -133,12 +157,13 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
               }}
             />
           ) : (
-            <p className={'mt-0.5 text-[13px] leading-relaxed ' + (hasSearch ? '' : 'line-clamp-3 ') + (note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
+            <p className={'mt-0.5 text-[13px] leading-relaxed ' + (hasSearch ? '' : 'line-clamp-3 ') + (note.pinned ? 'text-sky-700 dark:text-sky-400/80' : note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
               <HighlightedText text={bodyPreview} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
             </p>
           )}
           {!isTrash && (
             <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {note.pinned && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-500/20 dark:text-sky-300">{t.tagPinned}</span>}
               {note.fav && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{t.tagFav}</span>}
               {note.archived ? (
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500 dark:bg-white/10 dark:text-gray-400">{t.tagArch}</span>

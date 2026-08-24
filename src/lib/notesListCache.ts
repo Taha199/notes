@@ -54,6 +54,8 @@ export function compactNoteForListCache(note: Note): Note {
     text,
     html: '',
     fav: !!note.fav,
+    pinned: !!note.pinned,
+    pinnedAt: note.pinnedAt,
     read: !!note.read,
     archived: !!note.archived,
     trashed: !!note.trashed,

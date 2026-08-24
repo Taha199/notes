@@ -6,6 +6,10 @@ export interface Note {
   html: string;
   text: string;
   fav: boolean;
+  /** When true, the note stays at the top of lists until unpinned. */
+  pinned?: boolean;
+  /** ISO timestamp of when the note was pinned — newer pins sort first among pinned. */
+  pinnedAt?: string;
   read: boolean;
   archived: boolean;
   trashed?: boolean;

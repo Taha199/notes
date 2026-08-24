@@ -171,7 +171,7 @@ async function withAuth(url: string, getToken: () => Promise<string | null>): Pr
 }
 
 function noteSyncKey(note: Note) {
-  return `${note.title}\0${note.html}\0${note.read}\0${note.fav}\0${note.archived}\0${note.trashed}`;
+  return `${note.title}\0${note.html}\0${note.read}\0${note.fav}\0${note.pinned}\0${note.archived}\0${note.trashed}`;
 }
 
 /** Cheap notes[] equality — never JSON.stringify / full-HTML compare multi-MB notes. */
@@ -192,6 +192,8 @@ function notesMetaEqual(a: Note[], b: Note[]): boolean {
     if (!!left.trashed !== !!right.trashed) return false;
     if (!!left.read !== !!right.read) return false;
     if (!!left.fav !== !!right.fav) return false;
+    if (!!left.pinned !== !!right.pinned) return false;
+    if ((left.pinnedAt || '') !== (right.pinnedAt || '')) return false;
     if (!!left.archived !== !!right.archived) return false;
     if ((left.title || '') !== (right.title || '')) return false;
     // Length proxy — avoid scanning multi-MB base64 HTML on every ById flush.
@@ -225,6 +227,8 @@ function notesFlagsEqual(a: Note[], b: Note[]): boolean {
     if (!!left.trashed !== !!right.trashed) return false;
     if (!!left.read !== !!right.read) return false;
     if (!!left.fav !== !!right.fav) return false;
+    if (!!left.pinned !== !!right.pinned) return false;
+    if ((left.pinnedAt || '') !== (right.pinnedAt || '')) return false;
     if (!!left.archived !== !!right.archived) return false;
   }
   return true;
@@ -581,13 +585,15 @@ function adoptCloudNoteBodies(
     } else if (!localImg && (incoming.html || '').length > (cur.html || '').length) {
       next = { ...next, html: incoming.html, text: incoming.text || next.text };
     }
-    // notesById is the shared row — read/archive/fav/trash must match on every device.
+    // notesById is the shared row — read/archive/fav/pin/trash must match on every device.
     if (
       applyFlags
       && (
         !!incoming.archived !== !!next.archived
         || !!incoming.read !== !!next.read
         || !!incoming.fav !== !!next.fav
+        || !!incoming.pinned !== !!next.pinned
+        || (incoming.pinnedAt || '') !== (next.pinnedAt || '')
         || !!incoming.trashed !== !!next.trashed
       )
     ) {
@@ -602,6 +608,8 @@ function adoptCloudNoteBodies(
         archived: !!incoming.archived,
         read: !!incoming.read,
         fav: !!incoming.fav,
+        pinned: !!incoming.pinned,
+        pinnedAt: incoming.pinned ? (incoming.pinnedAt || next.pinnedAt) : undefined,
         trashed,
         deletedAt: trashed ? (next.deletedAt || incoming.deletedAt) : incoming.deletedAt,
       };
@@ -628,6 +636,8 @@ function pickBetterNote(local: Note, remote: Note) {
       ...photos,
       read: meta.read,
       fav: meta.fav,
+      pinned: meta.pinned,
+      pinnedAt: meta.pinnedAt,
       archived: meta.archived,
       trashed: meta.trashed,
       deletedAt: meta.deletedAt,
@@ -1246,6 +1256,7 @@ interface NotesCtx {
   toggleRead: (id: number) => void;
   toggleUnread: (id: number) => void;
   toggleFav: (id: number) => void;
+  togglePin: (id: number) => void;
   archive: (id: number) => void;
   unarchive: (id: number) => void;
   trash: (id: number) => void;
@@ -2065,6 +2076,8 @@ function deepScanOrphanedContent(value: unknown): { notes: Note[]; quizzes: Quiz
           html: obj.html,
           text,
           fav: obj.fav === true,
+          pinned: obj.pinned === true,
+          pinnedAt: typeof obj.pinnedAt === 'string' ? obj.pinnedAt : undefined,
           read: obj.read === true,
           archived: obj.archived === true,
           trashed: obj.trashed === true,
@@ -6821,6 +6834,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           && !!existing.archived === !!note.archived
           && !!existing.read === !!note.read
           && !!existing.fav === !!note.fav
+          && !!existing.pinned === !!note.pinned
           && !!existing.trashed === !!note.trashed
         ) return;
       }
@@ -7070,7 +7084,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   };
 
   const noteMetaChanged = (patch: Partial<Note>) =>
-    'read' in patch || 'archived' in patch || 'fav' in patch || 'trashed' in patch;
+    'read' in patch || 'archived' in patch || 'fav' in patch || 'pinned' in patch || 'pinnedAt' in patch || 'trashed' in patch;
 
   const updateNote = (id: number, patch: Partial<Note>) => {
     const contentChanged = 'html' in patch || 'title' in patch || 'text' in patch || 'savedAt' in patch;
@@ -8557,6 +8571,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!base) return;
     updateNote(id, { fav: !base.fav });
   };
+  const togglePin = (id: number) => {
+    const base = notesRef.current.find((n) => n.id === id);
+    if (!base) return;
+    if (base.pinned) {
+      updateNote(id, { pinned: false, pinnedAt: undefined });
+    } else {
+      updateNote(id, { pinned: true, pinnedAt: new Date().toISOString() });
+    }
+  };
   const archive = (id: number) => updateNote(id, { archived: true });
   const unarchive = (id: number) => updateNote(id, { archived: false, read: false });
   const trash = (id: number) => {
@@ -8852,6 +8875,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         toggleRead,
         toggleUnread,
         toggleFav,
+        togglePin,
         archive,
         unarchive,
         trash,

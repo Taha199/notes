@@ -17,6 +17,23 @@ export function noteCreatedAtMs(note: Note): number {
   return createdMs;
 }
 
+function notePinnedAtMs(note: Note): number {
+  if (!note.pinned) return 0;
+  const parsed = Date.parse(note.pinnedAt || '');
+  if (!Number.isNaN(parsed)) return parsed;
+  return noteCreatedAtMs(note);
+}
+
+/** Pinned notes first (newest pin on top), then by creation date descending. */
 export function sortNotesByCreatedDesc(notes: Note[]): Note[] {
-  return [...notes].sort((a, b) => noteCreatedAtMs(b) - noteCreatedAtMs(a));
+  return [...notes].sort((a, b) => {
+    const aPin = a.pinned ? 1 : 0;
+    const bPin = b.pinned ? 1 : 0;
+    if (aPin !== bPin) return bPin - aPin;
+    if (aPin && bPin) {
+      const pinDiff = notePinnedAtMs(b) - notePinnedAtMs(a);
+      if (pinDiff !== 0) return pinDiff;
+    }
+    return noteCreatedAtMs(b) - noteCreatedAtMs(a);
+  });
 }
