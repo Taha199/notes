@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLanguage } from '../../contexts/LanguageContext';
 import { useCountdowns } from '../../contexts/CountdownsContext';
 import {
   computeCountdownParts,
@@ -19,8 +18,7 @@ const UNIT_SHORT: Record<CountdownUnit, string> = {
 };
 
 export function HeaderCountdownWidget({ className = '' }: { className?: string }) {
-  const { t } = useLanguage();
-  const { countdowns, headerCountdownId, setHeaderCountdownId } = useCountdowns();
+  const { countdowns, headerCountdownId } = useCountdowns();
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -40,35 +38,19 @@ export function HeaderCountdownWidget({ className = '' }: { className?: string }
     return units.map((unit) => `${padCountdownUnit(parts[unit], unit)}${UNIT_SHORT[unit]}`).join(' ');
   }, [selected, now]);
 
-  if (!countdowns.length) return null;
+  if (!selected) return null;
 
   return (
     <div className={'inline-flex min-w-0 items-center gap-1.5 ' + className}>
-      {selected && (
-        <span
-          className="hidden max-w-[11rem] truncate text-[11px] font-semibold text-app-text-secondary dark:text-gray-300 lg:inline"
-          title={selected.title}
-        >
-          {selected.title}
-        </span>
-      )}
-      {selected && (
-        <span className="hidden whitespace-nowrap text-[11px] tabular-nums text-primary dark:text-primary/90 sm:inline">
-          {timerText}
-        </span>
-      )}
-      <select
-        value={headerCountdownId ?? ''}
-        onChange={(e) => setHeaderCountdownId(e.target.value || null)}
-        aria-label={t.countdownHeaderSelect}
-        title={t.countdownHeaderSelect}
-        className="max-w-[7.5rem] truncate rounded-lg border border-app-border bg-app-bg px-1.5 py-0.5 text-[11px] font-medium text-app-text-secondary outline-none focus:border-primary/50 dark:border-white/10 dark:bg-white/5 dark:text-gray-300 sm:max-w-[9rem]"
+      <span
+        className="max-w-[11rem] truncate text-[11px] font-semibold text-app-text-secondary dark:text-gray-300"
+        title={selected.title}
       >
-        <option value="">{t.countdownHeaderNone}</option>
-        {countdowns.map((item) => (
-          <option key={item.id} value={item.id}>{item.title}</option>
-        ))}
-      </select>
+        {selected.title}
+      </span>
+      <span className="whitespace-nowrap text-[11px] tabular-nums text-primary dark:text-primary/90">
+        {timerText}
+      </span>
     </div>
   );
 }

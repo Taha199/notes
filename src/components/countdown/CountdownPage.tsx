@@ -7,7 +7,7 @@ import { CountdownSettingsModal } from './CountdownSettingsModal';
 
 export function CountdownPage() {
   const { t } = useLanguage();
-  const { countdowns, addCountdown, updateCountdown, deleteCountdown } = useCountdowns();
+  const { countdowns, headerCountdownId, setHeaderCountdownId, addCountdown, updateCountdown, deleteCountdown } = useCountdowns();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CountdownItem | null>(null);
 
@@ -55,6 +55,8 @@ export function CountdownPage() {
             <CountdownDisplay
               key={item.id}
               item={item}
+              pinned={headerCountdownId === item.id}
+              onTogglePin={() => setHeaderCountdownId(headerCountdownId === item.id ? null : item.id)}
               onEdit={() => openEdit(item)}
             />
           ))}

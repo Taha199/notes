@@ -188,9 +188,8 @@ export interface Translation {
   countdownSave: string;
   countdownClose: string;
   countdownDelete: string;
-  countdownHeaderLabel: string;
-  countdownHeaderNone: string;
-  countdownHeaderSelect: string;
+  countdownPinHeader: string;
+  countdownUnpinHeader: string;
   filesUploadStuck: string;
   filesAllFiles: string;
   filesNewFolder: string;
@@ -757,9 +756,8 @@ export const LANGS: Record<Lang, Translation> = {
     countdownSave: 'Save',
     countdownClose: 'Close',
     countdownDelete: 'Delete',
-    countdownHeaderLabel: 'Header countdown',
-    countdownHeaderNone: 'None',
-    countdownHeaderSelect: 'Show in header',
+    countdownPinHeader: 'Show in header',
+    countdownUnpinHeader: 'Hide from header',
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleCopyFormat: 'Copy formatting', titlePasteFormat: 'Paste formatting', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
@@ -1223,9 +1221,8 @@ export const LANGS: Record<Lang, Translation> = {
     countdownSave: 'Spara',
     countdownClose: 'Stäng',
     countdownDelete: 'Ta bort',
-    countdownHeaderLabel: 'Nedräkning i sidhuvudet',
-    countdownHeaderNone: 'Ingen',
-    countdownHeaderSelect: 'Visa i sidhuvudet',
+    countdownPinHeader: 'Visa i sidhuvudet',
+    countdownUnpinHeader: 'Dölj från sidhuvudet',
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleCopyFormat: 'Kopiera formatering', titlePasteFormat: 'Klistra in formatering', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',

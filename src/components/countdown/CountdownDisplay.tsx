@@ -31,10 +31,14 @@ function unitLabel(unit: CountdownUnit, t: Record<string, string>): string {
 export function CountdownDisplay({
   item,
   onEdit,
+  pinned = false,
+  onTogglePin,
   className = '',
 }: {
   item: CountdownItem;
   onEdit?: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
   className?: string;
 }) {
   const { t } = useLanguage();
@@ -65,7 +69,7 @@ export function CountdownDisplay({
     >
       <div className="absolute inset-0 bg-black/10" aria-hidden="true" />
       <div className="relative flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-5 sm:px-5 sm:py-4">
-        <div className="min-w-0 flex-1 pr-8 sm:pr-0">
+        <div className="min-w-0 flex-1 pr-16 sm:pr-20">
           <h2
             className="truncate text-xl font-bold leading-tight tracking-tight sm:text-2xl"
             style={{ textShadow: shadow }}
@@ -114,20 +118,42 @@ export function CountdownDisplay({
           })}
         </div>
 
-        {onEdit && (
-          <button
-            type="button"
-            onClick={onEdit}
-            className={
-              'absolute right-2.5 top-2.5 rounded-lg border px-2 py-1 text-[11px] font-semibold opacity-0 backdrop-blur-md transition group-hover:opacity-100 sm:right-3 sm:top-1/2 sm:-translate-y-1/2 ' +
-              (isMinimal
-                ? 'border-app-border bg-white/90 text-app-text-secondary hover:bg-white dark:border-white/10 dark:bg-gray-900/90 dark:text-gray-300'
-                : 'border-white/25 bg-black/30 text-white hover:bg-black/45')
-            }
-          >
-            ⚙
-          </button>
-        )}
+        <div className="absolute right-2.5 top-2.5 flex items-center gap-1 sm:right-3 sm:top-1/2 sm:-translate-y-1/2">
+          {onTogglePin && (
+            <button
+              type="button"
+              onClick={onTogglePin}
+              title={pinned ? t.countdownUnpinHeader : t.countdownPinHeader}
+              aria-pressed={pinned}
+              className={
+                'rounded-lg border px-2 py-1 text-[13px] leading-none backdrop-blur-md transition ' +
+                (pinned
+                  ? (isMinimal
+                    ? 'border-sky-300 bg-sky-100 text-sky-700 dark:border-sky-400/40 dark:bg-sky-500/20 dark:text-sky-300'
+                    : 'border-sky-200/50 bg-sky-400/30 text-white ring-1 ring-sky-100/40')
+                  : (isMinimal
+                    ? 'border-app-border bg-white/90 text-app-text-secondary opacity-0 hover:bg-white group-hover:opacity-100 dark:border-white/10 dark:bg-gray-900/90 dark:text-gray-300'
+                    : 'border-white/25 bg-black/30 text-white opacity-0 hover:bg-black/45 group-hover:opacity-100'))
+              }
+            >
+              📌
+            </button>
+          )}
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className={
+                'rounded-lg border px-2 py-1 text-[11px] font-semibold opacity-0 backdrop-blur-md transition group-hover:opacity-100 ' +
+                (isMinimal
+                  ? 'border-app-border bg-white/90 text-app-text-secondary hover:bg-white dark:border-white/10 dark:bg-gray-900/90 dark:text-gray-300'
+                  : 'border-white/25 bg-black/30 text-white hover:bg-black/45')
+              }
+            >
+              ⚙
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
