@@ -4,6 +4,7 @@ import { safeLocalStorageSet } from './safeStorage';
 export const COUNTDOWNS_LS_KEY = 'malacadhati_countdowns';
 export const COUNTDOWNS_DELETED_LS_KEY = 'malacadhati_countdowns_deleted';
 export const COUNTDOWNS_UID_KEY = 'malacadhati_countdowns_uid';
+export const HEADER_COUNTDOWN_LS_KEY = 'malacadhati_header_countdown_id';
 
 export const DEFAULT_COUNTDOWN_FORMAT: CountdownFormat = {
   years: false,
@@ -67,6 +68,25 @@ export function readDeletedCountdownIds(): string[] {
 
 export function writeDeletedCountdownIds(ids: string[]): void {
   safeLocalStorageSet(COUNTDOWNS_DELETED_LS_KEY, JSON.stringify([...new Set(ids)]));
+}
+
+export function readHeaderCountdownId(): string | null {
+  try {
+    const raw = localStorage.getItem(HEADER_COUNTDOWN_LS_KEY);
+    if (!raw) return null;
+    const id = raw.trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeHeaderCountdownId(id: string | null): void {
+  if (!id) {
+    try { localStorage.removeItem(HEADER_COUNTDOWN_LS_KEY); } catch { /* ignore */ }
+    return;
+  }
+  safeLocalStorageSet(HEADER_COUNTDOWN_LS_KEY, id);
 }
 
 function countdownSyncTime(iso: string): number {
