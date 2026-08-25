@@ -49,6 +49,10 @@ const PAGE_META: Partial<Record<Page, { sv: { title: string; description: string
     sv: { title: 'Arabiskt tangentbord – Taha Note', description: 'Skriv arabiska med ett skärmtangentbord när datorn saknar arabisk layout.' },
     en: { title: 'Arabic keyboard – Taha Note', description: 'Type Arabic with an on-screen keyboard when your computer has no Arabic layout.' },
   },
+  countdown: {
+    sv: { title: 'Nedräkning – Taha Note', description: 'Skapa vackra nedräkningar till viktiga datum och händelser.' },
+    en: { title: 'Countdown – Taha Note', description: 'Create beautiful countdown timers for important dates and events.' },
+  },
   quiz: {
     sv: { title: 'Quiz – Taha Note', description: 'Skapa och träna med quiz från dina anteckningar i Taha Note.' },
     en: { title: 'Quiz – Taha Note', description: 'Create and practice quizzes from your notes in Taha Note.' },

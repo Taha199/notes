@@ -14,6 +14,7 @@ export interface Translation {
   navLibrary: string;
   navFiles: string;
   navArabicKb: string;
+  navCountdown: string;
   navArchive: string;
   navTrash: string;
   navDownload: string;
@@ -87,6 +88,7 @@ export interface Translation {
   pageArch: string;
   pageFiles: string;
   pageArabicKb: string;
+  pageCountdown: string;
   pageTrash: string;
   statActive: string;
   statUnread: string;
@@ -151,6 +153,41 @@ export interface Translation {
   arabicKbToggleOff: string;
   arabicKbOptionalHint: string;
   arabicKbDragHint: string;
+  countdownTitle: string;
+  countdownSubtitle: string;
+  countdownAdd: string;
+  countdownAddFirst: string;
+  countdownEmpty: string;
+  countdownEdit: string;
+  countdownSettingsTitle: string;
+  countdownNameLabel: string;
+  countdownNamePh: string;
+  countdownDateLabel: string;
+  countdownDateHint: string;
+  countdownRepeatLabel: string;
+  countdownRepeatNone: string;
+  countdownRepeatDaily: string;
+  countdownRepeatWeekly: string;
+  countdownRepeatMonthly: string;
+  countdownRepeatYearly: string;
+  countdownFormatLabel: string;
+  countdownTextShadow: string;
+  countdownBackgroundLabel: string;
+  countdownBgSunset: string;
+  countdownBgOcean: string;
+  countdownBgNight: string;
+  countdownBgMinimal: string;
+  countdownUnitYears: string;
+  countdownUnitMonths: string;
+  countdownUnitWeeks: string;
+  countdownUnitDays: string;
+  countdownUnitHours: string;
+  countdownUnitMinutes: string;
+  countdownUnitSeconds: string;
+  countdownExpired: string;
+  countdownSave: string;
+  countdownClose: string;
+  countdownDelete: string;
   filesUploadStuck: string;
   filesAllFiles: string;
   filesNewFolder: string;
@@ -627,7 +664,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
     appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
     navHome: 'Home', navFav: 'Favourites', navTodo: 'To-do', navUnread: 'Notes to Study', navRead: 'Studied Notes',
-    navLibrary: 'Notes Library', navFiles: 'File Uploads', navArabicKb: 'Arabic keyboard', navArchive: 'Archive', navTrash: 'Trash',
+    navLibrary: 'Notes Library', navFiles: 'File Uploads', navArabicKb: 'Arabic keyboard', navCountdown: 'Countdown', navArchive: 'Archive', navTrash: 'Trash',
     navDownload: 'Desktop app', downloadSectionTitle: 'Download as app',
     pageDownload: 'Desktop app', downloadTitle: 'Taha Note for Mac',
     downloadSubtitle: 'Install Taha Note as a native Mac app. Your notes sync with the web — same account, same features.',
@@ -652,7 +689,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Loading your open drafts from the cloud…',
     draftsWriteWhileLoading: 'You can start a new draft right away while your other drafts sync.',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Notes to Study', pageRead: 'Studied Notes',
-    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageArabicKb: 'Arabic keyboard', pageTrash: 'Trash',
+    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageArabicKb: 'Arabic keyboard', pageCountdown: 'Countdown', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
@@ -682,6 +719,41 @@ export const LANGS: Record<Lang, Translation> = {
     arabicKbToggleOff: 'Turn off',
     arabicKbOptionalHint: 'Drag to move · type in any field',
     arabicKbDragHint: 'Drag to move the keyboard',
+    countdownTitle: 'Countdown',
+    countdownSubtitle: 'Create countdown timers for important dates and events.',
+    countdownAdd: 'New countdown',
+    countdownAddFirst: 'Create your first countdown',
+    countdownEmpty: 'No countdowns yet.',
+    countdownEdit: 'Settings',
+    countdownSettingsTitle: 'Countdown settings',
+    countdownNameLabel: 'Name',
+    countdownNamePh: 'e.g. Exam, Trip, Birthday…',
+    countdownDateLabel: 'Target date',
+    countdownDateHint: 'Click to select the date and time',
+    countdownRepeatLabel: 'Repeat every',
+    countdownRepeatNone: 'Never',
+    countdownRepeatDaily: 'Daily',
+    countdownRepeatWeekly: 'Weekly',
+    countdownRepeatMonthly: 'Monthly',
+    countdownRepeatYearly: 'Yearly',
+    countdownFormatLabel: 'Format',
+    countdownTextShadow: 'Text shadow',
+    countdownBackgroundLabel: 'Background',
+    countdownBgSunset: 'Sunset',
+    countdownBgOcean: 'Ocean',
+    countdownBgNight: 'Night',
+    countdownBgMinimal: 'Minimal',
+    countdownUnitYears: 'Years',
+    countdownUnitMonths: 'Months',
+    countdownUnitWeeks: 'Weeks',
+    countdownUnitDays: 'Days',
+    countdownUnitHours: 'Hours',
+    countdownUnitMinutes: 'Minutes',
+    countdownUnitSeconds: 'Seconds',
+    countdownExpired: 'Time is up',
+    countdownSave: 'Save',
+    countdownClose: 'Close',
+    countdownDelete: 'Delete',
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleCopyFormat: 'Copy formatting', titlePasteFormat: 'Paste formatting', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
@@ -1055,7 +1127,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
     appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
     navHome: 'Hem', navFav: 'Favoriter', navTodo: 'Att göra', navUnread: 'Att studera', navRead: 'Studerade',
-    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArabicKb: 'Arabiskt tangentbord', navArchive: 'Arkiv', navTrash: 'Papperskorg',
+    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArabicKb: 'Arabiskt tangentbord', navCountdown: 'Nedräkning', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     navDownload: 'Skrivbordsapp', downloadSectionTitle: 'Ladda ner som program',
     pageDownload: 'Skrivbordsapp', downloadTitle: 'Taha Note för Mac',
     downloadSubtitle: 'Installera Taha Note som en inbyggd Mac-app. Dina anteckningar synkas med webben — samma konto, samma funktioner.',
@@ -1080,7 +1152,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Hämtar dina öppna utkast från molnet…',
     draftsWriteWhileLoading: 'Du kan börja skriva ett nytt utkast direkt medan dina andra utkast synkas.',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Att studera', pageRead: 'Studerade',
-    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageArabicKb: 'Arabiskt tangentbord', pageTrash: 'Papperskorg',
+    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageArabicKb: 'Arabiskt tangentbord', pageCountdown: 'Nedräkning', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
@@ -1110,6 +1182,41 @@ export const LANGS: Record<Lang, Translation> = {
     arabicKbToggleOff: 'Stäng av',
     arabicKbOptionalHint: 'Dra för att flytta · skriv i valfritt fält',
     arabicKbDragHint: 'Dra för att flytta tangentbordet',
+    countdownTitle: 'Nedräkning',
+    countdownSubtitle: 'Skapa nedräkningar till viktiga datum och händelser.',
+    countdownAdd: 'Ny nedräkning',
+    countdownAddFirst: 'Skapa din första nedräkning',
+    countdownEmpty: 'Inga nedräkningar ännu.',
+    countdownEdit: 'Inställningar',
+    countdownSettingsTitle: 'Nedräkningsinställningar',
+    countdownNameLabel: 'Namn',
+    countdownNamePh: 't.ex. tenta, resa, födelsedag…',
+    countdownDateLabel: 'Måldatum',
+    countdownDateHint: 'Klicka för att välja datum och tid',
+    countdownRepeatLabel: 'Upprepa varje',
+    countdownRepeatNone: 'Aldrig',
+    countdownRepeatDaily: 'Dagligen',
+    countdownRepeatWeekly: 'Veckovis',
+    countdownRepeatMonthly: 'Månadsvis',
+    countdownRepeatYearly: 'Årligen',
+    countdownFormatLabel: 'Format',
+    countdownTextShadow: 'Textskugga',
+    countdownBackgroundLabel: 'Bakgrund',
+    countdownBgSunset: 'Solnedgång',
+    countdownBgOcean: 'Hav',
+    countdownBgNight: 'Natt',
+    countdownBgMinimal: 'Minimal',
+    countdownUnitYears: 'År',
+    countdownUnitMonths: 'Månader',
+    countdownUnitWeeks: 'Veckor',
+    countdownUnitDays: 'Dagar',
+    countdownUnitHours: 'Timmar',
+    countdownUnitMinutes: 'Minuter',
+    countdownUnitSeconds: 'Sekunder',
+    countdownExpired: 'Tiden är ute',
+    countdownSave: 'Spara',
+    countdownClose: 'Stäng',
+    countdownDelete: 'Ta bort',
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleCopyFormat: 'Kopiera formatering', titlePasteFormat: 'Klistra in formatering', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',

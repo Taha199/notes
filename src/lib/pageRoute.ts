@@ -9,6 +9,7 @@ const PAGE_PATHS: Record<Page, string> = {
   library: '/library',
   files: '/files',
   arabicKb: '/arabic-keyboard',
+  countdown: '/countdown',
   archive: '/archive',
   trash: '/trash',
   quiz: '/quiz',

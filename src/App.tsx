@@ -6,6 +6,7 @@ import { NotesProvider } from './contexts/NotesContext';
 import { TodosProvider } from './contexts/TodosContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { ArabicInputProvider } from './contexts/ArabicInputContext';
+import { CountdownsProvider } from './contexts/CountdownsContext';
 import { AuthPage } from './components/auth/AuthPage';
 import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
 import { VerifyEmailPage } from './components/auth/VerifyEmailPage';
@@ -113,11 +114,13 @@ function Root() {
   return (
     <NotesProvider>
       <TodosProvider>
-        <ArabicInputProvider>
-          <Dashboard />
-          <FloatingOtterSearch />
-          <ArabicInputHost />
-        </ArabicInputProvider>
+        <CountdownsProvider>
+          <ArabicInputProvider>
+            <Dashboard />
+            <FloatingOtterSearch />
+            <ArabicInputHost />
+          </ArabicInputProvider>
+        </CountdownsProvider>
       </TodosProvider>
     </NotesProvider>
   );

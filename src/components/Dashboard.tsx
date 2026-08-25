@@ -15,6 +15,7 @@ import { SetPasswordModal } from './auth/SetPasswordModal';
 import { SeoHead } from './common/SeoHead';
 import { FilesPage } from './files/FilesPage';
 import { ArabicKeyboardPage } from './keyboard/ArabicKeyboardPage';
+import { CountdownPage } from './countdown/CountdownPage';
 import { QuizPage } from './quiz/QuizPage';
 import { ErrorBoundary } from './common/ErrorBoundary';
 import { safeLocalStorageSet } from '../lib/safeStorage';
@@ -228,7 +229,7 @@ export function Dashboard() {
     );
   }, [quizSets]);
   const hasSearch = normalizeSearch(search).length > 0;
-  const showGlobalSearch = hasSearch && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb';
+  const showGlobalSearch = hasSearch && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb' && page !== 'countdown';
   const { results: globalSearchResults, hitMeta: searchHitMeta } = useGlobalSearchResults(
     showGlobalSearch,
     search,
@@ -429,6 +430,7 @@ export function Dashboard() {
 
           {!showGlobalSearch && page === 'files' && <FilesPage search={search} />}
           {!showGlobalSearch && page === 'arabicKb' && <ArabicKeyboardPage />}
+          {!showGlobalSearch && page === 'countdown' && <CountdownPage />}
           {!showGlobalSearch && page === 'todo' && <TodoCalendarPage search={search} />}
           {!showGlobalSearch && page === 'quiz' && (
             <ErrorBoundary label="quiz">

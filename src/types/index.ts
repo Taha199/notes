@@ -25,7 +25,7 @@ export interface DraftContent {
   html: string;
 }
 
-export type Page = 'home' | 'fav' | 'todo' | 'unread' | 'read' | 'library' | 'files' | 'arabicKb' | 'archive' | 'trash' | 'quiz' | 'download' | 'settings' | 'admin';
+export type Page = 'home' | 'fav' | 'todo' | 'unread' | 'read' | 'library' | 'files' | 'arabicKb' | 'countdown' | 'archive' | 'trash' | 'quiz' | 'download' | 'settings' | 'admin';
 
 export type NoteViewMode = 'grid' | 'expanded';
 
@@ -130,4 +130,31 @@ export interface TodoItem {
   time?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+export type CountdownRepeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export type CountdownBackground = 'sunset' | 'ocean' | 'night' | 'minimal';
+
+export interface CountdownFormat {
+  years: boolean;
+  months: boolean;
+  weeks: boolean;
+  days: boolean;
+  hours: boolean;
+  minutes: boolean;
+  seconds: boolean;
+}
+
+export interface CountdownItem {
+  id: string;
+  title: string;
+  /** ISO datetime for the target moment. */
+  targetAt: string;
+  repeat: CountdownRepeat;
+  format: CountdownFormat;
+  textShadow: boolean;
+  background: CountdownBackground;
+  createdAt: string;
+  updatedAt: string;
 }
