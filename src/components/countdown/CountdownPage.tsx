@@ -50,20 +50,13 @@ export function CountdownPage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <div className="mx-auto flex max-w-3xl flex-col gap-3">
           {countdowns.map((item) => (
-            <div key={item.id} className="group relative">
-              <CountdownDisplay item={item} />
-              <div className="absolute right-3 top-3 flex gap-2 opacity-0 transition group-hover:opacity-100">
-                <button
-                  type="button"
-                  onClick={() => openEdit(item)}
-                  className="rounded-xl border border-white/20 bg-black/25 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-md hover:bg-black/40"
-                >
-                  ⚙ {t.countdownEdit}
-                </button>
-              </div>
-            </div>
+            <CountdownDisplay
+              key={item.id}
+              item={item}
+              onEdit={() => openEdit(item)}
+            />
           ))}
         </div>
       )}
