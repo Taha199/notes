@@ -102,6 +102,17 @@ export interface QuizSet {
   folderId?: string;
   // Non-deletable system set (e.g. the Favorites mirror set).
   system?: 'favorites';
+  /** Topic headings shown immediately before a question in the set list. */
+  sections?: QuizSection[];
+  /** LWW stamp for section metadata sync. */
+  sectionsUpdatedAt?: string;
+}
+
+export interface QuizSection {
+  id: string;
+  title: string;
+  /** Render this heading immediately before the question with this id. */
+  beforeItemId: number;
 }
 
 // A OneNote-style notebook/folder that groups quiz sets.

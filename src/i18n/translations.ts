@@ -481,6 +481,13 @@ export interface Translation {
   quizUpdated: string;
   quizReorderHint: string;
   quizReorderAria: string;
+  quizSectionLabel: string;
+  quizSectionTitlePh: string;
+  quizSectionSave: string;
+  quizSectionCancel: string;
+  quizSectionEdit: string;
+  quizSectionDelete: string;
+  quizSectionAdd: string;
   quizShowSidebar: string;
   quizHideSidebar: string;
   quizTitle: string;
@@ -948,6 +955,13 @@ export const LANGS: Record<Lang, Translation> = {
     quizUpdated: 'Updated:',
     quizReorderHint: 'Enter a number and press Enter — moves to that position',
     quizReorderAria: 'Move to number',
+    quizSectionLabel: 'Section',
+    quizSectionTitlePh: 'e.g. Medications, CPR, Pediatrics…',
+    quizSectionSave: 'Save',
+    quizSectionCancel: 'Cancel',
+    quizSectionEdit: 'Edit section',
+    quizSectionDelete: 'Delete section',
+    quizSectionAdd: 'Add section heading',
     quizShowSidebar: 'Show list',
     quizHideSidebar: 'Hide list',
     quizTitle: 'Quiz',
@@ -1413,6 +1427,13 @@ export const LANGS: Record<Lang, Translation> = {
     quizUpdated: 'Uppdaterad:',
     quizReorderHint: 'Skriv nummer och tryck Enter — flyttar till den positionen',
     quizReorderAria: 'Flytta till nummer',
+    quizSectionLabel: 'Rubrik',
+    quizSectionTitlePh: 't.ex. Läkemedel, HLR, Pediatrik…',
+    quizSectionSave: 'Spara',
+    quizSectionCancel: 'Avbryt',
+    quizSectionEdit: 'Redigera rubrik',
+    quizSectionDelete: 'Ta bort rubrik',
+    quizSectionAdd: 'Lägg till rubrik',
     quizShowSidebar: 'Visa listan',
     quizHideSidebar: 'Dölj listan',
     quizTitle: 'Quiz',

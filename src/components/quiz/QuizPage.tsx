@@ -25,6 +25,8 @@ import { safeLocalStorageSet } from '../../lib/safeStorage';
 import { findQuizItemSource } from '../../lib/quizItemSource';
 import { getQuizSetColorOptions } from '../../lib/quizColors';
 import { QuizColorPickerGrid } from './QuizColorPickerGrid';
+import { buildQuizListRows } from '../../lib/quizSections';
+import { QuizSectionDraft, QuizSectionHeading } from './QuizSectionHeading';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 /** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
@@ -129,9 +131,10 @@ interface QuizItemRowProps {
     fromNotes: boolean;
   } | null;
   onOpenSource?: () => void;
+  onAddRubrik?: () => void;
 }
 
-const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition, sourceLocation, onOpenSource }: QuizItemRowProps) {
+const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition, sourceLocation, onOpenSource, onAddRubrik }: QuizItemRowProps) {
   const { t } = useLanguage();
   const [moveOpen, setMoveOpen] = useState(false);
   const [keepCopy, setKeepCopy] = useState(false);
@@ -300,6 +303,16 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
             </svg>
           </button>
           <button onClick={() => onEdit(item)} className="text-[11px] text-app-text-secondary/40 transition-colors hover:text-primary" title={t.quizEdit}>✏️</button>
+          {onAddRubrik && (
+            <button
+              type="button"
+              onClick={onAddRubrik}
+              className="text-[11px] text-app-text-secondary/40 transition-colors hover:text-primary"
+              title={t.quizSectionAdd}
+            >
+              ¶
+            </button>
+          )}
           {onMoveToSet && sets && sets.length > 0 && (
             <>
               <button
@@ -848,7 +861,7 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, setQuizzesOrder, hydrateQuizSet } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, addQuizSection, updateQuizSection, deleteQuizSection, setQuizzesOrder, hydrateQuizSet } = useNotes();
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed && !!folder?.id && typeof folder.name === 'string');
   // Coerce Firebase object-shaped items[] before any render path touches .map/.filter.
   const quizSets = useMemo(() => {
@@ -868,6 +881,10 @@ export function QuizPage({
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(() => savedSelection.folderId);
   const selectedFolderIdRef = useRef<string | null>(selectedFolderId);
   selectedFolderIdRef.current = selectedFolderId;
+  const [sectionDraftBeforeId, setSectionDraftBeforeId] = useState<number | null>(null);
+  useEffect(() => {
+    setSectionDraftBeforeId(null);
+  }, [selectedSetId]);
   const [isNarrow, setIsNarrow] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
   );
@@ -1825,6 +1842,13 @@ export function QuizPage({
     });
   }, [displayItems, itemSort, currentProgress, selectedSetId]);
 
+  const listRows = useMemo(
+    () => (selectedSetId
+      ? buildQuizListRows(orderedItems, selectedSet?.sections ?? [])
+      : orderedItems.map((item, index) => ({ type: 'item' as const, item, questionNumber: index + 1 }))),
+    [selectedSetId, orderedItems, selectedSet?.sections],
+  );
+
   const scrollToLastQuestion = () => {
     const last = orderedItems[orderedItems.length - 1];
     if (!last) return;
@@ -1897,6 +1921,7 @@ export function QuizPage({
         onMoveToPosition={(targetPosition) => handleMoveToPosition(item.id, targetPosition)}
         sourceLocation={sourceLocation}
         onOpenSource={sourceItemId ? () => openQuestionSource(sourceItemId) : undefined}
+        onAddRubrik={selectedSetId ? () => setSectionDraftBeforeId(item.id) : undefined}
       />
     );
   };
@@ -2745,7 +2770,38 @@ export function QuizPage({
           <>
           {/* Questions list */}
           <div className="flex flex-col gap-2">
-            {orderedItems.map((item, index) => renderItemOrForm(item, index))}
+            {listRows.map((row) => {
+              if (row.type === 'section') {
+                return (
+                  <QuizSectionHeading
+                    key={row.section.id}
+                    section={row.section}
+                    onSave={(title) => {
+                      if (selectedSetId) updateQuizSection(selectedSetId, row.section.id, title);
+                    }}
+                    onDelete={() => {
+                      if (selectedSetId) deleteQuizSection(selectedSetId, row.section.id);
+                    }}
+                  />
+                );
+              }
+              return (
+                <div key={`row-${row.item.id}`}>
+                  {sectionDraftBeforeId === row.item.id && selectedSetId && (
+                    <div className="mb-2">
+                      <QuizSectionDraft
+                        onSave={(title) => {
+                          addQuizSection(selectedSetId, row.item.id, title);
+                          setSectionDraftBeforeId(null);
+                        }}
+                        onCancel={() => setSectionDraftBeforeId(null)}
+                      />
+                    </div>
+                  )}
+                  {renderItemOrForm(row.item, row.questionNumber - 1)}
+                </div>
+              );
+            })}
 
             {setBodiesLoading && (
               <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-primary/25 bg-primary/5 px-6 py-10 dark:border-primary/30 dark:bg-primary/10">

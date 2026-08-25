@@ -6,6 +6,7 @@
  * tombstones on the item itself (same pattern as notes).
  */
 import type { QuizItem, QuizSet } from '../types';
+import { mergeQuizSections, pruneQuizSections } from './quizSections';
 
 /**
  * Firebase RTDB often stores arrays as objects (`{ "0": … }`). Calling
@@ -451,7 +452,22 @@ export function pickBetterQuizSet(
       : (local.itemsOrder ?? remote.itemsOrder));
   const withItems = orderUpdatedAt ? { ...base, items, orderUpdatedAt } : { ...base, items };
   const withList = listOrderUpdatedAt ? { ...withItems, listOrderUpdatedAt } : withItems;
-  return itemsOrder?.length ? { ...withList, itemsOrder } : withList;
+  const withOrder = itemsOrder?.length ? { ...withList, itemsOrder } : withList;
+  const localSectionsTime = Date.parse(local.sectionsUpdatedAt ?? '') || 0;
+  const remoteSectionsTime = Date.parse(remote.sectionsUpdatedAt ?? '') || 0;
+  const preferRemoteSections = remoteSectionsTime >= localSectionsTime;
+  const mergedSections = mergeQuizSections(
+    preferRemoteSections ? (remote.sections ?? []) : (local.sections ?? []),
+    preferRemoteSections ? (local.sections ?? []) : (remote.sections ?? []),
+  );
+  const liveIds = new Set(items.filter((item) => !item.trashed).map((item) => item.id));
+  const sections = pruneQuizSections(mergedSections, liveIds);
+  const sectionsUpdatedAt = preferRemoteSections
+    ? (remote.sectionsUpdatedAt ?? local.sectionsUpdatedAt)
+    : (local.sectionsUpdatedAt ?? remote.sectionsUpdatedAt);
+  return sections.length || sectionsUpdatedAt
+    ? { ...withOrder, sections, ...(sectionsUpdatedAt ? { sectionsUpdatedAt } : {}) }
+    : withOrder;
 }
 
 /** Live (non-trashed) item count for one set. */

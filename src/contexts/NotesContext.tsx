@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { onChildAdded, onChildChanged, onChildRemoved, onValue, ref as dbRef, remove, set, update } from 'firebase/database';
-import type { Note, QuizItem, QuizSet, QuizFolder, ChatConversation } from '../types';
+import type { Note, QuizItem, QuizSection, QuizSet, QuizFolder, ChatConversation } from '../types';
 import { database, FB_DB_URL } from '../lib/firebase';
 import { buildFullBackupPayload, shouldRunHourlyFolderBackup, writeBackupToFolder } from '../lib/externalBackup';
 import { setTokenSink } from '../lib/gemini';
@@ -1246,6 +1246,9 @@ interface NotesCtx {
   moveItemInSet: (setId: string, itemId: number, direction: 'up' | 'down') => void;
   reorderItemInSet: (setId: string, dragId: number, targetId: number) => void;
   setItemsOrderInSet: (setId: string, itemIds: number[]) => void;
+  addQuizSection: (setId: string, beforeItemId: number, title: string) => void;
+  updateQuizSection: (setId: string, sectionId: string, title: string) => void;
+  deleteQuizSection: (setId: string, sectionId: string) => void;
   moveQuiz: (itemId: number, direction: 'up' | 'down') => void;
   reorderQuiz: (dragId: number, targetId: number) => void;
   setQuizzesOrder: (itemIds: number[]) => void;
@@ -8229,7 +8232,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         : s.items.filter((i) => i.id !== itemId);
       const itemsOrder = (s.itemsOrder ?? s.items.map((i) => i.id))
         .filter((oid) => Number(oid) !== Number(itemId));
-      return { ...s, items, updatedAt: trashAt, itemsOrder };
+      const sections = (s.sections ?? []).filter((section) => section.beforeItemId !== itemId);
+      return { ...s, items, updatedAt: trashAt, itemsOrder, sections, sectionsUpdatedAt: trashAt };
     });
     quizItemTombstonesRef.current = markTrashTombstone(
       QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
@@ -8551,6 +8555,56 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const mutateQuizSetSections = (
+    setId: string,
+    updater: (sections: QuizSection[]) => QuizSection[],
+  ) => {
+    setQuizSets((prev) => {
+      const stamp = nowStr();
+      let changed = false;
+      const next = prev.map((s) => {
+        if (s.id !== setId) return s;
+        const sections = updater(s.sections ?? []);
+        if (JSON.stringify(sections) === JSON.stringify(s.sections ?? [])) return s;
+        changed = true;
+        return { ...s, sections, sectionsUpdatedAt: stamp };
+      });
+      if (!changed) return prev;
+      quizSetsRef.current = next;
+      rememberLastGoodComplete(quizzesRef.current, next);
+      persistSets(next, true, true);
+      scheduleInstantDataCloudSave({ quizSets: next });
+      const updated = next.find((s) => s.id === setId);
+      if (updated) void pushQuizSetById(updated);
+      return next;
+    });
+  };
+
+  const addQuizSection = (setId: string, beforeItemId: number, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    mutateQuizSetSections(setId, (sections) => [
+      ...sections,
+      {
+        id: `sec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        title: trimmed,
+        beforeItemId,
+      },
+    ]);
+  };
+
+  const updateQuizSection = (setId: string, sectionId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    mutateQuizSetSections(setId, (sections) => sections.map((section) => (
+      section.id === sectionId ? { ...section, title: trimmed } : section
+    )));
+  };
+
+  const deleteQuizSection = (setId: string, sectionId: string) => {
+    mutateQuizSetSections(setId, (sections) => sections.filter((section) => section.id !== sectionId));
+  };
+
   const setQuizzesOrder = (itemIds: number[]) => {
     setQuizzes((prev) => {
       const next = orderItemsByIds(prev, itemIds);
@@ -8865,6 +8919,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         moveItemInSet,
         reorderItemInSet,
         setItemsOrderInSet,
+        addQuizSection,
+        updateQuizSection,
+        deleteQuizSection,
         moveQuiz,
         reorderQuiz,
         setQuizzesOrder,
