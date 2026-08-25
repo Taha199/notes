@@ -2,6 +2,8 @@ import type { CountdownFormat, CountdownItem, CountdownRepeat } from '../types';
 import { safeLocalStorageSet } from './safeStorage';
 
 export const COUNTDOWNS_LS_KEY = 'malacadhati_countdowns';
+export const COUNTDOWNS_DELETED_LS_KEY = 'malacadhati_countdowns_deleted';
+export const COUNTDOWNS_UID_KEY = 'malacadhati_countdowns_uid';
 
 export const DEFAULT_COUNTDOWN_FORMAT: CountdownFormat = {
   years: false,
@@ -50,6 +52,42 @@ export function readCountdownsLocal(): CountdownItem[] {
 
 export function writeCountdownsLocal(items: CountdownItem[]) {
   safeLocalStorageSet(COUNTDOWNS_LS_KEY, JSON.stringify(items));
+}
+
+export function readDeletedCountdownIds(): string[] {
+  try {
+    const raw = localStorage.getItem(COUNTDOWNS_DELETED_LS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeDeletedCountdownIds(ids: string[]): void {
+  safeLocalStorageSet(COUNTDOWNS_DELETED_LS_KEY, JSON.stringify([...new Set(ids)]));
+}
+
+function countdownSyncTime(iso: string): number {
+  return Date.parse(iso) || 0;
+}
+
+export function mergeCountdowns(
+  local: CountdownItem[],
+  remote: CountdownItem[],
+  deletedIds: Iterable<string> = [],
+): CountdownItem[] {
+  const dead = new Set(deletedIds);
+  const map = new Map<string, CountdownItem>();
+  for (const row of [...local, ...remote]) {
+    if (!row?.id || dead.has(row.id)) continue;
+    const prev = map.get(row.id);
+    if (!prev || countdownSyncTime(row.updatedAt) >= countdownSyncTime(prev.updatedAt)) {
+      map.set(row.id, row);
+    }
+  }
+  return [...map.values()].sort((a, b) => a.targetAt.localeCompare(b.targetAt));
 }
 
 export function normalizeCountdown(raw: unknown): CountdownItem | null {
