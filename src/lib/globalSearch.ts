@@ -9,6 +9,11 @@ import {
   getNoteSearchPlainText,
 } from './noteSearch';
 
+/** Global search stays idle until the query is at least this long (avoids 1-char freezes). */
+export const MIN_GLOBAL_SEARCH_CHARS = 2;
+/** Hard cap on rendered results — full highlight of hundreds of cards freezes the UI. */
+export const MAX_GLOBAL_SEARCH_RESULTS = 80;
+
 export type GlobalSearchResultType = 'note' | 'quiz';
 
 export interface GlobalSearchResult {
@@ -156,7 +161,7 @@ export function buildGlobalSearchResults(
   collectedQuizzes?: CollectedQuiz[],
 ): GlobalSearchResult[] {
   const query = normalizeSearch(search);
-  if (!query) return [];
+  if (!query || query.length < MIN_GLOBAL_SEARCH_CHARS) return [];
 
   const folderNameById = new Map(
     quizFolders.filter((folder) => !folder.trashed).map((folder) => [folder.id, folder.name]),
@@ -166,6 +171,7 @@ export function buildGlobalSearchResults(
   const quizItems = collectedQuizzes ?? collectQuizItems(quizzes, quizSets);
 
   for (const note of notes) {
+    if (results.length >= MAX_GLOBAL_SEARCH_RESULTS) break;
     if (!noteMatchesSearch(note, search)) continue;
     const cat = noteCategory(note, t);
     const body = getNoteSearchPlainText(note);
@@ -184,6 +190,7 @@ export function buildGlobalSearchResults(
   }
 
   for (const { item, setId, setName, folderId, fromNotes } of quizItems) {
+    if (results.length >= MAX_GLOBAL_SEARCH_RESULTS) break;
     if (!quizMatchesSearch(item, search)) continue;
     const isFavorite = favQuizIds.has(item.id) || favQuizIds.has(item.favOf ?? -1) || setId === FAVORITES_SET_ID;
     let categoryLabel: string;
@@ -226,7 +233,7 @@ export function buildGlobalSearchResults(
     return 0;
   });
 
-  return results;
+  return results.slice(0, MAX_GLOBAL_SEARCH_RESULTS);
 }
 
 export function globalSearchResultKey(result: GlobalSearchResult) {

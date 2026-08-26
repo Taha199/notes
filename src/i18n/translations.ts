@@ -36,6 +36,7 @@ export interface Translation {
   clearSearch: string;
   searchHitsLabel: string;
   searchNoHits: string;
+  searchMinCharsHint: string;
   searchHitPrevious: string;
   searchHitNext: string;
   searchResultsTitle: string;
@@ -684,7 +685,7 @@ export const LANGS: Record<Lang, Translation> = {
     downloadBuildTitle: 'Build from source', downloadBuildDesc: 'Developers can build the Mac app from the project repository:',
     downloadBuildOutput: 'Output: release/mac/Taha Note.app and release/Taha Note-1.0.0-arm64.dmg',
     downloadAlreadyTitle: 'You\'re using the desktop app', downloadAlreadyDesc: 'This window is already the Taha Note Mac app.',
-    searchPh: 'Search...', clearSearch: 'Clear search', searchHitsLabel: '{current}/{total}', searchNoHits: '0 hits', searchHitPrevious: 'Previous hit', searchHitNext: 'Next hit',
+    searchPh: 'Search...', clearSearch: 'Clear search', searchHitsLabel: '{current}/{total}', searchNoHits: '0 hits', searchMinCharsHint: 'Type at least 2 characters to search', searchHitPrevious: 'Previous hit', searchHitNext: 'Next hit',
     searchResultsTitle: 'Search results', searchResultNote: 'Note', searchResultQuiz: 'Quiz',
     searchCategoryFavorites: 'Favourites', searchCategoryUnread: 'Notes to Study', searchCategoryRead: 'Studied Notes',
     searchCategoryArchive: 'Archive', searchCategoryLibrary: 'Notes Library', searchCategoryTrash: 'Trash',
@@ -1156,7 +1157,7 @@ export const LANGS: Record<Lang, Translation> = {
     downloadBuildTitle: 'Bygg från källkod', downloadBuildDesc: 'Utvecklare kan bygga Mac-appen från projektets källkod:',
     downloadBuildOutput: 'Resultat: release/mac/Taha Note.app och release/Taha Note-1.0.0-arm64.dmg',
     downloadAlreadyTitle: 'Du använder skrivbordsappen', downloadAlreadyDesc: 'Det här fönstret är redan Taha Note Mac-appen.',
-    searchPh: 'Sök...', clearSearch: 'Töm sökning', searchHitsLabel: '{current}/{total}', searchNoHits: '0 träffar', searchHitPrevious: 'Föregående träff', searchHitNext: 'Nästa träff',
+    searchPh: 'Sök...', clearSearch: 'Töm sökning', searchHitsLabel: '{current}/{total}', searchNoHits: '0 träffar', searchMinCharsHint: 'Skriv minst 2 tecken för att söka', searchHitPrevious: 'Föregående träff', searchHitNext: 'Nästa träff',
     searchResultsTitle: 'Sökresultat', searchResultNote: 'Anteckning', searchResultQuiz: 'Quiz',
     searchCategoryFavorites: 'Favoriter', searchCategoryUnread: 'Att studera', searchCategoryRead: 'Studerade',
     searchCategoryArchive: 'Arkiv', searchCategoryLibrary: 'Anteckningsbibliotek', searchCategoryTrash: 'Papperskorg',

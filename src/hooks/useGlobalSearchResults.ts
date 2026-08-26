@@ -8,7 +8,7 @@ import {
   type GlobalSearchResult,
 } from '../lib/globalSearch';
 
-const IDLE_TIMEOUT_MS = 150;
+const IDLE_TIMEOUT_MS = 800;
 
 export function useGlobalSearchResults(
   enabled: boolean,
@@ -20,6 +20,7 @@ export function useGlobalSearchResults(
   t: Translation,
   favQuizIds: Set<number>,
 ) {
+  const deferredSearch = useDeferredValue(search);
   const collectedQuizzes = useMemo(
     () => collectQuizItems(quizzes, quizSets),
     [quizzes, quizSets],
@@ -41,7 +42,7 @@ export function useGlobalSearchResults(
         quizzes,
         quizSets,
         quizFolders,
-        search,
+        deferredSearch,
         t,
         favQuizIds,
         collectedQuizzes,
@@ -54,13 +55,13 @@ export function useGlobalSearchResults(
       return () => cancelIdleCallback(handle);
     }
 
-    const timer = window.setTimeout(compute, 0);
+    const timer = window.setTimeout(compute, 32);
     return () => window.clearTimeout(timer);
-  }, [enabled, search, notes, quizzes, quizSets, quizFolders, t, favQuizIds, collectedQuizzes]);
+  }, [enabled, deferredSearch, notes, quizzes, quizSets, quizFolders, t, favQuizIds, collectedQuizzes]);
 
   const hitMetaImmediate = useMemo(
-    () => (enabled && results.length > 0 ? buildGlobalSearchHitStarts(results, search) : { starts: {}, total: 0 }),
-    [enabled, results, search],
+    () => (enabled && results.length > 0 ? buildGlobalSearchHitStarts(results, deferredSearch) : { starts: {}, total: 0 }),
+    [enabled, results, deferredSearch],
   );
   const hitMeta = useDeferredValue(hitMetaImmediate);
 

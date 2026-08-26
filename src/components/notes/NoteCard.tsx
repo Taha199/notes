@@ -80,16 +80,22 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
   const bodyText = getNoteSearchPlainText(note);
   const hitCounter: SearchHitCounter = { value: searchHitStart };
   const previewHtml = note.html || `<p>${bodyText}</p>`;
-  const bodyPreview = hasSearch ? bodyText : bodyText.slice(0, 220);
+  // Always truncate in list/search — full-body highlight freezes the UI.
+  const bodyPreview = bodyText.slice(0, 220);
   const titleHitCount = useMemo(
     () => (hasSearch && note.title ? countSearchMatchesInText(note.title, search) : 0),
     [hasSearch, note.title, search],
   );
   const highlightedPreviewHtml = useMemo(() => {
     if (!hasSearch) return previewHtml;
+    // Never regex-highlight the full note HTML during search (common queries explode DOM size).
+    const escaped = bodyPreview
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
     const counter: SearchHitCounter = { value: searchHitStart + titleHitCount };
-    return highlightHtmlContent(previewHtml, search, counter, activeSearchHitIndex);
-  }, [hasSearch, previewHtml, search, searchHitStart, titleHitCount, activeSearchHitIndex]);
+    return highlightHtmlContent(`<p>${escaped}</p>`, search, counter, activeSearchHitIndex);
+  }, [hasSearch, bodyPreview, search, searchHitStart, titleHitCount, activeSearchHitIndex]);
   const favSearchHit =
     ' [&_.note-search-hit]:!rounded-sm [&_.note-search-hit]:!bg-orange-500 [&_.note-search-hit]:!px-0.5 [&_.note-search-hit]:!font-semibold [&_.note-search-hit]:!text-white [&_.note-search-hit]:shadow-sm dark:[&_.note-search-hit]:!bg-orange-400 dark:[&_.note-search-hit]:!text-white [&_.note-search-hit--active]:!bg-orange-600 [&_.note-search-hit--active]:!text-white [&_.note-search-hit--active]:!shadow-md dark:[&_.note-search-hit--active]:!bg-orange-300 dark:[&_.note-search-hit--active]:!text-gray-900';
 

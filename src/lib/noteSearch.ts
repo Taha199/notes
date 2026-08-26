@@ -96,10 +96,19 @@ export function buildSearchHighlightPattern(search: string) {
   return new RegExp(`(${tokens.map(tokenToAccentInsensitivePattern).join('|')})`, 'gi');
 }
 
-export function countSearchMatchesInText(text: string, search: string) {
+/** Cap hit counting so short/common queries cannot allocate huge match arrays. */
+export const MAX_SEARCH_HIT_COUNT = 200;
+
+export function countSearchMatchesInText(text: string, search: string, max = MAX_SEARCH_HIT_COUNT) {
   const pattern = buildSearchHighlightPattern(search);
   if (!pattern) return 0;
-  return [...text.matchAll(new RegExp(pattern.source, 'gi'))].length;
+  const re = new RegExp(pattern.source, 'gi');
+  let count = 0;
+  while (re.exec(text) !== null) {
+    count += 1;
+    if (count >= max) break;
+  }
+  return count;
 }
 
 export function getNoteSearchPlainText(note: Note) {

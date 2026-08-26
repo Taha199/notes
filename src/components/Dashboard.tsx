@@ -25,6 +25,7 @@ import { DownloadPage } from './download/DownloadPage';
 import { AdminPanel } from './admin/AdminPanel';
 import { ConfirmDialog } from './common/ConfirmDialog';
 import { filterNotesBySearch, normalizeSearch, noteMatchesSearch, nextSearchHitIndex } from '../lib/noteSearch';
+import { MIN_GLOBAL_SEARCH_CHARS } from '../lib/globalSearch';
 import { GlobalSearchResults } from './search/GlobalSearchResults';
 import { useGlobalSearchResults } from '../hooks/useGlobalSearchResults';
 import { AiBackNotice } from './common/AiBackNotice';
@@ -228,8 +229,11 @@ export function Dashboard() {
         .filter((x): x is number => x != null),
     );
   }, [quizSets]);
-  const hasSearch = normalizeSearch(search).length > 0;
-  const showGlobalSearch = hasSearch && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb' && page !== 'countdown';
+  const searchQueryLen = normalizeSearch(search).length;
+  const hasSearch = searchQueryLen > 0;
+  const searchReady = searchQueryLen >= MIN_GLOBAL_SEARCH_CHARS;
+  const showGlobalSearch = searchReady && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb' && page !== 'countdown';
+  const showSearchHint = hasSearch && !searchReady && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb' && page !== 'countdown';
   const { results: globalSearchResults, hitMeta: searchHitMeta } = useGlobalSearchResults(
     showGlobalSearch,
     search,
@@ -368,6 +372,12 @@ export function Dashboard() {
         <AiBackNotice />
 
         <div className="flex-1 overflow-y-auto">
+          {showSearchHint && (
+            <div className="px-3 py-8 text-center text-sm text-app-text-secondary dark:text-gray-400 sm:px-5">
+              {t.searchMinCharsHint}
+            </div>
+          )}
+
           {showGlobalSearch && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">
               <div className="mb-3 px-1 text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
@@ -379,7 +389,7 @@ export function Dashboard() {
                 searchHitStarts={searchHitMeta.starts}
                 activeSearchHitIndex={activeSearchHit}
                 emptyText={t.emptySearch}
-                noteViewMode={noteViewMode}
+                noteViewMode="grid"
                 onOpenNote={handleOpenNoteFromSearch}
                 onOpenQuiz={handleOpenQuizFromSearch}
               />
