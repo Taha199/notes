@@ -4,6 +4,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useNotes, FAVORITES_SET_ID } from '../contexts/NotesContext';
 import { useToast } from '../contexts/ToastContext';
 import { pageFromPath, pathFromPage } from '../lib/pageRoute';
+import { SHOW_ADMIN_PANEL } from '../lib/firebase';
 import { sortNotesByCreatedDesc } from '../lib/noteSort';
 import { Sidebar } from './layout/Sidebar';
 import { Header } from './layout/Header';
@@ -183,10 +184,21 @@ export function Dashboard() {
   const { show } = useToast();
   const [page, setPageState] = useState<Page>(() => pageFromPath(window.location.pathname));
   const setPage = useCallback((next: Page) => {
-    setPageState(next);
-    const nextPath = pathFromPage(next);
+    const resolved = next === 'admin' && !SHOW_ADMIN_PANEL ? 'home' : next;
+    setPageState(resolved);
+    const nextPath = pathFromPage(resolved);
     if (window.location.pathname !== nextPath) {
-      window.history.pushState({ page: next }, '', `${nextPath}${window.location.search}`);
+      window.history.pushState({ page: resolved }, '', `${nextPath}${window.location.search}`);
+    }
+  }, []);
+
+  // /admin disabled: rewrite URL to home if someone bookmarks or types the path.
+  useEffect(() => {
+    if (SHOW_ADMIN_PANEL) return;
+    const path = window.location.pathname.replace(/\/+$/, '') || '/';
+    if (path === '/admin') {
+      window.history.replaceState({ page: 'home' }, '', `/${window.location.search}`);
+      setPageState('home');
     }
   }, []);
 
@@ -232,8 +244,10 @@ export function Dashboard() {
   const searchQueryLen = normalizeSearch(search).length;
   const hasSearch = searchQueryLen > 0;
   const searchReady = searchQueryLen >= MIN_GLOBAL_SEARCH_CHARS;
-  const showGlobalSearch = searchReady && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb' && page !== 'countdown';
-  const showSearchHint = hasSearch && !searchReady && page !== 'files' && page !== 'settings' && page !== 'admin' && page !== 'todo' && page !== 'arabicKb' && page !== 'countdown';
+  // Global search overlays any tab (files, settings, todo, …) so the header
+  // search always works regardless of the open page.
+  const showGlobalSearch = searchReady;
+  const showSearchHint = hasSearch && !searchReady;
   const { results: globalSearchResults, hitMeta: searchHitMeta } = useGlobalSearchResults(
     showGlobalSearch,
     search,
@@ -452,7 +466,7 @@ export function Dashboard() {
           )}
           {!showGlobalSearch && page === 'download' && <DownloadPage />}
           {!showGlobalSearch && page === 'settings' && <SettingsPage />}
-          {!showGlobalSearch && page === 'admin' && <AdminPanel />}
+          {!showGlobalSearch && page === 'admin' && SHOW_ADMIN_PANEL && <AdminPanel />}
 
           {!showGlobalSearch && page === 'unread' && (
             <div className="px-3 py-4 sm:px-5 sm:py-5">

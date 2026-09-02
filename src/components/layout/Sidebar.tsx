@@ -4,7 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import { useTodos } from '../../contexts/TodosContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { ADMIN_EMAIL, SHOW_ADMIN_NAV } from '../../lib/firebase';
+import { ADMIN_EMAIL, SHOW_ADMIN_PANEL } from '../../lib/firebase';
 import { useTheme, type ColorThemeId } from '../../contexts/ThemeContext';
 import { Logo } from '../common/Logo';
 
@@ -66,7 +66,7 @@ export function Sidebar({
     { page: 'archive', icon: '🗄', label: t.navArchive, badge: counts.archive, badgeClass: 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400' },
     { page: 'trash', icon: '🗑', label: t.navTrash, badge: counts.trash, badgeClass: 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400' },
     { page: 'settings', icon: '⚙️', label: t.settingsTitle },
-    ...(SHOW_ADMIN_NAV && user?.email === ADMIN_EMAIL
+    ...(SHOW_ADMIN_PANEL && user?.email === ADMIN_EMAIL
       ? [{ page: 'admin' as Page, icon: '👑', label: t.adminTitle }]
       : []),
   ];

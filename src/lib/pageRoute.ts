@@ -1,4 +1,5 @@
 import type { Page } from '../types';
+import { SHOW_ADMIN_PANEL } from './firebase';
 
 const PAGE_PATHS: Record<Page, string> = {
   home: '/',
@@ -24,9 +25,12 @@ const PATH_TO_PAGE = Object.fromEntries(
 
 export function pageFromPath(pathname: string): Page {
   const normalized = pathname.replace(/\/+$/, '') || '/';
-  return PATH_TO_PAGE[normalized] ?? 'home';
+  const page = PATH_TO_PAGE[normalized] ?? 'home';
+  if (page === 'admin' && !SHOW_ADMIN_PANEL) return 'home';
+  return page;
 }
 
 export function pathFromPage(page: Page): string {
+  if (page === 'admin' && !SHOW_ADMIN_PANEL) return PAGE_PATHS.home;
   return PAGE_PATHS[page];
 }

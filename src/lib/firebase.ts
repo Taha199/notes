@@ -41,5 +41,8 @@ export const FB_DB_URL = 'https://noteclaude-a5b3b-default-rtdb.europe-west1.fir
 
 // Only this account sees the admin panel.
 export const ADMIN_EMAIL = 'abdomar200@gmail.com';
-/** Sidebar link for Användarpanel. Flip to true to show it again — panel/APIs stay wired. */
-export const SHOW_ADMIN_NAV = false;
+/**
+ * Sidebar link + /admin route for Användarpanel.
+ * Flip to true to restore — AdminPanel component and APIs stay wired.
+ */
+export const SHOW_ADMIN_PANEL = false;
