@@ -44,46 +44,84 @@ export function isFileSort(value: string): value is FileSort {
 }
 
 function localDateMs(year: number, month: number, day: number, hour = 0, minute = 0, second = 0): number {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return 0;
   return new Date(year, month - 1, day, hour, minute, second).getTime();
+}
+
+function normalizeAddedAt(addedAt: string): string {
+  return (addedAt || '')
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/[\/⁄∕／]/g, '/')
+    .replace(/[،，]/g, ',')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function applyAmPm(hour: number, ampm: string | undefined): number {
+  if (!ampm) return hour;
+  const p = ampm.trim().toLowerCase();
+  if (p.startsWith('p') && hour < 12) return hour + 12;
+  if (p.startsWith('a') && hour === 12) return 0;
+  return hour;
 }
 
 /**
  * Parse StoredFile.addedAt. Uploads used toLocaleString(), so values mix
  * `2026-07-21 00:38:32` and `29/07/2026, 09:58:32`. Date.parse treats the latter
- * as US MM/DD (or NaN), which made "nyast" look unchanged.
+ * as US MM/DD (or NaN), which left those files stuck at the bottom of "nyast".
  */
 export function fileAddedAtMs(addedAt: string): number {
-  const raw = (addedAt || '').trim();
+  const raw = normalizeAddedAt(addedAt);
   if (!raw) return 0;
 
-  let m = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  const clock = '(?:[T, ]+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?(?:\\s*([AaPp][Mm]?))?)?';
+
+  let m = raw.match(new RegExp(`(\\d{4})-(\\d{2})-(\\d{2})${clock}`));
   if (m) {
-    if (/Z|[+-]\d{2}:\d{2}\s*$/i.test(raw)) {
-      const iso = Date.parse(raw);
+    if (/T|Z|[+-]\d{2}:\d{2}/.test(raw)) {
+      const iso = Date.parse(addedAt.trim());
       if (!Number.isNaN(iso)) return iso;
     }
-    return localDateMs(+m[1], +m[2], +m[3], m[4] ? +m[4] : 0, m[5] ? +m[5] : 0, m[6] ? +m[6] : 0);
+    return localDateMs(
+      +m[1], +m[2], +m[3],
+      applyAmPm(m[4] ? +m[4] : 0, m[7]),
+      m[5] ? +m[5] : 0,
+      m[6] ? +m[6] : 0,
+    );
   }
 
-  m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  m = raw.match(new RegExp(`(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4})${clock}`));
   if (m) {
     const first = +m[1];
     const second = +m[2];
     const year = +m[3];
-    const hour = m[4] ? +m[4] : 0;
-    const minute = m[5] ? +m[5] : 0;
-    const secondOf = m[6] ? +m[6] : 0;
     let day = first;
     let month = second;
     if (first <= 12 && second > 12) {
       month = first;
       day = second;
     }
-    return localDateMs(year, month, day, hour, minute, secondOf);
+    return localDateMs(
+      year, month, day,
+      applyAmPm(m[4] ? +m[4] : 0, m[7]),
+      m[5] ? +m[5] : 0,
+      m[6] ? +m[6] : 0,
+    );
   }
 
   const parsed = Date.parse(raw);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/** Upload ids are `${Date.now()}-…` — used when addedAt cannot be parsed. */
+export function fileIdTimeMs(id: string): number {
+  const n = Number.parseInt(String(id).split('-')[0] || '', 10);
+  if (n >= 1_000_000_000_000 && n <= 9_999_999_999_999) return n;
+  return 0;
+}
+
+export function fileSortTimeMs(file: StoredFile): number {
+  return fileAddedAtMs(file.addedAt) || fileIdTimeMs(file.id);
 }
 
 export function formatFileAddedAt(addedAt: string): string {
@@ -99,8 +137,8 @@ export function sortStoredFiles(files: StoredFile[], sort: FileSort): StoredFile
   next.sort((a, b) => {
     if (sort === 'size-large') return (b.size || 0) - (a.size || 0) || a.name.localeCompare(b.name);
     if (sort === 'size-small') return (a.size || 0) - (b.size || 0) || a.name.localeCompare(b.name);
-    const da = fileAddedAtMs(a.addedAt);
-    const db = fileAddedAtMs(b.addedAt);
+    const da = fileSortTimeMs(a);
+    const db = fileSortTimeMs(b);
     if (sort === 'date-old') return da - db || a.name.localeCompare(b.name);
     return db - da || a.name.localeCompare(b.name);
   });

@@ -52,4 +52,18 @@ describe('sortStoredFiles', () => {
     const jul21 = fileAddedAtMs('2026-07-21 00:38:32');
     expect(jul29).toBeGreaterThan(jul21);
   });
+
+  it('parses day/month dates with RTL marks or odd slashes', () => {
+    expect(fileAddedAtMs('\u200e31/08/2026, 12:07:24')).toBe(fileAddedAtMs('31/08/2026, 12:07:24'));
+    expect(fileAddedAtMs('31.08.2026, 12:07:24')).toBe(fileAddedAtMs('31/08/2026, 12:07:24'));
+  });
+
+  it('falls back to Date.now prefix in the file id', () => {
+    const aug = Date.parse('2026-08-31T12:07:24');
+    const listed = [
+      file({ id: '1', name: 'old.pdf', size: 1, addedAt: '2026-07-21 00:38:32' }),
+      file({ id: `${aug}-xyz`, name: 'newer.jpeg', size: 1, addedAt: 'not-a-date' }),
+    ];
+    expect(sortStoredFiles(listed, 'date-new').map((f) => f.name)).toEqual(['newer.jpeg', 'old.pdf']);
+  });
 });
