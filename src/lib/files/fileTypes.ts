@@ -43,13 +43,55 @@ export function isFileSort(value: string): value is FileSort {
   return value === 'date-new' || value === 'date-old' || value === 'size-large' || value === 'size-small';
 }
 
-/** Parse StoredFile.addedAt (ISO or locale / `YYYY-MM-DD HH:mm:ss`). */
+function localDateMs(year: number, month: number, day: number, hour = 0, minute = 0, second = 0): number {
+  return new Date(year, month - 1, day, hour, minute, second).getTime();
+}
+
+/**
+ * Parse StoredFile.addedAt. Uploads used toLocaleString(), so values mix
+ * `2026-07-21 00:38:32` and `29/07/2026, 09:58:32`. Date.parse treats the latter
+ * as US MM/DD (or NaN), which made "nyast" look unchanged.
+ */
 export function fileAddedAtMs(addedAt: string): number {
-  const parsed = Date.parse(addedAt);
-  if (!Number.isNaN(parsed)) return parsed;
-  const m = addedAt.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (!m) return 0;
-  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] ? +m[6] : 0).getTime();
+  const raw = (addedAt || '').trim();
+  if (!raw) return 0;
+
+  let m = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    if (/Z|[+-]\d{2}:\d{2}\s*$/i.test(raw)) {
+      const iso = Date.parse(raw);
+      if (!Number.isNaN(iso)) return iso;
+    }
+    return localDateMs(+m[1], +m[2], +m[3], m[4] ? +m[4] : 0, m[5] ? +m[5] : 0, m[6] ? +m[6] : 0);
+  }
+
+  m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    const first = +m[1];
+    const second = +m[2];
+    const year = +m[3];
+    const hour = m[4] ? +m[4] : 0;
+    const minute = m[5] ? +m[5] : 0;
+    const secondOf = m[6] ? +m[6] : 0;
+    let day = first;
+    let month = second;
+    if (first <= 12 && second > 12) {
+      month = first;
+      day = second;
+    }
+    return localDateMs(year, month, day, hour, minute, secondOf);
+  }
+
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export function formatFileAddedAt(addedAt: string): string {
+  const ms = fileAddedAtMs(addedAt);
+  if (!ms) return addedAt;
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 export function sortStoredFiles(files: StoredFile[], sort: FileSort): StoredFile[] {

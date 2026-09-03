@@ -6,6 +6,7 @@ import {
   PROFILE_TIMEOUT_MS,
   lightFileMeta,
   normalizeList,
+  sortStoredFiles,
   withTimeout,
   type FileFolder,
   type StoredFile,
@@ -29,9 +30,10 @@ async function authFetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
 }
 
 function sortFiles(files: StoredFile[], keepInlineDataUrl = false): StoredFile[] {
-  return files
-    .map((f) => (keepInlineDataUrl ? f : lightFileMeta(f)))
-    .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
+  return sortStoredFiles(
+    files.map((f) => (keepInlineDataUrl ? f : lightFileMeta(f))),
+    'date-new',
+  );
 }
 
 function sortFolders(folders: FileFolder[]): FileFolder[] {

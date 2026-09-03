@@ -29,4 +29,27 @@ describe('sortStoredFiles', () => {
   it('parses locale-style timestamps', () => {
     expect(fileAddedAtMs('2026-09-03 01:18:26')).toBeGreaterThan(fileAddedAtMs('2026-08-27 10:38:00'));
   });
+
+  it('sorts mixed ISO and day/month locale dates newest first', () => {
+    const mixed = [
+      file({ id: 'iso-jul21', name: 'a.pdf', size: 1, addedAt: '2026-07-21 00:38:32' }),
+      file({ id: 'iso-jul16', name: 'b.pdf', size: 1, addedAt: '2026-07-16 20:43:46' }),
+      file({ id: 'eu-jul29', name: 'c.pdf', size: 1, addedAt: '29/07/2026, 09:58:32' }),
+      file({ id: 'eu-aug31', name: 'd.pdf', size: 1, addedAt: '31/08/2026, 12:07:24' }),
+      file({ id: 'eu-jul17', name: 'e.pdf', size: 1, addedAt: '17/07/2026, 09:42:39' }),
+    ];
+    expect(sortStoredFiles(mixed, 'date-new').map((f) => f.id)).toEqual([
+      'eu-aug31',
+      'eu-jul29',
+      'iso-jul21',
+      'eu-jul17',
+      'iso-jul16',
+    ]);
+  });
+
+  it('treats 29/07/2026 as 29 July, not invalid US month', () => {
+    const jul29 = fileAddedAtMs('29/07/2026, 09:58:32');
+    const jul21 = fileAddedAtMs('2026-07-21 00:38:32');
+    expect(jul29).toBeGreaterThan(jul21);
+  });
 });

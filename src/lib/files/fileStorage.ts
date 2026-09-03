@@ -120,7 +120,7 @@ export async function uploadFileToStorage(
     name: file.name,
     type: file.type || 'application/octet-stream',
     size: file.size,
-    addedAt: new Date().toLocaleString(),
+    addedAt: new Date().toISOString(),
   };
   const withFolder = folderId ? { ...base, folderId } : base;
 

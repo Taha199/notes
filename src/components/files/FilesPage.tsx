@@ -28,6 +28,7 @@ import {
   saveFileMeta,
   saveFolderMeta,
   sortStoredFiles,
+  formatFileAddedAt,
   uploadErrorMessage,
   uploadFileToStorage,
   dataUrlToBlobWithProgress,
@@ -908,7 +909,7 @@ export function FilesPage({ search }: { search: string }) {
                     <div className="truncate text-sm font-bold text-app-text dark:text-gray-100" title={file.name}>{file.name}</div>
                   )}
                   <div className="mt-1 text-xs text-app-text-secondary dark:text-gray-400">{formatFileSize(file.size)} · {t.filesStored}</div>
-                  <div className="mt-0.5 truncate text-[11px] text-app-text-secondary/70 dark:text-gray-500">{file.addedAt}</div>
+                  <div className="mt-0.5 truncate text-[11px] text-app-text-secondary/70 dark:text-gray-500">{formatFileAddedAt(file.addedAt)}</div>
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">

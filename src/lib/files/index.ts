@@ -29,6 +29,7 @@ export {
   withTimeout,
   isFileSort,
   fileAddedAtMs,
+  formatFileAddedAt,
   sortStoredFiles,
 } from './fileTypes';
 
