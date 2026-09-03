@@ -206,6 +206,10 @@ export interface Translation {
   filesSortDateOld: string;
   filesSortSizeLarge: string;
   filesSortSizeSmall: string;
+  filesSortDateNewShort: string;
+  filesSortDateOldShort: string;
+  filesSortSizeLargeShort: string;
+  filesSortSizeSmallShort: string;
   selDel: string;
   cancelSel: string;
   emptyTrashBtn: string;
@@ -773,6 +777,7 @@ export const LANGS: Record<Lang, Translation> = {
     countdownUnpinHeader: 'Hide from header',
     filesAllFiles: 'All files', filesNewFolder: 'New folder', filesFolderEmpty: 'This folder is empty', filesMoveTo: 'Move to', filesMoveToRoot: 'All files (root)', filesFolderDelete: 'Delete folder', filesFolderCreated: 'Folder created', filesFolderNamePh: 'Folder name', filesInFolder: 'files',
     filesSortLabel: 'Sort', filesSortDateNew: 'Date · newest first', filesSortDateOld: 'Date · oldest first', filesSortSizeLarge: 'Size · largest first', filesSortSizeSmall: 'Size · smallest first',
+    filesSortDateNewShort: 'Newest', filesSortDateOldShort: 'Oldest', filesSortSizeLargeShort: 'Largest', filesSortSizeSmallShort: 'Smallest',
     selDel: '☑ Select to Delete', cancelSel: '✕ Cancel', emptyTrashBtn: 'Empty Trash', delSelected: 'Delete Selected',
     titleBold: 'Bold', titleItalic: 'Italic', titleUnline: 'Underline', titleStrike: 'Strikethrough', titleCopyFormat: 'Copy formatting', titlePasteFormat: 'Paste formatting', titleInsertDateHeader: "Insert today's date as header", titleInsertTable: 'Insert table',
     tableAddRowAbove: 'Row above', tableAddRowBelow: 'Row below', tableRemoveRow: 'Delete row',
@@ -1246,6 +1251,7 @@ export const LANGS: Record<Lang, Translation> = {
     countdownUnpinHeader: 'Dölj från sidhuvudet',
     filesAllFiles: 'Alla filer', filesNewFolder: 'Ny mapp', filesFolderEmpty: 'Mappen är tom', filesMoveTo: 'Flytta till', filesMoveToRoot: 'Alla filer (rot)', filesFolderDelete: 'Ta bort mapp', filesFolderCreated: 'Mapp skapad', filesFolderNamePh: 'Mappnamn', filesInFolder: 'filer',
     filesSortLabel: 'Sortera', filesSortDateNew: 'Datum · nyast först', filesSortDateOld: 'Datum · äldst först', filesSortSizeLarge: 'Storlek · störst först', filesSortSizeSmall: 'Storlek · minst först',
+    filesSortDateNewShort: 'Nyast', filesSortDateOldShort: 'Äldst', filesSortSizeLargeShort: 'Störst', filesSortSizeSmallShort: 'Minst',
     selDel: '☑ Välj för Radering', cancelSel: '✕ Avbryt', emptyTrashBtn: 'Töm Papperskorgen', delSelected: 'Radera Valda',
     titleBold: 'Fet', titleItalic: 'Kursiv', titleUnline: 'Understruken', titleStrike: 'Genomstruken', titleCopyFormat: 'Kopiera formatering', titlePasteFormat: 'Klistra in formatering', titleInsertDateHeader: 'Infoga dagens datum som rubrik', titleInsertTable: 'Infoga tabell',
     tableAddRowAbove: 'Rad ovanför', tableAddRowBelow: 'Rad under', tableRemoveRow: 'Ta bort rad',

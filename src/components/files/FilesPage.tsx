@@ -81,6 +81,7 @@ export function FilesPage({ search }: { search: string }) {
       return 'date-new';
     }
   });
+  const [fileSortMenuOpen, setFileSortMenuOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadPct, setDownloadPct] = useState(0);
@@ -670,23 +671,74 @@ export function FilesPage({ search }: { search: string }) {
           </>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-[12px] font-semibold text-app-text-secondary dark:text-gray-400">
-            <span className="sr-only">{t.filesSortLabel}</span>
-            <select
-              value={fileSort}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (isFileSort(next)) setFileSort(next);
-              }}
-              className="cursor-pointer rounded-xl border border-app-border bg-white px-2.5 py-1.5 text-[12px] font-semibold text-app-text outline-none transition hover:bg-app-bg dark:border-white/10 dark:bg-white/5 dark:text-gray-200"
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setFileSortMenuOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={fileSortMenuOpen}
               title={t.filesSortLabel}
+              className={
+                'flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[12px] font-semibold transition ' +
+                (fileSortMenuOpen
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-app-border bg-white text-app-text-secondary hover:bg-app-bg dark:border-white/10 dark:bg-white/5 dark:text-gray-300 dark:hover:bg-white/10')
+              }
             >
-              <option value="date-new">{t.filesSortDateNew}</option>
-              <option value="date-old">{t.filesSortDateOld}</option>
-              <option value="size-large">{t.filesSortSizeLarge}</option>
-              <option value="size-small">{t.filesSortSizeSmall}</option>
-            </select>
-          </label>
+              <span aria-hidden="true">⇅</span>
+              <span>
+                {fileSort === 'date-old' ? t.filesSortDateOldShort
+                  : fileSort === 'size-large' ? t.filesSortSizeLargeShort
+                    : fileSort === 'size-small' ? t.filesSortSizeSmallShort
+                      : t.filesSortDateNewShort}
+              </span>
+              <span className={'text-[10px] opacity-60 transition ' + (fileSortMenuOpen ? 'rotate-180' : '')}>▾</span>
+            </button>
+            {fileSortMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setFileSortMenuOpen(false)} />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-50 mt-1.5 w-[220px] overflow-hidden rounded-2xl border border-app-border bg-white py-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-gray-900 dark:shadow-[0_12px_32px_rgba(0,0,0,0.45)]"
+                >
+                  <p className="px-3 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/55 dark:text-gray-500">
+                    {t.filesSortLabel}
+                  </p>
+                  {([
+                    { key: 'date-new' as const, icon: '📅', label: t.filesSortDateNew },
+                    { key: 'date-old' as const, icon: '📅', label: t.filesSortDateOld },
+                    { key: 'size-large' as const, icon: '📦', label: t.filesSortSizeLarge },
+                    { key: 'size-small' as const, icon: '📦', label: t.filesSortSizeSmall },
+                  ]).map((opt, i) => (
+                    <div key={opt.key}>
+                      {i === 2 && <div className="my-1.5 border-t border-app-border/70 dark:border-white/10" />}
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={fileSort === opt.key}
+                        onClick={() => {
+                          setFileSort(opt.key);
+                          setFileSortMenuOpen(false);
+                        }}
+                        className={
+                          'mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[12.5px] transition ' +
+                          (fileSort === opt.key
+                            ? 'bg-primary/10 font-semibold text-primary'
+                            : 'text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5')
+                        }
+                      >
+                        <span className="text-[13px] opacity-80" aria-hidden="true">{opt.icon}</span>
+                        <span className="min-w-0 flex-1 leading-snug">{opt.label}</span>
+                        {fileSort === opt.key && (
+                          <span className="text-[12px] font-bold text-primary" aria-hidden="true">✓</span>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           {!currentFolderId && !creatingFolder && (
             <button
               type="button"
