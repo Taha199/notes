@@ -34,7 +34,36 @@ export const UPLOAD_STUCK_MS = 10_000;
 export const UPLOAD_TOTAL_MS = 90_000;
 export const PROFILE_TIMEOUT_MS = 5_000;
 export const FILES_FOLDER_KEY = 'malacadhati_files_folder';
+export const FILES_SORT_KEY = 'malacadhati_files_sort';
 export const FILE_INPUT_ID = 'files-upload-input';
+
+export type FileSort = 'date-new' | 'date-old' | 'size-large' | 'size-small';
+
+export function isFileSort(value: string): value is FileSort {
+  return value === 'date-new' || value === 'date-old' || value === 'size-large' || value === 'size-small';
+}
+
+/** Parse StoredFile.addedAt (ISO or locale / `YYYY-MM-DD HH:mm:ss`). */
+export function fileAddedAtMs(addedAt: string): number {
+  const parsed = Date.parse(addedAt);
+  if (!Number.isNaN(parsed)) return parsed;
+  const m = addedAt.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return 0;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] ? +m[6] : 0).getTime();
+}
+
+export function sortStoredFiles(files: StoredFile[], sort: FileSort): StoredFile[] {
+  const next = [...files];
+  next.sort((a, b) => {
+    if (sort === 'size-large') return (b.size || 0) - (a.size || 0) || a.name.localeCompare(b.name);
+    if (sort === 'size-small') return (a.size || 0) - (b.size || 0) || a.name.localeCompare(b.name);
+    const da = fileAddedAtMs(a.addedAt);
+    const db = fileAddedAtMs(b.addedAt);
+    if (sort === 'date-old') return da - db || a.name.localeCompare(b.name);
+    return db - da || a.name.localeCompare(b.name);
+  });
+  return next;
+}
 
 export function safeStorageFileName(name: string): string {
   const cleaned = name

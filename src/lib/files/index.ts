@@ -3,6 +3,7 @@ export type {
   FileFolder,
   PreviewMode,
   UploadProgressItem,
+  FileSort,
 } from './fileTypes';
 
 export {
@@ -12,6 +13,7 @@ export {
   UPLOAD_TOTAL_MS,
   PROFILE_TIMEOUT_MS,
   FILES_FOLDER_KEY,
+  FILES_SORT_KEY,
   FILE_INPUT_ID,
   safeStorageFileName,
   formatFileSize,
@@ -25,6 +27,9 @@ export {
   firebaseErrorCode,
   isMissingStorageError,
   withTimeout,
+  isFileSort,
+  fileAddedAtMs,
+  sortStoredFiles,
 } from './fileTypes';
 
 export {

@@ -8,6 +8,7 @@ import { getStorageLimitBytes } from '../../lib/storageQuota';
 import {
   FILE_INPUT_ID,
   FILES_FOLDER_KEY,
+  FILES_SORT_KEY,
   MAX_FILE_SIZE_BYTES,
   canPreviewFile,
   deleteFileFully,
@@ -17,6 +18,7 @@ import {
   formatFileSize,
   healMissingDownloadUrls,
   hydrateInlineFile,
+  isFileSort,
   isInlinePendingFile,
   isMissingStorageError,
   loadFilesWithFallback,
@@ -25,12 +27,14 @@ import {
   revokePreviewBlobCache,
   saveFileMeta,
   saveFolderMeta,
+  sortStoredFiles,
   uploadErrorMessage,
   uploadFileToStorage,
   dataUrlToBlobWithProgress,
   triggerBlobDownload,
   withTimeout,
   type FileFolder,
+  type FileSort,
   type StoredFile,
   type UploadProgressItem,
 } from '../../lib/files';
@@ -68,6 +72,14 @@ export function FilesPage({ search }: { search: string }) {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [moveMenuFileId, setMoveMenuFileId] = useState<string | null>(null);
+  const [fileSort, setFileSort] = useState<FileSort>(() => {
+    try {
+      const raw = localStorage.getItem(FILES_SORT_KEY) || '';
+      return isFileSort(raw) ? raw : 'date-new';
+    } catch {
+      return 'date-new';
+    }
+  });
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadPct, setDownloadPct] = useState(0);
@@ -75,6 +87,12 @@ export function FilesPage({ search }: { search: string }) {
   useEffect(() => {
     localStorage.setItem(FILES_FOLDER_KEY, JSON.stringify(currentFolderId));
   }, [currentFolderId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILES_SORT_KEY, fileSort);
+    } catch { /* ignore */ }
+  }, [fileSort]);
 
   useEffect(() => {
     if (renamingId) renameInputRef.current?.focus();
@@ -238,15 +256,15 @@ export function FilesPage({ search }: { search: string }) {
   }, [folders, currentFolderId, q]);
 
   const visibleFiles = useMemo(() => {
-    if (q) {
-      return files.filter(
+    const listed = q
+      ? files.filter(
         (file) => file.name.toLowerCase().includes(q) || file.type.toLowerCase().includes(q),
+      )
+      : files.filter((file) =>
+        currentFolderId ? file.folderId === currentFolderId : !file.folderId,
       );
-    }
-    return files.filter((file) =>
-      currentFolderId ? file.folderId === currentFolderId : !file.folderId,
-    );
-  }, [files, currentFolderId, q]);
+    return sortStoredFiles(listed, fileSort);
+  }, [files, currentFolderId, q, fileSort]);
 
   const updateUploadItem = (key: string, patch: Partial<UploadProgressItem>) => {
     setUploadItems((prev) => prev.map((item) => (item.key === key ? { ...item, ...patch } : item)));
@@ -650,15 +668,34 @@ export function FilesPage({ search }: { search: string }) {
             </span>
           </>
         )}
-        {!currentFolderId && !creatingFolder && (
-          <button
-            type="button"
-            onClick={() => setCreatingFolder(true)}
-            className="ml-auto rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary hover:bg-primary/10"
-          >
-            + {t.filesNewFolder}
-          </button>
-        )}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[12px] font-semibold text-app-text-secondary dark:text-gray-400">
+            <span className="sr-only">{t.filesSortLabel}</span>
+            <select
+              value={fileSort}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (isFileSort(next)) setFileSort(next);
+              }}
+              className="cursor-pointer rounded-xl border border-app-border bg-white px-2.5 py-1.5 text-[12px] font-semibold text-app-text outline-none transition hover:bg-app-bg dark:border-white/10 dark:bg-white/5 dark:text-gray-200"
+              title={t.filesSortLabel}
+            >
+              <option value="date-new">{t.filesSortDateNew}</option>
+              <option value="date-old">{t.filesSortDateOld}</option>
+              <option value="size-large">{t.filesSortSizeLarge}</option>
+              <option value="size-small">{t.filesSortSizeSmall}</option>
+            </select>
+          </label>
+          {!currentFolderId && !creatingFolder && (
+            <button
+              type="button"
+              onClick={() => setCreatingFolder(true)}
+              className="rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary hover:bg-primary/10"
+            >
+              + {t.filesNewFolder}
+            </button>
+          )}
+        </div>
       </div>
 
       {creatingFolder && (
