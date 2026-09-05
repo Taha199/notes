@@ -61,7 +61,7 @@ const LIST_TAGS = new Set(['UL', 'OL']);
 type BlockAlign = 'left' | 'center' | 'right';
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
-const FONT_LINE_HEIGHT = '1.35';
+const FONT_LINE_HEIGHT = '1.25';
 
 /** Toolbar font-family options (inline style.fontFamily). Empty = inherit app font. */
 const NOTE_FONT_OPTIONS: { id: string; label: string; family: string }[] = [
@@ -73,6 +73,13 @@ const NOTE_FONT_OPTIONS: { id: string; label: string; family: string }[] = [
   { id: 'courier', label: 'Courier', family: "'Courier New', Courier, monospace" },
 ];
 
+/** Line-height presets applied to editor + content blocks. */
+const NOTE_LINE_HEIGHT_OPTIONS: { id: string; value: string }[] = [
+  { id: 'tight', value: '1.1' },
+  { id: 'normal', value: '1.25' },
+  { id: 'loose', value: '1.55' },
+];
+
 function noteFontIdFromFamily(family: string): string {
   const raw = family.toLowerCase().replace(/["']/g, '');
   if (!raw.trim()) return '';
@@ -82,6 +89,23 @@ function noteFontIdFromFamily(family: string): string {
     if (token && raw.includes(token)) return opt.id;
   }
   return '';
+}
+
+function noteLineHeightIdFromValue(raw: string, fontPx: number): string {
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n) || n <= 0) return 'normal';
+  // Computed style may be px; convert to ratio when possible.
+  const ratio = n > 4 && fontPx > 0 ? n / fontPx : n;
+  let best = NOTE_LINE_HEIGHT_OPTIONS[1]!;
+  let bestDist = Infinity;
+  for (const opt of NOTE_LINE_HEIGHT_OPTIONS) {
+    const d = Math.abs(parseFloat(opt.value) - ratio);
+    if (d < bestDist) {
+      bestDist = d;
+      best = opt;
+    }
+  }
+  return best.id;
 }
 const TAB_INDENT = '    ';
 
@@ -1043,6 +1067,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     fontFamilyIdRef.current = id;
     setFontFamilyIdState(id);
   };
+  const [lineHeightId, setLineHeightIdState] = useState('normal');
+  const lineHeightRef = useRef(FONT_LINE_HEIGHT);
+  const lineHeightIdRef = useRef('normal');
+  const setLineHeightId = (id: string) => {
+    const opt = NOTE_LINE_HEIGHT_OPTIONS.find((o) => o.id === id) ?? NOTE_LINE_HEIGHT_OPTIONS[1]!;
+    lineHeightRef.current = opt.value;
+    lineHeightIdRef.current = opt.id;
+    setLineHeightIdState(opt.id);
+  };
+  const [fontMenuOpen, setFontMenuOpen] = useState(false);
+  const [lineHeightMenuOpen, setLineHeightMenuOpen] = useState(false);
+  const fontMenuWrapRef = useRef<HTMLDivElement>(null);
+  const lineHeightMenuWrapRef = useRef<HTMLDivElement>(null);
   const [copiedFormat, setCopiedFormat] = useState<CopiedTextFormat | null>(null);
   const copiedFormatRef = useRef<CopiedTextFormat | null>(null);
   const fontInputFocused = useRef(false);
@@ -5039,7 +5076,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return active;
   };
 
-  // ── Font size / family indicators in sync with caret ─────────────────
+  // ── Font size / family / line-height indicators in sync with caret ────
   const syncFontSizeFromCaret = () => {
     const ed = editorRef.current;
     if (!ed) return;
@@ -5047,6 +5084,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (px !== fontSizeRef.current) setFontSize(px);
     const fam = readFontFamilyAtCaret(ed);
     if (fam !== fontFamilyIdRef.current) setFontFamilyId(fam);
+    const lh = readLineHeightAtCaret(ed);
+    if (lh !== lineHeightIdRef.current) setLineHeightId(lh);
   };
 
   useEffect(() => {
@@ -5369,7 +5408,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const applyFontSizeStyle = (span: HTMLSpanElement, px: number) => {
     span.style.fontSize = `${px}px`;
-    span.style.lineHeight = FONT_LINE_HEIGHT;
+    span.style.lineHeight = lineHeightRef.current;
   };
 
   // ── Font size ─────────────────────────────────────────────────────────
@@ -5741,6 +5780,56 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return '';
   };
 
+  const readLineHeightAtCaret = (ed: HTMLElement): string => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return lineHeightIdRef.current;
+    let node: Node | null = sel.anchorNode;
+    if (node?.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    while (node instanceof HTMLElement && node !== ed) {
+      const inline = node.style.lineHeight;
+      if (inline) {
+        const fs = parseFloat(node.style.fontSize) || parseFloat(getComputedStyle(node).fontSize) || fontSizeRef.current;
+        return noteLineHeightIdFromValue(inline, fs);
+      }
+      node = node.parentElement;
+    }
+    const fs = fontSizeRef.current || DEFAULT_FONT_PX;
+    return noteLineHeightIdFromValue(getComputedStyle(ed).lineHeight, fs);
+  };
+
+  const applyLineHeight = (id: string) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const opt = NOTE_LINE_HEIGHT_OPTIONS.find((o) => o.id === id) ?? NOTE_LINE_HEIGHT_OPTIONS[1]!;
+    if (document.activeElement !== ed) {
+      ed.focus({ preventScroll: true });
+      restoreSel();
+    }
+    pushUndoCheckpoint();
+    setLineHeightId(opt.id);
+    ed.style.lineHeight = opt.value;
+
+    const skip = (el: HTMLElement) =>
+      el.classList.contains('note-img-frame')
+      || el.classList.contains('note-yt-frame')
+      || el.classList.contains('note-table-wrap')
+      || !!el.closest('.note-img-frame, .note-yt-frame, .note-table-wrap, [data-note-table-toolbar], .note-img-frame__toolbar-host');
+
+    ed.querySelectorAll<HTMLElement>('div, p, li, h1, h2, h3, h4, h5, h6, blockquote, span').forEach((el) => {
+      if (skip(el)) return;
+      // Only restyle spans that already carry typography styles.
+      if (el.tagName === 'SPAN') {
+        if (!(el.style.fontSize || el.style.fontFamily || el.getAttribute('data-note-font') || el.style.lineHeight)) return;
+      }
+      el.style.lineHeight = opt.value;
+    });
+
+    blurTableToolbarFocus(ed);
+    saveSel();
+    emitHtml();
+    setLineHeightMenuOpen(false);
+  };
+
   const clearCopiedFormat = () => {
     copiedFormatRef.current = null;
     setCopiedFormat(null);
@@ -5836,6 +5925,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       positionPalette(e.currentTarget as HTMLElement, setPalPos);
       setHlPalOpen(false);
       setListPalOpen(false);
+      setFontMenuOpen(false);
+      setLineHeightMenuOpen(false);
     }
     setPalOpen(opening);
   };
@@ -5918,6 +6009,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       positionPalette(e.currentTarget as HTMLElement, setHlPalPos);
       setPalOpen(false);
       setListPalOpen(false);
+      setFontMenuOpen(false);
+      setLineHeightMenuOpen(false);
     }
     setHlPalOpen(opening);
   };
@@ -5938,6 +6031,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       positionPalette(e.currentTarget as HTMLElement, setListPalPos);
       setPalOpen(false);
       setHlPalOpen(false);
+      setFontMenuOpen(false);
+      setLineHeightMenuOpen(false);
     } else {
       listMenuRangeRef.current = null;
       listMenuBlockRef.current = null;
@@ -6255,6 +6350,28 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   }, [copiedFormat]);
 
   useEffect(() => {
+    if (!fontMenuOpen && !lineHeightMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (fontMenuWrapRef.current?.contains(t) || lineHeightMenuWrapRef.current?.contains(t)) return;
+      setFontMenuOpen(false);
+      setLineHeightMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setFontMenuOpen(false);
+        setLineHeightMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [fontMenuOpen, lineHeightMenuOpen]);
+
+  useEffect(() => {
     if (!listPalOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -6405,28 +6522,150 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         </div>
 
         {/* Font family */}
-        <select
-          value={fontFamilyId}
-          title={t.titleFont}
-          aria-label={t.titleFont}
-          onMouseDown={() => { captureFormattingSelection(); }}
-          onFocus={() => { captureFormattingSelection(); }}
-          onChange={(e) => {
-            captureFormattingSelection();
-            applyFontFamily(e.target.value);
-          }}
-          className="ml-1 h-[26px] max-w-[7.5rem] cursor-pointer rounded-lg border border-app-border bg-white px-1.5 text-[11px] font-semibold text-app-text outline-none hover:bg-app-bg dark:border-white/10 dark:bg-gray-900 dark:text-gray-100"
-        >
-          {NOTE_FONT_OPTIONS.map((opt) => (
-            <option
-              key={opt.id || 'standard'}
-              value={opt.id}
-              style={opt.family ? { fontFamily: opt.family } : undefined}
+        <div ref={fontMenuWrapRef} className="relative ml-1">
+          <button
+            type="button"
+            title={t.titleFont}
+            aria-label={t.titleFont}
+            aria-haspopup="menu"
+            aria-expanded={fontMenuOpen}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              captureFormattingSelection();
+              setLineHeightMenuOpen(false);
+              setFontMenuOpen((v) => !v);
+            }}
+            className={
+              'flex h-[26px] max-w-[7.75rem] items-center gap-1 rounded-lg border px-1.5 text-[11px] font-semibold transition ' +
+              (fontMenuOpen
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-app-border bg-white text-app-text hover:bg-app-bg dark:border-white/10 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-white/10')
+            }
+          >
+            <span
+              className="min-w-0 truncate"
+              style={{
+                fontFamily: (NOTE_FONT_OPTIONS.find((o) => o.id === fontFamilyId)?.family) || undefined,
+              }}
             >
-              {opt.id === '' ? t.fontStandard : opt.label}
-            </option>
-          ))}
-        </select>
+              {fontFamilyId === '' ? t.fontStandard : (NOTE_FONT_OPTIONS.find((o) => o.id === fontFamilyId)?.label ?? t.fontStandard)}
+            </span>
+            <span className={'text-[9px] opacity-60 transition ' + (fontMenuOpen ? 'rotate-180' : '')}>▾</span>
+          </button>
+          {fontMenuOpen && (
+            <div
+              role="menu"
+              className="absolute left-0 top-full z-[80] mt-1.5 w-[168px] overflow-hidden rounded-2xl border border-app-border bg-white py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-gray-900"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            >
+              <p className="px-3 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/55 dark:text-gray-500">
+                {t.titleFont}
+              </p>
+              {NOTE_FONT_OPTIONS.map((opt) => {
+                const selected = fontFamilyId === opt.id;
+                return (
+                  <button
+                    key={opt.id || 'standard'}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      captureFormattingSelection();
+                      applyFontFamily(opt.id);
+                      setFontMenuOpen(false);
+                    }}
+                    className={
+                      'mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-[12.5px] transition ' +
+                      (selected
+                        ? 'bg-primary/10 font-semibold text-primary'
+                        : 'text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5')
+                    }
+                    style={opt.family ? { fontFamily: opt.family } : undefined}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{opt.id === '' ? t.fontStandard : opt.label}</span>
+                    {selected && <span className="text-[12px] font-bold text-primary">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Line height */}
+        <div ref={lineHeightMenuWrapRef} className="relative ml-1">
+          <button
+            type="button"
+            title={t.titleLineHeight}
+            aria-label={t.titleLineHeight}
+            aria-haspopup="menu"
+            aria-expanded={lineHeightMenuOpen}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              captureFormattingSelection();
+              setFontMenuOpen(false);
+              setLineHeightMenuOpen((v) => !v);
+            }}
+            className={
+              'flex h-[26px] items-center gap-1 rounded-lg border px-1.5 text-[11px] font-semibold transition ' +
+              (lineHeightMenuOpen
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-app-border bg-white text-app-text hover:bg-app-bg dark:border-white/10 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-white/10')
+            }
+          >
+            <span aria-hidden="true" className="flex flex-col gap-[2px]">
+              <span className="block h-[1.5px] w-3 rounded-full bg-current" />
+              <span className="block h-[1.5px] w-3 rounded-full bg-current opacity-80" />
+              <span className="block h-[1.5px] w-3 rounded-full bg-current opacity-60" />
+            </span>
+            <span className="max-w-[4.5rem] truncate">
+              {lineHeightId === 'tight' ? t.lineHeightTight
+                : lineHeightId === 'loose' ? t.lineHeightLoose
+                  : t.lineHeightNormal}
+            </span>
+            <span className={'text-[9px] opacity-60 transition ' + (lineHeightMenuOpen ? 'rotate-180' : '')}>▾</span>
+          </button>
+          {lineHeightMenuOpen && (
+            <div
+              role="menu"
+              className="absolute left-0 top-full z-[80] mt-1.5 w-[168px] overflow-hidden rounded-2xl border border-app-border bg-white py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-gray-900"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            >
+              <p className="px-3 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/55 dark:text-gray-500">
+                {t.titleLineHeight}
+              </p>
+              {NOTE_LINE_HEIGHT_OPTIONS.map((opt) => {
+                const selected = lineHeightId === opt.id;
+                const label = opt.id === 'tight' ? t.lineHeightTight
+                  : opt.id === 'loose' ? t.lineHeightLoose
+                    : t.lineHeightNormal;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      captureFormattingSelection();
+                      applyLineHeight(opt.id);
+                    }}
+                    className={
+                      'mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-[12.5px] transition ' +
+                      (selected
+                        ? 'bg-primary/10 font-semibold text-primary'
+                        : 'text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5')
+                    }
+                  >
+                    <span className="min-w-0 flex-1">{label}</span>
+                    <span className="text-[10px] tabular-nums text-app-text-secondary/60">{opt.value}</span>
+                    {selected && <span className="text-[12px] font-bold text-primary">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
@@ -6898,8 +7137,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           }
         }}
         suppressContentEditableWarning
-        className={(flexToolbar ? 'min-h-0 flex-1 ' : '') + (verticalScroll ? 'overflow-y-auto ' : 'overflow-x-hidden ') + 'w-full max-w-full min-w-0 break-words whitespace-normal px-4 pt-1 pb-3 leading-normal text-app-text outline-none [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:ps-5 [&_ol]:list-decimal [&_ol]:ps-5 [&_li>ul]:mt-0.5 [&_li>ol]:mt-0.5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
-        style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
+        className={(flexToolbar ? 'min-h-0 flex-1 ' : '') + (verticalScroll ? 'overflow-y-auto ' : 'overflow-x-hidden ') + 'w-full max-w-full min-w-0 break-words whitespace-normal px-4 pt-0.5 pb-3 text-app-text outline-none [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal [&_div]:my-0 [&_p]:my-0 [&_ul]:my-0.5 [&_ul]:list-disc [&_ul]:ps-4 [&_ul]:marker:text-app-text-secondary/70 [&_ol]:my-0.5 [&_ol]:list-decimal [&_ol]:ps-4 [&_li]:my-0 [&_li]:py-0 [&_li]:leading-[inherit] [&_li>ul]:mt-0.5 [&_li>ol]:mt-0.5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
+        style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: (NOTE_LINE_HEIGHT_OPTIONS.find((o) => o.id === lineHeightId)?.value ?? FONT_LINE_HEIGHT), cursor: editable ? 'text' : 'default' }}
       />
 
       {/* Color / highlight palettes — portaled to body (see comment above useEffects) */}
@@ -6937,48 +7176,47 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         <div
           ref={listPalRef}
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          className="fixed z-[9999] min-w-[168px] overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
+          className="fixed z-[9999] w-[200px] overflow-hidden rounded-2xl border border-app-border bg-white py-1.5 shadow-[0_12px_28px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-gray-900 dark:shadow-[0_12px_28px_rgba(0,0,0,0.45)]"
           style={{ left: listPalPos.left, top: listPalPos.top }}
         >
-          <button
-            type="button"
-            onMouseDown={(e) => { e.preventDefault(); applyList('bullet'); }}
-            className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-app-bg dark:hover:bg-white/5 ' + (activeCmds.has('insertUnorderedList') ? 'font-semibold text-primary' : 'text-app-text dark:text-gray-100')}
-          >
-            <span className="w-4 text-center">•</span>
-            <span>{t.titleBulletList}</span>
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => { e.preventDefault(); applyList('ordered'); }}
-            className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-app-bg dark:hover:bg-white/5 ' + (activeCmds.has('insertOrderedList') ? 'font-semibold text-primary' : 'text-app-text dark:text-gray-100')}
-          >
-            <span className="w-4 text-center text-[11px] font-bold">1.</span>
-            <span>{t.titleNumberedList}</span>
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => { e.preventDefault(); applySubList(); }}
-            className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-app-bg dark:hover:bg-white/5 ' + (activeCmds.has('nestedList') ? 'font-semibold text-primary' : 'text-app-text dark:text-gray-100')}
-          >
-            <span className="w-4 text-center text-[10px] leading-none">↳</span>
-            <span>{t.titleSubList}</span>
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => { e.preventDefault(); applyOutdentSubList(); }}
-            className={'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-app-bg dark:hover:bg-white/5 ' + (activeCmds.has('canOutdentList') ? 'font-semibold text-primary' : 'text-app-text-secondary dark:text-gray-300')}
-          >
-            <span className="w-4 text-center text-[10px] leading-none">↰</span>
-            <span>{t.titleOutdentSubList}</span>
-          </button>
+          <p className="px-3 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/55 dark:text-gray-500">
+            {t.titleBulletList}
+          </p>
+          {([
+            { key: 'bullet' as const, icon: '•', label: t.titleBulletList, active: activeCmds.has('insertUnorderedList') },
+            { key: 'ordered' as const, icon: '1.', label: t.titleNumberedList, active: activeCmds.has('insertOrderedList') },
+            { key: 'sub' as const, icon: '↳', label: t.titleSubList, active: activeCmds.has('nestedList') },
+            { key: 'outdent' as const, icon: '↰', label: t.titleOutdentSubList, active: activeCmds.has('canOutdentList') },
+          ]).map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                if (opt.key === 'bullet') applyList('bullet');
+                else if (opt.key === 'ordered') applyList('ordered');
+                else if (opt.key === 'sub') applySubList();
+                else applyOutdentSubList();
+              }}
+              className={
+                'mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[12.5px] transition ' +
+                (opt.active
+                  ? 'bg-primary/10 font-semibold text-primary'
+                  : 'text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5')
+              }
+            >
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-app-bg text-[11px] font-bold text-app-text-secondary dark:bg-white/10 dark:text-gray-300">{opt.icon}</span>
+              <span className="min-w-0 flex-1 leading-snug">{opt.label}</span>
+              {opt.active && <span className="text-[12px] font-bold text-primary">✓</span>}
+            </button>
+          ))}
           {(activeCmds.has('insertUnorderedList') || activeCmds.has('insertOrderedList')) && (
             <button
               type="button"
               onMouseDown={(e) => { e.preventDefault(); applyList('none'); }}
-              className="flex w-full items-center gap-2 border-t border-app-border px-3 py-2 text-left text-[13px] text-red-600 hover:bg-red-50 dark:border-white/10 dark:text-red-400 dark:hover:bg-red-500/10"
+              className="mx-1.5 mt-1 flex w-[calc(100%-0.75rem)] items-center gap-2.5 rounded-xl border border-red-200/80 px-2.5 py-2 text-left text-[12.5px] font-medium text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
             >
-              <span className="w-4 text-center">✕</span>
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-red-50 text-[11px] dark:bg-red-500/15">✕</span>
               <span>{t.titleRemoveList}</span>
             </button>
           )}
