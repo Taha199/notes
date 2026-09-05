@@ -117,6 +117,54 @@ export function getNoteSearchPlainText(note: Note) {
   return plainText || plainHtml;
 }
 
+/**
+ * Collect image / YouTube blocks from HTML so search previews can keep media
+ * after text is truncated to plain snippets.
+ */
+export function extractSearchMediaHtml(html: string): string {
+  const source = String(html ?? '');
+  if (!source || !/<img\b|note-img-frame|note-yt-frame/i.test(source)) return '';
+
+  if (typeof document !== 'undefined') {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = source;
+    const parts: string[] = [];
+    wrap.querySelectorAll('.note-img-frame, .note-yt-frame, img').forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      // Prefer the frame wrapper over the bare <img> inside it.
+      if (node.matches('img') && node.closest('.note-img-frame, .note-yt-frame')) return;
+      parts.push(node.outerHTML);
+    });
+    return parts.join('');
+  }
+
+  return (source.match(/<img\b[^>]*>/gi) || []).join('');
+}
+
+/**
+ * Search-result preview: keep formatting when small, otherwise plain snippet + media.
+ * Always preserves embedded images so they remain visible during search.
+ */
+export function buildSearchSnippetHtml(html: string, maxPlainChars = 360): string {
+  const source = String(html ?? '').trim();
+  if (!source) return '';
+
+  const plainLen = decodeBasicEntities(source.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim().length;
+  const hasMedia = /<img\b|note-img-frame|note-yt-frame/i.test(source);
+  // Quiz/note bodies with images: keep full HTML so frames stay in place (bounded size).
+  if (hasMedia && source.length < 120_000) return source;
+  if (!hasMedia && plainLen <= maxPlainChars && source.length < 20_000) return source;
+
+  const media = extractSearchMediaHtml(source);
+  const plain = decodeBasicEntities(source.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const clipped = plain.length > maxPlainChars ? `${plain.slice(0, maxPlainChars)}…` : plain;
+  const escaped = clipped
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return `<p>${escaped}</p>${media}`;
+}
+
 export function countNoteSearchHits(note: Note, search: string) {
   const title = note.title ?? '';
   const body = getNoteSearchPlainText(note);

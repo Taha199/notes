@@ -2,7 +2,7 @@ import type { QuizItem } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
 import { mdToHtml } from '../../lib/quizHtml';
-import { highlightHtmlContent, type SearchHitCounter } from '../../lib/noteSearch';
+import { buildSearchSnippetHtml, highlightHtmlContent, type SearchHitCounter } from '../../lib/noteSearch';
 
 const QUESTION_CLASS =
   'note-content block w-full max-w-full min-w-0 break-words whitespace-normal text-center text-[14px] font-semibold leading-relaxed text-app-text [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal';
@@ -13,16 +13,6 @@ const ANSWER_CLASS =
 const HIGHLIGHT_CLASS =
   ' [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100';
 
-const SEARCH_SNIPPET_CHARS = 360;
-
-function truncatePlain(content: string | null | undefined, max = SEARCH_SNIPPET_CHARS) {
-  const plain = String(content ?? '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return plain.length > max ? `${plain.slice(0, max)}…` : plain;
-}
-
 function renderHtml(
   content: string | null | undefined,
   search: string,
@@ -31,7 +21,8 @@ function renderHtml(
 ) {
   const html = mdToHtml(content);
   if (!search.trim() || !counter) return html;
-  return highlightHtmlContent(html, search, counter, activeSearchHitIndex ?? null);
+  // Keep images in search snippets (plain-text truncation used to strip <img>).
+  return highlightHtmlContent(buildSearchSnippetHtml(html), search, counter, activeSearchHitIndex ?? null);
 }
 
 export function QuizItemQaDisplay({
@@ -48,10 +39,10 @@ export function QuizItemQaDisplay({
   const { t } = useLanguage();
   const searching = search.trim().length > 0 && !!hitCounter;
   const questionHtml = searching
-    ? renderHtml(truncatePlain(item.question), search, hitCounter, activeSearchHitIndex)
+    ? renderHtml(item.question, search, hitCounter, activeSearchHitIndex)
     : mdToHtml(item.question);
   const answerHtml = searching
-    ? renderHtml(truncatePlain(item.answer), search, hitCounter, activeSearchHitIndex)
+    ? renderHtml(item.answer, search, hitCounter, activeSearchHitIndex)
     : mdToHtml(item.answer);
 
   return (

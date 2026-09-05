@@ -5,7 +5,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useToast } from '../../contexts/ToastContext';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { HighlightedText } from '../common/HighlightedText';
-import { getNoteSearchPlainText, highlightHtmlContent, countSearchMatchesInText, type SearchHitCounter } from '../../lib/noteSearch';
+import { getNoteSearchPlainText, buildSearchSnippetHtml, highlightHtmlContent, countSearchMatchesInText, type SearchHitCounter } from '../../lib/noteSearch';
 
 interface Props {
   note: Note;
@@ -88,14 +88,11 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
   );
   const highlightedPreviewHtml = useMemo(() => {
     if (!hasSearch) return previewHtml;
-    // Never regex-highlight the full note HTML during search (common queries explode DOM size).
-    const escaped = bodyPreview
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+    // Bounded snippet for highlight perf, but keep embedded images visible.
     const counter: SearchHitCounter = { value: searchHitStart + titleHitCount };
-    return highlightHtmlContent(`<p>${escaped}</p>`, search, counter, activeSearchHitIndex);
-  }, [hasSearch, bodyPreview, search, searchHitStart, titleHitCount, activeSearchHitIndex]);
+    const snippet = buildSearchSnippetHtml(note.html || previewHtml, 220);
+    return highlightHtmlContent(snippet, search, counter, activeSearchHitIndex);
+  }, [hasSearch, note.html, previewHtml, search, searchHitStart, titleHitCount, activeSearchHitIndex]);
   const favSearchHit =
     ' [&_.note-search-hit]:!rounded-sm [&_.note-search-hit]:!bg-orange-500 [&_.note-search-hit]:!px-0.5 [&_.note-search-hit]:!font-semibold [&_.note-search-hit]:!text-white [&_.note-search-hit]:shadow-sm dark:[&_.note-search-hit]:!bg-orange-400 dark:[&_.note-search-hit]:!text-white [&_.note-search-hit--active]:!bg-orange-600 [&_.note-search-hit--active]:!text-white [&_.note-search-hit--active]:!shadow-md dark:[&_.note-search-hit--active]:!bg-orange-300 dark:[&_.note-search-hit--active]:!text-gray-900';
 
@@ -162,8 +159,13 @@ export function NoteCard({ note, search = '', searchHitStart = 0, activeSearchHi
                 __html: highlightedPreviewHtml,
               }}
             />
+          ) : hasSearch ? (
+            <div
+              className="note-content mt-0.5 line-clamp-[8] text-[13px] leading-relaxed text-app-text-secondary dark:text-gray-400 [&_.note-img-frame]:my-2 [&_.note-img-frame]:max-h-28 [&_.note-img-frame]:overflow-hidden [&_.note-img-frame_img]:max-h-28 [&_.note-img-frame_img]:object-contain [&_.note-search-hit]:rounded-sm [&_.note-search-hit]:bg-amber-200 [&_.note-search-hit]:px-0.5 [&_.note-search-hit]:font-semibold [&_.note-search-hit]:text-amber-950 dark:[&_.note-search-hit]:bg-amber-400/35 dark:[&_.note-search-hit]:text-amber-100"
+              dangerouslySetInnerHTML={{ __html: highlightedPreviewHtml }}
+            />
           ) : (
-            <p className={'mt-0.5 text-[13px] leading-relaxed ' + (hasSearch ? '' : 'line-clamp-3 ') + (note.pinned ? 'text-sky-700 dark:text-sky-400/80' : note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
+            <p className={'mt-0.5 text-[13px] leading-relaxed line-clamp-3 ' + (note.pinned ? 'text-sky-700 dark:text-sky-400/80' : note.fav ? 'text-amber-700 dark:text-amber-400/80' : 'text-app-text-secondary dark:text-gray-400')}>
               <HighlightedText text={bodyPreview} search={search} counter={hitCounter} activeHitIndex={activeSearchHitIndex} />
             </p>
           )}
