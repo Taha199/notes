@@ -62,6 +62,27 @@ type BlockAlign = 'left' | 'center' | 'right';
 const NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const DEFAULT_FONT_PX = 15;
 const FONT_LINE_HEIGHT = '1.35';
+
+/** Toolbar font-family options (inline style.fontFamily). Empty = inherit app font. */
+const NOTE_FONT_OPTIONS: { id: string; label: string; family: string }[] = [
+  { id: '', label: 'Standard', family: '' },
+  { id: 'almarai', label: 'Almarai', family: "'Almarai', sans-serif" },
+  { id: 'georgia', label: 'Georgia', family: 'Georgia, serif' },
+  { id: 'times', label: 'Times', family: "'Times New Roman', Times, serif" },
+  { id: 'arial', label: 'Arial', family: 'Arial, Helvetica, sans-serif' },
+  { id: 'courier', label: 'Courier', family: "'Courier New', Courier, monospace" },
+];
+
+function noteFontIdFromFamily(family: string): string {
+  const raw = family.toLowerCase().replace(/["']/g, '');
+  if (!raw.trim()) return '';
+  for (const opt of NOTE_FONT_OPTIONS) {
+    if (!opt.family) continue;
+    const token = opt.family.split(',')[0]!.replace(/["']/g, '').trim().toLowerCase();
+    if (token && raw.includes(token)) return opt.id;
+  }
+  return '';
+}
 const TAB_INDENT = '    ';
 
 function isEquivalentEditorHtml(a: string, b: string): boolean {
@@ -599,6 +620,16 @@ function stripInlineFontSize(root: ParentNode) {
   root.querySelectorAll?.('font[size]').forEach((node) => node.removeAttribute('size'));
 }
 
+function stripInlineFontFamily(root: ParentNode) {
+  root.querySelectorAll?.('[style]').forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    node.style.removeProperty('font-family');
+    node.removeAttribute('data-note-font');
+    if (!node.getAttribute('style')?.trim()) node.removeAttribute('style');
+  });
+  root.querySelectorAll?.('font[face]').forEach((node) => node.removeAttribute('face'));
+}
+
 function stripInlineTextColor(root: ParentNode) {
   root.querySelectorAll?.('[style]').forEach((node) => {
     if (!(node instanceof HTMLElement)) return;
@@ -1006,6 +1037,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const pendingFontSize = useRef<number | null>(null);
   const [fontSize, setFontSizeState] = useState(15);
   const fontSizeRef = useRef(15);
+  const [fontFamilyId, setFontFamilyIdState] = useState('');
+  const fontFamilyIdRef = useRef('');
+  const setFontFamilyId = (id: string) => {
+    fontFamilyIdRef.current = id;
+    setFontFamilyIdState(id);
+  };
   const [copiedFormat, setCopiedFormat] = useState<CopiedTextFormat | null>(null);
   const copiedFormatRef = useRef<CopiedTextFormat | null>(null);
   const fontInputFocused = useRef(false);
@@ -1669,7 +1706,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const stripEmptyFontSpans = (ed: HTMLElement) => {
-    ed.querySelectorAll<HTMLElement>('span[style*="font-size"]').forEach((span) => {
+    ed.querySelectorAll<HTMLElement>('span[style*="font-size"], span[style*="font-family"], span[data-note-font]').forEach((span) => {
       const text = span.textContent?.replace(/\u200B/g, '').trim() ?? '';
       if (!text) span.remove();
     });
@@ -5002,12 +5039,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return active;
   };
 
-  // ── Font size indicator in sync with caret ────────────────────────────
+  // ── Font size / family indicators in sync with caret ─────────────────
   const syncFontSizeFromCaret = () => {
     const ed = editorRef.current;
     if (!ed) return;
     const px = readFontSizeAtCaret(ed);
     if (px !== fontSizeRef.current) setFontSize(px);
+    const fam = readFontFamilyAtCaret(ed);
+    if (fam !== fontFamilyIdRef.current) setFontFamilyId(fam);
   };
 
   useEffect(() => {
@@ -5477,12 +5516,14 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const getStylingSpanForRange = (range: Range, ed: HTMLElement): HTMLSpanElement | null => {
     const ancestor = range.commonAncestorContainer;
     let span: HTMLSpanElement | null = null;
-    if (ancestor instanceof HTMLSpanElement && ancestor.style.fontSize && ed.contains(ancestor)) {
+    const isStyleSpan = (el: HTMLSpanElement) =>
+      !!(el.style.fontSize || el.style.fontFamily || el.getAttribute('data-note-font'));
+    if (ancestor instanceof HTMLSpanElement && isStyleSpan(ancestor) && ed.contains(ancestor)) {
       span = ancestor;
     } else if (
       ancestor.nodeType === Node.TEXT_NODE
       && ancestor.parentElement instanceof HTMLSpanElement
-      && ancestor.parentElement.style.fontSize
+      && isStyleSpan(ancestor.parentElement)
       && ed.contains(ancestor.parentElement)
     ) {
       span = ancestor.parentElement;
@@ -5585,6 +5626,119 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     setFontSize(px);
     saveSel();
     emitHtml();
+  };
+
+  const applyFontFamilyStyle = (el: HTMLElement, family: string, id: string) => {
+    if (!family) {
+      el.style.removeProperty('font-family');
+      el.removeAttribute('data-note-font');
+    } else {
+      el.style.fontFamily = family;
+      el.setAttribute('data-note-font', id);
+    }
+  };
+
+  const wrapRangeWithFontFamily = (range: Range, family: string, id: string): HTMLSpanElement | null => {
+    try {
+      const contents = range.extractContents();
+      stripInlineFontFamily(contents);
+      const span = document.createElement('span');
+      applyFontFamilyStyle(span, family, id);
+      span.appendChild(contents);
+      range.insertNode(span);
+      return span;
+    } catch {
+      return null;
+    }
+  };
+
+  const setFutureFontFamily = (id: string) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const opt = NOTE_FONT_OPTIONS.find((o) => o.id === id) ?? NOTE_FONT_OPTIONS[0]!;
+    if (document.activeElement !== ed) {
+      ed.focus({ preventScroll: true });
+      restoreSel();
+    }
+    const sel = window.getSelection();
+    let range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    if (!range || !range.collapsed) {
+      setFontFamilyId(id);
+      return;
+    }
+    if (range.startContainer === ed) {
+      const lastChild = ed.lastChild;
+      if (lastChild) {
+        range = document.createRange();
+        range.selectNodeContents(lastChild);
+        range.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }
+    finalizePendingFontMarkers(ed);
+    stripEmptyFontSpans(ed);
+    const span = document.createElement('span');
+    span.setAttribute('data-font-marker', 'true');
+    applyFontFamilyStyle(span, opt.family, opt.id);
+    // Keep typing size if we already know one.
+    applyFontSizeStyle(span, fontSizeRef.current);
+    const zws = document.createTextNode('\u200B');
+    span.appendChild(zws);
+    range.insertNode(span);
+    range.setStart(zws, zws.length);
+    range.collapse(true);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    setFontFamilyId(id);
+    saveSel();
+    emitHtml();
+  };
+
+  const applyFontFamily = (id: string) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const opt = NOTE_FONT_OPTIONS.find((o) => o.id === id) ?? NOTE_FONT_OPTIONS[0]!;
+    const range = resolveToolbarFormatRange();
+    if (!range || range.collapsed) {
+      setFutureFontFamily(id);
+      return;
+    }
+    savedFormattingRange.current = null;
+    pushUndoCheckpoint();
+    const targets = collectFormatTargetRanges(range, ed);
+    const spans: HTMLSpanElement[] = [];
+    targets.forEach((sub) => {
+      const existing = getStylingSpanForRange(sub, ed);
+      if (existing) {
+        applyFontFamilyStyle(existing, opt.family, opt.id);
+        spans.push(existing);
+        return;
+      }
+      // Also reuse a span that already only wraps this range with color/size.
+      const wrapped = wrapRangeWithFontFamily(sub, opt.family, opt.id);
+      if (wrapped) spans.push(wrapped);
+    });
+    selectSpansAfterFormat(spans);
+    blurTableToolbarFocus(ed);
+    if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+    setFontFamilyId(id);
+    saveSel();
+    emitHtml();
+  };
+
+  const readFontFamilyAtCaret = (ed: HTMLElement): string => {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return '';
+    let node: Node | null = sel.anchorNode;
+    if (node?.nodeType === Node.TEXT_NODE) node = node.parentElement;
+    while (node instanceof HTMLElement && node !== ed) {
+      const marked = node.getAttribute('data-note-font');
+      if (marked != null && marked !== '') return marked;
+      if (node.style.fontFamily) return noteFontIdFromFamily(node.style.fontFamily);
+      node = node.parentElement;
+    }
+    return '';
   };
 
   const clearCopiedFormat = () => {
@@ -6250,6 +6404,30 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           <button type="button" onMouseDown={(e) => { e.preventDefault(); captureFormattingSelection(); changeSize(1); }} className="flex h-[26px] w-6 items-center justify-center text-sm font-bold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10">+</button>
         </div>
 
+        {/* Font family */}
+        <select
+          value={fontFamilyId}
+          title={t.titleFont}
+          aria-label={t.titleFont}
+          onMouseDown={() => { captureFormattingSelection(); }}
+          onFocus={() => { captureFormattingSelection(); }}
+          onChange={(e) => {
+            captureFormattingSelection();
+            applyFontFamily(e.target.value);
+          }}
+          className="ml-1 h-[26px] max-w-[7.5rem] cursor-pointer rounded-lg border border-app-border bg-white px-1.5 text-[11px] font-semibold text-app-text outline-none hover:bg-app-bg dark:border-white/10 dark:bg-gray-900 dark:text-gray-100"
+        >
+          {NOTE_FONT_OPTIONS.map((opt) => (
+            <option
+              key={opt.id || 'standard'}
+              value={opt.id}
+              style={opt.family ? { fontFamily: opt.family } : undefined}
+            >
+              {opt.id === '' ? t.fontStandard : opt.label}
+            </option>
+          ))}
+        </select>
+
         <div className="mx-1.5 h-4 w-px bg-app-border dark:bg-white/10" />
 
         {/* Text color */}
@@ -6720,7 +6898,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           }
         }}
         suppressContentEditableWarning
-        className={(flexToolbar ? 'min-h-0 flex-1 ' : '') + (verticalScroll ? 'overflow-y-auto ' : 'overflow-x-hidden ') + 'w-full max-w-full min-w-0 break-words whitespace-normal px-4 py-3 leading-normal text-app-text outline-none [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:ps-5 [&_ol]:list-decimal [&_ol]:ps-5 [&_li>ul]:mt-0.5 [&_li>ol]:mt-0.5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
+        className={(flexToolbar ? 'min-h-0 flex-1 ' : '') + (verticalScroll ? 'overflow-y-auto ' : 'overflow-x-hidden ') + 'w-full max-w-full min-w-0 break-words whitespace-normal px-4 pt-1 pb-3 leading-normal text-app-text outline-none [overflow-wrap:anywhere] dark:text-gray-100 [&_*]:max-w-full [&_*]:break-words [&_*]:whitespace-normal [&_div]:my-0 [&_p]:my-0 [&_ul]:list-disc [&_ul]:ps-5 [&_ol]:list-decimal [&_ol]:ps-5 [&_li>ul]:mt-0.5 [&_li>ol]:mt-0.5 [&_.note-img-frame]:my-2 [&_.note-img-frame]:block [&_.note-img-frame]:w-fit [&_.note-img-frame]:max-w-full [&_.note-img-frame]:overflow-hidden [&_.note-img-frame]:rounded-xl [&_.note-img-frame]:border [&_.note-img-frame]:border-app-border/50 [&_.note-img-frame]:bg-app-bg/20 [&_.note-img-frame--active]:border-primary/45 [&_.note-img-frame--active]:shadow-sm dark:[&_.note-img-frame]:border-white/12 dark:[&_.note-img-frame]:bg-gray-900/30 dark:[&_.note-img-frame--active]:border-primary/35 [&_.note-img-frame_img]:block [&_.note-img-frame_img]:max-w-full [&_.note-img-frame_img]:h-auto [&_.note-img-frame_img]:object-contain' + (resizable && editable ? ' resize-y' : '')}
         style={{ minHeight, maxHeight: resizable ? undefined : maxHeight, fontSize: `${DEFAULT_FONT_PX}px`, lineHeight: FONT_LINE_HEIGHT, cursor: editable ? 'text' : 'default' }}
       />
 

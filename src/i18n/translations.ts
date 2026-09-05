@@ -246,6 +246,8 @@ export interface Translation {
   titleMoveImageDown: string;
   titleClr: string;
   titleColor: string;
+  titleFont: string;
+  fontStandard: string;
   titleResizeImage: string;
   titleResizeWidth: string;
   titleResizeHeight: string;
@@ -787,7 +789,7 @@ export const LANGS: Record<Lang, Translation> = {
     moveTableDown: 'Move table down', titleMoveTableDown: 'Move table down one line',
     insertLineAboveBlock: 'Line above', titleInsertLineAboveBlock: 'Add empty line above',
     insertLineBelowBlock: 'Line below', titleInsertLineBelowBlock: 'Add empty line below',
-    titleRight: 'Align Right', titleLeft: 'Align Left', titleCenter: 'Align Center', titleMoveImageUp: 'Move image up', titleMoveImageDown: 'Move image down', titleClr: 'Clear Formatting', titleColor: 'Text Color', titleResizeImage: 'Drag to resize (keep ratio)', titleResizeWidth: 'Drag to change width', titleResizeHeight: 'Drag to change height',
+    titleRight: 'Align Right', titleLeft: 'Align Left', titleCenter: 'Align Center', titleMoveImageUp: 'Move image up', titleMoveImageDown: 'Move image down', titleClr: 'Clear Formatting', titleColor: 'Text Color', titleFont: 'Font', fontStandard: 'Standard', titleResizeImage: 'Drag to resize (keep ratio)', titleResizeWidth: 'Drag to change width', titleResizeHeight: 'Drag to change height',
     titleBulletList: 'Bullet list', titleNumberedList: 'Numbered list', titleRemoveList: 'Remove list', titleSubList: 'Sub-list', titleOutdentSubList: 'Back to parent list',
     titleUnarch: 'Unarchive', titleDone: 'Mark as Read', titleUnread: 'Move to Unread', titleArch: 'Archive',
     titleDel: 'Delete', titleRestore: 'Restore', titlePermDel: 'Delete Permanently', titleFavAdd: 'Add to Favourites', titleFavRem: 'Remove from Favourites',
@@ -1261,7 +1263,7 @@ export const LANGS: Record<Lang, Translation> = {
     moveTableDown: 'Flytta ner tabell', titleMoveTableDown: 'Flytta tabellen ner en rad',
     insertLineAboveBlock: 'Tom rad ovanför', titleInsertLineAboveBlock: 'Lägg till tom rad ovanför',
     insertLineBelowBlock: 'Tom rad under', titleInsertLineBelowBlock: 'Lägg till tom rad under',
-    titleRight: 'Höger', titleLeft: 'Vänster', titleCenter: 'Centrera', titleMoveImageUp: 'Flytta bild uppåt', titleMoveImageDown: 'Flytta bild nedåt', titleClr: 'Ta bort formatering', titleColor: 'Textfärg', titleResizeImage: 'Dra för att ändra storlek (behåll proportioner)', titleResizeWidth: 'Dra för att ändra bredd', titleResizeHeight: 'Dra för att ändra höjd',
+    titleRight: 'Höger', titleLeft: 'Vänster', titleCenter: 'Centrera', titleMoveImageUp: 'Flytta bild uppåt', titleMoveImageDown: 'Flytta bild nedåt', titleClr: 'Ta bort formatering', titleColor: 'Textfärg', titleFont: 'Typsnitt', fontStandard: 'Standard', titleResizeImage: 'Dra för att ändra storlek (behåll proportioner)', titleResizeWidth: 'Dra för att ändra bredd', titleResizeHeight: 'Dra för att ändra höjd',
     titleBulletList: 'Punktlista', titleNumberedList: 'Numrerad lista', titleRemoveList: 'Ta bort lista', titleSubList: 'Underlista', titleOutdentSubList: 'Tillbaka till överliggande lista',
     titleUnarch: 'Avarkivera', titleDone: 'Markera som Läst', titleUnread: 'Flytta till Olästa', titleArch: 'Arkivera',
     titleDel: 'Radera', titleRestore: 'Återställ', titlePermDel: 'Radera Permanent', titleFavAdd: 'Lägg till Favoriter', titleFavRem: 'Ta bort från Favoriter',
