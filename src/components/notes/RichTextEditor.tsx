@@ -3889,15 +3889,15 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return !text && !el.querySelector('img, table, iframe, .note-table-wrap, .note-img-frame, .note-yt-frame');
   };
 
-  const insertEmptyLineAboveBlock = (ed: HTMLElement, block: HTMLElement) => {
-    if (!block.parentElement || !ed.contains(block)) return;
+  const insertEmptyLineAboveBlock = (ed: HTMLElement, block: HTMLElement): HTMLElement | null => {
+    if (!block.parentElement || !ed.contains(block)) return null;
     const prev = block.previousElementSibling;
     if (prev instanceof HTMLElement && BLOCK_TAGS.has(prev.tagName) && isEmptyTextLine(prev)) {
       placeCaretInBlock(prev, true);
       ed.focus({ preventScroll: true });
       saveSel();
       emitHtml();
-      return;
+      return prev;
     }
     const line = document.createElement('div');
     line.setAttribute('dir', 'auto');
@@ -3907,17 +3907,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     ed.focus({ preventScroll: true });
     saveSel();
     emitHtml();
+    return line;
   };
 
-  const insertEmptyLineBelowBlock = (ed: HTMLElement, block: HTMLElement) => {
-    if (!block.parentElement || !ed.contains(block)) return;
+  const insertEmptyLineBelowBlock = (ed: HTMLElement, block: HTMLElement): HTMLElement | null => {
+    if (!block.parentElement || !ed.contains(block)) return null;
     const next = block.nextElementSibling;
     if (next instanceof HTMLElement && BLOCK_TAGS.has(next.tagName) && isEmptyTextLine(next)) {
       placeCaretInBlock(next, true);
       ed.focus({ preventScroll: true });
       saveSel();
       emitHtml();
-      return;
+      return next;
     }
     const line = document.createElement('div');
     line.setAttribute('dir', 'auto');
@@ -3927,6 +3928,51 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     ed.focus({ preventScroll: true });
     saveSel();
     emitHtml();
+    return line;
+  };
+
+  /**
+   * Image frames are often nested; for line insert we want a block sibling at the
+   * same level as the image's outer flow block so the new line is visible under/
+   * above the picture (not trapped inside a wrapper the user cannot click).
+   */
+  const resolveImageLineInsertTarget = (ed: HTMLElement, frame: HTMLElement): HTMLElement => {
+    const top = editorTopBlock(ed, frame);
+    if (!top || top === frame) return frame;
+    // Parent wraps only this image (plus empty noise) → treat parent as the block.
+    const kids = Array.from(top.children).filter((n): n is HTMLElement => n instanceof HTMLElement);
+    const meaningful = kids.filter((el) => {
+      if (el === frame || el.contains(frame)) return true;
+      if (el.classList.contains(NOTE_IMG_TOOLBAR_HOST)) return false;
+      return !isEmptyTextLine(el);
+    });
+    if (meaningful.length === 1 && (meaningful[0] === frame || meaningful[0]!.contains(frame))) {
+      return top;
+    }
+    // Text + image in one parent: insert relative to the frame itself.
+    return frame;
+  };
+
+  const insertEmptyLineAroundImage = (img: HTMLImageElement, where: 'above' | 'below') => {
+    const ed = editorRef.current;
+    if (!ed || !img.isConnected) return;
+    const frame = ensureImageFrame(img, ed);
+    const target = resolveImageLineInsertTarget(ed, frame);
+    pushUndoCheckpoint();
+    const line = where === 'above'
+      ? insertEmptyLineAboveBlock(ed, target)
+      : insertEmptyLineBelowBlock(ed, target);
+    // Drop image chrome so the caret on the new line is visible (toolbar sat on
+    // the image bottom and large images push the new line below the fold).
+    hideImageToolbar();
+    if (line?.isConnected) {
+      requestAnimationFrame(() => {
+        line.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        placeCaretInBlock(line, true);
+        ed.focus({ preventScroll: true });
+        saveSel();
+      });
+    }
   };
 
   const editorTopBlock = (ed: HTMLElement, el: HTMLElement): HTMLElement | null => {
@@ -7351,10 +7397,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                runOverflowAction(() => {
-                  const ed = editorRef.current;
-                  if (ed) insertEmptyLineAboveBlock(ed, hoveredImg.frame);
-                });
+                runOverflowAction(() => insertEmptyLineAroundImage(hoveredImg.el, 'above'));
               }}
               className={compact ? `${imgMenuBtn} font-semibold text-primary dark:text-primary-200` : `${imgBtn} font-semibold text-primary dark:text-primary-200`}
               title={t.titleInsertLineAboveBlock}
@@ -7366,10 +7409,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                runOverflowAction(() => {
-                  const ed = editorRef.current;
-                  if (ed) insertEmptyLineBelowBlock(ed, hoveredImg.frame);
-                });
+                runOverflowAction(() => insertEmptyLineAroundImage(hoveredImg.el, 'below'));
               }}
               className={compact ? `${imgMenuBtn} font-semibold text-primary dark:text-primary-200` : `${imgBtn} font-semibold text-primary dark:text-primary-200`}
               title={t.titleInsertLineBelowBlock}
