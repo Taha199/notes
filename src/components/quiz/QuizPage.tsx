@@ -2942,7 +2942,17 @@ export function QuizPage({
         <QuizStatsPanel
           quizzes={quizzes}
           quizSets={allQuizSets}
+          quizFolders={allQuizFolders}
           onClose={() => setShowQuizStats(false)}
+          onOpenQuiz={(itemId, setId, folderId) => {
+            setShowQuizStats(false);
+            if (setId) {
+              selectQuizFolder(folderId ?? null, setId);
+            } else {
+              selectQuizFolder(null, null);
+            }
+            scrollToQuizItem(itemId);
+          }}
         />
       )}
 

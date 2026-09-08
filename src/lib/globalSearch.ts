@@ -8,6 +8,9 @@ import {
   normalizeSearch,
   getNoteSearchPlainText,
 } from './noteSearch';
+import { coerceQuizItems } from './quizSetMerge';
+import { quizItemCreatedAtMs } from './quizSort';
+import { toDayKey } from './quizStats';
 
 /** Global search stays idle until the query is at least this long (avoids 1-char freezes). */
 export const MIN_GLOBAL_SEARCH_CHARS = 2;
@@ -234,6 +237,84 @@ export function buildGlobalSearchResults(
   });
 
   return results.slice(0, MAX_GLOBAL_SEARCH_RESULTS);
+}
+
+/** Quiz cards for one calendar day — same shape as global search results. */
+export function buildQuizDaySearchResults(
+  dayKey: string,
+  quizzes: QuizItem[],
+  quizSets: QuizSet[],
+  quizFolders: QuizFolder[],
+  t: Translation,
+): GlobalSearchResult[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return [];
+
+  const folderNameById = new Map(
+    quizFolders.filter((folder) => !folder.trashed).map((folder) => [folder.id, folder.name]),
+  );
+  const results: GlobalSearchResult[] = [];
+  const seen = new Set<number>();
+
+  const pushItem = (
+    item: QuizItem,
+    setId: string | null,
+    setName: string | null,
+    folderId: string | null,
+    fromNotes: boolean,
+  ) => {
+    if (seen.has(item.id)) return;
+    if (toDayKey(quizItemCreatedAtMs(item)) !== dayKey) return;
+    seen.add(item.id);
+    const question = stripHtml(item.question);
+    const folderName = folderId
+      ? (folderNameById.get(folderId) ?? null)
+      : fromNotes
+        ? t.searchCategoryQuiz
+        : null;
+    const displaySetName = setName ?? (fromNotes ? item.noteTitle || null : null);
+    let categoryLabel: string;
+    if (fromNotes) {
+      categoryLabel = t.searchCategoryQuiz;
+    } else if (setName) {
+      categoryLabel = t.searchCategoryQuizSet.replace('{name}', setName);
+    } else {
+      categoryLabel = t.searchCategoryQuiz;
+    }
+    results.push({
+      type: 'quiz',
+      id: item.id,
+      categoryLabel,
+      isFavorite: false,
+      sortOrder: SORT_OTHER,
+      quizItem: item,
+      quizSetId: setId,
+      quizSetName: displaySetName,
+      quizFolderId: folderId,
+      quizFolderName: folderName,
+      quizCreatedAt: formatQuizItemCreatedAt(item),
+      title: question.slice(0, 100) || '…',
+      snippet: question.slice(0, 220),
+    });
+  };
+
+  for (const set of quizSets) {
+    if (set.trashed || set.system === 'favorites') continue;
+    for (const item of coerceQuizItems(set.items)) {
+      if (!item || item.trashed || item.draft || item.favOf != null) continue;
+      pushItem(item, set.id, set.name, set.folderId ?? null, false);
+    }
+  }
+  for (const q of quizzes) {
+    if (!q || q.trashed || q.draft || q.favOf != null) continue;
+    pushItem(q, null, null, null, true);
+  }
+
+  results.sort((a, b) => {
+    const at = a.quizItem ? quizItemCreatedAtMs(a.quizItem) : 0;
+    const bt = b.quizItem ? quizItemCreatedAtMs(b.quizItem) : 0;
+    return bt - at;
+  });
+  return results;
 }
 
 export function globalSearchResultKey(result: GlobalSearchResult) {

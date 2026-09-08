@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import type { QuizItem, QuizSet } from '../../types';
+import type { QuizFolder, QuizItem, QuizSet } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { GlobalSearchResults } from '../search/GlobalSearchResults';
+import { buildQuizDaySearchResults } from '../../lib/globalSearch';
 import {
   buildMonthDayBars,
   buildYearMonthBars,
@@ -261,11 +263,15 @@ function MonthDayChart({
   locale,
   questionsOne,
   questionsMany,
+  selectedKey,
+  onSelectDay,
 }: {
   bars: DayBar[];
   locale: string;
   questionsOne: string;
   questionsMany: string;
+  selectedKey: string | null;
+  onSelectDay: (key: string) => void;
 }) {
   const yMax = Math.max(1, maxCount(bars.map((b) => b.count)));
   return (
@@ -273,7 +279,7 @@ function MonthDayChart({
       <div
         className="flex min-w-max items-end gap-1 px-1 pt-2"
         style={{ height: 260 }}
-        role="img"
+        role="list"
         aria-label="day chart"
       >
         {bars.map((b) => {
@@ -281,19 +287,21 @@ function MonthDayChart({
           const weekday = date.toLocaleDateString(locale, { weekday: 'short' });
           const h = b.count > 0 ? Math.max(12, (b.count / yMax) * 160) : 4;
           const active = b.count > 0;
-          return (
-            <div
-              key={b.key}
-              title={`${date.toLocaleDateString(locale, {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long',
-              })}: ${b.count} ${b.count === 1 ? questionsOne : questionsMany}`}
-              className={
-                'flex w-9 flex-col items-center justify-end gap-1 rounded-lg px-0.5 py-1 ' +
-                (active ? 'bg-primary/5 dark:bg-primary/10' : '')
-              }
-            >
+          const selected = selectedKey === b.key;
+          const label = `${date.toLocaleDateString(locale, {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+          })}: ${b.count} ${b.count === 1 ? questionsOne : questionsMany}`;
+          const className =
+            'flex w-9 flex-col items-center justify-end gap-1 rounded-lg px-0.5 py-1 transition ' +
+            (selected
+              ? 'bg-primary/15 ring-2 ring-primary/40 dark:bg-primary/20'
+              : active
+                ? 'cursor-pointer bg-primary/5 hover:bg-primary/10 dark:bg-primary/10 dark:hover:bg-primary/15'
+                : '');
+          const inner = (
+            <>
               <span
                 className={
                   'text-[11px] font-bold tabular-nums ' +
@@ -327,7 +335,27 @@ function MonthDayChart({
               >
                 {weekday.replace(/\.$/, '')}
               </span>
-            </div>
+            </>
+          );
+          if (!active) {
+            return (
+              <div key={b.key} title={label} className={className} role="listitem">
+                {inner}
+              </div>
+            );
+          }
+          return (
+            <button
+              key={b.key}
+              type="button"
+              title={label}
+              aria-pressed={selected}
+              aria-label={label}
+              onClick={() => onSelectDay(b.key)}
+              className={className}
+            >
+              {inner}
+            </button>
           );
         })}
       </div>
@@ -372,12 +400,16 @@ function TotalsCompareChart({
 export function QuizStatsPanel({
   quizzes,
   quizSets,
+  quizFolders = [],
   onClose,
+  onOpenQuiz,
   variant = 'modal',
 }: {
   quizzes: QuizItem[];
   quizSets: QuizSet[];
+  quizFolders?: QuizFolder[];
   onClose?: () => void;
+  onOpenQuiz?: (itemId: number, setId?: string | null, folderId?: string | null) => void;
   variant?: 'modal' | 'page';
 }) {
   const { t, lang } = useLanguage();
@@ -403,6 +435,7 @@ export function QuizStatsPanel({
 
   const [mode, setMode] = useState<Mode>('overview');
   const [monthKey, setMonthKey] = useState(now.key);
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [compareMonths, setCompareMonths] = useState<string[]>(() => {
     const a = monthOptions[0] ?? now.key;
     const b = monthOptions[1];
@@ -411,6 +444,10 @@ export function QuizStatsPanel({
   const [compareYearA, setCompareYearA] = useState(yearOptions[0] ?? now.year);
   const [compareYearB, setCompareYearB] = useState(yearOptions[1] ?? now.year - 1);
 
+  useEffect(() => {
+    setSelectedDayKey(null);
+  }, [mode, monthKey]);
+
   const monthParts = monthKey.split('-').map(Number);
   const monthYear = monthParts[0] ?? now.year;
   const monthNum = monthParts[1] ?? now.month;
@@ -418,6 +455,13 @@ export function QuizStatsPanel({
   const monthBars = useMemo(
     () => buildMonthDayBars(byDay, monthYear, monthNum),
     [byDay, monthYear, monthNum],
+  );
+
+  const dayResults = useMemo(
+    () => (selectedDayKey
+      ? buildQuizDaySearchResults(selectedDayKey, quizzes, quizSets, quizFolders, t)
+      : []),
+    [selectedDayKey, quizzes, quizSets, quizFolders, t],
   );
 
   const monthLabel = (key: string) => {
@@ -709,47 +753,62 @@ export function QuizStatsPanel({
               {items.length === 0 ? (
                 <p className="py-16 text-center text-sm text-app-text-secondary">{t.quizStatsEmpty}</p>
               ) : mode === 'month' ? (
-                <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
-                  <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">
-                    {t.quizStatsDayByDay}
-                  </p>
-                  <MonthDayChart
-                    bars={monthBars}
-                    locale={locale}
-                    questionsOne={t.quizQuestionOne}
-                    questionsMany={t.quizQuestionMany}
-                  />
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
+                    <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">
+                      {t.quizStatsDayByDay}
+                    </p>
+                    <MonthDayChart
+                      bars={monthBars}
+                      locale={locale}
+                      questionsOne={t.quizQuestionOne}
+                      questionsMany={t.quizQuestionMany}
+                      selectedKey={selectedDayKey}
+                      onSelectDay={(key) => setSelectedDayKey((prev) => (prev === key ? null : key))}
+                    />
+                  </div>
+                  {selectedDayKey && (
+                    <div>
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
+                          🔎{' '}
+                          {t.quizStatsDayQuestions.replace(
+                            '{date}',
+                            new Date(`${selectedDayKey}T12:00:00`).toLocaleDateString(locale, {
+                              weekday: 'long',
+                              day: 'numeric',
+                              month: 'long',
+                            }),
+                          )}
+                          {' · '}
+                          {dayResults.length}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDayKey(null)}
+                          className="rounded-lg px-2 py-1 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-bg hover:text-primary dark:hover:bg-white/10"
+                        >
+                          {t.quizStatsBackToChart}
+                        </button>
+                      </div>
+                      <GlobalSearchResults
+                        results={dayResults}
+                        search=""
+                        searchHitStarts={{}}
+                        activeSearchHitIndex={null}
+                        emptyText={t.quizStatsEmpty}
+                        noteViewMode="expanded"
+                        onOpenNote={() => {}}
+                        onOpenQuiz={(itemId, setId, folderId) => {
+                          onOpenQuiz?.(itemId, setId, folderId);
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
                   <TotalsCompareChart items={compareTotals ?? []} />
-                </div>
-              )}
-
-              {mode === 'month' && monthBars.some((b) => b.count > 0) && (
-                <div className="mt-4">
-                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
-                    {t.quizStatsDailyList}
-                  </p>
-                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-                    {[...monthBars].filter((b) => b.count > 0).reverse().map((b) => (
-                      <div
-                        key={b.key}
-                        className="flex items-center justify-between border-b border-app-border/60 px-3 py-2 text-[13px] last:border-b-0 dark:border-white/10"
-                      >
-                        <span className="font-medium text-app-text dark:text-gray-200">
-                          {new Date(b.key + 'T12:00:00').toLocaleDateString(locale, {
-                            weekday: 'long',
-                            day: 'numeric',
-                            month: 'long',
-                          })}
-                        </span>
-                        <span className="rounded-lg bg-primary/10 px-2 py-0.5 text-[12px] font-bold tabular-nums text-primary">
-                          {b.count} {b.count === 1 ? t.quizQuestionOne : t.quizQuestionMany}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               )}
             </>

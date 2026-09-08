@@ -464,7 +464,9 @@ export function Dashboard() {
           )}
           {!showGlobalSearch && page === 'arabicKb' && <ArabicKeyboardPage />}
           {!showGlobalSearch && page === 'countdown' && <CountdownPage />}
-          {!showGlobalSearch && page === 'quizStats' && <QuizStatsPage />}
+          {!showGlobalSearch && page === 'quizStats' && (
+            <QuizStatsPage onOpenQuiz={handleOpenQuizFromSearch} />
+          )}
           {!showGlobalSearch && page === 'todo' && <TodoCalendarPage search={search} />}
           {!showGlobalSearch && page === 'quiz' && (
             <ErrorBoundary label="quiz">
