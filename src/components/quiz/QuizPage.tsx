@@ -27,6 +27,7 @@ import { getQuizSetColorOptions } from '../../lib/quizColors';
 import { QuizColorPickerGrid } from './QuizColorPickerGrid';
 import { buildQuizListRows } from '../../lib/quizSections';
 import { QuizSectionDraft, QuizSectionHeading } from './QuizSectionHeading';
+import { QuizStatsPanel } from './QuizStatsPanel';
 
 const PROGRESS_KEY = 'malacadhati_quiz_progress';
 /** Per-item "hide answer" prefs (item id → true). Local-only; does not touch quiz content. */
@@ -919,6 +920,7 @@ export function QuizPage({
   const [studyMode, setStudyMode] = useState<'flashcard' | null>(null);
   // Optional filtered deck chosen from inside study mode (🎯 Välj)
   const [studyDeck, setStudyDeck] = useState<QuizItem[] | null>(null);
+  const [showQuizStats, setShowQuizStats] = useState(false);
   // Hide answers (self-test): blur all Svar, click a card to reveal it
   const [hideAnswers, setHideAnswers] = useState(false);
   // Per-question hide (local preference map by item id — does not sync/wipe Q&A)
@@ -2715,6 +2717,14 @@ export function QuizPage({
                 {/* Study buttons */}
                 <button
                   type="button"
+                  onClick={() => setShowQuizStats(true)}
+                  className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-3 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
+                  title={t.quizStatsTitle}
+                >
+                  {t.quizStats}
+                </button>
+                <button
+                  type="button"
                   disabled={pdfExporting || orderedItems.filter((item) => !item.draft).length === 0}
                   onClick={() => {
                     const title = selectedSet?.name ?? t.quizQuestionsFromNotes;
@@ -2755,6 +2765,14 @@ export function QuizPage({
             )}
             {!isFolderEmptyView && displayItems.length === 0 && (
               <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowQuizStats(true)}
+                  className="flex items-center gap-1 rounded-xl border border-app-border bg-app-bg px-3 py-1.5 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-border/40 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
+                  title={t.quizStatsTitle}
+                >
+                  {t.quizStats}
+                </button>
                 <button
                   onClick={handleAddQuestionClick}
                   className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-[12px] font-semibold text-primary transition-all hover:bg-primary/10"
@@ -2870,6 +2888,14 @@ export function QuizPage({
           initialProgress={currentProgress}
           onClose={() => { setStudyMode(null); setStudyDeck(null); }}
           onSaveProgress={handleSaveProgress}
+        />
+      )}
+
+      {showQuizStats && (
+        <QuizStatsPanel
+          quizzes={quizzes}
+          quizSets={allQuizSets}
+          onClose={() => setShowQuizStats(false)}
         />
       )}
 

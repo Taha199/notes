@@ -521,6 +521,17 @@ export interface Translation {
   quizSortQuestions: string;
   quizFlashcards: string;
   quizDownloadPdf: string;
+  quizStats: string;
+  quizStatsTitle: string;
+  quizStatsSubtitle: string;
+  quizStatsModeMonth: string;
+  quizStatsModeCompareMonths: string;
+  quizStatsModeCompareYears: string;
+  quizStatsTotal: string;
+  quizStatsActiveDays: string;
+  quizStatsBestDay: string;
+  quizStatsDailyList: string;
+  quizStatsEmpty: string;
   quizPdfGeneratedOn: string;
   quizTypeAnswer: string;
   quizAdd: string;
@@ -997,6 +1008,17 @@ export const LANGS: Record<Lang, Translation> = {
     quizSortQuestions: 'Sort questions',
     quizFlashcards: '🃏 Flashcards',
     quizDownloadPdf: '📄 Download PDF',
+    quizStats: '📊 Stats',
+    quizStatsTitle: 'Quiz statistics',
+    quizStatsSubtitle: '{n} questions tracked · new questions per day',
+    quizStatsModeMonth: 'Month',
+    quizStatsModeCompareMonths: 'Compare months',
+    quizStatsModeCompareYears: 'Compare years',
+    quizStatsTotal: 'Total',
+    quizStatsActiveDays: 'Active days',
+    quizStatsBestDay: 'Best day',
+    quizStatsDailyList: 'Days with new questions',
+    quizStatsEmpty: 'No quiz questions yet to chart.',
     quizPdfGeneratedOn: 'Generated on',
     quizTypeAnswer: '✏️ Type',
     quizAdd: 'Add',
@@ -1471,6 +1493,17 @@ export const LANGS: Record<Lang, Translation> = {
     quizSortQuestions: 'Sortera frågor',
     quizFlashcards: '🃏 Flashcards',
     quizDownloadPdf: '📄 Ladda ner PDF',
+    quizStats: '📊 Statistik',
+    quizStatsTitle: 'Quizstatistik',
+    quizStatsSubtitle: '{n} frågor spårade · nya frågor per dag',
+    quizStatsModeMonth: 'Månad',
+    quizStatsModeCompareMonths: 'Jämför månader',
+    quizStatsModeCompareYears: 'Jämför år',
+    quizStatsTotal: 'Totalt',
+    quizStatsActiveDays: 'Aktiva dagar',
+    quizStatsBestDay: 'Bästa dagen',
+    quizStatsDailyList: 'Dagar med nya frågor',
+    quizStatsEmpty: 'Inga quizfrågor att visa i diagrammet ännu.',
     quizPdfGeneratedOn: 'Genererad',
     quizTypeAnswer: '✏️ Skriv',
     quizAdd: 'Lägg till',
