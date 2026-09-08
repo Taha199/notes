@@ -531,6 +531,7 @@ export interface Translation {
   quizStatsActiveDays: string;
   quizStatsBestDay: string;
   quizStatsDailyList: string;
+  quizStatsDayByDay: string;
   quizStatsEmpty: string;
   quizPdfGeneratedOn: string;
   quizTypeAnswer: string;
@@ -1018,6 +1019,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsActiveDays: 'Active days',
     quizStatsBestDay: 'Best day',
     quizStatsDailyList: 'Days with new questions',
+    quizStatsDayByDay: 'Day by day',
     quizStatsEmpty: 'No quiz questions yet to chart.',
     quizPdfGeneratedOn: 'Generated on',
     quizTypeAnswer: '✏️ Type',
@@ -1503,6 +1505,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsActiveDays: 'Aktiva dagar',
     quizStatsBestDay: 'Bästa dagen',
     quizStatsDailyList: 'Dagar med nya frågor',
+    quizStatsDayByDay: 'Dag för dag',
     quizStatsEmpty: 'Inga quizfrågor att visa i diagrammet ännu.',
     quizPdfGeneratedOn: 'Genererad',
     quizTypeAnswer: '✏️ Skriv',

@@ -12,6 +12,7 @@ import {
   monthsWithData,
   sumCounts,
   yearsWithData,
+  type DayBar,
 } from '../../lib/quizStats';
 
 type Mode = 'month' | 'compareMonths' | 'compareYears';
@@ -19,33 +20,121 @@ type Mode = 'month' | 'compareMonths' | 'compareYears';
 const SERIES_A = '#534AB7';
 const SERIES_B = '#0d9488';
 
+/** One column per calendar day — number, weekday, bar, count. */
+function MonthDayChart({
+  bars,
+  locale,
+  questionsOne,
+  questionsMany,
+}: {
+  bars: DayBar[];
+  locale: string;
+  questionsOne: string;
+  questionsMany: string;
+}) {
+  const yMax = Math.max(1, maxCount(bars.map((b) => b.count)));
+  return (
+    <div className="w-full overflow-x-auto pb-1">
+      <div
+        className="flex min-w-max items-end gap-1 px-1 pt-2"
+        style={{ height: 260 }}
+        role="img"
+        aria-label="day chart"
+      >
+        {bars.map((b) => {
+          const date = new Date(`${b.key}T12:00:00`);
+          const weekday = date.toLocaleDateString(locale, { weekday: 'short' });
+          const h = b.count > 0 ? Math.max(12, (b.count / yMax) * 160) : 4;
+          const active = b.count > 0;
+          return (
+            <div
+              key={b.key}
+              title={`${date.toLocaleDateString(locale, {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+              })}: ${b.count} ${b.count === 1 ? questionsOne : questionsMany}`}
+              className={
+                'flex w-9 flex-col items-center justify-end gap-1 rounded-lg px-0.5 py-1 ' +
+                (active ? 'bg-primary/5 dark:bg-primary/10' : '')
+              }
+            >
+              <span
+                className={
+                  'text-[11px] font-bold tabular-nums ' +
+                  (active ? 'text-primary' : 'text-transparent')
+                }
+              >
+                {active ? b.count : '0'}
+              </span>
+              <div
+                className={
+                  'w-5 rounded-t-md transition-all ' +
+                  (active
+                    ? 'bg-primary shadow-sm shadow-primary/25'
+                    : 'bg-app-border/50 dark:bg-white/10')
+                }
+                style={{ height: h }}
+              />
+              <span
+                className={
+                  'text-[12px] font-bold tabular-nums leading-none ' +
+                  (active ? 'text-app-text dark:text-gray-100' : 'text-app-text-secondary/45')
+                }
+              >
+                {b.day}
+              </span>
+              <span
+                className={
+                  'text-[9px] font-semibold uppercase leading-none ' +
+                  (active ? 'text-app-text-secondary' : 'text-app-text-secondary/35')
+                }
+              >
+                {weekday.replace(/\.$/, '')}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function BarChart({
   labels,
   series,
   maxY,
+  labelEvery = false,
+  showValues = false,
+  slotPx = 14,
 }: {
   labels: string[];
   series: { label: string; color: string; values: number[] }[];
   maxY: number;
+  labelEvery?: boolean;
+  showValues?: boolean;
+  slotPx?: number;
 }) {
   const n = labels.length;
-  const height = 220;
+  const height = 240;
   const padL = 28;
   const padR = 8;
-  const padT = 16;
-  const padB = 36;
-  const width = Math.max(320, n * (series.length > 1 ? 22 : 14) + padL + padR);
+  const padT = showValues ? 22 : 16;
+  const padB = 40;
+  const width = Math.max(320, n * slotPx + padL + padR);
   const innerW = width - padL - padR;
   const innerH = height - padT - padB;
   const groupW = innerW / Math.max(n, 1);
-  const barW = Math.min(series.length > 1 ? 8 : 12, groupW / (series.length + 1));
+  const barW = Math.min(series.length > 1 ? slotPx * 0.35 : slotPx * 0.55, groupW / (series.length + 0.6));
   const yMax = Math.max(1, maxY);
 
   return (
     <div className="w-full overflow-x-auto">
       <svg
+        width={width}
+        height={height}
         viewBox={`0 0 ${width} ${height}`}
-        className="min-w-full"
+        className="block"
         role="img"
         aria-label="chart"
       >
@@ -77,6 +166,7 @@ function BarChart({
         })}
         {labels.map((label, i) => {
           const gx = padL + groupW * i + groupW / 2;
+          const showLabel = labelEvery || i === 0 || i === n - 1 || i % Math.ceil(n / 12) === 0;
           return (
             <g key={`${label}-${i}`}>
               {series.map((s, si) => {
@@ -85,27 +175,41 @@ function BarChart({
                 const x = gx - (series.length * barW) / 2 + si * barW;
                 const y = padT + innerH - h;
                 return (
-                  <rect
-                    key={s.label}
-                    x={x}
-                    y={y}
-                    width={barW}
-                    height={Math.max(v > 0 ? 2 : 0, h)}
-                    rx={2}
-                    fill={s.color}
-                    opacity={v > 0 ? 1 : 0.15}
-                  >
-                    <title>{`${s.label}: ${label} — ${v}`}</title>
-                  </rect>
+                  <g key={s.label}>
+                    <rect
+                      x={x}
+                      y={y}
+                      width={barW}
+                      height={Math.max(v > 0 ? 2 : 0, h)}
+                      rx={2}
+                      fill={s.color}
+                      opacity={v > 0 ? 1 : 0.12}
+                    >
+                      <title>{`${s.label}: ${label} — ${v}`}</title>
+                    </rect>
+                    {showValues && v > 0 && series.length === 1 && (
+                      <text
+                        x={x + barW / 2}
+                        y={y - 4}
+                        textAnchor="middle"
+                        className="fill-primary"
+                        fontSize={9}
+                        fontWeight={700}
+                      >
+                        {v}
+                      </text>
+                    )}
+                  </g>
                 );
               })}
-              {(n <= 16 || i === 0 || i === n - 1 || i % Math.ceil(n / 10) === 0) && (
+              {showLabel && (
                 <text
                   x={gx}
-                  y={height - 12}
+                  y={height - 14}
                   textAnchor="middle"
-                  className="fill-app-text-secondary/80 dark:fill-gray-400"
-                  fontSize={9}
+                  className="fill-app-text-secondary dark:fill-gray-400"
+                  fontSize={labelEvery ? 10 : 9}
+                  fontWeight={labelEvery ? 700 : 400}
                 >
                   {label}
                 </text>
@@ -250,7 +354,7 @@ export function QuizStatsPanel({
         role="dialog"
         aria-modal="true"
         aria-label={t.quizStatsTitle}
-        className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-[#1e1e2e]"
+        className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-[#1e1e2e]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-app-border px-4 py-3 dark:border-white/10">
@@ -360,9 +464,28 @@ export function QuizStatsPanel({
 
           {items.length === 0 ? (
             <p className="py-16 text-center text-sm text-app-text-secondary">{t.quizStatsEmpty}</p>
+          ) : mode === 'month' ? (
+            <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
+              <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">
+                {t.quizStatsDayByDay}
+              </p>
+              <MonthDayChart
+                bars={monthBars}
+                locale={locale}
+                questionsOne={t.quizQuestionOne}
+                questionsMany={t.quizQuestionMany}
+              />
+            </div>
           ) : (
             <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
-              <BarChart labels={chartLabels} series={chartSeries} maxY={yMax} />
+              <BarChart
+                labels={chartLabels}
+                series={chartSeries}
+                maxY={yMax}
+                labelEvery={mode === 'compareMonths' || mode === 'compareYears'}
+                showValues={mode === 'compareMonths'}
+                slotPx={mode === 'compareMonths' ? 26 : 36}
+              />
             </div>
           )}
 
@@ -371,20 +494,20 @@ export function QuizStatsPanel({
               <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
                 {t.quizStatsDailyList}
               </p>
-              <div className="max-h-40 overflow-y-auto rounded-xl border border-app-border dark:border-white/10">
+              <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
                 {[...monthBars].filter((b) => b.count > 0).reverse().map((b) => (
                   <div
                     key={b.key}
-                    className="flex items-center justify-between border-b border-app-border/60 px-3 py-1.5 text-[12px] last:border-b-0 dark:border-white/10"
+                    className="flex items-center justify-between border-b border-app-border/60 px-3 py-2 text-[13px] last:border-b-0 dark:border-white/10"
                   >
-                    <span className="text-app-text dark:text-gray-200">
+                    <span className="font-medium text-app-text dark:text-gray-200">
                       {new Date(b.key + 'T12:00:00').toLocaleDateString(locale, {
-                        weekday: 'short',
+                        weekday: 'long',
                         day: 'numeric',
-                        month: 'short',
+                        month: 'long',
                       })}
                     </span>
-                    <span className="font-semibold tabular-nums text-primary">
+                    <span className="rounded-lg bg-primary/10 px-2 py-0.5 text-[12px] font-bold tabular-nums text-primary">
                       {b.count} {b.count === 1 ? t.quizQuestionOne : t.quizQuestionMany}
                     </span>
                   </div>
