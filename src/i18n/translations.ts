@@ -555,6 +555,7 @@ export interface Translation {
   quizDashDone: string;
   quizDashDoneHint: string;
   quizDashEmpty: string;
+  quizDashCreated: string;
   quizPdfGeneratedOn: string;
   quizTypeAnswer: string;
   quizAdd: string;
@@ -1055,7 +1056,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewToday: 'Created today',
     quizOverviewLast12Months: 'Last 12 months',
     quizDashTitle: 'Quiz dashboard',
-    quizDashSubtitle: 'Move sets between columns with the status buttons on each quiz.',
+    quizDashSubtitle: 'Open a quiz, or move it between columns with the buttons on each card.',
     quizDashStatusLabel: 'Status',
     quizDashNotStarted: 'Not started',
     quizDashNotStartedHint: 'New quizzes land here until you move them',
@@ -1064,6 +1065,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizDashDone: 'Studied',
     quizDashDoneHint: 'Quizzes you marked as finished',
     quizDashEmpty: 'No quiz sets in this column',
+    quizDashCreated: 'Created',
     quizPdfGeneratedOn: 'Generated on',
     quizTypeAnswer: '✏️ Type',
     quizAdd: 'Add',
@@ -1562,7 +1564,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewToday: 'Skapade idag',
     quizOverviewLast12Months: 'Senaste 12 månaderna',
     quizDashTitle: 'Quiz dashboard',
-    quizDashSubtitle: 'Flytta set mellan kolumnerna med statusknapparna på varje quiz.',
+    quizDashSubtitle: 'Öppna ett quiz, eller flytta det mellan kolumnerna med knapparna på varje kort.',
     quizDashStatusLabel: 'Status',
     quizDashNotStarted: 'Ej påbörjade',
     quizDashNotStartedHint: 'Nya quiz hamnar här tills du flyttar dem',
@@ -1571,6 +1573,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizDashDone: 'Studerade',
     quizDashDoneHint: 'Quiz du markerat som klara',
     quizDashEmpty: 'Inga quizset i den här kolumnen',
+    quizDashCreated: 'Skapad',
     quizPdfGeneratedOn: 'Genererad',
     quizTypeAnswer: '✏️ Skriv',
     quizAdd: 'Lägg till',
