@@ -452,16 +452,18 @@ export function QuizStatsPanel({
   let periodTotal = 0;
   let periodSubtitle = '';
   let activeDays = 0;
-  let best = 0;
+  let periodDays = 0;
 
   if (mode === 'month') {
     periodTotal = sumCounts(monthBars.map((b) => b.count));
     periodSubtitle = monthLabel(monthKey);
     activeDays = monthBars.filter((b) => b.count > 0).length;
-    best = maxCount(monthBars.map((b) => b.count));
+    periodDays = monthBars.length;
   } else if (mode === 'compareMonths') {
-    // Keep chart order stable: newest months first (same as menu), among selected only
-    const selected = monthOptions.filter((k) => compareMonths.includes(k));
+    // Chronological order (oldest → newest) so June appears before July, etc.
+    const selected = [...compareMonths]
+      .filter((k) => monthOptions.includes(k))
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     compareTotals = selected.map((key, i) => {
       const parts = key.split('-').map(Number);
       const bars = buildMonthDayBars(byDay, parts[0]!, parts[1]!);
@@ -475,11 +477,14 @@ export function QuizStatsPanel({
     });
     periodTotal = sumCounts(compareTotals.map((x) => x.value));
     periodSubtitle = compareTotals.map((x) => x.label).join(' · ');
-    activeDays = selected.reduce((acc, key) => {
+    activeDays = 0;
+    periodDays = 0;
+    for (const key of selected) {
       const parts = key.split('-').map(Number);
-      return acc + buildMonthDayBars(byDay, parts[0]!, parts[1]!).filter((x) => x.count > 0).length;
-    }, 0);
-    best = maxCount(compareTotals.map((x) => x.value));
+      const bars = buildMonthDayBars(byDay, parts[0]!, parts[1]!);
+      activeDays += bars.filter((x) => x.count > 0).length;
+      periodDays += bars.length;
+    }
   } else {
     const barsA = buildYearMonthBars(byMonth, compareYearA);
     const barsB = buildYearMonthBars(byMonth, compareYearB);
@@ -492,7 +497,7 @@ export function QuizStatsPanel({
     periodTotal = totalA + totalB;
     periodSubtitle = `${compareYearA} · ${compareYearB}`;
     activeDays = barsA.filter((x) => x.count > 0).length + barsB.filter((x) => x.count > 0).length;
-    best = Math.max(totalA, totalB);
+    periodDays = barsA.length + barsB.length;
   }
 
   const modeBtn = (active: boolean) =>
@@ -582,7 +587,7 @@ export function QuizStatsPanel({
         </div>
 
         <div className="overflow-y-auto px-4 py-4">
-          <div className="mb-4 grid grid-cols-3 gap-2">
+          <div className="mb-4 grid grid-cols-2 gap-2">
             <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
               <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsTotal}</p>
               <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">{periodTotal}</p>
@@ -590,11 +595,10 @@ export function QuizStatsPanel({
             </div>
             <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
               <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsActiveDays}</p>
-              <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">{activeDays}</p>
-            </div>
-            <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsBestDay}</p>
-              <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">{best}</p>
+              <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">
+                {activeDays}
+                <span className="text-[15px] font-semibold text-app-text-secondary/55"> / {periodDays}</span>
+              </p>
             </div>
           </div>
 
