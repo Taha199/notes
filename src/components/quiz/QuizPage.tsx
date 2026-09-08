@@ -923,6 +923,25 @@ export function QuizPage({
   const [hideAnswers, setHideAnswers] = useState(false);
   // Per-question hide (local preference map by item id — does not sync/wipe Q&A)
   const [hiddenAnswers, setHiddenAnswers] = useState<Record<number, true>>(loadHiddenAnswers);
+  const clearHiddenAnswers = () => {
+    setHiddenAnswers({});
+    saveHiddenAnswers({});
+  };
+  const anyAnswersConcealed = hideAnswers || Object.keys(hiddenAnswers).length > 0;
+  /**
+   * Top bar wins over solo eye toggles:
+   * - If anything is hidden → Show reveals every answer (clears solo hides).
+   * - If everything is visible → Hide masks every answer.
+   */
+  const toggleHideAnswers = () => {
+    if (anyAnswersConcealed) {
+      setHideAnswers(false);
+      clearHiddenAnswers();
+      return;
+    }
+    setHideAnswers(true);
+    clearHiddenAnswers();
+  };
   const toggleHideAnswer = (id: number) => {
     setHiddenAnswers((prev) => {
       const next = { ...prev };
@@ -2654,11 +2673,11 @@ export function QuizPage({
               <div className="flex items-center gap-1.5">
                 {/* Hide/show answers toggle */}
                 <button
-                  onClick={() => setHideAnswers((v) => !v)}
-                  className={'flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ' + (hideAnswers ? 'border-primary bg-primary text-white' : 'border-app-border bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:border-white/10 dark:text-gray-400')}
-                  title={hideAnswers ? t.quizShowAnswers : t.quizHideAnswers}
+                  onClick={toggleHideAnswers}
+                  className={'flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ' + (anyAnswersConcealed ? 'border-primary bg-primary text-white' : 'border-app-border bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:border-white/10 dark:text-gray-400')}
+                  title={anyAnswersConcealed ? t.quizShowAnswers : t.quizHideAnswers}
                 >
-                  {hideAnswers ? '👁️ ' : '🙈 '}{hideAnswers ? t.quizShowAnswersShort : t.quizHideAnswersShort}
+                  {anyAnswersConcealed ? '👁️ ' : '🙈 '}{anyAnswersConcealed ? t.quizShowAnswersShort : t.quizHideAnswersShort}
                 </button>
                 {/* Sort order */}
                 <div className="relative">
