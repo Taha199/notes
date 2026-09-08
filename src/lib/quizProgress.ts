@@ -23,6 +23,7 @@ export type QuizDashboardRow = {
   folderName: string | null;
   total: number;
   createdAt: string;
+  color: string | null;
   status: QuizStudyStatus;
 };
 
@@ -47,6 +48,7 @@ export function buildQuizDashboardRows(
       folderName: set.folderId ? (folderName.get(set.folderId) ?? null) : null,
       total: visibleQuizItems(set.items).length,
       createdAt: set.createdAt,
+      color: set.color ?? null,
       status,
     };
     if (status === 'notStarted') notStarted.push(row);
