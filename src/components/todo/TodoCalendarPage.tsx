@@ -23,11 +23,14 @@ function MonthYearPicker({
   onChange,
   locale,
   ariaLabel,
+  openByMonth,
 }: {
   cursor: Date;
   onChange: (next: Date) => void;
   locale: string;
   ariaLabel: string;
+  /** Open (incomplete) task counts keyed by YYYY-MM. */
+  openByMonth: Map<string, number>;
 }) {
   const [open, setOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState(cursor.getFullYear());
@@ -86,7 +89,7 @@ function MonthYearPicker({
         <div
           role="dialog"
           aria-label={ariaLabel}
-          className="absolute left-1/2 top-full z-30 mt-2 w-[17.5rem] -translate-x-1/2 rounded-2xl border border-app-border bg-white p-3 shadow-[0_12px_32px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-gray-900 dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+          className="absolute left-1/2 top-full z-30 mt-2 w-[18.5rem] -translate-x-1/2 rounded-2xl border border-app-border bg-white p-3 shadow-[0_12px_32px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-gray-900 dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <button
@@ -110,6 +113,8 @@ function MonthYearPicker({
           <div className="grid grid-cols-3 gap-1.5">
             {months.map((label, month) => {
               const active = cursor.getFullYear() === pickerYear && cursor.getMonth() === month;
+              const monthKey = `${pickerYear}-${String(month + 1).padStart(2, '0')}`;
+              const openCount = openByMonth.get(monthKey) ?? 0;
               return (
                 <button
                   key={label + month}
@@ -119,13 +124,27 @@ function MonthYearPicker({
                     setOpen(false);
                   }}
                   className={
-                    'rounded-xl px-2 py-2 text-[12.5px] font-semibold capitalize transition ' +
+                    'flex flex-col items-center gap-0.5 rounded-xl px-2 py-2 transition ' +
                     (active
                       ? 'bg-primary text-white'
                       : 'text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5')
                   }
                 >
-                  {label}
+                  <span className="text-[12.5px] font-semibold capitalize leading-none">{label}</span>
+                  <span
+                    className={
+                      'text-[11px] font-bold tabular-nums leading-none ' +
+                      (active
+                        ? openCount > 0
+                          ? 'text-white/90'
+                          : 'text-white/55'
+                        : openCount > 0
+                          ? 'text-primary'
+                          : 'text-app-text-secondary/45')
+                    }
+                  >
+                    {openCount}
+                  </span>
                 </button>
               );
             })}
@@ -171,6 +190,17 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
     return map;
   }, [visibleTodos]);
 
+  const openByMonth = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const todo of visibleTodos) {
+      if (todo.done) continue;
+      const monthKey = todo.date.slice(0, 7);
+      if (monthKey.length !== 7) continue;
+      map.set(monthKey, (map.get(monthKey) ?? 0) + 1);
+    }
+    return map;
+  }, [visibleTodos]);
+
   const submitDraft = () => {
     addTodo(draft, selectedKey, draftTime);
     setDraft('');
@@ -194,6 +224,7 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
             onChange={setCursor}
             locale={t.dateLocale}
             ariaLabel={t.todoPickMonth}
+            openByMonth={openByMonth}
           />
           <button
             type="button"
@@ -219,9 +250,11 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.9fr)]">
         <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-900/70">
-          <div className="grid grid-cols-[2rem_repeat(7,minmax(0,1fr))] border-b border-app-border bg-app-bg/80 px-1 py-2 dark:border-white/10 dark:bg-white/5">
-            <div className="text-center text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/55">
-              {t.todoWeekShort}
+          <div className="grid grid-cols-[2.5rem_repeat(7,minmax(0,1fr))] border-b border-app-border bg-app-bg/80 px-1 py-2 dark:border-white/10 dark:bg-white/5">
+            <div className="flex items-center justify-center">
+              <span className="rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary dark:bg-primary/25">
+                {t.todoWeekShort}
+              </span>
             </div>
             {weekdays.map((label) => (
               <div key={label} className="text-center text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/80">
@@ -231,12 +264,14 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
           </div>
           <div>
             {weeks.map((row) => (
-              <div key={`${row.week}-${toDateKey(row.days[0]!)}`} className="grid grid-cols-[2rem_repeat(7,minmax(0,1fr))]">
+              <div key={`${row.week}-${toDateKey(row.days[0]!)}`} className="grid grid-cols-[2.5rem_repeat(7,minmax(0,1fr))]">
                 <div
-                  className="flex items-start justify-center border-b border-app-border/70 pt-2.5 text-[11px] font-bold tabular-nums text-app-text-secondary/55 dark:border-white/10"
+                  className="flex items-start justify-center border-b border-r border-app-border/70 bg-primary/[0.06] pt-2 dark:border-white/10 dark:bg-primary/10"
                   title={`${t.todoWeek} ${row.week}`}
                 >
-                  {row.week}
+                  <span className="inline-flex min-w-[1.65rem] items-center justify-center rounded-lg bg-primary/15 px-1 py-1 text-[12px] font-bold tabular-nums text-primary shadow-sm dark:bg-primary/25 dark:text-primary">
+                    {row.week}
+                  </span>
                 </div>
                 {row.days.map((day) => {
                   const key = toDateKey(day);
