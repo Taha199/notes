@@ -13,6 +13,7 @@ export interface Translation {
   navRead: string;
   navLibrary: string;
   navFiles: string;
+  navQuizDashboard: string;
   navArabicKb: string;
   navCountdown: string;
   navQuizStats: string;
@@ -89,6 +90,7 @@ export interface Translation {
   pageTodo: string;
   pageArch: string;
   pageFiles: string;
+  pageQuizDashboard: string;
   pageArabicKb: string;
   pageCountdown: string;
   pageQuizStats: string;
@@ -543,6 +545,15 @@ export interface Translation {
   quizOverviewTotal: string;
   quizOverviewToday: string;
   quizOverviewLast12Months: string;
+  quizDashTitle: string;
+  quizDashSubtitle: string;
+  quizDashNotStarted: string;
+  quizDashNotStartedHint: string;
+  quizDashStarted: string;
+  quizDashStartedHint: string;
+  quizDashDone: string;
+  quizDashDoneHint: string;
+  quizDashEmpty: string;
   quizPdfGeneratedOn: string;
   quizTypeAnswer: string;
   quizAdd: string;
@@ -714,7 +725,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
     appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
     navHome: 'Home', navFav: 'Favourites', navTodo: 'To-do', navUnread: 'Notes to Study', navRead: 'Studied Notes',
-    navLibrary: 'Notes Library', navFiles: 'File Uploads', navArabicKb: 'Arabic keyboard', navCountdown: 'Countdown', navQuizStats: 'Statistics', navArchive: 'Archive', navTrash: 'Trash',
+    navLibrary: 'Notes Library', navFiles: 'File Uploads', navQuizDashboard: 'Quiz dashboard', navArabicKb: 'Arabic keyboard', navCountdown: 'Countdown', navQuizStats: 'Statistics', navArchive: 'Archive', navTrash: 'Trash',
     navDownload: 'Desktop app', downloadSectionTitle: 'Download as app',
     pageDownload: 'Desktop app', downloadTitle: 'Taha Note for Mac',
     downloadSubtitle: 'Install Taha Note as a native Mac app. Your notes sync with the web — same account, same features.',
@@ -739,7 +750,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Loading your open drafts from the cloud…',
     draftsWriteWhileLoading: 'You can start a new draft right away while your other drafts sync.',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Notes to Study', pageRead: 'Studied Notes',
-    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageArabicKb: 'Arabic keyboard', pageCountdown: 'Countdown', pageQuizStats: 'Quiz statistics', pageTrash: 'Trash',
+    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageQuizDashboard: 'Quiz dashboard', pageArabicKb: 'Arabic keyboard', pageCountdown: 'Countdown', pageQuizStats: 'Quiz statistics', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
@@ -1042,6 +1053,15 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewTotal: 'Total questions',
     quizOverviewToday: 'Created today',
     quizOverviewLast12Months: 'Last 12 months',
+    quizDashTitle: 'Quiz dashboard',
+    quizDashSubtitle: 'Open a quiz set directly from not started, in progress, or finished.',
+    quizDashNotStarted: 'Not started',
+    quizDashNotStartedHint: 'Quizzes you have not begun studying',
+    quizDashStarted: 'Started',
+    quizDashStartedHint: 'Quizzes you have begun but not finished',
+    quizDashDone: 'Studied',
+    quizDashDoneHint: 'All questions marked as known',
+    quizDashEmpty: 'No quiz sets in this column',
     quizPdfGeneratedOn: 'Generated on',
     quizTypeAnswer: '✏️ Type',
     quizAdd: 'Add',
@@ -1211,7 +1231,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
     appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
     navHome: 'Hem', navFav: 'Favoriter', navTodo: 'Att göra', navUnread: 'Att studera', navRead: 'Studerade',
-    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArabicKb: 'Arabiskt tangentbord', navCountdown: 'Nedräkning', navQuizStats: 'Statistik', navArchive: 'Arkiv', navTrash: 'Papperskorg',
+    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navQuizDashboard: 'Quiz dashboard', navArabicKb: 'Arabiskt tangentbord', navCountdown: 'Nedräkning', navQuizStats: 'Statistik', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     navDownload: 'Skrivbordsapp', downloadSectionTitle: 'Ladda ner som program',
     pageDownload: 'Skrivbordsapp', downloadTitle: 'Taha Note för Mac',
     downloadSubtitle: 'Installera Taha Note som en inbyggd Mac-app. Dina anteckningar synkas med webben — samma konto, samma funktioner.',
@@ -1236,7 +1256,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Hämtar dina öppna utkast från molnet…',
     draftsWriteWhileLoading: 'Du kan börja skriva ett nytt utkast direkt medan dina andra utkast synkas.',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Att studera', pageRead: 'Studerade',
-    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageArabicKb: 'Arabiskt tangentbord', pageCountdown: 'Nedräkning', pageQuizStats: 'Quizstatistik', pageTrash: 'Papperskorg',
+    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageQuizDashboard: 'Quiz dashboard', pageArabicKb: 'Arabiskt tangentbord', pageCountdown: 'Nedräkning', pageQuizStats: 'Quizstatistik', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
@@ -1539,6 +1559,15 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewTotal: 'Totalt antal frågor',
     quizOverviewToday: 'Skapade idag',
     quizOverviewLast12Months: 'Senaste 12 månaderna',
+    quizDashTitle: 'Quiz dashboard',
+    quizDashSubtitle: 'Öppna ett quizset direkt från ej påbörjade, påbörjade eller klara.',
+    quizDashNotStarted: 'Ej påbörjade',
+    quizDashNotStartedHint: 'Quiz du inte har börjat studera',
+    quizDashStarted: 'Påbörjade',
+    quizDashStartedHint: 'Quiz du har börjat men inte klarat',
+    quizDashDone: 'Studerade',
+    quizDashDoneHint: 'Alla frågor markerade som kända',
+    quizDashEmpty: 'Inga quizset i den här kolumnen',
     quizPdfGeneratedOn: 'Genererad',
     quizTypeAnswer: '✏️ Skriv',
     quizAdd: 'Lägg till',

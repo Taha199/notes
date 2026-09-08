@@ -58,6 +58,7 @@ export function Sidebar({
     { page: 'read', icon: '✓', label: t.navRead, badge: counts.read, badgeClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' },
     { page: 'quiz', icon: '🧠', label: 'Quiz' },
     { page: 'files', icon: '📎', label: t.navFiles },
+    { page: 'quizDashboard', icon: '🗂', label: t.navQuizDashboard },
     { page: 'arabicKb', icon: '⌨️', label: t.navArabicKb },
     { page: 'countdown', icon: '⏳', label: t.navCountdown },
     { page: 'quizStats', icon: '📊', label: t.navQuizStats },
