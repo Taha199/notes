@@ -666,14 +666,10 @@ export function QuizStatsPanel({
   let compareTotals: { id: string; label: string; value: number; color: string }[] | null = null;
   let periodTotal = 0;
   let periodSubtitle = '';
-  let activeDays = 0;
-  let periodDays = 0;
 
   if (mode === 'month') {
     periodTotal = sumCounts(monthBars.map((b) => b.count));
     periodSubtitle = monthLabel(monthKey);
-    activeDays = monthBars.filter((b) => b.count > 0).length;
-    periodDays = monthBars.length;
   } else if (mode === 'compareMonths') {
     // Chronological order (oldest → newest) so June appears before July, etc.
     const selected = [...compareMonths]
@@ -692,14 +688,6 @@ export function QuizStatsPanel({
     });
     periodTotal = sumCounts(compareTotals.map((x) => x.value));
     periodSubtitle = compareTotals.map((x) => x.label).join(' · ');
-    activeDays = 0;
-    periodDays = 0;
-    for (const key of selected) {
-      const parts = key.split('-').map(Number);
-      const bars = buildMonthDayBars(byDay, parts[0]!, parts[1]!);
-      activeDays += bars.filter((x) => x.count > 0).length;
-      periodDays += bars.length;
-    }
   } else if (mode === 'compareYears') {
     // Chronological order (oldest → newest), same pattern as compare months.
     const selected = [...compareYears]
@@ -718,13 +706,6 @@ export function QuizStatsPanel({
     });
     periodTotal = sumCounts(compareTotals.map((x) => x.value));
     periodSubtitle = compareTotals.map((x) => x.label).join(' · ');
-    activeDays = 0;
-    periodDays = 0;
-    for (const year of selected) {
-      const bars = buildYearMonthBars(byMonth, year);
-      activeDays += bars.filter((x) => x.count > 0).length;
-      periodDays += bars.length;
-    }
   }
 
   const modeBtn = (active: boolean) =>
@@ -992,18 +973,11 @@ export function QuizStatsPanel({
             </div>
           ) : (
             <>
-              <div className="mb-4 grid grid-cols-2 gap-2">
-                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
+              <div className="mb-4">
+                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03] sm:max-w-xs">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsTotal}</p>
                   <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">{periodTotal}</p>
                   <p className="truncate text-[10px] text-app-text-secondary/60">{periodSubtitle}</p>
-                </div>
-                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsActiveDays}</p>
-                  <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">
-                    {activeDays}
-                    <span className="text-[15px] font-semibold text-app-text-secondary/55"> / {periodDays}</span>
-                  </p>
                 </div>
               </div>
 
