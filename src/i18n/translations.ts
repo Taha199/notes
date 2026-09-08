@@ -545,6 +545,8 @@ export interface Translation {
   quizStatsEmpty: string;
   quizStatsSelectMonths: string;
   quizStatsMonthsSelected: string;
+  quizStatsSelectYears: string;
+  quizStatsYearsSelected: string;
   quizOverviewTitle: string;
   quizOverviewSubtitle: string;
   quizOverviewTotal: string;
@@ -1061,6 +1063,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsEmpty: 'No quiz questions yet to chart.',
     quizStatsSelectMonths: 'Select months',
     quizStatsMonthsSelected: '{n} months',
+    quizStatsSelectYears: 'Select years',
+    quizStatsYearsSelected: '{n} years',
     quizOverviewTitle: 'Quiz overview',
     quizOverviewSubtitle: 'Total questions, today, and the last 12 months',
     quizOverviewTotal: 'Total questions',
@@ -1575,6 +1579,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsEmpty: 'Inga quizfrågor att visa i diagrammet ännu.',
     quizStatsSelectMonths: 'Välj månader',
     quizStatsMonthsSelected: '{n} månader',
+    quizStatsSelectYears: 'Välj år',
+    quizStatsYearsSelected: '{n} år',
     quizOverviewTitle: 'Quizöversikt',
     quizOverviewSubtitle: 'Totalt antal frågor, dagens frågor och senaste 12 månaderna',
     quizOverviewTotal: 'Totalt antal frågor',

@@ -32,8 +32,6 @@ function loadDayListSort(): DayListSort {
   return saved === 'oldest' ? 'oldest' : 'newest';
 }
 
-const SERIES_A = '#534AB7';
-const SERIES_B = '#0d9488';
 const COMPARE_COLORS = [
   '#534AB7',
   '#0d9488',
@@ -545,8 +543,11 @@ export function QuizStatsPanel({
     const b = monthOptions[1];
     return b && b !== a ? [a, b] : [a];
   });
-  const [compareYearA, setCompareYearA] = useState(yearOptions[0] ?? now.year);
-  const [compareYearB, setCompareYearB] = useState(yearOptions[1] ?? now.year - 1);
+  const [compareYears, setCompareYears] = useState<string[]>(() => {
+    const a = String(yearOptions[0] ?? now.year);
+    const b = String(yearOptions[1] ?? now.year - 1);
+    return b !== a ? [a, b] : [a];
+  });
 
   useEffect(() => {
     setSelectedDayKey(null);
@@ -636,13 +637,13 @@ export function QuizStatsPanel({
     [monthOptions, byDay, locale],
   );
   const yearMenuOptions = useMemo(() => {
-    const years = [...new Set([...yearOptions, compareYearB, now.year - 1])].sort((a, b) => b - a);
+    const years = [...new Set([...yearOptions, now.year - 1, now.year])].sort((a, b) => b - a);
     return years.map((y) => ({
       value: String(y),
       label: String(y),
       hint: String(sumCounts(buildYearMonthBars(byMonth, y).map((b) => b.count))),
     }));
-  }, [yearOptions, compareYearB, now.year, byMonth]);
+  }, [yearOptions, now.year, byMonth]);
 
   const totalSets = useMemo(
     () => quizSets.filter((s) => !s.trashed && s.system !== 'favorites').length,
@@ -700,18 +701,30 @@ export function QuizStatsPanel({
       periodDays += bars.length;
     }
   } else if (mode === 'compareYears') {
-    const barsA = buildYearMonthBars(byMonth, compareYearA);
-    const barsB = buildYearMonthBars(byMonth, compareYearB);
-    const totalA = sumCounts(barsA.map((x) => x.count));
-    const totalB = sumCounts(barsB.map((x) => x.count));
-    compareTotals = [
-      { id: `y-${compareYearA}`, label: String(compareYearA), value: totalA, color: SERIES_A },
-      { id: `y-${compareYearB}`, label: String(compareYearB), value: totalB, color: SERIES_B },
-    ];
-    periodTotal = totalA + totalB;
-    periodSubtitle = `${compareYearA} · ${compareYearB}`;
-    activeDays = barsA.filter((x) => x.count > 0).length + barsB.filter((x) => x.count > 0).length;
-    periodDays = barsA.length + barsB.length;
+    // Chronological order (oldest → newest), same pattern as compare months.
+    const selected = [...compareYears]
+      .map((y) => Number(y))
+      .filter((y) => Number.isFinite(y))
+      .sort((a, b) => a - b);
+    compareTotals = selected.map((year, i) => {
+      const bars = buildYearMonthBars(byMonth, year);
+      const total = sumCounts(bars.map((x) => x.count));
+      return {
+        id: `y-${year}`,
+        label: String(year),
+        value: total,
+        color: COMPARE_COLORS[i % COMPARE_COLORS.length]!,
+      };
+    });
+    periodTotal = sumCounts(compareTotals.map((x) => x.value));
+    periodSubtitle = compareTotals.map((x) => x.label).join(' · ');
+    activeDays = 0;
+    periodDays = 0;
+    for (const year of selected) {
+      const bars = buildYearMonthBars(byMonth, year);
+      activeDays += bars.filter((x) => x.count > 0).length;
+      periodDays += bars.length;
+    }
   }
 
   const modeBtn = (active: boolean) =>
@@ -826,21 +839,14 @@ export function QuizStatsPanel({
               />
             )}
             {mode === 'compareYears' && (
-              <>
-                <StatsMenuSelect
-                  ariaLabel={t.quizStatsModeCompareYears}
-                  value={String(compareYearA)}
-                  options={yearMenuOptions}
-                  onChange={(v) => setCompareYearA(Number(v))}
-                />
-                <span className="text-[11px] font-semibold text-app-text-secondary/70">vs</span>
-                <StatsMenuSelect
-                  ariaLabel={t.quizStatsModeCompareYears}
-                  value={String(compareYearB)}
-                  options={yearMenuOptions}
-                  onChange={(v) => setCompareYearB(Number(v))}
-                />
-              </>
+              <StatsMultiSelect
+                ariaLabel={t.quizStatsModeCompareYears}
+                values={compareYears}
+                options={yearMenuOptions}
+                onChange={setCompareYears}
+                emptyLabel={t.quizStatsSelectYears}
+                manyLabel={t.quizStatsYearsSelected}
+              />
             )}
           </div>
         </div>
