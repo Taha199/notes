@@ -84,6 +84,40 @@ export function buildMonthDayBars(
   return bars;
 }
 
+export type HourBar = { hour: number; key: string; count: number };
+
+/** Counts for a single local calendar day, keyed by hour 0–23. */
+export function countQuestionsByHourForDay(
+  items: QuizItem[],
+  dayKey: string,
+): Map<number, number> {
+  const map = new Map<number, number>();
+  for (const item of items) {
+    const ms = quizItemCreatedAtMs(item);
+    if (toDayKey(ms) !== dayKey) continue;
+    const hour = new Date(ms).getHours();
+    map.set(hour, (map.get(hour) ?? 0) + 1);
+  }
+  return map;
+}
+
+/** One vertical bar per hour of the day (zeros included). */
+export function buildTodayHourBars(
+  items: QuizItem[],
+  dayKey: string,
+): HourBar[] {
+  const byHour = countQuestionsByHourForDay(items, dayKey);
+  const bars: HourBar[] = [];
+  for (let hour = 0; hour < 24; hour++) {
+    bars.push({
+      hour,
+      key: `${dayKey}T${String(hour).padStart(2, '0')}`,
+      count: byHour.get(hour) ?? 0,
+    });
+  }
+  return bars;
+}
+
 export type MonthBar = { month: number; key: string; count: number };
 
 /** Jan–Dec for a year. */

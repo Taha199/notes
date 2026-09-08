@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { QuizFolder, QuizItem, QuizSet } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { GlobalSearchResults } from '../search/GlobalSearchResults';
-import { buildQuizDaySearchResults } from '../../lib/globalSearch';
+import { buildQuizDaySearchResults, sortQuizSearchResultsByCreated } from '../../lib/globalSearch';
+import { safeLocalStorageSet } from '../../lib/safeStorage';
 import {
   buildMonthDayBars,
+  buildTodayHourBars,
   buildYearMonthBars,
   collectQuizItemsForStats,
   countQuestionsByDay,
@@ -18,9 +20,17 @@ import {
   toDayKey,
   yearsWithData,
   type DayBar,
+  type HourBar,
 } from '../../lib/quizStats';
 
-type Mode = 'overview' | 'month' | 'compareMonths' | 'compareYears';
+type Mode = 'overview' | 'today' | 'month' | 'compareMonths' | 'compareYears';
+type DayListSort = 'newest' | 'oldest';
+const DAY_LIST_SORT_KEY = 'malacadhati_quiz_stats_day_sort';
+
+function loadDayListSort(): DayListSort {
+  const saved = localStorage.getItem(DAY_LIST_SORT_KEY);
+  return saved === 'oldest' ? 'oldest' : 'newest';
+}
 
 const SERIES_A = '#534AB7';
 const SERIES_B = '#0d9488';
@@ -363,6 +373,97 @@ function MonthDayChart({
   );
 }
 
+/** Vertical hour columns for today. */
+function TodayHourChart({
+  bars,
+  questionsOne,
+  questionsMany,
+  selectedKey,
+  onSelectHour,
+}: {
+  bars: HourBar[];
+  questionsOne: string;
+  questionsMany: string;
+  selectedKey: string | null;
+  onSelectHour: (key: string) => void;
+}) {
+  const yMax = Math.max(1, maxCount(bars.map((b) => b.count)));
+  return (
+    <div className="w-full overflow-x-auto pb-1">
+      <div
+        className="flex min-w-max items-end gap-1 px-1 pt-2"
+        style={{ height: 260 }}
+        role="list"
+        aria-label="hour chart"
+      >
+        {bars.map((b) => {
+          const h = b.count > 0 ? Math.max(12, (b.count / yMax) * 160) : 4;
+          const active = b.count > 0;
+          const selected = selectedKey === b.key;
+          const timeLabel = `${String(b.hour).padStart(2, '0')}:00`;
+          const label = `${timeLabel}: ${b.count} ${b.count === 1 ? questionsOne : questionsMany}`;
+          const className =
+            'flex w-8 flex-col items-center justify-end gap-1 rounded-lg px-0.5 py-1 transition sm:w-9 ' +
+            (selected
+              ? 'bg-primary/15 ring-2 ring-primary/40 dark:bg-primary/20'
+              : active
+                ? 'cursor-pointer bg-primary/5 hover:bg-primary/10 dark:bg-primary/10 dark:hover:bg-primary/15'
+                : '');
+          const inner = (
+            <>
+              <span
+                className={
+                  'text-[10px] font-bold tabular-nums sm:text-[11px] ' +
+                  (active ? 'text-primary' : 'text-transparent')
+                }
+              >
+                {active ? b.count : '0'}
+              </span>
+              <div
+                className={
+                  'w-4 rounded-t-md transition-all sm:w-5 ' +
+                  (active
+                    ? 'bg-primary shadow-sm shadow-primary/25'
+                    : 'bg-app-border/50 dark:bg-white/10')
+                }
+                style={{ height: h }}
+              />
+              <span
+                className={
+                  'text-[10px] font-bold tabular-nums leading-none sm:text-[11px] ' +
+                  (active ? 'text-app-text dark:text-gray-100' : 'text-app-text-secondary/45')
+                }
+              >
+                {String(b.hour).padStart(2, '0')}
+              </span>
+            </>
+          );
+          if (!active) {
+            return (
+              <div key={b.key} title={label} className={className} role="listitem">
+                {inner}
+              </div>
+            );
+          }
+          return (
+            <button
+              key={b.key}
+              type="button"
+              title={label}
+              aria-pressed={selected}
+              aria-label={label}
+              onClick={() => onSelectHour(b.key)}
+              className={className}
+            >
+              {inner}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Big bars for month/year totals comparison. */
 function TotalsCompareChart({
   items,
@@ -436,10 +537,9 @@ export function QuizStatsPanel({
   const [mode, setMode] = useState<Mode>('overview');
   const [monthKey, setMonthKey] = useState(now.key);
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
-  const [daySort, setDaySort] = useState<'newest' | 'oldest'>('newest');
-  const [daySortMenuOpen, setDaySortMenuOpen] = useState(false);
-  const [monthsSort, setMonthsSort] = useState<'newest' | 'oldest'>('oldest');
-  const [monthsSortMenuOpen, setMonthsSortMenuOpen] = useState(false);
+  const [selectedHourKey, setSelectedHourKey] = useState<string | null>(null);
+  const [dayListSort, setDayListSort] = useState<DayListSort>(() => loadDayListSort());
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [compareMonths, setCompareMonths] = useState<string[]>(() => {
     const a = monthOptions[0] ?? now.key;
     const b = monthOptions[1];
@@ -450,7 +550,14 @@ export function QuizStatsPanel({
 
   useEffect(() => {
     setSelectedDayKey(null);
+    setSelectedHourKey(null);
   }, [mode, monthKey]);
+
+  const changeDayListSort = (next: DayListSort) => {
+    setDayListSort(next);
+    safeLocalStorageSet(DAY_LIST_SORT_KEY, next);
+    setSortMenuOpen(false);
+  };
 
   const monthParts = monthKey.split('-').map(Number);
   const monthYear = monthParts[0] ?? now.year;
@@ -461,11 +568,50 @@ export function QuizStatsPanel({
     [byDay, monthYear, monthNum],
   );
 
-  const dayResults = useMemo(() => {
-    if (!selectedDayKey) return [];
-    const rows = buildQuizDaySearchResults(selectedDayKey, quizzes, quizSets, quizFolders, t);
-    return daySort === 'oldest' ? [...rows].reverse() : rows;
-  }, [selectedDayKey, quizzes, quizSets, quizFolders, t, daySort]);
+  const todayKey = toDayKey(Date.now());
+  const todayCount = todayKey ? (byDay.get(todayKey) ?? 0) : 0;
+  const todayHourBars = useMemo(
+    () => (todayKey ? buildTodayHourBars(items, todayKey) : []),
+    [items, todayKey],
+  );
+
+  const selectedHour = selectedHourKey ? Number(selectedHourKey.slice(-2)) : null;
+
+  const dayResultsRaw = useMemo(() => {
+    if (mode === 'today' && todayKey) {
+      return buildQuizDaySearchResults(
+        todayKey,
+        quizzes,
+        quizSets,
+        quizFolders,
+        t,
+        selectedHourKey ? selectedHour : null,
+      );
+    }
+    if (selectedDayKey) {
+      return buildQuizDaySearchResults(selectedDayKey, quizzes, quizSets, quizFolders, t);
+    }
+    return [];
+  }, [
+    mode,
+    todayKey,
+    selectedHourKey,
+    selectedHour,
+    selectedDayKey,
+    quizzes,
+    quizSets,
+    quizFolders,
+    t,
+  ]);
+
+  const dayResults = useMemo(
+    () => sortQuizSearchResultsByCreated(dayResultsRaw, dayListSort),
+    [dayResultsRaw, dayListSort],
+  );
+
+  const showDayQuestionList =
+    (mode === 'month' && !!selectedDayKey) ||
+    (mode === 'today' && todayCount > 0);
 
   const monthLabel = (key: string) => {
     const [y, m] = key.split('-').map(Number);
@@ -498,8 +644,6 @@ export function QuizStatsPanel({
     }));
   }, [yearOptions, compareYearB, now.year, byMonth]);
 
-  const todayKey = toDayKey(Date.now());
-  const todayCount = todayKey ? (byDay.get(todayKey) ?? 0) : 0;
   const totalSets = useMemo(
     () => quizSets.filter((s) => !s.trashed && s.system !== 'favorites').length,
     [quizSets],
@@ -516,14 +660,7 @@ export function QuizStatsPanel({
     // monthLabel uses locale
     [last12MonthKeys, byMonth, locale],
   );
-  const last12DisplayRows = useMemo(
-    () => (monthsSort === 'newest' ? [...last12Rows].reverse() : last12Rows),
-    [last12Rows, monthsSort],
-  );
   const last12Max = Math.max(1, maxCount(last12Rows.map((r) => r.count)));
-  const last12RangeLabel = last12Rows.length
-    ? `${last12Rows[0]!.label} – ${last12Rows[last12Rows.length - 1]!.label}`
-    : '';
 
   let compareTotals: { id: string; label: string; value: number; color: string }[] | null = null;
   let periodTotal = 0;
@@ -617,6 +754,9 @@ export function QuizStatsPanel({
           <button type="button" className={modeBtn(mode === 'overview')} onClick={() => setMode('overview')}>
             {t.quizStatsModeOverview}
           </button>
+          <button type="button" className={modeBtn(mode === 'today')} onClick={() => setMode('today')}>
+            {t.quizStatsModeToday}
+          </button>
           <button type="button" className={modeBtn(mode === 'month')} onClick={() => setMode('month')}>
             {t.quizStatsModeMonth}
           </button>
@@ -628,6 +768,45 @@ export function QuizStatsPanel({
           </button>
 
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {(mode === 'today' || (mode === 'month' && selectedDayKey)) && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSortMenuOpen((v) => !v)}
+                  className="flex h-8 items-center gap-1.5 rounded-xl border border-app-border bg-white px-2.5 text-[11px] font-semibold text-app-text-secondary transition-colors hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-300"
+                  aria-haspopup="listbox"
+                  aria-expanded={sortMenuOpen}
+                  aria-label={t.filesSortLabel}
+                >
+                  <span aria-hidden>⇅</span>
+                  {dayListSort === 'oldest' ? t.quizSortOldestShort : t.quizSortNewestShort}
+                </button>
+                {sortMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
+                    <div className="absolute right-0 top-9 z-50 w-48 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800">
+                      {([
+                        { key: 'newest' as const, label: t.quizSortNewest },
+                        { key: 'oldest' as const, label: t.quizSortOldest },
+                      ]).map((o) => (
+                        <button
+                          key={o.key}
+                          type="button"
+                          onClick={() => changeDayListSort(o.key)}
+                          className={
+                            'flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' +
+                            (dayListSort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')
+                          }
+                        >
+                          {o.label}
+                          {dayListSort === o.key && <span className="ml-auto text-[11px]">✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             {mode === 'month' && (
               <StatsMenuSelect
                 ariaLabel={t.quizStatsModeMonth}
@@ -695,7 +874,7 @@ export function QuizStatsPanel({
               </div>
 
               <div className="rounded-xl border border-app-border bg-white p-3 dark:border-white/10 dark:bg-gray-950/40">
-                <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                <div className="mb-3 flex items-end justify-between gap-3">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
                       {t.quizOverviewLast12Months}
@@ -704,57 +883,12 @@ export function QuizStatsPanel({
                       {last12Total}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 pb-0.5">
-                    <p className="text-[11px] text-app-text-secondary/60">{last12RangeLabel}</p>
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setMonthsSortMenuOpen((v) => !v)}
-                        className="flex h-7 items-center gap-1 rounded-lg border border-app-border bg-white px-2 text-[11px] font-semibold text-app-text-secondary transition hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-300"
-                        aria-haspopup="listbox"
-                        aria-expanded={monthsSortMenuOpen}
-                        aria-label={t.filesSortLabel}
-                      >
-                        <span aria-hidden>⇅</span>
-                        {monthsSort === 'newest' ? t.quizSortNewestShort : t.quizSortOldestShort}
-                      </button>
-                      {monthsSortMenuOpen && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setMonthsSortMenuOpen(false)} />
-                          <div
-                            className="absolute right-0 top-8 z-50 w-48 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
-                            role="listbox"
-                          >
-                            {([
-                              { key: 'oldest' as const, label: t.quizSortOldest },
-                              { key: 'newest' as const, label: t.quizSortNewest },
-                            ]).map((o) => (
-                              <button
-                                key={o.key}
-                                type="button"
-                                role="option"
-                                aria-selected={monthsSort === o.key}
-                                onClick={() => {
-                                  setMonthsSort(o.key);
-                                  setMonthsSortMenuOpen(false);
-                                }}
-                                className={
-                                  'flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' +
-                                  (monthsSort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')
-                                }
-                              >
-                                {o.label}
-                                {monthsSort === o.key && <span className="ml-auto text-[11px]">✓</span>}
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                  <p className="pb-0.5 text-[11px] text-app-text-secondary/60">
+                    {last12Rows[0]?.label} – {last12Rows[last12Rows.length - 1]?.label}
+                  </p>
                 </div>
                 <div className="space-y-1.5">
-                  {last12DisplayRows.map((row) => {
+                  {last12Rows.map((row) => {
                     const w = row.count > 0 ? Math.max(6, (row.count / last12Max) * 100) : 0;
                     return (
                       <div key={row.key} className="flex items-center gap-2.5">
@@ -776,6 +910,80 @@ export function QuizStatsPanel({
                 </div>
               </div>
             </>
+          ) : mode === 'today' ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
+                    {t.quizOverviewToday}
+                  </p>
+                  <p className="mt-1 text-3xl font-bold tabular-nums text-primary">{todayCount}</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
+                <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">
+                  {t.quizStatsHourByHour}
+                </p>
+                {todayCount === 0 ? (
+                  <p className="py-12 text-center text-sm text-app-text-secondary">{t.quizStatsEmpty}</p>
+                ) : (
+                  <TodayHourChart
+                    bars={todayHourBars}
+                    questionsOne={t.quizQuestionOne}
+                    questionsMany={t.quizQuestionMany}
+                    selectedKey={selectedHourKey}
+                    onSelectHour={(key) => setSelectedHourKey((prev) => (prev === key ? null : key))}
+                  />
+                )}
+              </div>
+
+              {showDayQuestionList && (
+                <div>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70 dark:text-gray-500">
+                      🔎{' '}
+                      {selectedHourKey
+                        ? t.quizStatsHourQuestions.replace(
+                            '{time}',
+                            `${String(selectedHour ?? 0).padStart(2, '0')}:00`,
+                          )
+                        : t.quizStatsDayQuestions.replace(
+                            '{date}',
+                            new Date(`${todayKey}T12:00:00`).toLocaleDateString(locale, {
+                              weekday: 'long',
+                              day: 'numeric',
+                              month: 'long',
+                            }),
+                          )}
+                      {' · '}
+                      {dayResults.length}
+                    </p>
+                    {selectedHourKey && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedHourKey(null)}
+                        className="rounded-lg px-2 py-1 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-bg hover:text-primary dark:hover:bg-white/10"
+                      >
+                        {t.quizStatsBackToChart}
+                      </button>
+                    )}
+                  </div>
+                  <GlobalSearchResults
+                    results={dayResults}
+                    search=""
+                    searchHitStarts={{}}
+                    activeSearchHitIndex={null}
+                    emptyText={t.quizStatsEmpty}
+                    noteViewMode="expanded"
+                    onOpenNote={() => {}}
+                    onOpenQuiz={(itemId, setId, folderId) => {
+                      onOpenQuiz?.(itemId, setId, folderId);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           ) : (
             <>
               <div className="mb-4 grid grid-cols-2 gap-2">
@@ -838,60 +1046,13 @@ export function QuizStatsPanel({
                           {' · '}
                           {dayResults.length}
                         </p>
-                        <div className="flex items-center gap-1.5">
-                          <div className="relative">
-                            <button
-                              type="button"
-                              onClick={() => setDaySortMenuOpen((v) => !v)}
-                              className="flex h-7 items-center gap-1 rounded-lg border border-app-border bg-white px-2 text-[11px] font-semibold text-app-text-secondary transition hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-300"
-                              aria-haspopup="listbox"
-                              aria-expanded={daySortMenuOpen}
-                              aria-label={t.filesSortLabel}
-                            >
-                              <span aria-hidden>⇅</span>
-                              {daySort === 'newest' ? t.quizSortNewestShort : t.quizSortOldestShort}
-                            </button>
-                            {daySortMenuOpen && (
-                              <>
-                                <div className="fixed inset-0 z-40" onClick={() => setDaySortMenuOpen(false)} />
-                                <div
-                                  className="absolute right-0 top-8 z-50 w-48 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
-                                  role="listbox"
-                                >
-                                  {([
-                                    { key: 'newest' as const, label: t.quizSortNewest },
-                                    { key: 'oldest' as const, label: t.quizSortOldest },
-                                  ]).map((o) => (
-                                    <button
-                                      key={o.key}
-                                      type="button"
-                                      role="option"
-                                      aria-selected={daySort === o.key}
-                                      onClick={() => {
-                                        setDaySort(o.key);
-                                        setDaySortMenuOpen(false);
-                                      }}
-                                      className={
-                                        'flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' +
-                                        (daySort === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')
-                                      }
-                                    >
-                                      {o.label}
-                                      {daySort === o.key && <span className="ml-auto text-[11px]">✓</span>}
-                                    </button>
-                                  ))}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedDayKey(null)}
-                            className="rounded-lg px-2 py-1 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-bg hover:text-primary dark:hover:bg-white/10"
-                          >
-                            {t.quizStatsBackToChart}
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDayKey(null)}
+                          className="rounded-lg px-2 py-1 text-[11px] font-semibold text-app-text-secondary transition hover:bg-app-bg hover:text-primary dark:hover:bg-white/10"
+                        >
+                          {t.quizStatsBackToChart}
+                        </button>
                       </div>
                       <GlobalSearchResults
                         results={dayResults}

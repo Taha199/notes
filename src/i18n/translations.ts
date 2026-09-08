@@ -530,6 +530,7 @@ export interface Translation {
   quizStatsSubtitle: string;
   quizStatsModeMonth: string;
   quizStatsModeOverview: string;
+  quizStatsModeToday: string;
   quizStatsModeCompareMonths: string;
   quizStatsModeCompareYears: string;
   quizStatsTotal: string;
@@ -537,7 +538,9 @@ export interface Translation {
   quizStatsBestDay: string;
   quizStatsDailyList: string;
   quizStatsDayByDay: string;
+  quizStatsHourByHour: string;
   quizStatsDayQuestions: string;
+  quizStatsHourQuestions: string;
   quizStatsBackToChart: string;
   quizStatsEmpty: string;
   quizStatsSelectMonths: string;
@@ -1042,7 +1045,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsTitle: 'Quiz statistics',
     quizStatsSubtitle: '{n} questions tracked · new questions per day',
     quizStatsModeMonth: 'Month',
-    quizStatsModeOverview: 'Overview today',
+    quizStatsModeOverview: 'Overview',
+    quizStatsModeToday: 'Today',
     quizStatsModeCompareMonths: 'Compare months',
     quizStatsModeCompareYears: 'Compare years',
     quizStatsTotal: 'Total',
@@ -1050,7 +1054,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsBestDay: 'Best day',
     quizStatsDailyList: 'Days with new questions',
     quizStatsDayByDay: 'Day by day',
+    quizStatsHourByHour: 'Hour by hour',
     quizStatsDayQuestions: 'Questions created {date}',
+    quizStatsHourQuestions: 'Questions at {time}',
     quizStatsBackToChart: 'Back to chart',
     quizStatsEmpty: 'No quiz questions yet to chart.',
     quizStatsSelectMonths: 'Select months',
@@ -1553,7 +1559,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsTitle: 'Quizstatistik',
     quizStatsSubtitle: '{n} frågor spårade · nya frågor per dag',
     quizStatsModeMonth: 'Månad',
-    quizStatsModeOverview: 'Översikt idag',
+    quizStatsModeOverview: 'Översikt',
+    quizStatsModeToday: 'Idag',
     quizStatsModeCompareMonths: 'Jämför månader',
     quizStatsModeCompareYears: 'Jämför år',
     quizStatsTotal: 'Totalt',
@@ -1561,7 +1568,9 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsBestDay: 'Bästa dagen',
     quizStatsDailyList: 'Dagar med nya frågor',
     quizStatsDayByDay: 'Dag för dag',
+    quizStatsHourByHour: 'Timme för timme',
     quizStatsDayQuestions: 'Frågor skapade {date}',
+    quizStatsHourQuestions: 'Frågor kl. {time}',
     quizStatsBackToChart: 'Tillbaka till diagrammet',
     quizStatsEmpty: 'Inga quizfrågor att visa i diagrammet ännu.',
     quizStatsSelectMonths: 'Välj månader',

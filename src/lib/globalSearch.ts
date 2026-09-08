@@ -246,8 +246,11 @@ export function buildQuizDaySearchResults(
   quizSets: QuizSet[],
   quizFolders: QuizFolder[],
   t: Translation,
+  hour?: number | null,
 ): GlobalSearchResult[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return [];
+  const hourFilter = hour == null || !Number.isFinite(hour) ? null : Math.trunc(hour);
+  if (hourFilter != null && (hourFilter < 0 || hourFilter > 23)) return [];
 
   const folderNameById = new Map(
     quizFolders.filter((folder) => !folder.trashed).map((folder) => [folder.id, folder.name]),
@@ -263,7 +266,9 @@ export function buildQuizDaySearchResults(
     fromNotes: boolean,
   ) => {
     if (seen.has(item.id)) return;
-    if (toDayKey(quizItemCreatedAtMs(item)) !== dayKey) return;
+    const ms = quizItemCreatedAtMs(item);
+    if (toDayKey(ms) !== dayKey) return;
+    if (hourFilter != null && new Date(ms).getHours() !== hourFilter) return;
     seen.add(item.id);
     const question = stripHtml(item.question);
     const folderName = folderId
@@ -315,6 +320,18 @@ export function buildQuizDaySearchResults(
     return bt - at;
   });
   return results;
+}
+
+export function sortQuizSearchResultsByCreated(
+  results: GlobalSearchResult[],
+  mode: 'newest' | 'oldest',
+): GlobalSearchResult[] {
+  const dir = mode === 'newest' ? -1 : 1;
+  return [...results].sort((a, b) => {
+    const at = a.quizItem ? quizItemCreatedAtMs(a.quizItem) : 0;
+    const bt = b.quizItem ? quizItemCreatedAtMs(b.quizItem) : 0;
+    return dir * (at - bt);
+  });
 }
 
 export function globalSearchResultKey(result: GlobalSearchResult) {
