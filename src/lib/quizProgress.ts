@@ -56,10 +56,5 @@ export function buildQuizDashboardRows(
     else done.push(row);
   }
 
-  const byName = (a: QuizDashboardRow, b: QuizDashboardRow) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-  notStarted.sort(byName);
-  started.sort(byName);
-  done.sort(byName);
   return { notStarted, started, done };
 }

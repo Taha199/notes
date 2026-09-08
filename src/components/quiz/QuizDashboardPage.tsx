@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import {
@@ -7,6 +7,7 @@ import {
   type QuizDashboardRow,
   type QuizStudyStatus,
 } from '../../lib/quizProgress';
+import { safeLocalStorageSet } from '../../lib/safeStorage';
 
 const STATUS_OPTS: QuizStudyStatus[] = ['notStarted', 'started', 'done'];
 const STATUS_EMOJI: Record<QuizStudyStatus, string> = {
@@ -15,6 +16,33 @@ const STATUS_EMOJI: Record<QuizStudyStatus, string> = {
   done: '✅',
 };
 const DEFAULT_SET_COLOR = '#6C63FF';
+const DASH_SORT_KEY = 'malacadhati_quiz_dash_sort';
+
+type DashSort = 'newest' | 'oldest' | 'name';
+
+function loadDashSort(): DashSort {
+  const saved = localStorage.getItem(DASH_SORT_KEY);
+  if (saved === 'newest' || saved === 'oldest' || saved === 'name') return saved;
+  return 'newest';
+}
+
+function createdMs(iso: string): number {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function sortDashRows(rows: QuizDashboardRow[], mode: DashSort, locale: string): QuizDashboardRow[] {
+  const copy = [...rows];
+  if (mode === 'name') {
+    return copy.sort((a, b) => a.name.localeCompare(b.name, locale, { sensitivity: 'base' }));
+  }
+  const dir = mode === 'newest' ? -1 : 1;
+  return copy.sort((a, b) => {
+    const byDate = dir * (createdMs(a.createdAt) - createdMs(b.createdAt));
+    if (byDate !== 0) return byDate;
+    return a.name.localeCompare(b.name, locale, { sensitivity: 'base' });
+  });
+}
 
 function formatCreatedAt(iso: string, locale: string): string {
   const d = new Date(iso);
@@ -140,11 +168,23 @@ export function QuizDashboardPage({
   const { t, lang } = useLanguage();
   const { quizSets, quizFolders, setQuizSetDashboardStatus } = useNotes();
   const locale = lang === 'sv' ? 'sv-SE' : 'en-GB';
+  const [sortMode, setSortMode] = useState<DashSort>(() => loadDashSort());
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
 
-  const columns = useMemo(
-    () => buildQuizDashboardRows(quizSets, quizFolders),
-    [quizSets, quizFolders],
-  );
+  const changeSort = (mode: DashSort) => {
+    setSortMode(mode);
+    safeLocalStorageSet(DASH_SORT_KEY, mode);
+    setSortMenuOpen(false);
+  };
+
+  const columns = useMemo(() => {
+    const grouped = buildQuizDashboardRows(quizSets, quizFolders);
+    return {
+      notStarted: sortDashRows(grouped.notStarted, sortMode, locale),
+      started: sortDashRows(grouped.started, sortMode, locale),
+      done: sortDashRows(grouped.done, sortMode, locale),
+    };
+  }, [quizSets, quizFolders, sortMode, locale]);
 
   const openRow = (row: QuizDashboardRow) => {
     saveQuizSelection(row.folderId, row.id);
@@ -180,14 +220,67 @@ export function QuizDashboardPage({
     },
   };
 
+  const sortShortLabel =
+    sortMode === 'name' ? t.quizSortAz
+      : sortMode === 'oldest' ? t.quizSortOldestShort
+        : t.quizSortNewestShort;
+
+  const sortOptions: { key: DashSort; label: string }[] = [
+    { key: 'newest', label: t.quizSortNewest },
+    { key: 'oldest', label: t.quizSortOldest },
+    { key: 'name', label: t.quizSortName },
+  ];
+
   return (
     <div className="bg-app-bg p-3 dark:bg-white/[0.03] sm:p-5">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-4">
-          <h2 className="text-[17px] font-bold text-app-text dark:text-gray-100">{t.quizDashTitle}</h2>
-          <p className="mt-0.5 text-[12px] text-app-text-secondary dark:text-gray-400">
-            {t.quizDashSubtitle}
-          </p>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-[17px] font-bold text-app-text dark:text-gray-100">{t.quizDashTitle}</h2>
+            <p className="mt-0.5 text-[12px] text-app-text-secondary dark:text-gray-400">
+              {t.quizDashSubtitle}
+            </p>
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setSortMenuOpen((v) => !v)}
+              className="flex h-8 items-center gap-1.5 rounded-xl border border-app-border bg-white px-3 text-[12px] font-semibold text-app-text-secondary transition-colors hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-300 dark:hover:bg-white/10"
+              aria-haspopup="listbox"
+              aria-expanded={sortMenuOpen}
+              aria-label={t.filesSortLabel}
+            >
+              <span aria-hidden>⇅</span>
+              {sortShortLabel}
+            </button>
+            {sortMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setSortMenuOpen(false)} />
+                <div
+                  className="absolute right-0 top-9 z-50 w-48 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
+                  role="listbox"
+                  aria-label={t.filesSortLabel}
+                >
+                  {sortOptions.map((o) => (
+                    <button
+                      key={o.key}
+                      type="button"
+                      role="option"
+                      aria-selected={sortMode === o.key}
+                      onClick={() => changeSort(o.key)}
+                      className={
+                        'flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-app-bg dark:hover:bg-white/5 ' +
+                        (sortMode === o.key ? 'font-bold text-primary' : 'text-app-text dark:text-gray-200')
+                      }
+                    >
+                      {o.label}
+                      {sortMode === o.key && <span className="ml-auto text-[11px]">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="grid gap-3 lg:grid-cols-3">
           {STATUS_OPTS.map((key) => (
