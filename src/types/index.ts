@@ -102,6 +102,8 @@ export interface QuizSet {
   folderId?: string;
   // Non-deletable system set (e.g. the Favorites mirror set).
   system?: 'favorites';
+  /** Manual Quiz dashboard column: not started / started / done. Defaults to notStarted. */
+  dashboardStatus?: 'notStarted' | 'started' | 'done';
   /** Topic headings shown immediately before a question in the set list. */
   sections?: QuizSection[];
   /** LWW stamp for section metadata sync. */

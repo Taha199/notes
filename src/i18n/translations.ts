@@ -547,6 +547,7 @@ export interface Translation {
   quizOverviewLast12Months: string;
   quizDashTitle: string;
   quizDashSubtitle: string;
+  quizDashStatusLabel: string;
   quizDashNotStarted: string;
   quizDashNotStartedHint: string;
   quizDashStarted: string;
@@ -1054,13 +1055,14 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewToday: 'Created today',
     quizOverviewLast12Months: 'Last 12 months',
     quizDashTitle: 'Quiz dashboard',
-    quizDashSubtitle: 'Open a quiz set directly from not started, in progress, or finished.',
+    quizDashSubtitle: 'Move sets between columns with the status buttons on each quiz.',
+    quizDashStatusLabel: 'Status',
     quizDashNotStarted: 'Not started',
-    quizDashNotStartedHint: 'Quizzes you have not begun studying',
+    quizDashNotStartedHint: 'New quizzes land here until you move them',
     quizDashStarted: 'Started',
-    quizDashStartedHint: 'Quizzes you have begun but not finished',
+    quizDashStartedHint: 'Quizzes you marked as started',
     quizDashDone: 'Studied',
-    quizDashDoneHint: 'All questions marked as known',
+    quizDashDoneHint: 'Quizzes you marked as finished',
     quizDashEmpty: 'No quiz sets in this column',
     quizPdfGeneratedOn: 'Generated on',
     quizTypeAnswer: '✏️ Type',
@@ -1560,13 +1562,14 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewToday: 'Skapade idag',
     quizOverviewLast12Months: 'Senaste 12 månaderna',
     quizDashTitle: 'Quiz dashboard',
-    quizDashSubtitle: 'Öppna ett quizset direkt från ej påbörjade, påbörjade eller klara.',
+    quizDashSubtitle: 'Flytta set mellan kolumnerna med statusknapparna på varje quiz.',
+    quizDashStatusLabel: 'Status',
     quizDashNotStarted: 'Ej påbörjade',
-    quizDashNotStartedHint: 'Quiz du inte har börjat studera',
+    quizDashNotStartedHint: 'Nya quiz hamnar här tills du flyttar dem',
     quizDashStarted: 'Påbörjade',
-    quizDashStartedHint: 'Quiz du har börjat men inte klarat',
+    quizDashStartedHint: 'Quiz du markerat som påbörjade',
     quizDashDone: 'Studerade',
-    quizDashDoneHint: 'Alla frågor markerade som kända',
+    quizDashDoneHint: 'Quiz du markerat som klara',
     quizDashEmpty: 'Inga quizset i den här kolumnen',
     quizPdfGeneratedOn: 'Genererad',
     quizTypeAnswer: '✏️ Skriv',

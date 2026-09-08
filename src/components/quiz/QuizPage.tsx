@@ -15,6 +15,7 @@ import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
 import { countQuizSetQuestions, quizItemCreatedAtMs, visibleQuizItems } from '../../lib/quizSort';
+import { dashboardStatusForSet } from '../../lib/quizProgress';
 import { coerceQuizItems, withCoercedQuizSetItems } from '../../lib/quizSetMerge';
 import { SITE_URL } from '../../lib/seo';
 import { StableNoteHtml } from '../notes/StableNoteHtml';
@@ -862,7 +863,7 @@ export function QuizPage({
   const { t } = useLanguage();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
-  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, addQuizSection, updateQuizSection, deleteQuizSection, setQuizzesOrder, hydrateQuizSet } = useNotes();
+  const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetDashboardStatus, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, addQuizSection, updateQuizSection, deleteQuizSection, setQuizzesOrder, hydrateQuizSet } = useNotes();
   const quizFolders = allQuizFolders.filter((folder) => !folder.trashed && !!folder?.id && typeof folder.name === 'string');
   // Coerce Firebase object-shaped items[] before any render path touches .map/.filter.
   const quizSets = useMemo(() => {
@@ -2783,6 +2784,43 @@ export function QuizPage({
             )}
           </div>
 
+
+          {selectedSet && !selectedSet.system && (
+            <div className="mb-1 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">
+                {t.quizDashStatusLabel}
+              </span>
+              {([
+                { key: 'notStarted' as const, label: t.quizDashNotStarted },
+                { key: 'started' as const, label: t.quizDashStarted },
+                { key: 'done' as const, label: t.quizDashDone },
+              ]).map((opt) => {
+                const active = dashboardStatusForSet(selectedSet) === opt.key;
+                const tone =
+                  opt.key === 'notStarted'
+                    ? active
+                      ? 'border-sky-500 bg-sky-500 text-white'
+                      : 'border-sky-200 bg-sky-50 text-sky-800 hover:border-sky-400 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200'
+                    : opt.key === 'started'
+                      ? active
+                        ? 'border-amber-500 bg-amber-500 text-white'
+                        : 'border-amber-200 bg-amber-50 text-amber-900 hover:border-amber-400 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'
+                      : active
+                        ? 'border-emerald-500 bg-emerald-500 text-white'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-900 hover:border-emerald-400 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200';
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setQuizSetDashboardStatus(selectedSet.id, opt.key)}
+                    className={'rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition ' + tone}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {isFolderEmptyView ? (
             <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-app-border bg-white/60 px-6 py-24 text-center dark:border-white/10 dark:bg-white/5">

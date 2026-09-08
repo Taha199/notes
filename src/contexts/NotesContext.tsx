@@ -1219,6 +1219,7 @@ interface NotesCtx {
   renameQuizSet: (id: string, name: string) => void;
   reorderQuizSets: (dragId: string, targetId: string) => void;
   setQuizSetColor: (id: string, color: string) => void;
+  setQuizSetDashboardStatus: (id: string, status: 'notStarted' | 'started' | 'done') => void;
   setQuizSetFolder: (id: string, folderId: string | undefined) => void;
   addQuizFolder: (name: string) => QuizFolder;
   renameQuizFolder: (id: string, name: string) => void;
@@ -7655,6 +7656,21 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     void pushQuizSetStructure(next, updated ? [updated] : []);
   };
 
+  const setQuizSetDashboardStatus = (id: string, status: 'notStarted' | 'started' | 'done') => {
+    if (id === FAVORITES_SET_ID) return;
+    const set = quizSetsRef.current.find((s) => s.id === id);
+    if (!set || set.system) return;
+    if (set.dashboardStatus === status) return;
+    const stamp = new Date().toISOString();
+    const next = quizSetsRef.current.map((s) => (
+      s.id === id ? { ...s, dashboardStatus: status, updatedAt: stamp } : s
+    ));
+    quizSetsRef.current = next;
+    setQuizSets(next);
+    const updated = next.find((s) => s.id === id);
+    void pushQuizSetStructure(next, updated ? [updated] : []);
+  };
+
   const setQuizSetFolder = (id: string, folderId: string | undefined) => {
     if (id === FAVORITES_SET_ID) return;
     const set = quizSetsRef.current.find((s) => s.id === id);
@@ -8892,6 +8908,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         permDeleteQuizSet,
         renameQuizSet,
         setQuizSetColor,
+        setQuizSetDashboardStatus,
         setQuizSetFolder,
         addQuizFolder,
         renameQuizFolder,

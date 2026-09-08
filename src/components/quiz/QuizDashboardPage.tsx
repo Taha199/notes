@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
 import {
   buildQuizDashboardRows,
-  loadQuizProgress,
   saveQuizSelection,
   type QuizDashboardRow,
   type QuizStudyStatus,
@@ -55,11 +54,7 @@ function Column({
                 {row.folderName && (
                   <span className="truncate font-medium text-app-text-secondary/80">{row.folderName}</span>
                 )}
-                <span className="tabular-nums">
-                  {row.status === 'notStarted'
-                    ? questionsLabel(row.total)
-                    : `${row.known}/${row.total}`}
-                </span>
+                <span className="tabular-nums">{questionsLabel(row.total)}</span>
               </span>
             </button>
           ))
@@ -76,22 +71,11 @@ export function QuizDashboardPage({
 }) {
   const { t } = useLanguage();
   const { quizSets, quizFolders } = useNotes();
-  const [progressTick, setProgressTick] = useState(0);
 
-  useEffect(() => {
-    const refresh = () => setProgressTick((n) => n + 1);
-    window.addEventListener('focus', refresh);
-    window.addEventListener('storage', refresh);
-    return () => {
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('storage', refresh);
-    };
-  }, []);
-
-  const columns = useMemo(() => {
-    void progressTick;
-    return buildQuizDashboardRows(quizSets, quizFolders, loadQuizProgress());
-  }, [quizSets, quizFolders, progressTick]);
+  const columns = useMemo(
+    () => buildQuizDashboardRows(quizSets, quizFolders),
+    [quizSets, quizFolders],
+  );
 
   const openRow = (row: QuizDashboardRow) => {
     saveQuizSelection(row.folderId, row.id);
