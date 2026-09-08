@@ -202,124 +202,33 @@ function MonthDayChart({
   );
 }
 
-function BarChart({
-  labels,
-  series,
-  maxY,
-  labelEvery = false,
-  showValues = false,
-  slotPx = 14,
+/** Two big bars for month/year totals comparison. */
+function TotalsCompareChart({
+  items,
 }: {
-  labels: string[];
-  series: { label: string; color: string; values: number[] }[];
-  maxY: number;
-  labelEvery?: boolean;
-  showValues?: boolean;
-  slotPx?: number;
+  items: { label: string; value: number; color: string }[];
 }) {
-  const n = labels.length;
-  const height = 240;
-  const padL = 28;
-  const padR = 8;
-  const padT = showValues ? 22 : 16;
-  const padB = 40;
-  const width = Math.max(320, n * slotPx + padL + padR);
-  const innerW = width - padL - padR;
-  const innerH = height - padT - padB;
-  const groupW = innerW / Math.max(n, 1);
-  const barW = Math.min(series.length > 1 ? slotPx * 0.35 : slotPx * 0.55, groupW / (series.length + 0.6));
-  const yMax = Math.max(1, maxY);
-
+  const yMax = Math.max(1, ...items.map((i) => i.value));
   return (
-    <div className="w-full overflow-x-auto">
-      <svg
-        width={width}
-        height={height}
-        viewBox={`0 0 ${width} ${height}`}
-        className="block"
-        role="img"
-        aria-label="chart"
-      >
-        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-          const y = padT + innerH * (1 - t);
-          const val = Math.round(yMax * t);
-          return (
-            <g key={t}>
-              <line
-                x1={padL}
-                x2={width - padR}
-                y1={y}
-                y2={y}
-                stroke="currentColor"
-                className="text-app-border/70 dark:text-white/10"
-                strokeWidth={1}
-              />
-              <text
-                x={padL - 6}
-                y={y + 3}
-                textAnchor="end"
-                className="fill-app-text-secondary/70 dark:fill-gray-500"
-                fontSize={9}
-              >
-                {val}
-              </text>
-            </g>
-          );
-        })}
-        {labels.map((label, i) => {
-          const gx = padL + groupW * i + groupW / 2;
-          const showLabel = labelEvery || i === 0 || i === n - 1 || i % Math.ceil(n / 12) === 0;
-          return (
-            <g key={`${label}-${i}`}>
-              {series.map((s, si) => {
-                const v = s.values[i] ?? 0;
-                const h = (v / yMax) * innerH;
-                const x = gx - (series.length * barW) / 2 + si * barW;
-                const y = padT + innerH - h;
-                return (
-                  <g key={s.label}>
-                    <rect
-                      x={x}
-                      y={y}
-                      width={barW}
-                      height={Math.max(v > 0 ? 2 : 0, h)}
-                      rx={2}
-                      fill={s.color}
-                      opacity={v > 0 ? 1 : 0.12}
-                    >
-                      <title>{`${s.label}: ${label} — ${v}`}</title>
-                    </rect>
-                    {showValues && v > 0 && series.length === 1 && (
-                      <text
-                        x={x + barW / 2}
-                        y={y - 4}
-                        textAnchor="middle"
-                        className="fill-primary"
-                        fontSize={9}
-                        fontWeight={700}
-                      >
-                        {v}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-              {showLabel && (
-                <text
-                  x={gx}
-                  y={height - 14}
-                  textAnchor="middle"
-                  className="fill-app-text-secondary dark:fill-gray-400"
-                  fontSize={labelEvery ? 10 : 9}
-                  fontWeight={labelEvery ? 700 : 400}
-                >
-                  {label}
-                </text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
+    <div className="flex min-h-[260px] items-end justify-center gap-10 px-4 py-6 sm:gap-16">
+      {items.map((item) => {
+        const h = item.value > 0 ? Math.max(28, (item.value / yMax) * 180) : 8;
+        return (
+          <div key={item.label} className="flex w-[7.5rem] flex-col items-center gap-2 sm:w-36">
+            <span className="text-2xl font-bold tabular-nums text-app-text dark:text-gray-100">
+              {item.value}
+            </span>
+            <div
+              className="w-14 rounded-t-2xl shadow-sm sm:w-16"
+              style={{ height: h, background: item.color }}
+              title={`${item.label}: ${item.value}`}
+            />
+            <span className="text-center text-[12px] font-semibold leading-snug text-app-text dark:text-gray-200">
+              {item.label}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -379,8 +288,6 @@ export function QuizStatsPanel({
       new Date(y, m - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' }),
     );
   };
-  const shortMonth = (m: number) =>
-    capitalizeLabel(new Date(2000, m - 1, 1).toLocaleDateString(locale, { month: 'short' }));
 
   const monthMenuOptions = useMemo(
     () => monthOptions.map((key) => {
@@ -405,66 +312,46 @@ export function QuizStatsPanel({
     }));
   }, [yearOptions, compareYearB, now.year, byMonth]);
 
-  let chartLabels: string[] = [];
-  let chartSeries: { label: string; color: string; values: number[] }[] = [];
+  let compareTotals: { label: string; value: number; color: string }[] | null = null;
   let periodTotal = 0;
   let periodSubtitle = '';
+  let activeDays = 0;
+  let best = 0;
 
   if (mode === 'month') {
-    chartLabels = monthBars.map((b) => String(b.day));
-    chartSeries = [{
-      label: monthLabel(monthKey),
-      color: SERIES_A,
-      values: monthBars.map((b) => b.count),
-    }];
     periodTotal = sumCounts(monthBars.map((b) => b.count));
     periodSubtitle = monthLabel(monthKey);
+    activeDays = monthBars.filter((b) => b.count > 0).length;
+    best = maxCount(monthBars.map((b) => b.count));
   } else if (mode === 'compareMonths') {
     const a = compareMonthA.split('-').map(Number);
     const b = compareMonthB.split('-').map(Number);
     const barsA = buildMonthDayBars(byDay, a[0]!, a[1]!);
     const barsB = buildMonthDayBars(byDay, b[0]!, b[1]!);
-    const len = Math.max(barsA.length, barsB.length);
-    chartLabels = Array.from({ length: len }, (_, i) => String(i + 1));
-    chartSeries = [
-      {
-        label: monthLabel(compareMonthA),
-        color: SERIES_A,
-        values: Array.from({ length: len }, (_, i) => barsA[i]?.count ?? 0),
-      },
-      {
-        label: monthLabel(compareMonthB),
-        color: SERIES_B,
-        values: Array.from({ length: len }, (_, i) => barsB[i]?.count ?? 0),
-      },
+    const totalA = sumCounts(barsA.map((x) => x.count));
+    const totalB = sumCounts(barsB.map((x) => x.count));
+    compareTotals = [
+      { label: monthLabel(compareMonthA), value: totalA, color: SERIES_A },
+      { label: monthLabel(compareMonthB), value: totalB, color: SERIES_B },
     ];
-    periodTotal = sumCounts(chartSeries[0]!.values) + sumCounts(chartSeries[1]!.values);
+    periodTotal = totalA + totalB;
     periodSubtitle = `${monthLabel(compareMonthA)} · ${monthLabel(compareMonthB)}`;
+    activeDays = barsA.filter((x) => x.count > 0).length + barsB.filter((x) => x.count > 0).length;
+    best = Math.max(totalA, totalB);
   } else {
     const barsA = buildYearMonthBars(byMonth, compareYearA);
     const barsB = buildYearMonthBars(byMonth, compareYearB);
-    chartLabels = barsA.map((b) => shortMonth(b.month));
-    chartSeries = [
-      {
-        label: String(compareYearA),
-        color: SERIES_A,
-        values: barsA.map((b) => b.count),
-      },
-      {
-        label: String(compareYearB),
-        color: SERIES_B,
-        values: barsB.map((b) => b.count),
-      },
+    const totalA = sumCounts(barsA.map((x) => x.count));
+    const totalB = sumCounts(barsB.map((x) => x.count));
+    compareTotals = [
+      { label: String(compareYearA), value: totalA, color: SERIES_A },
+      { label: String(compareYearB), value: totalB, color: SERIES_B },
     ];
-    periodTotal = sumCounts(chartSeries[0]!.values) + sumCounts(chartSeries[1]!.values);
+    periodTotal = totalA + totalB;
     periodSubtitle = `${compareYearA} · ${compareYearB}`;
+    activeDays = barsA.filter((x) => x.count > 0).length + barsB.filter((x) => x.count > 0).length;
+    best = Math.max(totalA, totalB);
   }
-
-  const yMax = maxCount(chartSeries.flatMap((s) => s.values));
-  const activeDays = mode === 'month'
-    ? monthBars.filter((b) => b.count > 0).length
-    : chartSeries[0]!.values.filter((v) => v > 0).length;
-  const best = Math.max(0, ...chartSeries.flatMap((s) => s.values));
 
   const modeBtn = (active: boolean) =>
     'rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ' +
@@ -576,13 +463,13 @@ export function QuizStatsPanel({
             </div>
           </div>
 
-          {chartSeries.length > 1 && (
+          {compareTotals && (
             <div className="mb-3 flex flex-wrap gap-3 text-[11px] font-semibold">
-              {chartSeries.map((s) => (
+              {compareTotals.map((s) => (
                 <span key={s.label} className="inline-flex items-center gap-1.5 text-app-text dark:text-gray-200">
                   <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
                   {s.label}
-                  <span className="tabular-nums text-app-text-secondary">({sumCounts(s.values)})</span>
+                  <span className="tabular-nums text-app-text-secondary">({s.value})</span>
                 </span>
               ))}
             </div>
@@ -604,14 +491,7 @@ export function QuizStatsPanel({
             </div>
           ) : (
             <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
-              <BarChart
-                labels={chartLabels}
-                series={chartSeries}
-                maxY={yMax}
-                labelEvery={mode === 'compareMonths' || mode === 'compareYears'}
-                showValues={mode === 'compareMonths'}
-                slotPx={mode === 'compareMonths' ? 26 : 36}
-              />
+              <TotalsCompareChart items={compareTotals ?? []} />
             </div>
           )}
 
