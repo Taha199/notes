@@ -8,7 +8,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { AiAnswerStyleToggle, useAiAnswerStyle } from './AiAnswerStyleToggle';
 import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
-import { AutoFitText } from '../common/AutoFitText';
 import { BrandedAlert } from '../common/BrandedAlert';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { SaveStatusBadge } from '../common/SaveStatusIcon';
@@ -370,7 +369,9 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                                     className="flex w-full items-center gap-3 border-b border-app-border/20 px-6 py-2.5 text-left transition-colors last:border-b-0 hover:bg-primary/5 dark:border-white/5 dark:hover:bg-primary/10"
                                   >
                                     <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
-                                    <AutoFitText text={s.name} maxSize={13} minSize={9} className="flex-1 text-app-text dark:text-gray-100" />
+                                    <span className="min-w-0 flex-1 truncate text-[13px] text-app-text dark:text-gray-100" title={s.name}>
+                                      {s.name}
+                                    </span>
                                     <span className="text-[11px] text-app-text-secondary/40">{countQuizSetQuestions(s)} {t.quizItemsShort}</span>
                                   </button>
                                 ))}
@@ -2132,7 +2133,7 @@ export function QuizPage({
               setDragOverFolderId(null);
               setDragOverFolderSortId(null);
             }}
-            className={'relative mx-1 my-0.5 w-[calc(100%-0.5rem)] rounded-lg py-2.5 pl-3 pr-1 text-left transition-all ' +
+            className={'relative mx-1 my-0.5 w-[calc(100%-0.5rem)] min-w-0 rounded-lg py-2.5 pl-3 pr-1 text-left transition-all ' +
               (dragOverSetId === s.id && dragSetId.current
                 ? 'bg-primary/10 ring-2 ring-inset ring-primary/70 dark:bg-primary/20'
                 : isSelected
@@ -2156,14 +2157,17 @@ export function QuizPage({
                 startRenameSet(s, 'sidebar');
               }}
               onContextMenu={(e) => { if (!s.system) openCtxMenu(e, s.id); }}
-              className="block w-full text-left"
+              className="block w-full min-w-0 text-left"
             >
-              <AutoFitText
-                text={s.name || ''}
-                maxSize={11}
-                minSize={7}
-                className={'block w-full font-semibold ' + (isSelected ? 'text-app-text dark:text-gray-100' : 'text-app-text dark:text-gray-200')}
-              />
+              <span
+                className={
+                  'block w-full truncate text-[11px] font-semibold ' +
+                  (isSelected ? 'text-app-text dark:text-gray-100' : 'text-app-text dark:text-gray-200')
+                }
+                title={s.name || undefined}
+              >
+                {s.name || ''}
+              </span>
               <span className="block text-[9px] text-app-text-secondary/50">{questionCount}</span>
             </button>
             {!s.system && (
@@ -2396,12 +2400,15 @@ export function QuizPage({
                       {!f.system && (
                         <span className="absolute right-1 bottom-1 select-none text-[12px] text-app-text-secondary/20 opacity-0 transition-opacity group-hover/fl:opacity-100">⠿</span>
                       )}
-                      <AutoFitText
-                        text={f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
-                        maxSize={11}
-                        minSize={7}
-                        className={'block w-full font-semibold ' + (isSelected ? 'text-app-text dark:text-gray-100' : 'text-app-text dark:text-gray-200')}
-                      />
+                      <span
+                        className={
+                          'block w-full truncate text-[11px] font-semibold ' +
+                          (isSelected ? 'text-app-text dark:text-gray-100' : 'text-app-text dark:text-gray-200')
+                        }
+                        title={f.system === 'favorites' ? t.quizFavorites : f.system ? t.quizRestored : f.name}
+                      >
+                        {f.system === 'favorites' ? `⭐ ${t.quizFavorites}` : f.system ? `🔒 ${t.quizRestored}` : f.name}
+                      </span>
                       <span className="block text-[9px] text-app-text-secondary/50">{t.quizSetsCount.replace('{n}', String(userSetsInFolder(f.id).length))}</span>
                       {!f.system && (
                         <span

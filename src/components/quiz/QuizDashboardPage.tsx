@@ -66,7 +66,7 @@ function Column({
             return (
               <div
                 key={row.id}
-                className="group/dash relative rounded-lg py-2 pl-3 pr-1.5 transition-all hover:bg-gray-100/90 dark:hover:bg-white/5"
+                className="group/dash relative min-w-0 overflow-hidden rounded-lg py-2 pl-3 pr-1.5 transition-all hover:bg-gray-100/90 dark:hover:bg-white/5"
               >
                 <span
                   className="absolute inset-y-1 left-0 w-1 rounded-r-sm"
