@@ -10,6 +10,7 @@ import { StudyMode } from './StudyMode';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { BrandedAlert } from '../common/BrandedAlert';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { SaveStatusBadge } from '../common/SaveStatusIcon';
 import { useToast } from '../../contexts/ToastContext';
 import type { QuizItem, QuizSet, QuizFolder } from '../../types';
@@ -137,6 +138,7 @@ interface QuizItemRowProps {
 
 const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition, sourceLocation, onOpenSource, onAddRubrik }: QuizItemRowProps) {
   const { t } = useLanguage();
+  const { showQuizAccentColors } = useTheme();
   const [moveOpen, setMoveOpen] = useState(false);
   const [keepCopy, setKeepCopy] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
@@ -368,7 +370,9 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
                                     onClick={() => { onMoveToSet(s.id, keepCopy); setMoveOpen(false); }}
                                     className="flex w-full items-center gap-3 border-b border-app-border/20 px-6 py-2.5 text-left transition-colors last:border-b-0 hover:bg-primary/5 dark:border-white/5 dark:hover:bg-primary/10"
                                   >
-                                    <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
+                                    {showQuizAccentColors && (
+                                      <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: s.color ?? '#6C63FF' }} />
+                                    )}
                                     <span className="min-w-0 flex-1 truncate text-[13px] text-app-text dark:text-gray-100" title={s.name}>
                                       {s.name}
                                     </span>
@@ -862,6 +866,7 @@ export function QuizPage({
   onFocusHandled?: () => void;
 }) {
   const { t } = useLanguage();
+  const { showQuizAccentColors } = useTheme();
   const setColors = useMemo(() => getSetColors(t), [t]);
   const { show } = useToast();
   const { quizzes, quizSets: allQuizSets, quizFolders: allQuizFolders, quizLocalReady, quizContentReady, addQuiz, deleteQuiz, updateQuiz, permDeleteQuiz, addQuizSet, deleteQuizSet, renameQuizSet, reorderQuizSets, setQuizSetColor, setQuizSetDashboardStatus, setQuizSetFolder, addQuizFolder, renameQuizFolder, reorderQuizFolders, setQuizFolderColor, deleteQuizFolder, addItemToSet, removeItemFromSet, updateItemInSet, setItemsOrderInSet, addQuizSection, updateQuizSection, deleteQuizSection, setQuizzesOrder, hydrateQuizSet } = useNotes();
@@ -2063,7 +2068,8 @@ export function QuizPage({
 
   const renderSetRow = (s: QuizSet) => {
     const { known, total } = progressForSet(s.id);
-    const setAccent = s.color || '#9ca3af';
+    const setAccent = showQuizAccentColors ? (s.color || '#9ca3af') : '';
+    const showAccent = showQuizAccentColors;
     const isSelected = selectedSetId === s.id;
     const isEditing = renamingSetId === s.id && renameSetPlace === 'sidebar';
     const questionCount = countQuizSetQuestions(s);
@@ -2072,7 +2078,7 @@ export function QuizPage({
         {isEditing ? (
           <div
             className="relative mx-1.5 my-0.5 rounded-lg bg-gray-100/90 py-2 pl-3 pr-2 dark:bg-white/10"
-            style={{ boxShadow: `inset 4px 0 0 0 ${setAccent}` }}
+            style={showAccent ? { boxShadow: `inset 4px 0 0 0 ${setAccent}` } : undefined}
           >
             <input
               data-quiz-rename-input="1"
@@ -2099,7 +2105,7 @@ export function QuizPage({
                 });
               }}
               className="w-full rounded-md border-2 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-app-text shadow-sm outline-none dark:bg-gray-900 dark:text-gray-100"
-              style={{ borderColor: setAccent }}
+              style={showAccent ? { borderColor: setAccent } : undefined}
               aria-label={t.quizRename}
             />
           </div>
@@ -2139,9 +2145,9 @@ export function QuizPage({
                 : isSelected
                   ? 'bg-gray-200 ring-2 ring-inset ring-gray-300 shadow-sm dark:bg-white/20 dark:ring-white/25'
                   : 'hover:bg-white dark:hover:bg-white/5')}
-            style={isSelected ? { boxShadow: `inset 4px 0 0 0 ${setAccent}` } : undefined}
+            style={isSelected && showAccent ? { boxShadow: `inset 4px 0 0 0 ${setAccent}` } : undefined}
           >
-            {!isSelected && (
+            {showAccent && !isSelected && (
               <span className="absolute inset-y-1 left-0 w-1 rounded-r-sm" style={{ backgroundColor: setAccent }} />
             )}
             {!s.system && (
@@ -2280,7 +2286,8 @@ export function QuizPage({
                 <p className="px-2 py-4 text-center text-[10px] italic leading-relaxed text-app-text-secondary/40">{t.quizNoFolders}</p>
               )}
               {sortedFolders.map((f) => {
-                const folderAccent = f.color || '#9ca3af';
+                const folderAccent = showQuizAccentColors ? (f.color || '#9ca3af') : '';
+                const showFolderAccent = showQuizAccentColors;
                 const isSelected = selectedFolderId === f.id;
                 const isEditing = renamingFolderId === f.id;
                 return (
@@ -2289,7 +2296,7 @@ export function QuizPage({
                     <form
                       data-quiz-folder-rename="1"
                       className="relative mx-1.5 my-0.5 rounded-lg bg-gray-100/90 py-2 pl-3 pr-2 dark:bg-white/10"
-                      style={{ boxShadow: `inset 4px 0 0 0 ${folderAccent}` }}
+                      style={showFolderAccent ? { boxShadow: `inset 4px 0 0 0 ${folderAccent}` } : undefined}
                       onSubmit={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -2311,7 +2318,7 @@ export function QuizPage({
                         }}
                         onBlur={() => commitFolderName(f.id, f.name)}
                         className="w-full rounded-md border-2 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-app-text shadow-sm outline-none dark:bg-gray-900 dark:text-gray-100"
-                        style={{ borderColor: folderAccent }}
+                        style={showFolderAccent ? { borderColor: folderAccent } : undefined}
                         aria-label={t.quizRename}
                       />
                     </form>
@@ -2392,9 +2399,9 @@ export function QuizPage({
                             : isSelected
                               ? 'bg-gray-200 ring-2 ring-inset ring-gray-300 shadow-sm dark:bg-white/20 dark:ring-white/25'
                               : 'hover:bg-white dark:hover:bg-white/5')}
-                      style={isSelected ? { boxShadow: `inset 4px 0 0 0 ${folderAccent}` } : undefined}
+                      style={isSelected && showFolderAccent ? { boxShadow: `inset 4px 0 0 0 ${folderAccent}` } : undefined}
                     >
-                      {!isSelected && (
+                      {showFolderAccent && !isSelected && (
                         <span className="absolute inset-y-1 left-0 w-1 rounded-r-sm" style={{ backgroundColor: folderAccent }} />
                       )}
                       {!f.system && (
@@ -2973,19 +2980,23 @@ export function QuizPage({
             >
               {t.quizRename}
             </button>
-            <button
-              onClick={() => setShowColorPicker((v) => !v)}
-              className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
-            >
-              <span className="flex items-center gap-3">{t.quizColor}</span>
-              <span className="text-app-text-secondary/50">{showColorPicker ? '▾' : '›'}</span>
-            </button>
-            {showColorPicker && (
-              <QuizColorPickerGrid
-                colors={setColors}
-                activeValue={quizSets.find((x) => x.id === ctxMenu.setId)?.color ?? ''}
-                onPick={(value) => { setQuizSetColor(ctxMenu.setId, value); closeCtxMenu(); }}
-              />
+            {showQuizAccentColors && (
+              <>
+                <button
+                  onClick={() => setShowColorPicker((v) => !v)}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+                >
+                  <span className="flex items-center gap-3">{t.quizColor}</span>
+                  <span className="text-app-text-secondary/50">{showColorPicker ? '▾' : '›'}</span>
+                </button>
+                {showColorPicker && (
+                  <QuizColorPickerGrid
+                    colors={setColors}
+                    activeValue={quizSets.find((x) => x.id === ctxMenu.setId)?.color ?? ''}
+                    onPick={(value) => { setQuizSetColor(ctxMenu.setId, value); closeCtxMenu(); }}
+                  />
+                )}
+              </>
             )}
             <button
               onClick={() => setMoveMenuForSet((v) => (v === ctxMenu.setId ? null : ctxMenu.setId))}
@@ -3034,19 +3045,23 @@ export function QuizPage({
               onClick={() => { const f = quizFolders.find((x) => x.id === folderCtxMenu.folderId); if (f) beginFolderRename(f.id, f.name); setFolderCtxMenu(null); }}
               className="flex w-full items-center gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
             >{t.quizRename}</button>
-            <button
-              onClick={() => setFolderColorPicker((v) => !v)}
-              className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
-            >
-              <span className="flex items-center gap-3">{t.quizColor}</span>
-              <span className="text-app-text-secondary/50">{folderColorPicker ? '▾' : '›'}</span>
-            </button>
-            {folderColorPicker && (
-              <QuizColorPickerGrid
-                colors={setColors}
-                activeValue={quizFolders.find((x) => x.id === folderCtxMenu.folderId)?.color ?? ''}
-                onPick={(value) => { setQuizFolderColor(folderCtxMenu.folderId, value); setFolderCtxMenu(null); }}
-              />
+            {showQuizAccentColors && (
+              <>
+                <button
+                  onClick={() => setFolderColorPicker((v) => !v)}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-2 text-[13px] text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5"
+                >
+                  <span className="flex items-center gap-3">{t.quizColor}</span>
+                  <span className="text-app-text-secondary/50">{folderColorPicker ? '▾' : '›'}</span>
+                </button>
+                {folderColorPicker && (
+                  <QuizColorPickerGrid
+                    colors={setColors}
+                    activeValue={quizFolders.find((x) => x.id === folderCtxMenu.folderId)?.color ?? ''}
+                    onPick={(value) => { setQuizFolderColor(folderCtxMenu.folderId, value); setFolderCtxMenu(null); }}
+                  />
+                )}
+              </>
             )}
             <div className="my-1 h-px bg-app-border dark:bg-white/10" />
             <button

@@ -392,6 +392,8 @@ export interface Translation {
   settingsColorThemeTeal: string;
   settingsColorThemeRose: string;
   settingsDarkMode: string;
+  settingsShowQuizColors: string;
+  settingsShowQuizColorsHint: string;
   settingsLightMode: string;
   settingsPassword: string;
   settingsPasswordSet: string;
@@ -727,7 +729,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
     appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
     navHome: 'Home', navFav: 'Favourites', navTodo: 'To-do', navUnread: 'Notes to Study', navRead: 'Studied Notes',
-    navLibrary: 'Notes Library', navFiles: 'File Uploads', navQuizDashboard: 'Quiz dashboard', navArabicKb: 'Arabic keyboard', navCountdown: 'Countdown', navQuizStats: 'Statistics', navArchive: 'Archive', navTrash: 'Trash',
+    navLibrary: 'Notes Library', navFiles: 'File Uploads', navQuizDashboard: 'Quiz overview', navArabicKb: 'Arabic keyboard', navCountdown: 'Countdown', navQuizStats: 'Statistics', navArchive: 'Archive', navTrash: 'Trash',
     navDownload: 'Desktop app', downloadSectionTitle: 'Download as app',
     pageDownload: 'Desktop app', downloadTitle: 'Taha Note for Mac',
     downloadSubtitle: 'Install Taha Note as a native Mac app. Your notes sync with the web — same account, same features.',
@@ -752,7 +754,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Loading your open drafts from the cloud…',
     draftsWriteWhileLoading: 'You can start a new draft right away while your other drafts sync.',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Notes to Study', pageRead: 'Studied Notes',
-    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageQuizDashboard: 'Quiz dashboard', pageArabicKb: 'Arabic keyboard', pageCountdown: 'Countdown', pageQuizStats: 'Quiz statistics', pageTrash: 'Trash',
+    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageQuizDashboard: 'Quiz overview', pageArabicKb: 'Arabic keyboard', pageCountdown: 'Countdown', pageQuizStats: 'Quiz statistics', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
@@ -904,6 +906,8 @@ export const LANGS: Record<Lang, Translation> = {
     settingsColorThemeTeal: 'Teal',
     settingsColorThemeRose: 'Rose',
     settingsDarkMode: 'Dark mode',
+    settingsShowQuizColors: 'Quiz accent colors',
+    settingsShowQuizColorsHint: 'Show colored bars and color pickers for quiz folders and sets',
     settingsLightMode: 'Light mode',
     settingsPassword: 'Password',
     settingsPasswordSet: 'Password is set',
@@ -1055,7 +1059,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewTotal: 'Total questions',
     quizOverviewToday: 'Created today',
     quizOverviewLast12Months: 'Last 12 months',
-    quizDashTitle: 'Quiz dashboard',
+    quizDashTitle: 'Quiz overview',
     quizDashSubtitle: 'Open a quiz, or move it between columns with the buttons on each card.',
     quizDashStatusLabel: 'Status',
     quizDashNotStarted: 'Not started 🙂',
@@ -1235,7 +1239,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
     appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
     navHome: 'Hem', navFav: 'Favoriter', navTodo: 'Att göra', navUnread: 'Att studera', navRead: 'Studerade',
-    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navQuizDashboard: 'Quiz dashboard', navArabicKb: 'Arabiskt tangentbord', navCountdown: 'Nedräkning', navQuizStats: 'Statistik', navArchive: 'Arkiv', navTrash: 'Papperskorg',
+    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navQuizDashboard: 'Quizöversikt', navArabicKb: 'Arabiskt tangentbord', navCountdown: 'Nedräkning', navQuizStats: 'Statistik', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     navDownload: 'Skrivbordsapp', downloadSectionTitle: 'Ladda ner som program',
     pageDownload: 'Skrivbordsapp', downloadTitle: 'Taha Note för Mac',
     downloadSubtitle: 'Installera Taha Note som en inbyggd Mac-app. Dina anteckningar synkas med webben — samma konto, samma funktioner.',
@@ -1260,7 +1264,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Hämtar dina öppna utkast från molnet…',
     draftsWriteWhileLoading: 'Du kan börja skriva ett nytt utkast direkt medan dina andra utkast synkas.',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Att studera', pageRead: 'Studerade',
-    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageQuizDashboard: 'Quiz dashboard', pageArabicKb: 'Arabiskt tangentbord', pageCountdown: 'Nedräkning', pageQuizStats: 'Quizstatistik', pageTrash: 'Papperskorg',
+    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageQuizDashboard: 'Quizöversikt', pageArabicKb: 'Arabiskt tangentbord', pageCountdown: 'Nedräkning', pageQuizStats: 'Quizstatistik', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
@@ -1412,6 +1416,8 @@ export const LANGS: Record<Lang, Translation> = {
     settingsColorThemeTeal: 'Turkos',
     settingsColorThemeRose: 'Rosé',
     settingsDarkMode: 'Mörkt läge',
+    settingsShowQuizColors: 'Quizfärger',
+    settingsShowQuizColorsHint: 'Visa färgade streck och färgväljare för quizmappar och set',
     settingsLightMode: 'Ljust läge',
     settingsPassword: 'Lösenord',
     settingsPasswordSet: 'Lösenord är aktiverat',
@@ -1563,7 +1569,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewTotal: 'Totalt antal frågor',
     quizOverviewToday: 'Skapade idag',
     quizOverviewLast12Months: 'Senaste 12 månaderna',
-    quizDashTitle: 'Quiz dashboard',
+    quizDashTitle: 'Quizöversikt',
     quizDashSubtitle: 'Öppna ett quiz, eller flytta det mellan kolumnerna med knapparna på varje kort.',
     quizDashStatusLabel: 'Status',
     quizDashNotStarted: 'Ej påbörjade 🙂',

@@ -23,6 +23,7 @@ const COLOR_THEME_MAP = Object.fromEntries(COLOR_THEMES.map((t) => [t.id, t])) a
 
 const STORAGE_DARK = 'appTheme';
 const STORAGE_COLOR = 'appColorTheme';
+const STORAGE_QUIZ_COLORS = 'appShowQuizAccentColors';
 
 function isColorThemeId(v: string | null): v is ColorThemeId {
   return !!v && v in COLOR_THEME_MAP;
@@ -46,6 +47,9 @@ interface ThemeCtx {
   colorTheme: ColorThemeId;
   setColorTheme: (id: ColorThemeId) => void;
   colorThemes: ColorThemeDef[];
+  /** Colored left bars / color pickers on quiz folders & sets. */
+  showQuizAccentColors: boolean;
+  setShowQuizAccentColors: (show: boolean) => void;
 }
 
 const ThemeContext = createContext<ThemeCtx | null>(null);
@@ -62,6 +66,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return isColorThemeId(saved) ? saved : 'violet';
   });
 
+  const [showQuizAccentColors, setShowQuizAccentColorsState] = useState<boolean>(() => {
+    const saved = localStorage.getItem(STORAGE_QUIZ_COLORS);
+    if (saved === '1' || saved === 'true') return true;
+    if (saved === '0' || saved === 'false') return false;
+    return false;
+  });
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
     localStorage.setItem(STORAGE_DARK, dark ? 'dark' : 'light');
@@ -71,6 +82,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyColorThemeVars(colorTheme);
     localStorage.setItem(STORAGE_COLOR, colorTheme);
   }, [colorTheme]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_QUIZ_COLORS, showQuizAccentColors ? '1' : '0');
+  }, [showQuizAccentColors]);
 
   const setColorTheme = (id: ColorThemeId) => {
     if (!isColorThemeId(id)) return;
@@ -85,6 +100,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         colorTheme,
         setColorTheme,
         colorThemes: COLOR_THEMES,
+        showQuizAccentColors,
+        setShowQuizAccentColors: setShowQuizAccentColorsState,
       }}
     >
       {children}

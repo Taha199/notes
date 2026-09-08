@@ -46,8 +46,8 @@ const PAGE_META: Partial<Record<Page, { sv: { title: string; description: string
     en: { title: 'File Uploads – Taha Note', description: 'Upload and store files securely in your Taha Note cloud account. Up to 20 MB per file.' },
   },
   quizDashboard: {
-    sv: { title: 'Quizdashboard – Taha Note', description: 'Se vilka quiz du inte börjat, börjat eller klarat.' },
-    en: { title: 'Quiz dashboard – Taha Note', description: 'See which quizzes you have not started, started, or finished.' },
+    sv: { title: 'Quizöversikt – Taha Note', description: 'Se vilka quiz du inte börjat, börjat eller klarat.' },
+    en: { title: 'Quiz overview – Taha Note', description: 'See which quizzes you have not started, started, or finished.' },
   },
   arabicKb: {
     sv: { title: 'Arabiskt tangentbord – Taha Note', description: 'Skriv arabiska med ett skärmtangentbord när datorn saknar arabisk layout.' },

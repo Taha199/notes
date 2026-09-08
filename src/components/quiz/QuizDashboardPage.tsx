@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import {
   buildQuizDashboardRows,
   saveQuizSelection,
@@ -33,6 +34,7 @@ function Column({
   createdLabel,
   statusLabels,
   locale,
+  showAccentColors,
 }: {
   title: string;
   hint: string;
@@ -44,6 +46,7 @@ function Column({
   createdLabel: string;
   statusLabels: Record<QuizStudyStatus, string>;
   locale: string;
+  showAccentColors: boolean;
 }) {
   return (
     <section className="flex min-h-[18rem] min-w-0 flex-col rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]">
@@ -68,10 +71,12 @@ function Column({
                 key={row.id}
                 className="group/dash relative min-w-0 overflow-hidden rounded-lg py-2 pl-3 pr-1.5 transition-all hover:bg-gray-100/90 dark:hover:bg-white/5"
               >
-                <span
-                  className="absolute inset-y-1 left-0 w-1 rounded-r-sm"
-                  style={{ backgroundColor: setAccent }}
-                />
+                {showAccentColors && (
+                  <span
+                    className="absolute inset-y-1 left-0 w-1 rounded-r-sm"
+                    style={{ backgroundColor: setAccent }}
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => onOpen(row)}
@@ -139,6 +144,7 @@ export function QuizDashboardPage({
 }) {
   const { t, lang } = useLanguage();
   const { quizSets, quizFolders, setQuizSetDashboardStatus } = useNotes();
+  const { showQuizAccentColors } = useTheme();
   const locale = lang === 'sv' ? 'sv-SE' : 'en-GB';
 
   const columns = useMemo(
@@ -203,6 +209,7 @@ export function QuizDashboardPage({
               createdLabel={t.quizDashCreated}
               statusLabels={statusLabels}
               locale={locale}
+              showAccentColors={showQuizAccentColors}
             />
           ))}
         </div>
