@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { QuizItem, QuizSet } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 import {
@@ -19,6 +19,108 @@ type Mode = 'month' | 'compareMonths' | 'compareYears';
 
 const SERIES_A = '#534AB7';
 const SERIES_B = '#0d9488';
+
+function capitalizeLabel(value: string) {
+  if (!value) return value;
+  return value.charAt(0).toLocaleUpperCase() + value.slice(1);
+}
+
+function StatsMenuSelect({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  align = 'right',
+}: {
+  value: string;
+  options: { value: string; label: string; hint?: string }[];
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  align?: 'left' | 'right';
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={
+          'flex min-w-[9.5rem] items-center gap-2 rounded-xl border px-3 py-1.5 text-left text-[12px] font-semibold transition ' +
+          (open
+            ? 'border-primary/40 bg-primary/10 text-primary'
+            : 'border-app-border bg-white text-app-text hover:bg-app-bg dark:border-white/10 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-white/10')
+        }
+      >
+        <span className="min-w-0 flex-1 truncate">{selected?.label ?? value}</span>
+        <span className={'text-[10px] opacity-60 transition ' + (open ? 'rotate-180' : '')}>▾</span>
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label={ariaLabel}
+          className={
+            'absolute top-full z-[30] mt-1.5 max-h-64 w-[min(16rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-app-border bg-white py-1.5 shadow-[0_12px_32px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-gray-900 dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)] ' +
+            (align === 'left' ? 'left-0' : 'right-0')
+          }
+        >
+          {options.map((opt) => {
+            const active = opt.value === value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                className={
+                  'mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-xl px-2.5 py-2 text-left transition ' +
+                  (active
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5')
+                }
+              >
+                <span className={'min-w-0 flex-1 text-[12.5px] leading-snug ' + (active ? 'font-bold' : 'font-semibold')}>
+                  {opt.label}
+                </span>
+                {opt.hint && (
+                  <span className="shrink-0 text-[10px] font-medium tabular-nums text-app-text-secondary/55">
+                    {opt.hint}
+                  </span>
+                )}
+                {active && <span className="shrink-0 text-[12px] font-bold text-primary">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** One column per calendar day — number, weekday, bar, count. */
 function MonthDayChart({
@@ -271,10 +373,35 @@ export function QuizStatsPanel({
   const monthLabel = (key: string) => {
     const [y, m] = key.split('-').map(Number);
     if (!y || !m) return key;
-    return new Date(y, m - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' });
+    return capitalizeLabel(
+      new Date(y, m - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' }),
+    );
   };
   const shortMonth = (m: number) =>
-    new Date(2000, m - 1, 1).toLocaleDateString(locale, { month: 'short' });
+    capitalizeLabel(new Date(2000, m - 1, 1).toLocaleDateString(locale, { month: 'short' }));
+
+  const monthMenuOptions = useMemo(
+    () => monthOptions.map((key) => {
+      const count = sumCounts(
+        buildMonthDayBars(byDay, Number(key.slice(0, 4)), Number(key.slice(5, 7))).map((b) => b.count),
+      );
+      return {
+        value: key,
+        label: monthLabel(key),
+        hint: count > 0 ? String(count) : undefined,
+      };
+    }),
+    // monthLabel depends on locale; rebuild when options/day map change
+    [monthOptions, byDay, locale],
+  );
+  const yearMenuOptions = useMemo(() => {
+    const years = [...new Set([...yearOptions, compareYearB, now.year - 1])].sort((a, b) => b - a);
+    return years.map((y) => ({
+      value: String(y),
+      label: String(y),
+      hint: String(sumCounts(buildYearMonthBars(byMonth, y).map((b) => b.count))),
+    }));
+  }, [yearOptions, compareYearB, now.year, byMonth]);
 
   let chartLabels: string[] = [];
   let chartSeries: { label: string; color: string; values: number[] }[] = [];
@@ -337,8 +464,6 @@ export function QuizStatsPanel({
     : chartSeries[0]!.values.filter((v) => v > 0).length;
   const best = Math.max(0, ...chartSeries.flatMap((s) => s.values));
 
-  const selectCls =
-    'rounded-lg border border-app-border bg-white px-2 py-1.5 text-[12px] font-semibold text-app-text outline-none dark:border-white/10 dark:bg-gray-900 dark:text-gray-100';
   const modeBtn = (active: boolean) =>
     'rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ' +
     (active
@@ -386,48 +511,45 @@ export function QuizStatsPanel({
 
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             {mode === 'month' && (
-              <select className={selectCls} value={monthKey} onChange={(e) => setMonthKey(e.target.value)}>
-                {monthOptions.map((key) => (
-                  <option key={key} value={key}>{monthLabel(key)}</option>
-                ))}
-              </select>
+              <StatsMenuSelect
+                ariaLabel={t.quizStatsModeMonth}
+                value={monthKey}
+                options={monthMenuOptions}
+                onChange={setMonthKey}
+              />
             )}
             {mode === 'compareMonths' && (
               <>
-                <select className={selectCls} value={compareMonthA} onChange={(e) => setCompareMonthA(e.target.value)}>
-                  {monthOptions.map((key) => (
-                    <option key={key} value={key}>{monthLabel(key)}</option>
-                  ))}
-                </select>
-                <span className="text-[11px] text-app-text-secondary">vs</span>
-                <select className={selectCls} value={compareMonthB} onChange={(e) => setCompareMonthB(e.target.value)}>
-                  {monthOptions.map((key) => (
-                    <option key={key} value={key}>{monthLabel(key)}</option>
-                  ))}
-                </select>
+                <StatsMenuSelect
+                  ariaLabel={t.quizStatsModeCompareMonths}
+                  value={compareMonthA}
+                  options={monthMenuOptions}
+                  onChange={setCompareMonthA}
+                />
+                <span className="text-[11px] font-semibold text-app-text-secondary/70">vs</span>
+                <StatsMenuSelect
+                  ariaLabel={t.quizStatsModeCompareMonths}
+                  value={compareMonthB}
+                  options={monthMenuOptions}
+                  onChange={setCompareMonthB}
+                />
               </>
             )}
             {mode === 'compareYears' && (
               <>
-                <select
-                  className={selectCls}
-                  value={compareYearA}
-                  onChange={(e) => setCompareYearA(Number(e.target.value))}
-                >
-                  {yearOptions.map((y) => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-                <span className="text-[11px] text-app-text-secondary">vs</span>
-                <select
-                  className={selectCls}
-                  value={compareYearB}
-                  onChange={(e) => setCompareYearB(Number(e.target.value))}
-                >
-                  {[...new Set([...yearOptions, compareYearB, now.year - 1])].sort((a, b) => b - a).map((y) => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
+                <StatsMenuSelect
+                  ariaLabel={t.quizStatsModeCompareYears}
+                  value={String(compareYearA)}
+                  options={yearMenuOptions}
+                  onChange={(v) => setCompareYearA(Number(v))}
+                />
+                <span className="text-[11px] font-semibold text-app-text-secondary/70">vs</span>
+                <StatsMenuSelect
+                  ariaLabel={t.quizStatsModeCompareYears}
+                  value={String(compareYearB)}
+                  options={yearMenuOptions}
+                  onChange={(v) => setCompareYearB(Number(v))}
+                />
               </>
             )}
           </div>
