@@ -453,6 +453,10 @@ export function QuizStatsPanel({
 
   const todayKey = toDayKey(Date.now());
   const todayCount = todayKey ? (byDay.get(todayKey) ?? 0) : 0;
+  const totalSets = useMemo(
+    () => quizSets.filter((s) => !s.trashed && s.system !== 'favorites').length,
+    [quizSets],
+  );
   const last12MonthKeys = useMemo(() => lastNMonthKeys(12), []);
   const last12Total = sumMonthKeys(byMonth, last12MonthKeys);
   const last12Rows = useMemo(
@@ -611,13 +615,21 @@ export function QuizStatsPanel({
         <div className="overflow-y-auto px-4 py-4">
           {mode === 'overview' ? (
             <>
-              <div className="mb-4 grid grid-cols-2 gap-2">
+              <div className="mb-4 grid grid-cols-3 gap-2">
                 <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
                     {t.quizOverviewTotal}
                   </p>
                   <p className="mt-1 text-3xl font-bold tabular-nums text-app-text dark:text-gray-100">
                     {items.length}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
+                    {t.quizOverviewTotalSets}
+                  </p>
+                  <p className="mt-1 text-3xl font-bold tabular-nums text-app-text dark:text-gray-100">
+                    {totalSets}
                   </p>
                 </div>
                 <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">

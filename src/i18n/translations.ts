@@ -543,6 +543,7 @@ export interface Translation {
   quizOverviewTitle: string;
   quizOverviewSubtitle: string;
   quizOverviewTotal: string;
+  quizOverviewTotalSets: string;
   quizOverviewToday: string;
   quizOverviewLast12Months: string;
   quizDashTitle: string;
@@ -1053,6 +1054,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewTitle: 'Quiz overview',
     quizOverviewSubtitle: 'Total questions, today, and the last 12 months',
     quizOverviewTotal: 'Total questions',
+    quizOverviewTotalSets: 'Total sets',
     quizOverviewToday: 'Created today',
     quizOverviewLast12Months: 'Last 12 months',
     quizDashTitle: 'Quiz overview',
@@ -1561,6 +1563,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizOverviewTitle: 'Quizöversikt',
     quizOverviewSubtitle: 'Totalt antal frågor, dagens frågor och senaste 12 månaderna',
     quizOverviewTotal: 'Totalt antal frågor',
+    quizOverviewTotalSets: 'Totalt antal set',
     quizOverviewToday: 'Skapade idag',
     quizOverviewLast12Months: 'Senaste 12 månaderna',
     quizDashTitle: 'Quizöversikt',
