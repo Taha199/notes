@@ -60,7 +60,6 @@ export function Sidebar({
     { page: 'files', icon: '📎', label: t.navFiles },
     { page: 'arabicKb', icon: '⌨️', label: t.navArabicKb },
     { page: 'countdown', icon: '⏳', label: t.navCountdown },
-    { page: 'quizOverview', icon: '📈', label: t.navQuizOverview },
     { page: 'quizStats', icon: '📊', label: t.navQuizStats },
   ];
   const items2: { page: Page; icon: string; label: string; badge?: number; badgeClass?: string }[] = [

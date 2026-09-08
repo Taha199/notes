@@ -15,7 +15,6 @@ export interface Translation {
   navFiles: string;
   navArabicKb: string;
   navCountdown: string;
-  navQuizOverview: string;
   navQuizStats: string;
   navArchive: string;
   navTrash: string;
@@ -92,7 +91,6 @@ export interface Translation {
   pageFiles: string;
   pageArabicKb: string;
   pageCountdown: string;
-  pageQuizOverview: string;
   pageQuizStats: string;
   pageTrash: string;
   statActive: string;
@@ -529,6 +527,7 @@ export interface Translation {
   quizStatsTitle: string;
   quizStatsSubtitle: string;
   quizStatsModeMonth: string;
+  quizStatsModeOverview: string;
   quizStatsModeCompareMonths: string;
   quizStatsModeCompareYears: string;
   quizStatsTotal: string;
@@ -712,7 +711,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'en', label: 'EN',
     appName: 'Taha Note', appSubtitle: 'Write, organize, and sync your notes everywhere.',
     navHome: 'Home', navFav: 'Favourites', navTodo: 'To-do', navUnread: 'Notes to Study', navRead: 'Studied Notes',
-    navLibrary: 'Notes Library', navFiles: 'File Uploads', navArabicKb: 'Arabic keyboard', navCountdown: 'Countdown', navQuizOverview: 'Overview', navQuizStats: 'Statistics', navArchive: 'Archive', navTrash: 'Trash',
+    navLibrary: 'Notes Library', navFiles: 'File Uploads', navArabicKb: 'Arabic keyboard', navCountdown: 'Countdown', navQuizStats: 'Statistics', navArchive: 'Archive', navTrash: 'Trash',
     navDownload: 'Desktop app', downloadSectionTitle: 'Download as app',
     pageDownload: 'Desktop app', downloadTitle: 'Taha Note for Mac',
     downloadSubtitle: 'Install Taha Note as a native Mac app. Your notes sync with the web — same account, same features.',
@@ -737,7 +736,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Loading your open drafts from the cloud…',
     draftsWriteWhileLoading: 'You can start a new draft right away while your other drafts sync.',
     pageHome: 'Home', pageLib: 'Notes Library', pageUnread: 'Notes to Study', pageRead: 'Studied Notes',
-    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageArabicKb: 'Arabic keyboard', pageCountdown: 'Countdown', pageQuizOverview: 'Quiz overview', pageQuizStats: 'Quiz statistics', pageTrash: 'Trash',
+    pageFav: 'Favourites', pageTodo: 'To-do calendar', pageArch: 'Archive', pageFiles: 'File Uploads', pageArabicKb: 'Arabic keyboard', pageCountdown: 'Countdown', pageQuizStats: 'Quiz statistics', pageTrash: 'Trash',
     statActive: 'Active Notes', statUnread: 'Unread', statFav: 'Favourites',
     secAll: 'All Notes', secUnread: 'Unread', secFav: 'Favourites', secFavArch: 'Archived Favourites',
     secRead: 'Read', secArch: 'Archive',
@@ -1024,6 +1023,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsTitle: 'Quiz statistics',
     quizStatsSubtitle: '{n} questions tracked · new questions per day',
     quizStatsModeMonth: 'Month',
+    quizStatsModeOverview: 'Overview',
     quizStatsModeCompareMonths: 'Compare months',
     quizStatsModeCompareYears: 'Compare years',
     quizStatsTotal: 'Total',
@@ -1205,7 +1205,7 @@ export const LANGS: Record<Lang, Translation> = {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
     appName: 'Taha Note', appSubtitle: 'Skriv, organisera och synkronisera dina anteckningar överallt.',
     navHome: 'Hem', navFav: 'Favoriter', navTodo: 'Att göra', navUnread: 'Att studera', navRead: 'Studerade',
-    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArabicKb: 'Arabiskt tangentbord', navCountdown: 'Nedräkning', navQuizOverview: 'Översikt', navQuizStats: 'Statistik', navArchive: 'Arkiv', navTrash: 'Papperskorg',
+    navLibrary: 'Anteckningsbibliotek', navFiles: 'Ladda upp filer', navArabicKb: 'Arabiskt tangentbord', navCountdown: 'Nedräkning', navQuizStats: 'Statistik', navArchive: 'Arkiv', navTrash: 'Papperskorg',
     navDownload: 'Skrivbordsapp', downloadSectionTitle: 'Ladda ner som program',
     pageDownload: 'Skrivbordsapp', downloadTitle: 'Taha Note för Mac',
     downloadSubtitle: 'Installera Taha Note som en inbyggd Mac-app. Dina anteckningar synkas med webben — samma konto, samma funktioner.',
@@ -1230,7 +1230,7 @@ export const LANGS: Record<Lang, Translation> = {
     draftsLoadingCloud: 'Hämtar dina öppna utkast från molnet…',
     draftsWriteWhileLoading: 'Du kan börja skriva ett nytt utkast direkt medan dina andra utkast synkas.',
     pageHome: 'Hem', pageLib: 'Anteckningsbibliotek', pageUnread: 'Att studera', pageRead: 'Studerade',
-    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageArabicKb: 'Arabiskt tangentbord', pageCountdown: 'Nedräkning', pageQuizOverview: 'Quizöversikt', pageQuizStats: 'Quizstatistik', pageTrash: 'Papperskorg',
+    pageFav: 'Favoriter', pageTodo: 'Att göra', pageArch: 'Arkiv', pageFiles: 'Ladda upp filer', pageArabicKb: 'Arabiskt tangentbord', pageCountdown: 'Nedräkning', pageQuizStats: 'Quizstatistik', pageTrash: 'Papperskorg',
     statActive: 'Aktiva Anteckningar', statUnread: 'Olästa', statFav: 'Favoriter',
     secAll: 'Alla Anteckningar', secUnread: 'Olästa', secFav: 'Favoriter', secFavArch: 'Arkiverade Favoriter',
     secRead: 'Lästa', secArch: 'Arkiv',
@@ -1517,6 +1517,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsTitle: 'Quizstatistik',
     quizStatsSubtitle: '{n} frågor spårade · nya frågor per dag',
     quizStatsModeMonth: 'Månad',
+    quizStatsModeOverview: 'Översikt',
     quizStatsModeCompareMonths: 'Jämför månader',
     quizStatsModeCompareYears: 'Jämför år',
     quizStatsTotal: 'Totalt',

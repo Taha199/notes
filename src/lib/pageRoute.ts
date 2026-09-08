@@ -11,7 +11,6 @@ const PAGE_PATHS: Record<Page, string> = {
   files: '/files',
   arabicKb: '/arabic-keyboard',
   countdown: '/countdown',
-  quizOverview: '/quiz-overview',
   quizStats: '/quiz-stats',
   archive: '/archive',
   trash: '/trash',
@@ -24,6 +23,9 @@ const PAGE_PATHS: Record<Page, string> = {
 const PATH_TO_PAGE = Object.fromEntries(
   Object.entries(PAGE_PATHS).map(([page, path]) => [path, page as Page]),
 ) as Record<string, Page>;
+
+/** Old overview URL now lives inside Statistics. */
+PATH_TO_PAGE['/quiz-overview'] = 'quizStats';
 
 export function pageFromPath(pathname: string): Page {
   const normalized = pathname.replace(/\/+$/, '') || '/';

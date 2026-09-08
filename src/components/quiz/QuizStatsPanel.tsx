@@ -8,14 +8,17 @@ import {
   countQuestionsByDay,
   countQuestionsByMonth,
   currentYearMonth,
+  lastNMonthKeys,
   maxCount,
   monthsWithData,
   sumCounts,
+  sumMonthKeys,
+  toDayKey,
   yearsWithData,
   type DayBar,
 } from '../../lib/quizStats';
 
-type Mode = 'month' | 'compareMonths' | 'compareYears';
+type Mode = 'overview' | 'month' | 'compareMonths' | 'compareYears';
 
 const SERIES_A = '#534AB7';
 const SERIES_B = '#0d9488';
@@ -398,7 +401,7 @@ export function QuizStatsPanel({
     return ms.length ? ms : [now.key];
   }, [byDay, now.key]);
 
-  const [mode, setMode] = useState<Mode>('month');
+  const [mode, setMode] = useState<Mode>('overview');
   const [monthKey, setMonthKey] = useState(now.key);
   const [compareMonths, setCompareMonths] = useState<string[]>(() => {
     const a = monthOptions[0] ?? now.key;
@@ -448,6 +451,22 @@ export function QuizStatsPanel({
     }));
   }, [yearOptions, compareYearB, now.year, byMonth]);
 
+  const todayKey = toDayKey(Date.now());
+  const todayCount = todayKey ? (byDay.get(todayKey) ?? 0) : 0;
+  const last12MonthKeys = useMemo(() => lastNMonthKeys(12), []);
+  const last12Total = sumMonthKeys(byMonth, last12MonthKeys);
+  const last12Rows = useMemo(
+    () =>
+      last12MonthKeys.map((key) => ({
+        key,
+        label: monthLabel(key),
+        count: byMonth.get(key) ?? 0,
+      })),
+    // monthLabel uses locale
+    [last12MonthKeys, byMonth, locale],
+  );
+  const last12Max = Math.max(1, maxCount(last12Rows.map((r) => r.count)));
+
   let compareTotals: { id: string; label: string; value: number; color: string }[] | null = null;
   let periodTotal = 0;
   let periodSubtitle = '';
@@ -485,7 +504,7 @@ export function QuizStatsPanel({
       activeDays += bars.filter((x) => x.count > 0).length;
       periodDays += bars.length;
     }
-  } else {
+  } else if (mode === 'compareYears') {
     const barsA = buildYearMonthBars(byMonth, compareYearA);
     const barsB = buildYearMonthBars(byMonth, compareYearB);
     const totalA = sumCounts(barsA.map((x) => x.count));
@@ -537,6 +556,9 @@ export function QuizStatsPanel({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-app-border/70 px-4 py-2.5 dark:border-white/10">
+          <button type="button" className={modeBtn(mode === 'overview')} onClick={() => setMode('overview')}>
+            {t.quizStatsModeOverview}
+          </button>
           <button type="button" className={modeBtn(mode === 'month')} onClick={() => setMode('month')}>
             {t.quizStatsModeMonth}
           </button>
@@ -587,78 +609,138 @@ export function QuizStatsPanel({
         </div>
 
         <div className="overflow-y-auto px-4 py-4">
-          <div className="mb-4 grid grid-cols-2 gap-2">
-            <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsTotal}</p>
-              <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">{periodTotal}</p>
-              <p className="truncate text-[10px] text-app-text-secondary/60">{periodSubtitle}</p>
-            </div>
-            <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsActiveDays}</p>
-              <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">
-                {activeDays}
-                <span className="text-[15px] font-semibold text-app-text-secondary/55"> / {periodDays}</span>
-              </p>
-            </div>
-          </div>
-
-          {compareTotals && compareTotals.length > 0 && (
-            <div className="mb-3 flex flex-wrap gap-3 text-[11px] font-semibold">
-              {compareTotals.map((s) => (
-                <span key={s.id} className="inline-flex items-center gap-1.5 text-app-text dark:text-gray-200">
-                  <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
-                  {s.label}
-                  <span className="tabular-nums text-app-text-secondary">({s.value})</span>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {items.length === 0 ? (
-            <p className="py-16 text-center text-sm text-app-text-secondary">{t.quizStatsEmpty}</p>
-          ) : mode === 'month' ? (
-            <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
-              <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">
-                {t.quizStatsDayByDay}
-              </p>
-              <MonthDayChart
-                bars={monthBars}
-                locale={locale}
-                questionsOne={t.quizQuestionOne}
-                questionsMany={t.quizQuestionMany}
-              />
-            </div>
-          ) : (
-            <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
-              <TotalsCompareChart items={compareTotals ?? []} />
-            </div>
-          )}
-
-          {mode === 'month' && monthBars.some((b) => b.count > 0) && (
-            <div className="mt-4">
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
-                {t.quizStatsDailyList}
-              </p>
-              <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
-                {[...monthBars].filter((b) => b.count > 0).reverse().map((b) => (
-                  <div
-                    key={b.key}
-                    className="flex items-center justify-between border-b border-app-border/60 px-3 py-2 text-[13px] last:border-b-0 dark:border-white/10"
-                  >
-                    <span className="font-medium text-app-text dark:text-gray-200">
-                      {new Date(b.key + 'T12:00:00').toLocaleDateString(locale, {
-                        weekday: 'long',
-                        day: 'numeric',
-                        month: 'long',
-                      })}
-                    </span>
-                    <span className="rounded-lg bg-primary/10 px-2 py-0.5 text-[12px] font-bold tabular-nums text-primary">
-                      {b.count} {b.count === 1 ? t.quizQuestionOne : t.quizQuestionMany}
-                    </span>
-                  </div>
-                ))}
+          {mode === 'overview' ? (
+            <>
+              <div className="mb-4 grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
+                    {t.quizOverviewTotal}
+                  </p>
+                  <p className="mt-1 text-3xl font-bold tabular-nums text-app-text dark:text-gray-100">
+                    {items.length}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
+                    {t.quizOverviewToday}
+                  </p>
+                  <p className="mt-1 text-3xl font-bold tabular-nums text-primary">{todayCount}</p>
+                </div>
               </div>
-            </div>
+
+              <div className="rounded-xl border border-app-border bg-white p-3 dark:border-white/10 dark:bg-gray-950/40">
+                <div className="mb-3 flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
+                      {t.quizOverviewLast12Months}
+                    </p>
+                    <p className="mt-1 text-2xl font-bold tabular-nums text-app-text dark:text-gray-100">
+                      {last12Total}
+                    </p>
+                  </div>
+                  <p className="pb-0.5 text-[11px] text-app-text-secondary/60">
+                    {last12Rows[0]?.label} – {last12Rows[last12Rows.length - 1]?.label}
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  {last12Rows.map((row) => {
+                    const w = row.count > 0 ? Math.max(6, (row.count / last12Max) * 100) : 0;
+                    return (
+                      <div key={row.key} className="flex items-center gap-2.5">
+                        <span className="w-[7.5rem] shrink-0 truncate text-[12px] font-semibold text-app-text dark:text-gray-200 sm:w-40">
+                          {row.label}
+                        </span>
+                        <div className="h-2.5 min-w-0 flex-1 rounded-full bg-app-bg dark:bg-white/5">
+                          <div
+                            className="h-full rounded-full bg-primary/80 transition-all"
+                            style={{ width: `${w}%` }}
+                          />
+                        </div>
+                        <span className="w-10 shrink-0 text-right text-[12px] font-bold tabular-nums text-app-text dark:text-gray-100">
+                          {row.count}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mb-4 grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsTotal}</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">{periodTotal}</p>
+                  <p className="truncate text-[10px] text-app-text-secondary/60">{periodSubtitle}</p>
+                </div>
+                <div className="rounded-xl border border-app-border bg-app-bg/50 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.03]">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.quizStatsActiveDays}</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums text-app-text dark:text-gray-100">
+                    {activeDays}
+                    <span className="text-[15px] font-semibold text-app-text-secondary/55"> / {periodDays}</span>
+                  </p>
+                </div>
+              </div>
+
+              {compareTotals && compareTotals.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-3 text-[11px] font-semibold">
+                  {compareTotals.map((s) => (
+                    <span key={s.id} className="inline-flex items-center gap-1.5 text-app-text dark:text-gray-200">
+                      <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
+                      {s.label}
+                      <span className="tabular-nums text-app-text-secondary">({s.value})</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {items.length === 0 ? (
+                <p className="py-16 text-center text-sm text-app-text-secondary">{t.quizStatsEmpty}</p>
+              ) : mode === 'month' ? (
+                <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
+                  <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/60">
+                    {t.quizStatsDayByDay}
+                  </p>
+                  <MonthDayChart
+                    bars={monthBars}
+                    locale={locale}
+                    questionsOne={t.quizQuestionOne}
+                    questionsMany={t.quizQuestionMany}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-xl border border-app-border bg-white p-2 dark:border-white/10 dark:bg-gray-950/40">
+                  <TotalsCompareChart items={compareTotals ?? []} />
+                </div>
+              )}
+
+              {mode === 'month' && monthBars.some((b) => b.count > 0) && (
+                <div className="mt-4">
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/70">
+                    {t.quizStatsDailyList}
+                  </p>
+                  <div className="overflow-hidden rounded-xl border border-app-border dark:border-white/10">
+                    {[...monthBars].filter((b) => b.count > 0).reverse().map((b) => (
+                      <div
+                        key={b.key}
+                        className="flex items-center justify-between border-b border-app-border/60 px-3 py-2 text-[13px] last:border-b-0 dark:border-white/10"
+                      >
+                        <span className="font-medium text-app-text dark:text-gray-200">
+                          {new Date(b.key + 'T12:00:00').toLocaleDateString(locale, {
+                            weekday: 'long',
+                            day: 'numeric',
+                            month: 'long',
+                          })}
+                        </span>
+                        <span className="rounded-lg bg-primary/10 px-2 py-0.5 text-[12px] font-bold tabular-nums text-primary">
+                          {b.count} {b.count === 1 ? t.quizQuestionOne : t.quizQuestionMany}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
