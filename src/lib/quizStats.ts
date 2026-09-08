@@ -139,3 +139,22 @@ export function currentYearMonth(now = new Date()): { year: number; month: numbe
     key: `${year}-${String(month).padStart(2, '0')}`,
   };
 }
+
+/** Rolling last N calendar months including the current month, oldest first. */
+export function lastNMonthKeys(n: number, now = new Date()): string[] {
+  const keys: string[] = [];
+  const count = Math.max(0, Math.floor(n));
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    keys.push(`${y}-${String(m).padStart(2, '0')}`);
+  }
+  return keys;
+}
+
+export function sumMonthKeys(byMonth: Map<string, number>, keys: Iterable<string>): number {
+  let total = 0;
+  for (const key of keys) total += byMonth.get(key) ?? 0;
+  return total;
+}

@@ -5,6 +5,8 @@ import {
   buildYearMonthBars,
   collectQuizItemsForStats,
   countQuestionsByDay,
+  lastNMonthKeys,
+  sumMonthKeys,
   toDayKey,
 } from './quizStats';
 
@@ -80,6 +82,19 @@ describe('quizStats', () => {
     expect(bars[2]?.count).toBe(4);
     expect(bars[10]?.count).toBe(1);
     expect(bars[0]?.count).toBe(0);
+  });
+
+  it('builds last N month keys oldest first including current month', () => {
+    const keys = lastNMonthKeys(12, new Date(2026, 8, 15)); // Sep 2026
+    expect(keys).toHaveLength(12);
+    expect(keys[0]).toBe('2025-10');
+    expect(keys[11]).toBe('2026-09');
+  });
+
+  it('sums counts for selected month keys', () => {
+    const byMonth = new Map([['2026-06', 38], ['2026-07', 119], ['2026-08', 170]]);
+    expect(sumMonthKeys(byMonth, ['2026-06', '2026-08'])).toBe(208);
+    expect(sumMonthKeys(byMonth, ['2026-01'])).toBe(0);
   });
 });
 
