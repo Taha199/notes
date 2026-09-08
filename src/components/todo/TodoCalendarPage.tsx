@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTodos } from '../../contexts/TodosContext';
-import { addMonths, monthGrid, toDateKey, todosForDate } from '../../lib/todosStore';
+import { addMonths, monthWeekRows, toDateKey, todosForDate } from '../../lib/todosStore';
 import { normalizeSearch } from '../../lib/noteSearch';
 
 function weekdayLabels(locale: string): string[] {
@@ -11,6 +11,129 @@ function weekdayLabels(locale: string): string[] {
     day.setDate(monday.getDate() + i);
     return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(day);
   });
+}
+
+function capitalizeLabel(value: string) {
+  if (!value) return value;
+  return value.charAt(0).toLocaleUpperCase() + value.slice(1);
+}
+
+function MonthYearPicker({
+  cursor,
+  onChange,
+  locale,
+  ariaLabel,
+}: {
+  cursor: Date;
+  onChange: (next: Date) => void;
+  locale: string;
+  ariaLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pickerYear, setPickerYear] = useState(cursor.getFullYear());
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const monthLabel = capitalizeLabel(
+    new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(cursor),
+  );
+
+  useEffect(() => {
+    if (open) setPickerYear(cursor.getFullYear());
+  }, [open, cursor]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const months = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, month) =>
+        capitalizeLabel(new Intl.DateTimeFormat(locale, { month: 'short' }).format(new Date(pickerYear, month, 1))),
+      ),
+    [locale, pickerYear],
+  );
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={
+          'flex min-w-[10.5rem] items-center justify-center gap-1.5 rounded-xl px-2 py-1.5 text-lg font-bold capitalize tracking-tight transition ' +
+          (open
+            ? 'bg-primary/10 text-primary'
+            : 'text-app-text hover:bg-app-bg dark:text-gray-100 dark:hover:bg-white/5')
+        }
+      >
+        <span>{monthLabel}</span>
+        <span className={'text-[11px] opacity-55 transition ' + (open ? 'rotate-180' : '')}>▾</span>
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          aria-label={ariaLabel}
+          className="absolute left-1/2 top-full z-30 mt-2 w-[17.5rem] -translate-x-1/2 rounded-2xl border border-app-border bg-white p-3 shadow-[0_12px_32px_rgba(15,23,42,0.16)] dark:border-white/10 dark:bg-gray-900 dark:shadow-[0_12px_32px_rgba(0,0,0,0.5)]"
+        >
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setPickerYear((y) => y - 1)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-app-border text-app-text-secondary hover:border-primary/40 hover:text-primary dark:border-white/10"
+              aria-label="Previous year"
+            >
+              ‹
+            </button>
+            <span className="text-[14px] font-bold tabular-nums text-app-text dark:text-gray-100">{pickerYear}</span>
+            <button
+              type="button"
+              onClick={() => setPickerYear((y) => y + 1)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-app-border text-app-text-secondary hover:border-primary/40 hover:text-primary dark:border-white/10"
+              aria-label="Next year"
+            >
+              ›
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {months.map((label, month) => {
+              const active = cursor.getFullYear() === pickerYear && cursor.getMonth() === month;
+              return (
+                <button
+                  key={label + month}
+                  type="button"
+                  onClick={() => {
+                    onChange(new Date(pickerYear, month, 1));
+                    setOpen(false);
+                  }}
+                  className={
+                    'rounded-xl px-2 py-2 text-[12.5px] font-semibold capitalize transition ' +
+                    (active
+                      ? 'bg-primary text-white'
+                      : 'text-app-text hover:bg-app-bg dark:text-gray-200 dark:hover:bg-white/5')
+                  }
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function TodoCalendarPage({ search = '' }: { search?: string }) {
@@ -29,9 +152,8 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
     () => (query ? todos.filter((todo) => normalizeSearch(todo.title).includes(query)) : todos),
     [todos, query],
   );
-  const cells = useMemo(() => monthGrid(cursor.getFullYear(), cursor.getMonth()), [cursor]);
+  const weeks = useMemo(() => monthWeekRows(cursor.getFullYear(), cursor.getMonth()), [cursor]);
   const weekdays = useMemo(() => weekdayLabels(t.dateLocale), [t.dateLocale]);
-  const monthLabel = new Intl.DateTimeFormat(t.dateLocale, { month: 'long', year: 'numeric' }).format(cursor);
   const selectedLabel = new Intl.DateTimeFormat(t.dateLocale, {
     weekday: 'long',
     day: 'numeric',
@@ -67,9 +189,12 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
           >
             ‹
           </button>
-          <h3 className="min-w-[10.5rem] text-center text-lg font-bold capitalize tracking-tight text-app-text dark:text-gray-100">
-            {monthLabel}
-          </h3>
+          <MonthYearPicker
+            cursor={cursor}
+            onChange={setCursor}
+            locale={t.dateLocale}
+            ariaLabel={t.todoPickMonth}
+          />
           <button
             type="button"
             onClick={() => setCursor((prev) => addMonths(prev, 1))}
@@ -94,70 +219,83 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.9fr)]">
         <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-900/70">
-          <div className="grid grid-cols-7 border-b border-app-border bg-app-bg/80 px-1 py-2 dark:border-white/10 dark:bg-white/5">
+          <div className="grid grid-cols-[2rem_repeat(7,minmax(0,1fr))] border-b border-app-border bg-app-bg/80 px-1 py-2 dark:border-white/10 dark:bg-white/5">
+            <div className="text-center text-[10px] font-bold uppercase tracking-wider text-app-text-secondary/55">
+              {t.todoWeekShort}
+            </div>
             {weekdays.map((label) => (
               <div key={label} className="text-center text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/80">
                 {label}
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-7">
-            {cells.map((day) => {
-              const key = toDateKey(day);
-              const inMonth = day.getMonth() === cursor.getMonth();
-              const selected = key === selectedKey;
-              const isToday = key === todayKey;
-              const stats = counts.get(key);
-              const overdue = !!stats?.open && key < todayKey;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setSelectedKey(key)}
-                  className={
-                    'relative flex min-h-[4.4rem] flex-col items-center gap-0.5 border-b border-r border-app-border/70 px-1 py-1.5 text-sm transition-colors dark:border-white/10 ' +
-                    (selected
-                      ? 'bg-primary/12 text-primary'
-                      : overdue
-                        ? 'bg-red-50 text-red-700 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.35)] dark:bg-red-500/15 dark:text-red-200 dark:shadow-[inset_0_0_0_1px_rgba(248,113,113,0.35)]'
-                        : isToday
-                          ? 'bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-200'
-                          : 'hover:bg-app-bg dark:hover:bg-white/5') +
-                    (inMonth ? '' : ' text-app-text-secondary/40')
-                  }
+          <div>
+            {weeks.map((row) => (
+              <div key={`${row.week}-${toDateKey(row.days[0]!)}`} className="grid grid-cols-[2rem_repeat(7,minmax(0,1fr))]">
+                <div
+                  className="flex items-start justify-center border-b border-app-border/70 pt-2.5 text-[11px] font-bold tabular-nums text-app-text-secondary/55 dark:border-white/10"
+                  title={`${t.todoWeek} ${row.week}`}
                 >
-                  <span className={
-                    'flex h-7 w-7 items-center justify-center rounded-full text-[13px] font-semibold ' +
-                    (selected
-                      ? 'bg-primary text-white'
-                      : overdue
-                        ? 'bg-red-500 text-white shadow-[0_0_12px_rgba(239,68,68,0.55)]'
-                        : isToday
-                          ? 'bg-white text-sky-700 ring-2 ring-sky-400/80 dark:bg-sky-500/20 dark:text-sky-100 dark:ring-sky-300/70'
-                          : '')
-                  }>
-                    {day.getDate()}
-                  </span>
-                  {isToday && (
-                    <span className="rounded-full bg-sky-500/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700 dark:bg-sky-400/20 dark:text-sky-200">
-                      {t.todoToday}
-                    </span>
-                  )}
-                  {stats && (
-                    <span className="flex items-center gap-0.5">
-                      {stats.open > 0 ? (
-                        <span className={'h-1.5 w-1.5 rounded-full ' + (overdue ? 'bg-red-500' : 'bg-primary')} />
-                      ) : (
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      )}
-                      <span className={'text-[10px] font-bold ' + (overdue ? 'text-red-600 dark:text-red-300' : 'text-app-text-secondary')}>
-                        {stats.total}
+                  {row.week}
+                </div>
+                {row.days.map((day) => {
+                  const key = toDateKey(day);
+                  const inMonth = day.getMonth() === cursor.getMonth();
+                  const selected = key === selectedKey;
+                  const isToday = key === todayKey;
+                  const stats = counts.get(key);
+                  const overdue = !!stats?.open && key < todayKey;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setSelectedKey(key)}
+                      className={
+                        'relative flex min-h-[4.4rem] flex-col items-center gap-0.5 border-b border-r border-app-border/70 px-1 py-1.5 text-sm transition-colors dark:border-white/10 ' +
+                        (selected
+                          ? 'bg-primary/12 text-primary'
+                          : overdue
+                            ? 'bg-red-50 text-red-700 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.35)] dark:bg-red-500/15 dark:text-red-200 dark:shadow-[inset_0_0_0_1px_rgba(248,113,113,0.35)]'
+                            : isToday
+                              ? 'bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-200'
+                              : 'hover:bg-app-bg dark:hover:bg-white/5') +
+                        (inMonth ? '' : ' text-app-text-secondary/40')
+                      }
+                    >
+                      <span className={
+                        'flex h-7 w-7 items-center justify-center rounded-full text-[13px] font-semibold ' +
+                        (selected
+                          ? 'bg-primary text-white'
+                          : overdue
+                            ? 'bg-red-500 text-white shadow-[0_0_12px_rgba(239,68,68,0.55)]'
+                            : isToday
+                              ? 'bg-white text-sky-700 ring-2 ring-sky-400/80 dark:bg-sky-500/20 dark:text-sky-100 dark:ring-sky-300/70'
+                              : '')
+                      }>
+                        {day.getDate()}
                       </span>
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+                      {isToday && (
+                        <span className="rounded-full bg-sky-500/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-sky-700 dark:bg-sky-400/20 dark:text-sky-200">
+                          {t.todoToday}
+                        </span>
+                      )}
+                      {stats && (
+                        <span className="flex items-center gap-0.5">
+                          {stats.open > 0 ? (
+                            <span className={'h-1.5 w-1.5 rounded-full ' + (overdue ? 'bg-red-500' : 'bg-primary')} />
+                          ) : (
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          )}
+                          <span className={'text-[10px] font-bold ' + (overdue ? 'text-red-600 dark:text-red-300' : 'text-app-text-secondary')}>
+                            {stats.total}
+                          </span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </div>
 

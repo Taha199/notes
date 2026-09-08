@@ -32,6 +32,26 @@ export function monthGrid(year: number, month: number): Date[] {
   return Array.from({ length: 42 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
 }
 
+/** ISO-8601 week number (week starts Monday; week 1 contains Jan 4). */
+export function isoWeekNumber(date: Date): number {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  // Thursday of this week
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d.getTime() - week1.getTime()) / 86_400_000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+}
+
+/** Six week rows for a month grid, each with ISO week number. */
+export function monthWeekRows(year: number, month: number): { week: number; days: Date[] }[] {
+  const cells = monthGrid(year, month);
+  const rows: { week: number; days: Date[] }[] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    const days = cells.slice(i, i + 7);
+    rows.push({ week: isoWeekNumber(days[0]!), days });
+  }
+  return rows;
+}
+
 export function normalizeTodoTime(raw: unknown): string | undefined {
   const value = String(raw || '').trim();
   if (!/^\d{2}:\d{2}$/.test(value)) return undefined;

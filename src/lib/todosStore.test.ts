@@ -5,6 +5,8 @@ import {
   monthGrid,
   normalizeTodo,
   toDateKey,
+  isoWeekNumber,
+  monthWeekRows,
   TODOS_LS_KEY,
 } from './todosStore';
 
@@ -26,6 +28,15 @@ describe('todosStore calendar helpers', () => {
     expect(cells).toHaveLength(42);
     expect(cells[0].getDay()).toBe(1);
     expect(toDateKey(cells[16])).toBe('2026-08-12');
+  });
+
+  it('computes ISO week numbers for Monday-first rows', () => {
+    expect(isoWeekNumber(new Date(2026, 0, 1))).toBe(1);
+    expect(isoWeekNumber(new Date(2025, 11, 29))).toBe(1);
+    const rows = monthWeekRows(2026, 8);
+    expect(rows).toHaveLength(6);
+    expect(rows[0]?.days[0]?.getDay()).toBe(1);
+    expect(rows[0]?.week).toBe(isoWeekNumber(rows[0]!.days[0]!));
   });
 
   it('keeps the newer copy and drops deleted ids', () => {
