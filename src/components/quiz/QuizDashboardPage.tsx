@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotes } from '../../contexts/NotesContext';
-import { AutoFitText } from '../common/AutoFitText';
 import {
   buildQuizDashboardRows,
   saveQuizSelection,
@@ -76,20 +75,17 @@ function Column({
                 <button
                   type="button"
                   onClick={() => onOpen(row)}
-                  className="block w-full text-left"
+                  className="block w-full min-w-0 text-left"
                 >
-                  <span className="flex min-w-0 items-baseline gap-1">
-                    <AutoFitText
-                      text={row.name || ''}
-                      maxSize={12}
-                      minSize={8}
-                      className="min-w-0 flex-1 font-semibold text-app-text dark:text-gray-100"
-                    />
+                  <span className="flex min-w-0 items-center gap-1">
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-app-text dark:text-gray-100">
+                      {row.name}
+                    </span>
                     <span className="shrink-0 text-[12px] leading-none" aria-hidden>
                       {STATUS_EMOJI[row.status]}
                     </span>
                   </span>
-                  <span className="mt-0.5 block text-[9px] tabular-nums text-app-text-secondary/55">
+                  <span className="mt-0.5 block truncate text-[9px] tabular-nums text-app-text-secondary/55">
                     {row.total}
                     {row.folderName ? ` · ${row.folderName}` : ''}
                     {created ? ` · ${createdLabel} ${created}` : ''}
