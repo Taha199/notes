@@ -11,6 +11,7 @@ const PAGE_PATHS: Record<Page, string> = {
   files: '/files',
   arabicKb: '/arabic-keyboard',
   countdown: '/countdown',
+  quizStats: '/quiz-stats',
   archive: '/archive',
   trash: '/trash',
   quiz: '/quiz',

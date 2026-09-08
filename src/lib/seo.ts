@@ -53,6 +53,10 @@ const PAGE_META: Partial<Record<Page, { sv: { title: string; description: string
     sv: { title: 'Nedräkning – Taha Note', description: 'Skapa vackra nedräkningar till viktiga datum och händelser.' },
     en: { title: 'Countdown – Taha Note', description: 'Create beautiful countdown timers for important dates and events.' },
   },
+  quizStats: {
+    sv: { title: 'Quizstatistik – Taha Note', description: 'Se hur många quizfrågor du skapar per dag, månad och år.' },
+    en: { title: 'Quiz statistics – Taha Note', description: 'See how many quiz questions you create per day, month, and year.' },
+  },
   quiz: {
     sv: { title: 'Quiz – Taha Note', description: 'Skapa och träna med quiz från dina anteckningar i Taha Note.' },
     en: { title: 'Quiz – Taha Note', description: 'Create and practice quizzes from your notes in Taha Note.' },

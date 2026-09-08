@@ -328,10 +328,12 @@ export function QuizStatsPanel({
   quizzes,
   quizSets,
   onClose,
+  variant = 'modal',
 }: {
   quizzes: QuizItem[];
   quizSets: QuizSet[];
-  onClose: () => void;
+  onClose?: () => void;
+  variant?: 'modal' | 'page';
 }) {
   const { t, lang } = useLanguage();
   const locale = lang === 'sv' ? 'sv-SE' : 'en-GB';
@@ -470,17 +472,17 @@ export function QuizStatsPanel({
       ? 'bg-primary text-white'
       : 'bg-app-bg text-app-text-secondary hover:bg-app-border/40 dark:bg-white/5 dark:text-gray-400');
 
-  return (
-    <div
-      className="fixed inset-0 z-[220] flex items-end justify-center bg-black/35 p-3 sm:items-center"
-      onClick={onClose}
-    >
+  const shell = (
       <div
-        role="dialog"
-        aria-modal="true"
+        role={variant === 'modal' ? 'dialog' : undefined}
+        aria-modal={variant === 'modal' ? true : undefined}
         aria-label={t.quizStatsTitle}
-        className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-[#1e1e2e]"
-        onClick={(e) => e.stopPropagation()}
+        className={
+          variant === 'modal'
+            ? 'flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-2xl dark:border-white/10 dark:bg-[#1e1e2e]'
+            : 'flex w-full flex-col overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-[#1e1e2e]'
+        }
+        onClick={variant === 'modal' ? (e) => e.stopPropagation() : undefined}
       >
         <div className="flex items-start justify-between gap-3 border-b border-app-border px-4 py-3 dark:border-white/10">
           <div>
@@ -489,13 +491,15 @@ export function QuizStatsPanel({
               {t.quizStatsSubtitle.replace('{n}', String(items.length))}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-2 py-1 text-[13px] font-semibold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10"
-          >
-            ✕
-          </button>
+          {variant === 'modal' && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-2 py-1 text-[13px] font-semibold text-app-text-secondary hover:bg-app-bg dark:hover:bg-white/10"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-app-border/70 px-4 py-2.5 dark:border-white/10">
@@ -639,6 +643,18 @@ export function QuizStatsPanel({
           )}
         </div>
       </div>
+  );
+
+  if (variant === 'page') {
+    return shell;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[220] flex items-end justify-center bg-black/35 p-3 sm:items-center"
+      onClick={onClose}
+    >
+      {shell}
     </div>
   );
 }

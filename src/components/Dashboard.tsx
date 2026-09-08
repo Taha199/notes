@@ -17,6 +17,7 @@ import { SeoHead } from './common/SeoHead';
 import { FilesPage } from './files/FilesPage';
 import { ArabicKeyboardPage } from './keyboard/ArabicKeyboardPage';
 import { CountdownPage } from './countdown/CountdownPage';
+import { QuizStatsPage } from './quiz/QuizStatsPage';
 import { QuizPage } from './quiz/QuizPage';
 import { ErrorBoundary } from './common/ErrorBoundary';
 import { safeLocalStorageSet } from '../lib/safeStorage';
@@ -455,6 +456,7 @@ export function Dashboard() {
           {!showGlobalSearch && page === 'files' && <FilesPage search={search} />}
           {!showGlobalSearch && page === 'arabicKb' && <ArabicKeyboardPage />}
           {!showGlobalSearch && page === 'countdown' && <CountdownPage />}
+          {!showGlobalSearch && page === 'quizStats' && <QuizStatsPage />}
           {!showGlobalSearch && page === 'todo' && <TodoCalendarPage search={search} />}
           {!showGlobalSearch && page === 'quiz' && (
             <ErrorBoundary label="quiz">
