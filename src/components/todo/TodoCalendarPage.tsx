@@ -115,6 +115,9 @@ function MonthYearPicker({
               const active = cursor.getFullYear() === pickerYear && cursor.getMonth() === month;
               const monthKey = `${pickerYear}-${String(month + 1).padStart(2, '0')}`;
               const openCount = openByMonth.get(monthKey) ?? 0;
+              const now = new Date();
+              const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+              const isPast = monthKey < currentMonthKey;
               return (
                 <button
                   key={label + month}
@@ -135,12 +138,16 @@ function MonthYearPicker({
                     className={
                       'text-[11px] font-bold tabular-nums leading-none ' +
                       (active
-                        ? openCount > 0
-                          ? 'text-white/90'
-                          : 'text-white/55'
-                        : openCount > 0
-                          ? 'text-primary'
-                          : 'text-app-text-secondary/45')
+                        ? isPast && openCount > 0
+                          ? 'text-red-200'
+                          : openCount > 0
+                            ? 'text-white/90'
+                            : 'text-white/55'
+                        : isPast && openCount > 0
+                          ? 'text-red-600 dark:text-red-400'
+                          : openCount > 0
+                            ? 'text-primary'
+                            : 'text-app-text-secondary/45')
                     }
                   >
                     {openCount}
