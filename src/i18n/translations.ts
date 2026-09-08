@@ -535,6 +535,8 @@ export interface Translation {
   quizStatsDailyList: string;
   quizStatsDayByDay: string;
   quizStatsEmpty: string;
+  quizStatsSelectMonths: string;
+  quizStatsMonthsSelected: string;
   quizPdfGeneratedOn: string;
   quizTypeAnswer: string;
   quizAdd: string;
@@ -1023,6 +1025,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsDailyList: 'Days with new questions',
     quizStatsDayByDay: 'Day by day',
     quizStatsEmpty: 'No quiz questions yet to chart.',
+    quizStatsSelectMonths: 'Select months',
+    quizStatsMonthsSelected: '{n} months',
     quizPdfGeneratedOn: 'Generated on',
     quizTypeAnswer: '✏️ Type',
     quizAdd: 'Add',
@@ -1509,6 +1513,8 @@ export const LANGS: Record<Lang, Translation> = {
     quizStatsDailyList: 'Dagar med nya frågor',
     quizStatsDayByDay: 'Dag för dag',
     quizStatsEmpty: 'Inga quizfrågor att visa i diagrammet ännu.',
+    quizStatsSelectMonths: 'Välj månader',
+    quizStatsMonthsSelected: '{n} månader',
     quizPdfGeneratedOn: 'Genererad',
     quizTypeAnswer: '✏️ Skriv',
     quizAdd: 'Lägg till',
