@@ -32,7 +32,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 export function SettingsPage() {
   const { user, hasPassword, isPlus, hasAi, profilePhotoURL, updateDisplayName, updateProfilePhoto, resetPassword, deleteAccount } = useAuth();
   const { t, lang } = useLanguage();
-  const { dark, toggleDark, colorTheme, setColorTheme, colorThemes, showQuizAccentColors, setShowQuizAccentColors } = useTheme();
+  const { dark, toggleDark, colorTheme, setColorTheme, colorThemes } = useTheme();
   const { show } = useToast();
 
   const colorThemeLabels: Record<ColorThemeId, string> = {
@@ -324,33 +324,6 @@ export function SettingsPage() {
                 );
               })}
             </div>
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-app-text dark:text-gray-100">
-                {t.settingsShowQuizColors}
-              </p>
-              <p className="mt-0.5 text-xs text-app-text-secondary dark:text-gray-400">
-                {t.settingsShowQuizColorsHint}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowQuizAccentColors(!showQuizAccentColors)}
-              aria-pressed={showQuizAccentColors}
-              aria-label={t.settingsShowQuizColors}
-              className={
-                'relative h-7 w-12 flex-shrink-0 rounded-full p-0.5 transition-colors ' +
-                (showQuizAccentColors ? 'bg-primary' : 'bg-app-border dark:bg-white/20')
-              }
-            >
-              <span
-                className={
-                  'block h-6 w-6 rounded-full bg-white shadow transition-transform ' +
-                  (showQuizAccentColors ? 'translate-x-5' : 'translate-x-0')
-                }
-              />
-            </button>
           </div>
         </div>
       </SectionCard>

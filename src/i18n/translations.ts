@@ -392,8 +392,6 @@ export interface Translation {
   settingsColorThemeTeal: string;
   settingsColorThemeRose: string;
   settingsDarkMode: string;
-  settingsShowQuizColors: string;
-  settingsShowQuizColorsHint: string;
   settingsLightMode: string;
   settingsPassword: string;
   settingsPasswordSet: string;
@@ -906,8 +904,6 @@ export const LANGS: Record<Lang, Translation> = {
     settingsColorThemeTeal: 'Teal',
     settingsColorThemeRose: 'Rose',
     settingsDarkMode: 'Dark mode',
-    settingsShowQuizColors: 'Quiz accent colors',
-    settingsShowQuizColorsHint: 'Show colored bars and color pickers for quiz folders and sets',
     settingsLightMode: 'Light mode',
     settingsPassword: 'Password',
     settingsPasswordSet: 'Password is set',
@@ -1416,8 +1412,6 @@ export const LANGS: Record<Lang, Translation> = {
     settingsColorThemeTeal: 'Turkos',
     settingsColorThemeRose: 'Rosé',
     settingsDarkMode: 'Mörkt läge',
-    settingsShowQuizColors: 'Quizfärger',
-    settingsShowQuizColorsHint: 'Visa färgade streck och färgväljare för quizmappar och set',
     settingsLightMode: 'Ljust läge',
     settingsPassword: 'Lösenord',
     settingsPasswordSet: 'Lösenord är aktiverat',

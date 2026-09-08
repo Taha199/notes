@@ -5,7 +5,7 @@ import { useNotes } from '../../contexts/NotesContext';
 import { useTodos } from '../../contexts/TodosContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { ADMIN_EMAIL, SHOW_ADMIN_PANEL } from '../../lib/firebase';
-import { useTheme, type ColorThemeId } from '../../contexts/ThemeContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { Logo } from '../common/Logo';
 
 export function Sidebar({
@@ -25,14 +25,7 @@ export function Sidebar({
   const { notes, trashedQuizzes, quizSets, quizFolders } = useNotes();
   const { incompleteCount } = useTodos();
   const { user, hasPassword, isPlus, profilePhotoURL, signOut } = useAuth();
-  const { dark, toggleDark, colorTheme, setColorTheme, colorThemes } = useTheme();
-  const colorThemeLabels: Record<ColorThemeId, string> = {
-    violet: t.settingsColorThemeViolet,
-    blue: t.settingsColorThemeBlue,
-    green: t.settingsColorThemeGreen,
-    teal: t.settingsColorThemeTeal,
-    rose: t.settingsColorThemeRose,
-  };
+  const { dark, toggleDark } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
 
   // Badge = the same filter as the page. One notes list, both devices.
@@ -159,39 +152,6 @@ export function Sidebar({
           <span>{dark ? '☀️' : '🌙'}</span>
           {(!collapsed || mobileOpen) && <span>{dark ? t.settingsLightMode : t.settingsDarkMode}</span>}
         </button>
-        {(!collapsed || mobileOpen) && (
-          <div
-            className="mb-1.5 flex items-center justify-between gap-1 rounded-xl px-3 py-2"
-            role="radiogroup"
-            aria-label={t.settingsColorTheme}
-          >
-            {colorThemes.map((theme) => {
-              const active = colorTheme === theme.id;
-              const label = colorThemeLabels[theme.id] ?? theme.id;
-              return (
-                <button
-                  key={theme.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  aria-label={label}
-                  title={label}
-                  onClick={() => setColorTheme(theme.id)}
-                  className={
-                    'flex h-7 w-7 items-center justify-center rounded-full transition-all ' +
-                    (active ? 'ring-2 ring-primary ring-offset-2 ring-offset-app-bg dark:ring-offset-gray-950' : 'hover:scale-110')
-                  }
-                >
-                  <span
-                    className="h-4 w-4 rounded-full shadow-sm ring-1 ring-black/10 dark:ring-white/20"
-                    style={{ background: theme.swatch }}
-                    aria-hidden="true"
-                  />
-                </button>
-              );
-            })}
-          </div>
-        )}
         {(!collapsed || mobileOpen) && (
           <div
             className={
