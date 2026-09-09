@@ -1118,7 +1118,7 @@ export function QuizPage({
   const scrollElementToPageEnd = (el: HTMLElement) => {
     let node: HTMLElement | null = el;
     while (node) {
-      const parent = node.parentElement;
+      const parent: HTMLElement | null = node.parentElement;
       if (!parent) break;
       const { overflowY } = getComputedStyle(parent);
       if (
