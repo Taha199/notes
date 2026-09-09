@@ -1114,6 +1114,32 @@ export function QuizPage({
     };
   };
 
+  /** Jump every overflow ancestor to its true bottom (nested quiz + dashboard panes). */
+  const scrollElementToPageEnd = (el: HTMLElement) => {
+    let node: HTMLElement | null = el;
+    while (node) {
+      const parent = node.parentElement;
+      if (!parent) break;
+      const { overflowY } = getComputedStyle(parent);
+      if (
+        (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+        && parent.scrollHeight > parent.clientHeight + 1
+      ) {
+        parent.scrollTop = parent.scrollHeight;
+      }
+      node = parent;
+    }
+    const root = document.scrollingElement;
+    if (root) root.scrollTop = root.scrollHeight;
+  };
+
+  const flashQuizItem = (el: HTMLElement) => {
+    el.classList.add('ring-2', 'ring-primary/50');
+    window.setTimeout(() => {
+      el.classList.remove('ring-2', 'ring-primary/50');
+    }, 1200);
+  };
+
   const openQuestionSource = (sourceItemId: number) => {
     const orphan = quizzes.find((q) => q.id === sourceItemId && !q.trashed);
     if (orphan) {
@@ -1875,7 +1901,26 @@ export function QuizPage({
   const scrollToLastQuestion = () => {
     const last = orderedItems[orderedItems.length - 1];
     if (!last) return;
-    scrollToQuizItem(last.id);
+
+    const run = () => {
+      const el = document.getElementById(`quiz-item-${last.id}`);
+      if (!el) return false;
+      // Instant snap to the real end — smooth + block:center often stopped mid-page.
+      scrollElementToPageEnd(el);
+      // Second pass after layout settles (images/editors can grow height).
+      requestAnimationFrame(() => {
+        scrollElementToPageEnd(el);
+        flashQuizItem(el);
+      });
+      return true;
+    };
+
+    if (run()) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      if (run() || attempts >= 20) window.clearInterval(timer);
+    }, 40);
   };
 
   const studyItems = useMemo(() => orderedItems.filter((item) => !item.draft), [orderedItems]);
