@@ -6,7 +6,6 @@ import { AuthBackground } from './AuthBackground';
 import { AuthCard } from './AuthCard';
 import { FeatureCards } from './FeatureCards';
 import { FooterCredit } from './FooterCredit';
-import { GoogleIcon } from './GoogleIcon';
 import { LanguageSwitcher } from '../common/LanguageSwitcher';
 import { Logo } from '../common/Logo';
 import { SeoHead } from '../common/SeoHead';
@@ -32,7 +31,7 @@ const ERROR_KEYS: Record<string, string> = {
 };
 
 export function AuthPage() {
-  const { signIn, signUp, signInGoogle, resetPassword } = useAuth();
+  const { signIn, signUp, resetPassword } = useAuth();
   const { t } = useLanguage();
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
@@ -92,16 +91,6 @@ export function AuthPage() {
       setError(key ? (t as unknown as Record<string, string>)[key] : (err as Error).message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGoogle = async () => {
-    setError(null);
-    try {
-      await signInGoogle();
-    } catch (err) {
-      const code = (err as { code?: string }).code;
-      if (code !== 'auth/popup-closed-by-user') setError(t.authErrGoogle);
     }
   };
 
@@ -270,20 +259,6 @@ export function AuthPage() {
                   </button>
                 )}
               </form>
-
-              <div className="my-6 flex items-center gap-3 text-xs font-medium text-gray-400">
-                <span className="h-px flex-1 bg-app-border dark:bg-white/10" />
-                {t.authOr}
-                <span className="h-px flex-1 bg-app-border dark:bg-white/10" />
-              </div>
-
-              <button
-                onClick={handleGoogle}
-                className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-app-border bg-white py-3.5 text-sm font-semibold text-app-text shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
-              >
-                <GoogleIcon />
-                {t.authGoogle}
-              </button>
             </AuthCard>
 
             {/* Mobile/tablet: feature cards under the card since marketing column is hidden */}
