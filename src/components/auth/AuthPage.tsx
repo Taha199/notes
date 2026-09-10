@@ -175,12 +175,6 @@ export function AuthPage() {
                 </div>
               )}
 
-              {!registrationOpen && (
-                <div className="mt-4 animate-fade-in rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-center text-sm font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-                  {t.authRegistrationClosed}
-                </div>
-              )}
-
               {error && (
                 <div className="mt-5 animate-fade-in rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-center text-sm font-medium text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
                   {error}
