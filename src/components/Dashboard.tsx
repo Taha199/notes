@@ -383,6 +383,7 @@ export function Dashboard() {
           onSearchHitNext={() => moveSearchHit(1)}
           onNewNote={handleNewNote}
           onOpenMenu={() => setMobileMenuOpen(true)}
+          onOpenCountdown={() => navigateToPage('countdown')}
         />
         <KeepGoingNotice />
         <AiBackNotice />

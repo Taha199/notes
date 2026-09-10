@@ -25,6 +25,7 @@ export const Header = memo(function Header({
   onSearchHitNext,
   onNewNote,
   onOpenMenu,
+  onOpenCountdown,
 }: {
   page: Page;
   search: string;
@@ -35,6 +36,7 @@ export const Header = memo(function Header({
   onSearchHitNext?: () => void;
   onNewNote: () => void;
   onOpenMenu: () => void;
+  onOpenCountdown?: () => void;
 }) {
   const { t } = useLanguage();
   const { enabled: arabicOn, toggle: toggleArabic } = useArabicInput();
@@ -104,7 +106,7 @@ export const Header = memo(function Header({
         <span className="text-lg text-primary">{ICONS[page]}</span>
         <h2 className="truncate text-[15px] font-bold tracking-tight text-app-text dark:text-gray-100">{titles[page]}</h2>
         <CloudSavedAtLabel className="hidden sm:inline-flex" showWhenEmpty />
-        <HeaderCountdownWidget className="hidden sm:inline-flex" />
+        <HeaderCountdownWidget className="hidden sm:inline-flex" onOpen={onOpenCountdown} />
       </div>
       <div className="flex w-full min-w-0 items-center gap-2 md:w-auto">
         <div className="flex min-w-0 flex-1 items-center gap-1.5 md:flex-none">
