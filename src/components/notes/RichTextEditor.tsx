@@ -800,6 +800,8 @@ type EditorSnapshot = {
 };
 
 const EDITOR_UNDO_LIMIT = 80;
+const EDITOR_UNDO_LIMIT_HEAVY = 12;
+const EDITOR_UNDO_HEAVY_HTML_CHARS = 80_000;
 
 export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, placeholder, editable = true, minHeight = '120px', maxHeight, toolbarEnd, onLockedTripleClick, resizable, stickyToolbar = true, flushRef }: Props) {
   const { t, lang } = useLanguage();
@@ -1428,6 +1430,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const undoStackRef = useRef<EditorSnapshot[]>([]);
   const redoStackRef = useRef<EditorSnapshot[]>([]);
   const isRestoringUndoRef = useRef(false);
+  const lastHeavyUndoAtRef = useRef(0);
   const skipDuplicateBackspaceRef = useRef(false);
   /** Prevents double Enter when Safari fires beforeinput + keydown for the same Return. */
   const enterHandledRef = useRef(false);
@@ -1622,12 +1625,19 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
 
   const pushUndoCheckpoint = () => {
     if (isRestoringUndoRef.current || !editorRef.current || !editable) return;
-    const snap = captureEditorSnapshot();
+    const ed = editorRef.current;
+    // Huge base64-heavy docs: checkpoint sparsely so cloneNode does not OOM the tab.
+    const htmlLen = ed.innerHTML.length;
+    const heavy = htmlLen > EDITOR_UNDO_HEAVY_HTML_CHARS || /data:image\//i.test(ed.innerHTML);
     const stack = undoStackRef.current;
+    if (heavy && Date.now() - lastHeavyUndoAtRef.current < 900) return;
+    if (heavy) lastHeavyUndoAtRef.current = Date.now();
+    const snap = captureEditorSnapshot();
     const last = stack[stack.length - 1];
     if (last && snapshotsEqual(last, snap)) return;
     stack.push(snap);
-    if (stack.length > EDITOR_UNDO_LIMIT) stack.shift();
+    const limit = heavy ? EDITOR_UNDO_LIMIT_HEAVY : EDITOR_UNDO_LIMIT;
+    while (stack.length > limit) stack.shift();
     redoStackRef.current = [];
   };
 

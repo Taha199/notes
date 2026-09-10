@@ -7531,17 +7531,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const existing = quizzesRef.current.find((q) => q.id === id);
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
     const updated: QuizItem = { ...existing, ...patch, updatedAt: new Date().toISOString() };
-    recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: updated });
-    void persistQuizItemDurable(userRef.current?.uid, updated, null, { immediate: true });
+    // Live keystrokes: single-item durable write only. Never stringify the full
+    // quizzes[] catalog or force React to remount every card (Chrome OOM / error 5).
+    void persistQuizItemDurable(userRef.current?.uid, updated, null, { immediate: forceCloud });
     const next = quizzesRef.current.map((q) => (q.id === id ? updated : q));
     quizzesRef.current = next;
+    if (!forceCloud) return;
+    recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: updated });
     setQuizzes(next);
     safeSetItem('malacadhati_quiz', JSON.stringify(next));
-    persist({ quizzes: next }, false);
-    if (forceCloud) {
-      persist({ quizzes: next }, true);
-      scheduleInstantDataCloudSave({ quizzes: next });
-    }
+    persist({ quizzes: next }, true);
+    scheduleInstantDataCloudSave({ quizzes: next });
   };
 
   const addQuizSet = async (name: string, folderId?: string): Promise<QuizSet> => {
@@ -8306,25 +8306,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const existing = set?.items.find((i) => i.id === itemId);
     if (!existing || !quizPatchChangesContent(existing, patch)) return;
     const updated: QuizItem = { ...existing, ...patch, updatedAt: new Date().toISOString() };
-    recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: updated });
-    // Live path: always push the single item immediately. Full quizSets array
-    // only when forceCloud (finalize / explicit save) — keystrokes must not
-    // rewrite multi-MB arrays or other devices lag behind typing.
-    void persistQuizItemDurable(userRef.current?.uid, updated, setId, { immediate: true });
+    // Live path: IDB + coalesced ById only. Keystrokes must never JSON.stringify
+    // the full quizSets tree (base64 answers) or the renderer OOMs (Chrome error 5).
+    void persistQuizItemDurable(userRef.current?.uid, updated, setId, { immediate: forceCloud });
     const next = quizSetsRef.current.map((s) => (
       s.id === setId
         ? { ...s, items: s.items.map((i) => (i.id === itemId ? updated : i)) }
         : s
     ));
     quizSetsRef.current = next;
+    if (!forceCloud) return;
+    recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: updated });
     setQuizSets(next);
     rememberLastGoodComplete(quizzesRef.current, next);
     safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
-    persistSets(next, false, true);
-    if (forceCloud) {
-      persistSets(next, true, true);
-      scheduleInstantDataCloudSave({ quizSets: next });
-    }
+    persistSets(next, true, true);
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   // ── Editor image → Storage URL swap ──────────────────────────────────────

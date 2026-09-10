@@ -573,7 +573,7 @@ function persistDurableFormsByScope(
   durableFormsPersistTimer = setTimeout(() => {
     durableFormsPersistTimer = null;
     writeDurableFormsByScope(durableFormsByScopeCache);
-  }, 200);
+  }, 800);
 }
 
 interface EditPanelProps {
@@ -740,7 +740,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           <AppRichTextEditor
             html={question}
             onChange={(v) => { latestQuestionRef.current = v; onChangeQ(v); }}
-            onLiveChange={(v) => { latestQuestionRef.current = v; onChangeQ(v); }}
+            onLiveChange={(v) => { latestQuestionRef.current = v; }}
             flushRef={questionFlushRef}
             placeholder={`${t.quizQuestionLabel}...`}
             minHeight="140px"
@@ -787,7 +787,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
               <AppRichTextEditor
                 html={explanation}
                 onChange={setExplanation}
-                onLiveChange={setExplanation}
+                onLiveChange={() => { /* local only until debounced onChange */ }}
                 placeholder={t.quizExplanationPh}
                 minHeight="100px"
               />
@@ -798,7 +798,7 @@ function EditPanel({ question, answer, initialOptions, initialCorrect, initialCo
           <AppRichTextEditor
             html={answer}
             onChange={(v) => { latestAnswerRef.current = v; onChangeA(v); }}
-            onLiveChange={(v) => { latestAnswerRef.current = v; onChangeA(v); }}
+            onLiveChange={(v) => { latestAnswerRef.current = v; }}
             flushRef={answerFlushRef}
             placeholder={`${t.quizAnswerLabel}...`}
             minHeight="140px"
@@ -1173,8 +1173,7 @@ export function QuizPage({
     });
   };
 
-  /** Push question/answer to quizItemsById within ~50ms so the other device
-   *  sees typing in the same card without waiting for Save. */
+  /** Coalesce live ById pushes so typing does not thrash memory / OOM the tab. */
   const scheduleLiveCloudPush = (formId: string) => {
     const existing = livePushTimers.current.get(formId);
     if (existing) clearTimeout(existing);
@@ -1197,7 +1196,7 @@ export function QuizPage({
           const still = openFormsRef.current.find((f) => f.formId === formId);
           if (still && still.saveStatus === 'syncing') updateForm(formId, { saveStatus: 'saved' });
         }, 200);
-      }, 50),
+      }, 400),
     );
   };
 
@@ -1436,7 +1435,7 @@ export function QuizPage({
   };
 
   const formSaveSigs = useMemo(
-    () => openForms.map((f) => `${f.formId}:${f.question}:${f.answer}`).join('|'),
+    () => openForms.map((f) => `${f.formId}:${f.question.length}:${f.answer.length}:${f.question.slice(0, 48)}:${f.answer.slice(0, 48)}`).join('|'),
     [openForms],
   );
 
@@ -1449,7 +1448,7 @@ export function QuizPage({
         form.formId,
         setTimeout(() => {
           persistForm(form.formId);
-        }, 120),
+        }, 450),
       );
     });
   }, [formSaveSigs, selectedSetId]); // eslint-disable-line react-hooks/exhaustive-deps
