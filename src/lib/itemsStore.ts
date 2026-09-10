@@ -162,14 +162,19 @@ export async function getAllNotesLocal(): Promise<Note[]> {
 let notesPrefetchPromise: Promise<Note[]> | null = null;
 let notesPrefetchValue: Note[] | null = null;
 let notesPrefetchSettled = false;
+let notesPrefetchGeneration = 0;
 
 export function prefetchAllNotesLocal(): Promise<Note[]> {
   if (!notesPrefetchPromise) {
+    const gen = notesPrefetchGeneration;
     notesPrefetchPromise = getAllNotesLocal().then((notes) => {
+      // Ignore stale reads that finished after an account-switch clear.
+      if (gen !== notesPrefetchGeneration) return notesPrefetchValue ?? [];
       notesPrefetchValue = notes;
       notesPrefetchSettled = true;
       return notes;
     }).catch(() => {
+      if (gen !== notesPrefetchGeneration) return notesPrefetchValue ?? [];
       notesPrefetchValue = [];
       notesPrefetchSettled = true;
       return [] as Note[];
@@ -184,6 +189,50 @@ export function peekPrefetchedNotes(): Note[] {
 
 export function hasNotesPrefetchSettled(): boolean {
   return notesPrefetchSettled;
+}
+
+/** Drop in-memory IDB prefetch so a new account cannot paint the previous user's notes. */
+export function clearNotesPrefetchMemory(): void {
+  notesPrefetchGeneration += 1;
+  notesPrefetchPromise = null;
+  notesPrefetchValue = null;
+  notesPrefetchSettled = false;
+}
+
+export function clearQuizCatalogMemory(): void {
+  quizCatalogMemory = null;
+}
+
+function idbClearStore(store: string): Promise<void> {
+  return openDb().then(
+    (db) =>
+      new Promise<void>((resolve, reject) => {
+        if (!db.objectStoreNames.contains(store)) {
+          resolve();
+          return;
+        }
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      }),
+  ).catch(() => undefined);
+}
+
+/**
+ * Clear shared IndexedDB item stores on account switch.
+ * Does not touch Firebase / cloud data — next login reloads from users/{uid}/.
+ */
+export async function clearSharedItemsIdb(): Promise<void> {
+  clearNotesPrefetchMemory();
+  clearQuizCatalogMemory();
+  await Promise.all([
+    idbClearStore(NOTES_STORE),
+    idbClearStore(QUIZ_STORE),
+    idbClearStore(QUIZ_SETS_STORE),
+    idbClearStore(QUIZ_COMPLETE_CACHE_STORE),
+    idbClearStore(QUIZ_TRASH_TOMBSTONE_STORE),
+  ]);
 }
 
 if (typeof indexedDB !== 'undefined') {

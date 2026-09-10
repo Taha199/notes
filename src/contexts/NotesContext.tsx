@@ -121,11 +121,16 @@ import {
   QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
   QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
   QUIZ_SET_TRASH_TOMBSTONE_KEY,
-  SIDEBAR_COUNTS_KEY,
   TRASH_EMPTIED_AT_KEY,
   type SidebarCounts,
   type TrashTombstones,
 } from '../lib/quizTrashTombstones';
+import {
+  clearAccountSwitchPending,
+  isAccountSwitchPending,
+  prepareLocalCacheForUid,
+  waitForAccountLocalIsolation,
+} from '../lib/accountLocalIsolation';
 
 /**
  * localStorage can throw (QuotaExceededError) when quiz answers embed large
@@ -1317,7 +1322,6 @@ function readLocalJson<T>(key: string): T | null {
   }
 }
 
-const LAST_UID_KEY = 'malacadhati_last_uid';
 const CLOUD_SYNCED_AT_KEY = 'malacadhati_cloud_synced_at';
 const DELETED_DRAFT_IDS_KEY = 'malacadhati_deleted_draft_ids';
 
@@ -1386,25 +1390,6 @@ function rememberLastGoodComplete(quizzes: QuizItem[], sets: QuizSet[], force = 
   }
 }
 
-const LOCAL_DATA_KEYS = [
-  'malacadhati',
-  'malacadhati_drafts',
-  'malacadhati_quiz',
-  'malacadhati_quiz_sets',
-  QUIZ_SETS_SHELL_KEY,
-  QUIZ_SETS_LIST_ORDER_KEY,
-  QUIZ_COMPLETE_CACHE_LS_KEY,
-  'malacadhati_quiz_folders',
-  'malacadhati_chats',
-  QUIZ_SET_TRASH_TOMBSTONE_KEY,
-  QUIZ_FOLDER_TRASH_TOMBSTONE_KEY,
-  QUIZ_ITEM_TRASH_TOMBSTONE_KEY,
-  TRASH_EMPTIED_AT_KEY,
-  PERM_DELETED_KEY,
-  SIDEBAR_COUNTS_KEY,
-  NOTES_LIST_CACHE_KEY,
-] as const;
-
 /** Tiny membership journal — survives when the full quizSets[] localStorage write hits QuotaExceeded. */
 function writeQuizSetsShellJournal(sets: QuizSet[]) {
   const shells = sets.map((set) => {
@@ -1470,19 +1455,15 @@ function insertQuizSetInFolderOrder(sets: QuizSet[], newSet: QuizSet): QuizSet[]
   return [...sets.slice(0, insertAt), newSet, ...sets.slice(insertAt)];
 }
 
-function clearLocalNotesData() {
-  for (const key of LOCAL_DATA_KEYS) localStorage.removeItem(key);
-  quizListsBootCache = null;
-  clearQuizCompleteCache();
-  clearNotesListCache();
-  clearNotesBootCache();
-}
-
-/** Clear cached notes when a different account signs in (keys are not uid-scoped). */
-function syncAccountLocalStorage(uid: string) {
-  const prev = localStorage.getItem(LAST_UID_KEY);
-  if (prev && prev !== uid) clearLocalNotesData();
-  safeSetItem(LAST_UID_KEY, uid);
+function emptyLocalNotesData() {
+  return {
+    notes: [] as Note[],
+    drafts: [] as Draft[],
+    quizzes: [] as QuizItem[],
+    chats: [] as ChatConversation[],
+    sets: [] as QuizSet[],
+    folders: [] as QuizFolder[],
+  };
 }
 
 function readLocalNotesDataRaw() {
@@ -2858,7 +2839,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setQuizContentReady(true);
       return;
     }
-    syncAccountLocalStorage(user.uid);
+    // Auth already ran prepareLocalCacheForUid; keep LAST_UID in sync if this remount races.
+    prepareLocalCacheForUid(user.uid);
+    const accountSwitched = isAccountSwitchPending(user.uid);
     // Account switch may have replaced LS; re-read tombstones after the swap.
     quizSetTombstonesRef.current = readTrashTombstones(QUIZ_SET_TRASH_TOMBSTONE_KEY);
     quizFolderTombstonesRef.current = readTrashTombstones(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY);
@@ -2867,15 +2850,31 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // IndexedDB journal is the durable write-ahead log for image notes (localStorage
     // quota can't hold them). Load it in parallel with the first paint from the
     // raw localStorage snapshot, then fold journal entries in before cloud merge.
-    let local = readLocalNotesDataRaw();
+    // After an account switch: never paint/merge previous account caches into this uid.
+    let local = accountSwitched ? emptyLocalNotesData() : readLocalNotesDataRaw();
+    if (accountSwitched) {
+      quizListsBootCache = null;
+      setNotes([]);
+      setDrafts([]);
+      setQuizzes([]);
+      setQuizSetsState([]);
+      setQuizFolders(ensureRestoredFolder([]));
+      setChats([]);
+      const emptyCounts = computeSidebarCounts([], [], [], [], permDeletedRef.current);
+      writeSidebarCounts(emptyCounts);
+      setSidebarCounts(emptyCounts);
+      notesRef.current = [];
+      quizzesRef.current = [];
+      quizSetsRef.current = [];
+    }
     // LAST-GOOD COMPLETE CACHE (sync): paint the correct full snapshot immediately.
     // Never first-paint incomplete LS shells (classic 9) over last-good 11.
-    const lastGoodSync = readQuizCompleteCache();
+    const lastGoodSync = accountSwitched ? null : readQuizCompleteCache();
     const bootPick = pickBootQuizLists({
       localQuizzes: local.quizzes,
       localSets: local.sets,
       lastGood: lastGoodSync,
-      memory: quizListsBootCache,
+      memory: accountSwitched ? null : quizListsBootCache,
     });
     // Honor soft-delete tombstones on boot so deletes stick in the first pixel.
     const bootSets = applyTrashTombstones(
@@ -2888,7 +2887,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
     const prunedBoot = pruneQuizListsAgainstTrashState(bootQuizzes, bootSets);
     const emptiedAtBootLocal = readTrashEmptiedAt();
-    const bootListOrder = ensureQuizSetsListOrderFromShells() ?? readQuizSetsListOrderLocal();
+    const bootListOrder = accountSwitched
+      ? null
+      : (ensureQuizSetsListOrderFromShells() ?? readQuizSetsListOrderLocal());
     quizSetsListOrderRef.current = bootListOrder;
     local = {
       ...local,
@@ -2905,13 +2906,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       }),
     };
     // Paint the richest local snapshot immediately — never wait on cloud.
-    const bootMergedNotes = sortNotesByCreatedDesc(mergeNotesPreferRicher(
-      local.notes,
-      readNotesListCache(),
-      readNotesBootCache(),
-      peekPrefetchedNotes(),
-      notesRef.current,
-    ));
+    // Account switch: skip shared memory/IDB/list caches (may still hold prior uid briefly).
+    const bootMergedNotes = accountSwitched
+      ? []
+      : sortNotesByCreatedDesc(mergeNotesPreferRicher(
+        local.notes,
+        readNotesListCache(),
+        readNotesBootCache(),
+        peekPrefetchedNotes(),
+        notesRef.current,
+      ));
     local = { ...local, notes: bootMergedNotes };
     notesRef.current = bootMergedNotes;
     // First paint already happened from useState(readBootNotesForPaint) after IDB
@@ -2928,7 +2932,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         local.folders,
         permDeletedRef.current,
       );
-      const cached = readSidebarCounts();
+      // Never Math.max prior-account badge floors into a freshly switched session.
+      const cached = accountSwitched ? null : readSidebarCounts();
       const merged: SidebarCounts = cached
         ? {
             home: Math.max(cached.home, computed.home),
@@ -2980,13 +2985,16 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     };
 
     // IndexedDB already awaited in BootLoader — fold in without a second paint when ids match.
+    // After account switch: wait for shared IDB wipe, then never merge prior-uid rows.
     const notesIdbReady = (async () => {
+      await waitForAccountLocalIsolation();
+      if (cancelled || accountSwitched) return;
       const idbNotes = await prefetchAllNotesLocal();
       if (cancelled || !idbNotes.length) return;
       commitNotes(mergeNotesPreferRicher(notesRef.current, idbNotes));
     })();
     bumpMaxKnownLiveBySet(maxKnownLiveBySetRef.current, local.sets);
-    if (bootPick.fromLastGood && local.sets.length > 0) {
+    if (!accountSwitched && bootPick.fromLastGood && local.sets.length > 0) {
       setQuizzes(local.quizzes);
       setQuizSets(local.sets);
       lastPaintedQuizzesRef.current = local.quizzes;
@@ -2998,7 +3006,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       quizAuthoritativeByIdSeenRef.current = true;
       setQuizLocalReady(true);
       setQuizContentReady(true);
-    } else if (local.sets.length > 0) {
+    } else if (!accountSwitched && local.sets.length > 0) {
       // Structure-first: sidebar shells only. Question cards wait for last-good
       // IDB hydrate or first ById merge — never timeout-reveal incomplete LS-9.
       setQuizSets(local.sets);
@@ -3012,7 +3020,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     }
     // Prefetched tiny quizCatalog (BootLoader) — same folder/set count on every device
     // before the multi-MB quizSetsById tree lands.
-    {
+    if (!accountSwitched) {
       const cat = peekQuizCatalog();
       if (cat.folders.length || cat.sets.length) {
         if (cat.folders.length) {
@@ -3040,7 +3048,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-    const journalReady = loadRecentEdits().then((edits) => {
+    const journalReady = accountSwitched
+      ? Promise.resolve([] as Awaited<ReturnType<typeof loadRecentEdits>>)
+      : loadRecentEdits().then((edits) => {
       if (cancelled || edits.length === 0) return edits;
       local = applyRecentEditsToData(local, edits);
       local = {
@@ -3234,6 +3244,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Phase 0: IDB last-good complete cache (async, but local — beats network).
     // If sync LS last-good was missing (quota), this still paints correct 11 before ById.
     const idbLastGoodReady = (async () => {
+      await waitForAccountLocalIsolation();
+      if (cancelled || accountSwitched) return;
       const idbTombs = await readQuizTrashTombstonesIdb();
       if (!cancelled && idbTombs) {
         quizItemTombstonesRef.current = mergeTombstoneMaps(quizItemTombstonesRef.current, idbTombs.items);
@@ -3296,6 +3308,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Phase 1 (fast): set shells only — tiny IDB store; unblocks "0 set" immediately.
     const durableSetsReady = (async () => {
       await idbLastGoodReady;
+      if (cancelled || accountSwitched) return;
       const idbSets = await getAllQuizSetsLocal();
       if (cancelled) return;
       if (idbSets.length) {
@@ -3317,9 +3330,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const durableReady = (async () => {
       const [, idbQuizzes] = await Promise.all([
         Promise.all([durableSetsReady, notesIdbReady]),
-        getAllQuizItemsLocal(),
+        accountSwitched ? Promise.resolve([] as QuizItem[]) : getAllQuizItemsLocal(),
       ]);
-      if (cancelled) return;
+      if (cancelled || accountSwitched) return;
       // notesIdbReady already painted; keep local.notes aligned with refs.
       local = { ...local, notes: notesRef.current };
       rememberNotesBootCache(notesRef.current, true);
@@ -3657,6 +3670,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const cloud = await fetchCloudSyncBundle(user.uid);
         if (!cloud) throw new Error('cloud-fetch-failed');
         cloudLoadSucceededRef.current = true;
+        clearAccountSwitchPending(user.uid);
         if (cancelled) return;
 
         if (cloud?.tokenUsage) {
@@ -4061,9 +4075,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           || quizSetsMissingFromRemote(quizSetsRef.current, cloudSets);
         // Never treat local-only folders as repair authority — that re-uploaded
         // deleted folders from a stale work-PC cache.
-        const needsRepair = notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
+        const needsRepair = !accountSwitched && !isAccountSwitchPending(user.uid) && (
+          notesRepair || quizzesRepair || chatsRepair || repairQuizStructure || historyRepair
           || needsMembershipHeal
-          || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0);
+          || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0)
+        );
         recoveryLog('load complete', {
           notes: notes.length,
           quizzes: quizzes.length,
@@ -4130,9 +4146,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         finalDrafts = filterVisibleDrafts(finalDrafts, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current);
         const cloudDraftContentLen = cloudDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
         const resolvedDraftContentLen = finalDrafts.reduce((sum, d) => sum + draftContentLength(d), 0);
-        const draftsRepair = resolvedDraftContentLen > cloudDraftContentLen
+        const draftsRepair = !accountSwitched && !isAccountSwitchPending(user.uid) && (
+          resolvedDraftContentLen > cloudDraftContentLen
           || finalDrafts.length > cloudDrafts.length
-          || (bestLocalDrafts.length > 0 && hasDraftContent(finalDrafts) && !hasDraftContent(cloudDrafts));
+          || (bestLocalDrafts.length > 0 && hasDraftContent(finalDrafts) && !hasDraftContent(cloudDrafts))
+        );
         setDrafts(finalDrafts);
         draftsRef.current = finalDrafts;
         draftCounter.current = syncDraftCounter(

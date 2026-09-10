@@ -45,6 +45,10 @@ export function clearNotesBootCache(): void {
   notesBootCache = null;
 }
 
+export function clearServerNotesCatalog(): void {
+  serverNotesCatalog = null;
+}
+
 /** Tiny membership+preview cache — never store note HTML (images blow quota). */
 export function compactNoteForListCache(note: Note): Note {
   const text = (note.text || '').slice(0, 400);
@@ -170,4 +174,5 @@ export function clearNotesListCache(): void {
     localStorage.removeItem(NOTES_LIST_CACHE_KEY);
   } catch { /* ignore */ }
   clearNotesBootCache();
+  clearServerNotesCatalog();
 }

@@ -21,6 +21,10 @@ import { auth, database, googleProvider, EmailAuthProvider, FB_DB_URL, storage }
 import { rtdbFetch } from '../lib/rtdb';
 import { fetchRegistrationEnabled } from '../lib/platformConfig';
 import { hasAiAccess, isPlusUser } from '../lib/userPlan';
+import {
+  clearInMemoryCachesOnSignOut,
+  prepareLocalCacheForUid,
+} from '../lib/accountLocalIsolation';
 
 async function sendVerificationEmailDirect(email: string): Promise<void> {
   const lang = document.documentElement.lang === 'en' ? 'en' : 'sv';
@@ -113,6 +117,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
+      // Isolate shared device caches BEFORE NotesProvider paints the new uid.
+      if (u?.uid) prepareLocalCacheForUid(u.uid);
+      else clearInMemoryCachesOnSignOut();
       setUser(u);
       setHasPassword(!!u?.providerData.some((p) => p.providerId === 'password'));
       setLoading(false);
@@ -310,6 +317,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     },
     signOut: async () => {
+      clearInMemoryCachesOnSignOut();
       await fbSignOut(auth);
     },
     resetPassword: async (email) => {

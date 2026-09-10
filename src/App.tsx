@@ -16,6 +16,7 @@ import { FloatingOtterSearch } from './components/common/FloatingOtterSearch';
 import { Dashboard } from './components/Dashboard';
 import { ArabicInputHost } from './components/keyboard/ArabicInputHost';
 import { hasNotesPrefetchSettled, prefetchAllNotesLocal, prefetchNotesCatalog, prefetchQuizCatalog } from './lib/itemsStore';
+import { waitForAccountLocalIsolation } from './lib/accountLocalIsolation';
 
 function getUrlAction(): { mode: string | null; oobCode: string | null } {
   const p = new URLSearchParams(window.location.search);
@@ -54,9 +55,17 @@ function Root() {
       return;
     }
     let cancelled = false;
+    setCatalogReady(false);
+    setLocalNotesReady(false);
     const timer = window.setTimeout(() => {
       if (!cancelled) setCatalogReady(true);
     }, 4000);
+    void (async () => {
+      await waitForAccountLocalIsolation();
+      if (cancelled) return;
+      await prefetchAllNotesLocal();
+      if (!cancelled) setLocalNotesReady(true);
+    })();
     void Promise.all([
       prefetchNotesCatalog(user.uid),
       prefetchQuizCatalog(user.uid),
@@ -112,7 +121,7 @@ function Root() {
   if (!localNotesReady || !catalogReady) return <BootLoader />;
 
   return (
-    <NotesProvider>
+    <NotesProvider key={user.uid}>
       <TodosProvider>
         <CountdownsProvider>
           <ArabicInputProvider>
