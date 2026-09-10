@@ -117,6 +117,7 @@ export function AdminPanel() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<UserRow | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [editingLimitUid, setEditingLimitUid] = useState<string | null>(null);
   const [limitInput, setLimitInput] = useState('');
   const [registrationOpen, setRegistrationOpen] = useState(true);
@@ -286,12 +287,21 @@ export function AdminPanel() {
 
   const deleteUser = async (row: UserRow) => {
     setBusy(row.uid);
+    setActionError(null);
     try {
       await adminAction({ action: 'deleteUser', uid: row.uid, email: row.email });
       setRows((prev) => prev.filter((r) => r.uid !== row.uid));
       setConfirmDelete(null);
     } catch (e) {
       console.error('deleteUser failed', e);
+      const msg = e instanceof Error ? e.message : 'delete-failed';
+      setActionError(
+        msg === 'auth-delete-failed'
+          ? 'Kunde inte radera inloggningskontot. Försök igen.'
+          : msg === 'cannot-delete-admin'
+            ? 'Admin-kontot kan inte raderas.'
+            : 'Kunde inte radera användaren. Försök igen.',
+      );
     } finally {
       setBusy(null);
     }
@@ -548,7 +558,10 @@ export function AdminPanel() {
                             {row.blocked ? 'Avblockera' : 'Blockera'}
                           </button>
                           <button
-                            onClick={() => setConfirmDelete(row)}
+                            onClick={() => {
+                              setActionError(null);
+                              setConfirmDelete(row);
+                            }}
                             disabled={busy === row.uid}
                             className="rounded-lg border border-red-300 px-3 py-1.5 text-[12px] font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50 dark:border-red-500/30 dark:hover:bg-red-500/10"
                           >
@@ -570,21 +583,29 @@ export function AdminPanel() {
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900">
             <h2 className="mb-2 text-lg font-bold text-app-text dark:text-gray-100">Radera användare?</h2>
             <p className="mb-1 text-sm text-app-text-secondary dark:text-gray-400">
-              Detta raderar permanent all data för <strong className="text-app-text dark:text-gray-200">{confirmDelete.email}</strong>.
+              Detta raderar permanent inloggningskontot och all data för <strong className="text-app-text dark:text-gray-200">{confirmDelete.email}</strong>.
             </p>
-            <p className="mb-6 text-xs text-app-text-secondary/70 dark:text-gray-500">
-              OBS: Själva inloggningskontot tas bort av Firebase först när användaren loggar in igen blockerad. Datan raderas direkt.
+            <p className="mb-4 text-xs text-app-text-secondary/70 dark:text-gray-500">
+              Åtgärden kan inte ångras.
             </p>
+            {actionError && (
+              <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                {actionError}
+              </p>
+            )}
             <div className="flex flex-col gap-2">
               <button
-                onClick={() => deleteUser(confirmDelete)}
+                onClick={() => void deleteUser(confirmDelete)}
                 disabled={busy === confirmDelete.uid}
                 className="w-full rounded-xl bg-red-500 py-3 text-sm font-bold text-white transition hover:bg-red-600 disabled:opacity-60"
               >
-                {busy === confirmDelete.uid ? 'Raderar…' : 'Ja, radera all data'}
+                {busy === confirmDelete.uid ? 'Raderar…' : 'Ja, radera kontot'}
               </button>
               <button
-                onClick={() => setConfirmDelete(null)}
+                onClick={() => {
+                  setConfirmDelete(null);
+                  setActionError(null);
+                }}
                 className="w-full rounded-xl border border-app-border py-3 text-sm font-semibold text-app-text transition hover:bg-gray-50 dark:border-white/10 dark:text-gray-200 dark:hover:bg-white/5"
               >
                 Avbryt

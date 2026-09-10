@@ -12,9 +12,30 @@ const FREE_STORAGE_LIMIT_MB = 100;
 const PLUS_STORAGE_LIMIT_MB = 1000;
 const MIN_STORAGE_LIMIT_MB = 10;
 const MAX_STORAGE_LIMIT_MB = 10_000;
+const AUTH_SCOPE = 'https://www.googleapis.com/auth/identitytoolkit';
 
 function plusStorageLimitForToggle(isPlus) {
   return isPlus ? PLUS_STORAGE_LIMIT_MB : FREE_STORAGE_LIMIT_MB;
+}
+
+/** Delete Firebase Auth account so the user disappears from the admin list. */
+async function deleteAuthAccount(serviceAccount, accessToken, uid) {
+  const url = `https://identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/accounts:delete`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ localId: uid }),
+  });
+  if (response.ok) return true;
+  const data = await response.json().catch(() => ({}));
+  const message = String(data?.error?.message || '');
+  // Already gone — treat as success so RTDB cleanup still completes.
+  if (message.includes('USER_NOT_FOUND') || response.status === 404) return true;
+  console.error('deleteAuthAccount failed', response.status, message);
+  return false;
 }
 
 export default async function handler(request, response) {
@@ -91,8 +112,20 @@ export default async function handler(request, response) {
       if (email === ADMIN_EMAIL) {
         return response.status(403).json({ error: 'cannot-delete-admin' });
       }
-      const ok = await writeRtdb(accessToken, `/users/${uid}`, null, 'DELETE');
-      if (!ok) return response.status(500).json({ error: 'write-failed' });
+      const authToken = await getGoogleAccessToken(serviceAccount, [AUTH_SCOPE]);
+      const authOk = await deleteAuthAccount(serviceAccount, authToken, uid);
+      if (!authOk) return response.status(500).json({ error: 'auth-delete-failed' });
+
+      // PUT null is the most reliable RTDB wipe (DELETE can no-op on some setups).
+      const dataOk = await writeRtdb(accessToken, `/users/${uid}`, null, 'PUT');
+      if (!dataOk) {
+        // Fallback DELETE if PUT null is rejected.
+        const deleted = await writeRtdb(accessToken, `/users/${uid}`, null, 'DELETE');
+        if (!deleted) return response.status(500).json({ error: 'write-failed' });
+      }
+      // Best-effort presence cleanup — ignore failures.
+      await writeRtdb(accessToken, `/presence/${uid}`, null, 'PUT').catch(() => false);
+
       return response.status(200).json({ ok: true });
     }
 
