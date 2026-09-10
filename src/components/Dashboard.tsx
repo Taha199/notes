@@ -455,7 +455,7 @@ export function Dashboard() {
             </div>
           )}
 
-          {!showGlobalSearch && page === 'files' && <FilesPage search={search} />}
+          {!showGlobalSearch && page === 'files' && <FilesPage />}
           {!showGlobalSearch && page === 'quizDashboard' && (
             <QuizDashboardPage
               onOpenSet={() => {

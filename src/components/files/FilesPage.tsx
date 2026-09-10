@@ -42,7 +42,7 @@ import {
 import { FilePreviewModal } from './FilePreviewModal';
 import { FilesLoadingIndicator } from './FilesLoadingIndicator';
 
-export function FilesPage({ search }: { search: string }) {
+export function FilesPage() {
   const { t } = useLanguage();
   const { user } = useAuth();
   const { show } = useToast();
@@ -51,6 +51,7 @@ export function FilesPage({ search }: { search: string }) {
   const folderRenameRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [folders, setFolders] = useState<FileFolder[]>([]);
+  const [fileNameQuery, setFileNameQuery] = useState('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(() => {
     try {
       const raw = localStorage.getItem(FILES_FOLDER_KEY);
@@ -249,7 +250,7 @@ export function FilesPage({ search }: { search: string }) {
   const fileCountInFolder = (folderId: string) =>
     files.filter((f) => f.folderId === folderId).length;
 
-  const q = search.trim().toLowerCase();
+  const q = fileNameQuery.trim().toLowerCase();
 
   const visibleFolders = useMemo(() => {
     if (currentFolderId) return [];
@@ -259,9 +260,7 @@ export function FilesPage({ search }: { search: string }) {
 
   const visibleFiles = useMemo(() => {
     const listed = q
-      ? files.filter(
-        (file) => file.name.toLowerCase().includes(q) || file.type.toLowerCase().includes(q),
-      )
+      ? files.filter((file) => file.name.toLowerCase().includes(q))
       : files.filter((file) =>
         currentFolderId ? file.folderId === currentFolderId : !file.folderId,
       );
@@ -670,7 +669,30 @@ export function FilesPage({ search }: { search: string }) {
             </span>
           </>
         )}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 sm:flex-initial">
+          <div className="relative min-w-0 w-full sm:w-[200px]">
+            <input
+              type="search"
+              value={fileNameQuery}
+              onChange={(e) => setFileNameQuery(e.target.value)}
+              placeholder={t.filesSearchNamePh}
+              aria-label={t.filesSearchNamePh}
+              className="w-full rounded-xl border border-app-border bg-white py-1.5 pl-8 pr-8 text-[12.5px] text-app-text outline-none transition placeholder:text-app-text-secondary/55 focus:border-primary/45 focus:ring-2 focus:ring-primary/15 dark:border-white/10 dark:bg-white/5 dark:text-gray-100 dark:placeholder:text-gray-500"
+            />
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-app-text-secondary/60 dark:text-gray-500" aria-hidden="true">
+              🔍
+            </span>
+            {fileNameQuery && (
+              <button
+                type="button"
+                onClick={() => setFileNameQuery('')}
+                aria-label={t.clearSearch}
+                className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-lg text-app-text-secondary transition hover:bg-app-bg hover:text-app-text dark:text-gray-400 dark:hover:bg-white/10"
+              >
+                ×
+              </button>
+            )}
+          </div>
           <div className="relative">
             <button
               type="button"
@@ -865,7 +887,7 @@ export function FilesPage({ search }: { search: string }) {
         >
           <span className="mb-3 text-5xl opacity-30">{currentFolderId ? '📁' : '📎'}</span>
           <p className="text-sm">
-            {search ? t.emptySearch : currentFolderId ? t.filesFolderEmpty : t.filesEmpty}
+            {q ? t.emptySearch : currentFolderId ? t.filesFolderEmpty : t.filesEmpty}
           </p>
         </div>
       ) : hasContent ? (
