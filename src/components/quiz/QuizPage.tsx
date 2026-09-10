@@ -133,9 +133,10 @@ interface QuizItemRowProps {
   } | null;
   onOpenSource?: () => void;
   onAddRubrik?: () => void;
+  onInsertAfter?: () => void;
 }
 
-const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition, sourceLocation, onOpenSource, onAddRubrik }: QuizItemRowProps) {
+const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speakingId, onSpeak, favs, onToggleFav, progressMap, sets, folders, onMoveToSet, hideAnswers, answerHidden, onToggleHideAnswer, onSetStatus, canReorder, questionNumber, totalQuestions, onMoveToPosition, sourceLocation, onOpenSource, onAddRubrik, onInsertAfter }: QuizItemRowProps) {
   const { t } = useLanguage();
   const [moveOpen, setMoveOpen] = useState(false);
   const [keepCopy, setKeepCopy] = useState(false);
@@ -390,7 +391,7 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
           <button onClick={onDelete} className="text-[13px] text-app-text-secondary/40 transition-all hover:scale-110 hover:text-red-500" title={t.quizDelete} aria-label={t.quizDelete}>🗑️</button>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-app-border/40 bg-app-bg/30 px-5 py-1.5 dark:border-white/5 dark:bg-white/[0.015]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-app-border/40 bg-app-bg/30 px-5 py-1.5 dark:border-white/5 dark:bg-white/[0.015]">
         {item.createdAt && (
           <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
             {t.quizCreated} {new Date(item.createdAt).toLocaleString()}
@@ -400,6 +401,17 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
           <span className="text-[10px] text-app-text-secondary/35 dark:text-gray-600">
             {t.quizUpdated} {new Date(item.updatedAt).toLocaleString()}
           </span>
+        )}
+        {onInsertAfter && (
+          <button
+            type="button"
+            onClick={onInsertAfter}
+            title={t.quizInsertQuestion}
+            aria-label={t.quizInsertQuestion}
+            className="ml-auto flex h-6 w-6 items-center justify-center rounded-lg border border-dashed border-app-border/70 text-[14px] font-semibold leading-none text-app-text-secondary/45 transition hover:border-primary hover:bg-primary/10 hover:text-primary dark:border-white/15 dark:text-gray-500 dark:hover:border-primary/50 dark:hover:bg-primary/15"
+          >
+            +
+          </button>
         )}
       </div>
     </div>
@@ -421,6 +433,8 @@ const QuizItemRow = memo(function QuizItemRow({ item, onEdit, onDelete, speaking
   && prev.sourceLocation?.setName === next.sourceLocation?.setName
   && prev.sourceLocation?.folderName === next.sourceLocation?.folderName
   && prev.sourceLocation?.fromNotes === next.sourceLocation?.fromNotes
+  && !!prev.onAddRubrik === !!next.onAddRubrik
+  && !!prev.onInsertAfter === !!next.onInsertAfter
 ));
 
 const OPT_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
@@ -455,6 +469,8 @@ interface OpenQuestionForm {
   options?: string[];
   correctIndexes?: number[];
   explanation?: string;
+  /** When set, the blank form renders under this item (insert between cards). */
+  insertAfterItemId?: number;
 }
 
 function cloneOpenForms(forms: OpenQuestionForm[]): OpenQuestionForm[] {
@@ -507,6 +523,7 @@ function sanitizeOpenForm(raw: unknown): OpenQuestionForm | null {
       ? f.correctIndexes.filter((n): n is number => typeof n === 'number')
       : undefined,
     explanation: typeof f.explanation === 'string' ? f.explanation : undefined,
+    insertAfterItemId: typeof f.insertAfterItemId === 'number' ? f.insertAfterItemId : undefined,
   };
 }
 
@@ -979,6 +996,7 @@ export function QuizPage({
   quizzesRef.current = quizzes;
   const allQuizSetsRef = useRef(allQuizSets);
   allQuizSetsRef.current = allQuizSets;
+  const orderedItemIdsRef = useRef<number[]>([]);
   const autoSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const livePushTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const currentFormsScopeKey = formsScopeKey(selectedSetId, selectedFolderId);
@@ -1286,6 +1304,14 @@ export function QuizPage({
           correctIndexes: patch.correctIndexes,
           explanation: patch.explanation,
         });
+        if (form.insertAfterItemId != null && id > 0) {
+          const liveIds = orderedItemIdsRef.current.filter((x) => x !== id);
+          const idx = liveIds.indexOf(form.insertAfterItemId);
+          if (idx >= 0) {
+            if (itemSort !== 'manual') changeItemSort('manual');
+            setItemsOrderInSet(setId, [...liveIds.slice(0, idx + 1), id, ...liveIds.slice(idx + 1)]);
+          }
+        }
         updateForm(formId, { itemId: id, question: q, answer: a, saveStatus: 'saved', finalized: true });
         return id;
       }
@@ -1344,7 +1370,10 @@ export function QuizPage({
     persistForm(formId, override, finalize);
   };
 
-  const addNewForm = (initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>) => {
+  const addNewForm = (
+    initial?: Partial<Pick<OpenQuestionForm, 'itemId' | 'question' | 'answer'>>,
+    insertAfterItemId?: number,
+  ) => {
     const setId = selectedSetIdRef.current;
     const folderId = selectedFolderIdRef.current;
     const scopeKey = formsScopeKey(setId, folderId);
@@ -1397,6 +1426,7 @@ export function QuizPage({
         question: '',
         answer: '',
         saveStatus: 'empty',
+        ...(insertAfterItemId != null ? { insertAfterItemId } : {}),
       });
       return;
     }
@@ -1409,6 +1439,13 @@ export function QuizPage({
       answer: '',
       saveStatus: 'saved',
     });
+    if (insertAfterItemId != null) {
+      const liveIds = quizzesRef.current.filter((q) => !q.trashed).map((q) => q.id).filter((x) => x !== id);
+      const idx = liveIds.indexOf(insertAfterItemId);
+      if (idx >= 0) {
+        setQuizzesOrder([...liveIds.slice(0, idx + 1), id, ...liveIds.slice(idx + 1)]);
+      }
+    }
   };
 
   const handleSaveForm = (formId: string, override?: SavePayload) => {
@@ -1432,6 +1469,10 @@ export function QuizPage({
 
   const handleAddQuestionClick = () => {
     addNewForm();
+  };
+
+  const handleInsertAfter = (afterItemId: number) => {
+    addNewForm(undefined, afterItemId);
   };
 
   const formSaveSigs = useMemo(
@@ -1890,6 +1931,8 @@ export function QuizPage({
     });
   }, [displayItems, itemSort, currentProgress, selectedSetId]);
 
+  orderedItemIdsRef.current = orderedItems.map((item) => item.id);
+
   const listRows = useMemo(
     () => (selectedSetId
       ? buildQuizListRows(orderedItems, selectedSet?.sections ?? [])
@@ -1989,6 +2032,7 @@ export function QuizPage({
         sourceLocation={sourceLocation}
         onOpenSource={sourceItemId ? () => openQuestionSource(sourceItemId) : undefined}
         onAddRubrik={selectedSetId ? () => setSectionDraftBeforeId(item.id) : undefined}
+        onInsertAfter={() => handleInsertAfter(item.id)}
       />
     );
   };
@@ -2927,6 +2971,17 @@ export function QuizPage({
                     </div>
                   )}
                   {renderItemOrForm(row.item, row.questionNumber - 1)}
+                  {openForms
+                    .filter((f) => (
+                      f.itemId === null
+                      && f.insertAfterItemId === row.item.id
+                      && (!currentFormsScopeKey || f.scopeKey === currentFormsScopeKey)
+                    ))
+                    .map((form, formIndex) => (
+                      <div key={`insert-${form.formId}`} className="mt-2">
+                        {renderOpenForm(form, formIndex, row.questionNumber + 1)}
+                      </div>
+                    ))}
                 </div>
               );
             })}
@@ -2949,7 +3004,11 @@ export function QuizPage({
             )}
 
             {openForms
-              .filter((f) => f.itemId === null && (!currentFormsScopeKey || f.scopeKey === currentFormsScopeKey))
+              .filter((f) => (
+                f.itemId === null
+                && f.insertAfterItemId == null
+                && (!currentFormsScopeKey || f.scopeKey === currentFormsScopeKey)
+              ))
               .map((form, formIndex) => renderOpenForm(form, formIndex))}
 
             {/* Add question dashed button — opens another form without closing existing ones */}

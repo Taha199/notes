@@ -499,6 +499,7 @@ export interface Translation {
   quizItemsShort: string;
   quizDelete: string;
   quizCreated: string;
+  quizInsertQuestion: string;
   quizUpdated: string;
   quizReorderHint: string;
   quizReorderAria: string;
@@ -1017,6 +1018,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizItemsShort: 'items',
     quizDelete: 'Delete',
     quizCreated: 'Created:',
+    quizInsertQuestion: 'Add question here',
     quizUpdated: 'Updated:',
     quizReorderHint: 'Enter a number and press Enter — moves to that position',
     quizReorderAria: 'Move to number',
@@ -1533,6 +1535,7 @@ export const LANGS: Record<Lang, Translation> = {
     quizItemsShort: 'st',
     quizDelete: 'Ta bort',
     quizCreated: 'Skapad:',
+    quizInsertQuestion: 'Lägg till fråga här',
     quizUpdated: 'Uppdaterad:',
     quizReorderHint: 'Skriv nummer och tryck Enter — flyttar till den positionen',
     quizReorderAria: 'Flytta till nummer',
