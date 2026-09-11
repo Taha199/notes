@@ -1,6 +1,31 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { QuizSection } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { AUTO_LINK_CLASS, linkifyPlainTextParts } from '../../lib/autoLink';
+
+function LinkifiedTitle({ title }: { title: string }) {
+  const parts = useMemo(() => linkifyPlainTextParts(title), [title]);
+  return (
+    <>
+      {parts.map((part, i) => (
+        part.type === 'link' && part.href ? (
+          <a
+            key={`${i}-${part.href}`}
+            className={AUTO_LINK_CLASS}
+            href={part.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {part.value}
+          </a>
+        ) : (
+          <span key={`${i}-t`}>{part.value}</span>
+        )
+      ))}
+    </>
+  );
+}
 
 export function QuizSectionHeading({
   section,
@@ -63,7 +88,9 @@ export function QuizSectionHeading({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary/70">{t.quizSectionLabel}</p>
-            <h3 className="mt-1 text-base font-bold leading-snug text-app-text dark:text-gray-100">{section.title}</h3>
+            <h3 className="mt-1 text-base font-bold leading-snug text-app-text [overflow-wrap:anywhere] dark:text-gray-100">
+              <LinkifiedTitle title={section.title} />
+            </h3>
           </div>
           <div className="flex shrink-0 items-center gap-1 opacity-0 transition group-hover:opacity-100">
             <button

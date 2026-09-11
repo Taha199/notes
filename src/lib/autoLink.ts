@@ -64,6 +64,25 @@ function findUrlsInText(text: string): { index: number; length: number; url: str
   return matches.sort((a, b) => a.index - b.index);
 }
 
+/** Split plain text into text + clickable URL parts for React (e.g. quiz rubrik). */
+export function linkifyPlainTextParts(text: string): { type: 'text' | 'link'; value: string; href?: string }[] {
+  if (!text) return [];
+  const matches = findUrlsInText(text);
+  if (matches.length === 0) return [{ type: 'text', value: text }];
+  const parts: { type: 'text' | 'link'; value: string; href?: string }[] = [];
+  let lastIndex = 0;
+  for (const match of matches) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
+    }
+    const { href, display } = trimTrailingPunctuation(match.url);
+    parts.push({ type: 'link', value: display, href });
+    lastIndex = match.index + match.length;
+  }
+  if (lastIndex < text.length) parts.push({ type: 'text', value: text.slice(lastIndex) });
+  return parts;
+}
+
 function upgradeTextNodeToLinks(textNode: Text): boolean {
   const parent = textNode.parentNode;
   if (!parent) return false;
