@@ -573,11 +573,12 @@ function suppressToolbarHostCaret(host: HTMLElement) {
   host.querySelectorAll('button, [href], input, select, textarea, [tabindex]').forEach((el) => {
     if (el instanceof HTMLElement) el.tabIndex = -1;
   });
+  // The host itself must stay without contenteditable=false (Chrome then treats the
+  // whole wrap as a dead island and cells stop receiving clicks). The React portal
+  // marks `.note-table-toolbar` contenteditable=false so typing cannot land in labels.
+  host.removeAttribute('contenteditable');
   if (host.dataset.noteTableHostBound === '1') return;
   host.dataset.noteTableHostBound = '1';
-  // Do NOT set contenteditable=false on the host: in Chrome/Safari that makes the
-  // surrounding table wrap behave like a non-editable island, so clicks never land
-  // in cells. Keep the strip non-editable via preventDefault + CSS user-select.
   host.addEventListener('mousedown', (e) => {
     // Always preventDefault so nested controls never steal focus from the editor.
     // Action handlers still run (React onMouseDown); they must not rely on focus.
