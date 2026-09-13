@@ -1337,7 +1337,9 @@ export function QuizPage({
     const storedItem = setId
       ? coerceQuizItems(allQuizSetsRef.current.find((s) => s.id === setId)?.items).find((i) => i.id === form.itemId)
       : quizzesRef.current.find((item) => item.id === form.itemId);
-    if (storedItem && !quizPatchChangesContent(storedItem, patch)) {
+    // Autosave can skip no-ops against React state. Explicit Save (finalize) must
+    // always call update* so the card list repaints from live ref writes.
+    if (!finalize && storedItem && !quizPatchChangesContent(storedItem, patch)) {
       if (form.saveStatus !== 'saved') updateForm(formId, { saveStatus: 'saved' });
       return form.itemId;
     }

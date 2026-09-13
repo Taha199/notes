@@ -7529,7 +7529,11 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const updateQuiz = (id: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
     const existing = quizzesRef.current.find((q) => q.id === id);
-    if (!existing || !quizPatchChangesContent(existing, patch)) return;
+    if (!existing) return;
+    const changed = quizPatchChangesContent(existing, patch);
+    // Live keystrokes skip no-op writes. Explicit Save must still repaint React —
+    // live typing updates quizzesRef only, so the card list can lag behind the ref.
+    if (!changed && !forceCloud) return;
     const updated: QuizItem = { ...existing, ...patch, updatedAt: new Date().toISOString() };
     // Live keystrokes: single-item durable write only. Never stringify the full
     // quizzes[] catalog or force React to remount every card (Chrome OOM / error 5).
@@ -8304,14 +8308,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
   const updateItemInSet = (setId: string, itemId: number, patch: Partial<Pick<QuizItem, 'question' | 'answer' | 'options' | 'correctIndex' | 'correctIndexes' | 'explanation' | 'draft'>>, forceCloud = false) => {
     const set = quizSetsRef.current.find((s) => s.id === setId);
     const existing = set?.items.find((i) => i.id === itemId);
-    if (!existing || !quizPatchChangesContent(existing, patch)) return;
+    if (!existing) return;
+    const changed = quizPatchChangesContent(existing, patch);
+    // Live keystrokes skip no-op writes. Explicit Save must still repaint React —
+    // live typing updates quizSetsRef only, so cards can keep showing stale HTML.
+    if (!changed && !forceCloud) return;
     const updated: QuizItem = { ...existing, ...patch, updatedAt: new Date().toISOString() };
     // Live path: IDB + coalesced ById only. Keystrokes must never JSON.stringify
     // the full quizSets tree (base64 answers) or the renderer OOMs (Chrome error 5).
     void persistQuizItemDurable(userRef.current?.uid, updated, setId, { immediate: forceCloud });
     const next = quizSetsRef.current.map((s) => (
       s.id === setId
-        ? { ...s, items: s.items.map((i) => (i.id === itemId ? updated : i)) }
+        ? { ...s, items: s.items.map((i) => (i.id === itemId ? updated : i)), updatedAt: new Date().toISOString() }
         : s
     ));
     quizSetsRef.current = next;
