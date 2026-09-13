@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTodos } from '../../contexts/TodosContext';
-import { addMonths, monthWeekRows, toDateKey, todosForDate } from '../../lib/todosStore';
+import {
+  addMonths,
+  expandRecurringTodoDates,
+  monthWeekRows,
+  toDateKey,
+  todosForDate,
+  type TodoRecurrenceMode,
+} from '../../lib/todosStore';
 import { normalizeSearch } from '../../lib/noteSearch';
 
 function weekdayLabels(locale: string): string[] {
@@ -12,6 +19,9 @@ function weekdayLabels(locale: string): string[] {
     return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(day);
   });
 }
+
+/** Monday-first labels → JS getDay() (0=Sun … 6=Sat). */
+const WEEKDAY_JS_FROM_MONDAY = [1, 2, 3, 4, 5, 6, 0] as const;
 
 function capitalizeLabel(value: string) {
   if (!value) return value;
@@ -164,7 +174,7 @@ function MonthYearPicker({
 
 export function TodoCalendarPage({ search = '' }: { search?: string }) {
   const { t } = useLanguage();
-  const { todos, addTodo, toggleTodo, renameTodo, setTodoTime, deleteTodo } = useTodos();
+  const { todos, addTodo, addRecurringTodos, toggleTodo, renameTodo, setTodoTime, deleteTodo } = useTodos();
   const todayKey = toDateKey(new Date());
   const [cursor, setCursor] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedKey, setSelectedKey] = useState(todayKey);
@@ -172,6 +182,16 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
   const [draftTime, setDraftTime] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [recurringOpen, setRecurringOpen] = useState(false);
+  const [recTitle, setRecTitle] = useState('');
+  const [recTime, setRecTime] = useState('');
+  const [recMode, setRecMode] = useState<TodoRecurrenceMode>('daily');
+  const [recWeekdayMonIndex, setRecWeekdayMonIndex] = useState(() => {
+    const js = new Date(`${todayKey}T12:00:00`).getDay();
+    return WEEKDAY_JS_FROM_MONDAY.indexOf(js as 0 | 1 | 2 | 3 | 4 | 5 | 6);
+  });
+  const [recFrom, setRecFrom] = useState(todayKey);
+  const [recTo, setRecTo] = useState(todayKey);
 
   const query = normalizeSearch(search);
   const visibleTodos = useMemo(
@@ -212,6 +232,55 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
     addTodo(draft, selectedKey, draftTime);
     setDraft('');
     setDraftTime('');
+  };
+
+  const weekdaysLong = useMemo(() => {
+    const monday = new Date(2026, 7, 10);
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = new Date(monday);
+      day.setDate(monday.getDate() + i);
+      return capitalizeLabel(new Intl.DateTimeFormat(t.dateLocale, { weekday: 'long' }).format(day));
+    });
+  }, [t.dateLocale]);
+
+  const recPreviewCount = useMemo(() => {
+    const weekday = WEEKDAY_JS_FROM_MONDAY[recWeekdayMonIndex] ?? 1;
+    return expandRecurringTodoDates(
+      recFrom,
+      recTo,
+      recMode,
+      recMode === 'weekly' ? weekday : undefined,
+    ).length;
+  }, [recFrom, recTo, recMode, recWeekdayMonIndex]);
+
+  const openRecurringPanel = () => {
+    setRecTitle('');
+    setRecTime('');
+    setRecMode('daily');
+    const js = new Date(`${selectedKey}T12:00:00`).getDay();
+    const monIdx = WEEKDAY_JS_FROM_MONDAY.indexOf(js as 0 | 1 | 2 | 3 | 4 | 5 | 6);
+    setRecWeekdayMonIndex(monIdx >= 0 ? monIdx : 0);
+    setRecFrom(selectedKey);
+    setRecTo(selectedKey);
+    setRecurringOpen(true);
+  };
+
+  const submitRecurring = () => {
+    if (!recTitle.trim() || recPreviewCount <= 0) return;
+    const weekday = WEEKDAY_JS_FROM_MONDAY[recWeekdayMonIndex] ?? 1;
+    const n = addRecurringTodos({
+      title: recTitle,
+      time: recTime,
+      mode: recMode,
+      weekday: recMode === 'weekly' ? weekday : undefined,
+      startDate: recFrom,
+      endDate: recTo,
+    });
+    if (n > 0) {
+      setRecurringOpen(false);
+      setRecTitle('');
+      setRecTime('');
+    }
   };
 
   return (
@@ -346,6 +415,134 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
             <p className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.pageTodo}</p>
             <h4 className="mt-0.5 text-base font-bold capitalize text-app-text dark:text-gray-100">{selectedLabel}</h4>
           </div>
+
+          <button
+            type="button"
+            onClick={() => (recurringOpen ? setRecurringOpen(false) : openRecurringPanel())}
+            className={
+              'mb-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[13px] font-semibold transition ' +
+              (recurringOpen
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-app-border bg-app-bg text-app-text hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-100')
+            }
+          >
+            <span aria-hidden="true">🔁</span>
+            {t.todoRecurring}
+          </button>
+
+          {recurringOpen && (
+            <div className="mb-3 space-y-2.5 rounded-2xl border border-primary/25 bg-primary/[0.04] p-3 dark:border-primary/30 dark:bg-primary/10">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-primary/80">{t.todoRecurringTitle}</p>
+              <input
+                value={recTitle}
+                onChange={(e) => setRecTitle(e.target.value)}
+                placeholder={t.todoRecurringPh}
+                className="w-full rounded-xl border border-app-border bg-white px-3 py-2.5 text-[13.5px] text-app-text outline-none placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRecMode('daily')}
+                  className={
+                    'rounded-xl border px-3 py-2 text-[12px] font-semibold transition ' +
+                    (recMode === 'daily'
+                      ? 'border-primary bg-primary text-white'
+                      : 'border-app-border bg-white text-app-text hover:border-primary/40 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100')
+                  }
+                >
+                  {t.todoRecurringEveryDay}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecMode('weekly')}
+                  className={
+                    'rounded-xl border px-3 py-2 text-[12px] font-semibold transition ' +
+                    (recMode === 'weekly'
+                      ? 'border-primary bg-primary text-white'
+                      : 'border-app-border bg-white text-app-text hover:border-primary/40 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100')
+                  }
+                >
+                  {t.todoRecurringEveryWeekday}
+                </button>
+              </div>
+              {recMode === 'weekly' && (
+                <div className="grid grid-cols-7 gap-1">
+                  {weekdaysLong.map((label, i) => (
+                    <button
+                      key={label}
+                      type="button"
+                      title={label}
+                      onClick={() => setRecWeekdayMonIndex(i)}
+                      className={
+                        'rounded-lg px-0.5 py-2 text-[10px] font-bold uppercase transition ' +
+                        (recWeekdayMonIndex === i
+                          ? 'bg-primary text-white'
+                          : 'bg-white text-app-text-secondary hover:bg-app-bg dark:bg-gray-800 dark:text-gray-300')
+                      }
+                    >
+                      {weekdays[i]?.slice(0, 2)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 text-[11px] font-semibold text-app-text-secondary">
+                  {t.todoRecurringFrom}
+                  <input
+                    type="date"
+                    value={recFrom}
+                    onChange={(e) => setRecFrom(e.target.value)}
+                    className="rounded-xl border border-app-border bg-white px-2.5 py-2 text-[13px] font-normal text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[11px] font-semibold text-app-text-secondary">
+                  {t.todoRecurringTo}
+                  <input
+                    type="date"
+                    value={recTo}
+                    onChange={(e) => setRecTo(e.target.value)}
+                    className="rounded-xl border border-app-border bg-white px-2.5 py-2 text-[13px] font-normal text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="time"
+                  value={recTime}
+                  onChange={(e) => setRecTime(e.target.value)}
+                  aria-label={t.todoTimeOptional}
+                  title={t.todoTimeOptional}
+                  className="w-[7.25rem] rounded-xl border border-app-border bg-white px-2 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                />
+                <p className={
+                  'min-w-0 flex-1 text-[12px] ' +
+                  (recPreviewCount > 0 ? 'text-app-text-secondary' : 'text-red-600 dark:text-red-400')
+                }>
+                  {recPreviewCount > 0
+                    ? t.todoRecurringCount.replace('{count}', String(recPreviewCount))
+                    : t.todoRecurringInvalidRange}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={submitRecurring}
+                  disabled={!recTitle.trim() || recPreviewCount <= 0}
+                  className="flex-1 rounded-xl bg-primary px-3 py-2.5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {t.todoRecurringCreate}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecurringOpen(false)}
+                  className="rounded-xl border border-app-border px-3 py-2.5 text-[13px] font-semibold text-app-text-secondary hover:bg-app-bg dark:border-white/10"
+                >
+                  {t.todoRecurringCancel}
+                </button>
+              </div>
+            </div>
+          )}
+
           <form
             className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-nowrap sm:items-stretch"
             onSubmit={(e) => {

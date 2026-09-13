@@ -137,3 +137,32 @@ export function todosForDate(todos: TodoItem[], dateKey: string): TodoItem[] {
 export function incompleteTodoCount(todos: TodoItem[]): number {
   return todos.filter((todo) => !todo.done).length;
 }
+
+export type TodoRecurrenceMode = 'daily' | 'weekly';
+
+/** Inclusive date keys from start→end matching daily or a weekday (0=Sun … 6=Sat). */
+export function expandRecurringTodoDates(
+  startKey: string,
+  endKey: string,
+  mode: TodoRecurrenceMode,
+  weekday?: number,
+): string[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey)) return [];
+  if (endKey < startKey) return [];
+  const start = parseDateKey(startKey);
+  const end = parseDateKey(endKey);
+  const out: string[] = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const MAX = 400;
+  while (cursor.getTime() <= last.getTime() && out.length < MAX) {
+    const key = toDateKey(cursor);
+    if (mode === 'daily') {
+      out.push(key);
+    } else if (typeof weekday === 'number' && weekday >= 0 && weekday <= 6 && cursor.getDay() === weekday) {
+      out.push(key);
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+}

@@ -11,17 +11,27 @@ import {
   normalizeTodoTime,
   readDeletedTodoIds,
   readTodosLocal,
+  expandRecurringTodoDates,
   TODOS_DELETED_LS_KEY,
   TODOS_LS_KEY,
   TODOS_UID_KEY,
   writeDeletedTodoIds,
   writeTodosLocal,
+  type TodoRecurrenceMode,
 } from '../lib/todosStore';
 
 interface TodosContextValue {
   todos: TodoItem[];
   incompleteCount: number;
   addTodo: (title: string, date: string, time?: string) => void;
+  addRecurringTodos: (opts: {
+    title: string;
+    time?: string;
+    mode: TodoRecurrenceMode;
+    weekday?: number;
+    startDate: string;
+    endDate: string;
+  }) => number;
   toggleTodo: (id: string) => void;
   renameTodo: (id: string, title: string) => void;
   setTodoTime: (id: string, time?: string) => void;
@@ -125,6 +135,40 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     persistTodoCloud(user?.uid, todo);
   }, [commit, user?.uid]);
 
+  const addRecurringTodos = useCallback((opts: {
+    title: string;
+    time?: string;
+    mode: TodoRecurrenceMode;
+    weekday?: number;
+    startDate: string;
+    endDate: string;
+  }) => {
+    const trimmed = opts.title.trim();
+    if (!trimmed) return 0;
+    const dates = expandRecurringTodoDates(
+      opts.startDate,
+      opts.endDate,
+      opts.mode,
+      opts.mode === 'weekly' ? opts.weekday : undefined,
+    );
+    if (!dates.length) return 0;
+    const now = Date.now();
+    const normalizedTime = normalizeTodoTime(opts.time);
+    const series = `rec-${now}-${Math.random().toString(36).slice(2, 7)}`;
+    const created: TodoItem[] = dates.map((date, i) => ({
+      id: `todo-${series}-${i}`,
+      title: trimmed,
+      done: false,
+      date,
+      ...(normalizedTime ? { time: normalizedTime } : {}),
+      createdAt: now + i,
+      updatedAt: now + i,
+    }));
+    commit([...todosRef.current, ...created]);
+    for (const todo of created) persistTodoCloud(user?.uid, todo);
+    return created.length;
+  }, [commit, user?.uid]);
+
   const toggleTodo = useCallback((id: string) => {
     const next = todosRef.current.map((todo) => (
       todo.id === id ? { ...todo, done: !todo.done, updatedAt: Date.now() } : todo
@@ -175,11 +219,12 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     todos,
     incompleteCount: incompleteTodoCount(todos),
     addTodo,
+    addRecurringTodos,
     toggleTodo,
     renameTodo,
     setTodoTime,
     deleteTodo,
-  }), [todos, addTodo, toggleTodo, renameTodo, setTodoTime, deleteTodo]);
+  }), [todos, addTodo, addRecurringTodos, toggleTodo, renameTodo, setTodoTime, deleteTodo]);
 
   return <TodosContext.Provider value={value}>{children}</TodosContext.Provider>;
 }

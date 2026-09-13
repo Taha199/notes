@@ -730,6 +730,17 @@ export interface Translation {
   todoTime: string;
   todoTimeOptional: string;
   todoClearTime: string;
+  todoRecurring: string;
+  todoRecurringTitle: string;
+  todoRecurringPh: string;
+  todoRecurringEveryDay: string;
+  todoRecurringEveryWeekday: string;
+  todoRecurringFrom: string;
+  todoRecurringTo: string;
+  todoRecurringCreate: string;
+  todoRecurringCancel: string;
+  todoRecurringCount: string;
+  todoRecurringInvalidRange: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -1249,6 +1260,17 @@ export const LANGS: Record<Lang, Translation> = {
     todoTime: 'Time',
     todoTimeOptional: 'Time (optional)',
     todoClearTime: 'Clear time',
+    todoRecurring: 'Recurring task',
+    todoRecurringTitle: 'Create recurring task',
+    todoRecurringPh: 'Task that repeats…',
+    todoRecurringEveryDay: 'Every day',
+    todoRecurringEveryWeekday: 'Every selected weekday',
+    todoRecurringFrom: 'From',
+    todoRecurringTo: 'To',
+    todoRecurringCreate: 'Create series',
+    todoRecurringCancel: 'Cancel',
+    todoRecurringCount: '{count} days will be created',
+    todoRecurringInvalidRange: 'Choose a valid date range',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -1766,5 +1788,16 @@ export const LANGS: Record<Lang, Translation> = {
     todoTime: 'Tid',
     todoTimeOptional: 'Tid (valfritt)',
     todoClearTime: 'Ta bort tid',
+    todoRecurring: 'Återkommande uppgift',
+    todoRecurringTitle: 'Skapa återkommande uppgift',
+    todoRecurringPh: 'Uppgift som upprepas…',
+    todoRecurringEveryDay: 'Varje dag',
+    todoRecurringEveryWeekday: 'Vald veckodag varje vecka',
+    todoRecurringFrom: 'Från',
+    todoRecurringTo: 'Till',
+    todoRecurringCreate: 'Skapa serie',
+    todoRecurringCancel: 'Avbryt',
+    todoRecurringCount: '{count} dagar skapas',
+    todoRecurringInvalidRange: 'Välj ett giltigt datumintervall',
   },
 };
