@@ -493,8 +493,6 @@ body {
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;
-  /* Keep menu labels out of the editable tree even if a browser parks the caret here. */
-  -webkit-user-modify: read-only;
 }
 
 .note-content .note-table-toolbar .note-table-toolbar__btn,

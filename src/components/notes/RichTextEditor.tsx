@@ -1497,7 +1497,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const node = r.commonAncestorContainer;
     const el = node instanceof Element ? node : node.parentElement;
     // Never remember a caret parked on table menu labels.
-    if (el?.closest(`.${NOTE_TABLE_TOOLBAR_HOST}, [data-note-table-toolbar]`)) return;
+    if (el?.closest('[data-note-table-toolbar]')) return;
     savedRange.current = r.cloneRange();
     if (!r.collapsed) savedFormattingRange.current = r.cloneRange();
     else savedFormattingRange.current = null;
@@ -1512,7 +1512,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed.contains(range.commonAncestorContainer)) return;
     const node = range.commonAncestorContainer;
     const el = node instanceof Element ? node : node.parentElement;
-    if (el?.closest(`.${NOTE_TABLE_TOOLBAR_HOST}, [data-note-table-toolbar]`)) return;
+    if (el?.closest('[data-note-table-toolbar]')) return;
     savedRange.current = range.cloneRange();
     if (!range.collapsed) savedFormattingRange.current = range.cloneRange();
     else savedFormattingRange.current = null;
@@ -5159,12 +5159,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         selectionRafRef.current = null;
         const ed = editorRef.current;
         if (!ed) return;
-        // Never persist a caret parked on table menu labels — that is what made
-        // later keystrokes rewrite "Line above" / other chrome text.
-        if (isSelectionInTableToolbarRef.current()) {
-          ejectCaretFromTableToolbarRef.current();
-          return;
-        }
         const focusedInEditor = document.activeElement === ed || ed.contains(document.activeElement);
         const sel = window.getSelection();
         const selInEd = sel?.rangeCount && ed.contains(sel.getRangeAt(0).commonAncestorContainer);
@@ -5250,10 +5244,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return () => document.removeEventListener('keydown', onDocKeyDown, true);
   }, [editable]);
 
-  /** True when focus landed on the in-editor table chrome ("Line above", etc.). */
+  /** True when focus landed on table menu labels — not the host strip or a cell. */
   const isTableToolbarFocusTarget = (node: Node | null): boolean => {
     if (!(node instanceof Element)) return false;
-    return !!node.closest(`.${NOTE_TABLE_TOOLBAR_HOST}, [data-note-table-toolbar]`);
+    return !!node.closest('[data-note-table-toolbar]');
   };
 
   const isSelectionInTableToolbar = (): boolean => {
@@ -5263,73 +5257,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return !!el && isTableToolbarFocusTarget(el);
   };
 
-  /** Move caret out of table menu labels without remounting the toolbar UI. */
-  const ejectCaretFromTableToolbar = (): boolean => {
-    if (!isSelectionInTableToolbar()) return false;
-    const ed = editorRef.current;
-    const ctx = activeTableCtxRef.current;
-    const preferred = savedRange.current?.cloneRange() ?? null;
-    if (ed) blurTableToolbarFocus(ed);
-    if (
-      preferred
-      && preferred.commonAncestorContainer.isConnected
-      && ed?.contains(preferred.commonAncestorContainer)
-      && !isTableToolbarFocusTarget(preferred.commonAncestorContainer)
-    ) {
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      try { sel?.addRange(preferred); } catch { /* stale */ }
-      saveSel();
-      return true;
-    }
-    if (ctx?.cell.isConnected) {
-      placeCaretInTableCell(ctx.cell);
-      saveSel();
-      return true;
-    }
-    if (ed) {
-      ed.focus({ preventScroll: true });
-      blurTableToolbarFocus(ed);
-    }
-    return true;
-  };
-
   /** Kick focus off table menu controls so formatting never targets "Line above". */
   const blurTableToolbarFocus = (ed: HTMLElement) => {
     const active = document.activeElement;
     if (active instanceof HTMLElement && ed.contains(active) && isTableToolbarFocusTarget(active)) {
       active.blur();
     }
-    ed.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST} button, [data-note-table-toolbar] button, [data-note-table-toolbar] [role="button"]`)
+    ed.querySelectorAll(`[data-note-table-toolbar] button, [data-note-table-toolbar] [role="button"]`)
       .forEach((el) => {
         if (el instanceof HTMLElement && el.tabIndex >= 0) el.tabIndex = -1;
         if (el === document.activeElement && el instanceof HTMLElement) el.blur();
       });
   };
-
-  // Block typing that landed in table menu chrome; redirect into the active cell.
-  const ejectCaretFromTableToolbarRef = useRef(ejectCaretFromTableToolbar);
-  ejectCaretFromTableToolbarRef.current = ejectCaretFromTableToolbar;
-  const isSelectionInTableToolbarRef = useRef(isSelectionInTableToolbar);
-  isSelectionInTableToolbarRef.current = isSelectionInTableToolbar;
-
-  useEffect(() => {
-    if (!editable) return;
-    const ed = editorRef.current;
-    if (!ed) return;
-    const onBeforeInput = (e: Event) => {
-      const input = e as InputEvent;
-      if (!isSelectionInTableToolbarRef.current()) return;
-      e.preventDefault();
-      e.stopPropagation();
-      ejectCaretFromTableToolbarRef.current();
-      if (input.inputType === 'insertText' && input.data) {
-        document.execCommand('insertText', false, input.data);
-      }
-    };
-    ed.addEventListener('beforeinput', onBeforeInput, true);
-    return () => ed.removeEventListener('beforeinput', onBeforeInput, true);
-  }, [editable]);
 
   /** Restore the pre-toolbar selection into this editor before applying marks. */
   const restoreToolbarSelection = (): Range | null => {
@@ -7047,6 +6986,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           }
         }}
         onBeforeInput={(e) => {
+          // Block edits that landed on menu labels only — never intercept cell typing.
+          if (isSelectionInTableToolbar()) {
+            e.preventDefault();
+            return;
+          }
           const inputEvent = e.nativeEvent as InputEvent;
           const inputType = inputEvent.inputType;
           const nativeEvent = { isComposing: inputEvent.isComposing };
@@ -7357,8 +7301,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       )}
 
       {/* Table toolbars — pinned above every table while edit mode is open.
-          contentEditable=false on the menu + beforeinput guard keeps cell typing
-          out of the labels without floating overlays. */}
+          contentEditable=false on the menu keeps labels out of the editable tree. */}
       {editable && tableWraps.map((wrap) => {
         if (!wrap.isConnected) return null;
         const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
