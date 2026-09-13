@@ -112,7 +112,9 @@ export function splitNodesByBr(block: HTMLElement): ChildNode[][] {
 function lineNodesLookLikePseudoItem(nodes: ChildNode[]): boolean {
   const probe = document.createElement('div');
   nodes.forEach((n) => probe.appendChild(n.cloneNode(true)));
-  return !!getPseudoListPrefix(probe) || !!getGenericBulletPrefix(probe);
+  const std = getPseudoListPrefix(probe);
+  if (std && isWeakTypedListMarker(std[0])) return false;
+  return !!std || !!getGenericBulletPrefix(probe);
 }
 
 /**
@@ -333,6 +335,8 @@ export function convertSymbolPrefixedRunsToLists(root: HTMLElement): boolean {
         j++;
       }
       if (run.length < 2) { i++; continue; }
+      // Keep typed "-" / "+" lines as plain text (toolbar creates real lists).
+      if (isWeakTypedListMarker(symbol)) { i++; continue; }
 
       const list = document.createElement('ul');
       list.setAttribute('dir', 'auto');
@@ -388,6 +392,9 @@ export function wrapLooseInlineChildren(root: HTMLElement): boolean {
 /**
  * Turn pasted ChatGPT/plain pseudo-lists (`• text` in div/p) into real ul/ol/li
  * so Enter/Backspace/list toolbar match manually created lists.
+ *
+ * Typed "-" / "+" / en-dash lines stay plain text — only the list toolbar
+ * (or a strong bullet like "•" / "1.") creates real lists.
  */
 export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boolean {
   const wrapChanged = wrapLooseInlineChildren(root);
@@ -409,6 +416,11 @@ export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boole
 
     const startPrefix = getPseudoListPrefix(start);
     if (!startPrefix) break;
+    // Never auto-promote typed hyphen/plus lines into ul/ol.
+    if (isWeakTypedListMarker(startPrefix[0])) {
+      start.dataset.skipPseudoList = '1';
+      continue;
+    }
     const ordered = isOrderedPseudoPrefix(startPrefix);
     const group: HTMLElement[] = [start];
     let sibling = start.nextElementSibling;
@@ -418,6 +430,7 @@ export function convertPseudoBulletBlocksToNativeLists(root: HTMLElement): boole
       if (blockHasNestedPseudoItems(sibling)) break;
       const prefix = getPseudoListPrefix(sibling);
       if (!prefix || isOrderedPseudoPrefix(prefix) !== ordered) break;
+      if (isWeakTypedListMarker(prefix[0])) break;
       group.push(sibling);
       sibling = sibling.nextElementSibling;
     }
@@ -478,6 +491,11 @@ export function plainTextToListHtml(plain: string): string | null {
     });
   }
   const strong = resolved.some((item) => STRONG_BULLET_RE.test(item.marker));
+  const onlyWeakTyping = resolved.every(
+    (item) => !item.ordered && isWeakTypedListMarker(item.marker),
+  );
+  // Typed "-" / "+" paste stays prose; only • / 1. become lists automatically.
+  if (onlyWeakTyping) return null;
   if (resolved.length < 2 && !strong) return null;
   const ordered = resolved.every((item) => item.ordered);
   const unordered = resolved.every((item) => !item.ordered);
@@ -690,7 +708,11 @@ export function plainTextToMixedHtml(plain: string): string | null {
   };
   for (const line of lines) {
     const match = line.match(BULLET_PREFIX_RE);
-    if (match && line.slice(match[0].length).trim()) {
+    if (
+      match
+      && line.slice(match[0].length).trim()
+      && !(isWeakTypedListMarker(match[0]) && !/\d+[.)]/.test(match[0]))
+    ) {
       sawBullet = true;
       listBuffer.push({ ordered: /\d+[.)]/.test(match[0]), content: line.slice(match[0].length) });
       continue;
@@ -716,8 +738,14 @@ export function inferPlainListType(plain: string): 'ol' | 'ul' | null {
   for (const line of lines) {
     const m = line.match(BULLET_PREFIX_RE);
     if (!m || !line.slice(m[0].length).trim()) return null;
-    if (/\d+[.)]/.test(m[0])) allBulleted = false;
-    else allNumbered = false;
+    if (/\d+[.)]/.test(m[0])) {
+      allBulleted = false;
+    } else if (isWeakTypedListMarker(m[0])) {
+      // Typed "-" / "+" is not an auto-list.
+      return null;
+    } else {
+      allNumbered = false;
+    }
   }
   if (allNumbered) return 'ol';
   if (allBulleted) return 'ul';

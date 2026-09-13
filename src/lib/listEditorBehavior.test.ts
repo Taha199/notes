@@ -301,6 +301,30 @@ describe('listEditorBehavior', () => {
     expect(isWeakTypedListMarker('1. ')).toBe(false);
   });
 
+  it('convertPseudoBulletBlocksToNativeLists leaves typed hyphen lines as prose', () => {
+    const ed = editorHtml(
+      '<div>-Huden.</div><div>-Luftvägssymtom-</div><div>-Gastrointestinala symtom</div>',
+    );
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(false);
+    expect(ed.querySelectorAll('ul, ol, li').length).toBe(0);
+    expect(ed.textContent).toContain('-Huden.');
+    expect(ed.textContent).toContain('-Luftvägssymtom-');
+    ed.remove();
+  });
+
+  it('convertPseudoBulletBlocksToNativeLists leaves spaced hyphen lines as prose', () => {
+    const ed = editorHtml('<div>- one</div><div>- two</div><div>- three</div>');
+    expect(convertPseudoBulletBlocksToNativeLists(ed)).toBe(false);
+    expect(ed.querySelectorAll('li').length).toBe(0);
+    expect(ed.textContent).toContain('- one');
+    ed.remove();
+  });
+
+  it('plainTextToListHtml rejects typed hyphen lines', () => {
+    expect(plainTextToListHtml('-Huden.\n-Luftvägssymtom-\n-Gastro')).toBeNull();
+    expect(plainTextToListHtml('- one\n- two\n- three')).toBeNull();
+  });
+
   it('shouldRemoveOrphanEmptyLists keeps multi-item lists when all items are empty', () => {
     expect(shouldRemoveOrphanEmptyLists(6, false)).toBe(false);
     expect(shouldRemoveOrphanEmptyLists(1, false)).toBe(true);
@@ -482,6 +506,8 @@ describe('listEditorBehavior', () => {
     expect(inferPlainListType('• a\n• b')).toBe('ul');
     expect(inferPlainListType('Rubrik\n1. a\n2. b')).toBeNull();
     expect(inferPlainListType('- a\n1. b')).toBeNull();
+    expect(inferPlainListType('- a\n- b')).toBeNull();
+    expect(inferPlainListType('-Huden.\n-Luft')).toBeNull();
   });
 
   it('clipboardToNormalizedHtml keeps numbered list ordered when copied alone (bare li)', () => {

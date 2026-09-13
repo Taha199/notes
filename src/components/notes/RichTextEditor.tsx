@@ -2914,7 +2914,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return false;
   };
 
-  /** Turn any leftover "• text" / "- text" blocks into the same native lists as the toolbar. */
+  /** Turn leftover "• text" / "1. text" blocks into the same native lists as the toolbar.
+   *  Typed "-" / "+" lines are left as plain text. */
   const promotePseudoListsToNative = (ed: HTMLElement): boolean => {
     if (!convertPseudoBulletBlocksToNativeLists(ed)) return false;
     ed.querySelectorAll('ul, ol, li').forEach((el) => {
