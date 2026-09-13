@@ -747,6 +747,12 @@ export interface Translation {
   todoRecurringInvalidRange: string;
   todoAddTask: string;
   todoAddRecurring: string;
+  todoSeriesBadge: string;
+  todoSeriesEdit: string;
+  todoSeriesDelete: string;
+  todoSeriesDeleteConfirm: string;
+  todoRecurringSave: string;
+  todoRecurringEditing: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -1283,6 +1289,12 @@ export const LANGS: Record<Lang, Translation> = {
     todoRecurringInvalidRange: 'Choose a valid date range',
     todoAddTask: 'Add task',
     todoAddRecurring: 'Add recurring task',
+    todoSeriesBadge: 'Recurring',
+    todoSeriesEdit: 'Edit series',
+    todoSeriesDelete: 'Delete entire series',
+    todoSeriesDeleteConfirm: 'Delete all {count} days in this recurring task?',
+    todoRecurringSave: 'Save changes',
+    todoRecurringEditing: 'Edit recurring task',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -1817,5 +1829,11 @@ export const LANGS: Record<Lang, Translation> = {
     todoRecurringInvalidRange: 'Välj ett giltigt datumintervall',
     todoAddTask: 'Lägg till uppgift',
     todoAddRecurring: 'Lägg till återkommande uppgift',
+    todoSeriesBadge: 'Återkommande',
+    todoSeriesEdit: 'Redigera serie',
+    todoSeriesDelete: 'Ta bort hela serien',
+    todoSeriesDeleteConfirm: 'Ta bort alla {count} dagar i den här återkommande uppgiften?',
+    todoRecurringSave: 'Spara ändringar',
+    todoRecurringEditing: 'Redigera återkommande uppgift',
   },
 };

@@ -4,12 +4,15 @@ import { useTodos } from '../../contexts/TodosContext';
 import {
   addMonths,
   expandRecurringTodoDates,
+  getTodoSeriesId,
   monthWeekRows,
   toDateKey,
   todosForDate,
+  todosInSeries,
   type TodoRecurrenceMode,
 } from '../../lib/todosStore';
 import { normalizeSearch } from '../../lib/noteSearch';
+import type { TodoItem } from '../../types';
 
 function weekdayLabels(locale: string): string[] {
   const monday = new Date(2026, 7, 10);
@@ -174,7 +177,17 @@ function MonthYearPicker({
 
 export function TodoCalendarPage({ search = '' }: { search?: string }) {
   const { t } = useLanguage();
-  const { todos, addTodo, addRecurringTodos, toggleTodo, renameTodo, setTodoTime, deleteTodo } = useTodos();
+  const {
+    todos,
+    addTodo,
+    addRecurringTodos,
+    updateRecurringSeries,
+    deleteSeries,
+    toggleTodo,
+    renameTodo,
+    setTodoTime,
+    deleteTodo,
+  } = useTodos();
   const todayKey = toDateKey(new Date());
   const [cursor, setCursor] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedKey, setSelectedKey] = useState(todayKey);
@@ -183,6 +196,8 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [panel, setPanel] = useState<'day' | 'recurring'>('day');
+  const [editingSeriesId, setEditingSeriesId] = useState<string | null>(null);
+  const [seriesMenuId, setSeriesMenuId] = useState<string | null>(null);
   const [recTitle, setRecTitle] = useState('');
   const [recMode, setRecMode] = useState<TodoRecurrenceMode>('daily');
   const [recWeekdays, setRecWeekdays] = useState<number[]>(() => {
@@ -197,6 +212,13 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
     return toDateKey(d);
   });
   const dayInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!seriesMenuId) return;
+    const onDoc = () => setSeriesMenuId(null);
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [seriesMenuId]);
 
   const query = normalizeSearch(search);
   const visibleTodos = useMemo(
@@ -245,6 +267,8 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
   }).length, [recFrom, recTo, recMode, recWeekdays, recMonthDay]);
 
   const openRecurringPanel = () => {
+    setEditingSeriesId(null);
+    setSeriesMenuId(null);
     setRecTitle('');
     setRecMode('daily');
     const js = new Date(`${selectedKey}T12:00:00`).getDay();
@@ -257,7 +281,47 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
     setPanel('recurring');
   };
 
+  const fillRecurringFormFromSeries = (todo: TodoItem) => {
+    const seriesId = getTodoSeriesId(todo);
+    if (!seriesId) return;
+    const members = todosInSeries(todos, seriesId);
+    const dates = members.map((m) => m.date).sort();
+    const meta = todo.recurrence ?? members.find((m) => m.recurrence)?.recurrence;
+    setEditingSeriesId(seriesId);
+    setSeriesMenuId(null);
+    setRecTitle(todo.title);
+    setRecMode(meta?.mode ?? 'daily');
+    setRecWeekdays(
+      meta?.weekdays?.length
+        ? [...meta.weekdays]
+        : [new Date(`${todo.date}T12:00:00`).getDay()],
+    );
+    setRecMonthDay(
+      meta?.monthDay
+        ?? Math.min(28, Math.max(1, new Date(`${todo.date}T12:00:00`).getDate())),
+    );
+    setRecFrom(meta?.startDate ?? dates[0] ?? todo.date);
+    setRecTo(meta?.endDate ?? dates[dates.length - 1] ?? todo.date);
+    setPanel('recurring');
+  };
+
+  const confirmDeleteSeries = (todo: TodoItem) => {
+    const seriesId = getTodoSeriesId(todo);
+    if (!seriesId) return;
+    const count = todosInSeries(todos, seriesId).length;
+    const ok = window.confirm(t.todoSeriesDeleteConfirm.replace('{count}', String(count)));
+    if (!ok) return;
+    deleteSeries(seriesId);
+    setSeriesMenuId(null);
+    if (editingSeriesId === seriesId) {
+      setEditingSeriesId(null);
+      setPanel('day');
+    }
+  };
+
   const openDayPanel = () => {
+    setEditingSeriesId(null);
+    setSeriesMenuId(null);
     setPanel('day');
     window.setTimeout(() => dayInputRef.current?.focus(), 50);
   };
@@ -274,17 +338,21 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
 
   const submitRecurring = () => {
     if (!recTitle.trim() || recPreviewCount <= 0) return;
-    const n = addRecurringTodos({
+    const opts = {
       title: recTitle,
       mode: recMode,
       weekdays: recMode === 'weekly' ? recWeekdays : undefined,
       monthDay: recMode === 'monthly' ? recMonthDay : undefined,
       startDate: recFrom,
       endDate: recTo,
-    });
+    };
+    const n = editingSeriesId
+      ? updateRecurringSeries(editingSeriesId, opts)
+      : addRecurringTodos(opts);
     if (n > 0) {
       setPanel('day');
       setRecTitle('');
+      setEditingSeriesId(null);
     }
   };
 
@@ -455,10 +523,12 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
         {panel === 'recurring' ? (
           <section className="flex min-h-[22rem] flex-col rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-900/70">
             <div className="mb-4 flex items-start justify-between gap-3">
-              <h4 className="text-base font-bold text-app-text dark:text-gray-100">{t.todoRecurringTitle}</h4>
+              <h4 className="text-base font-bold text-app-text dark:text-gray-100">
+                {editingSeriesId ? t.todoRecurringEditing : t.todoRecurringTitle}
+              </h4>
               <button
                 type="button"
-                onClick={() => setPanel('day')}
+                onClick={openDayPanel}
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary hover:bg-app-bg hover:text-app-text dark:hover:bg-white/10"
                 aria-label={t.todoRecurringCancel}
               >
@@ -579,7 +649,7 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
             <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={() => setPanel('day')}
+                onClick={openDayPanel}
                 className="rounded-xl border border-app-border px-4 py-2.5 text-[13px] font-semibold text-app-text-secondary hover:bg-app-bg dark:border-white/10"
               >
                 {t.todoRecurringCancel}
@@ -590,7 +660,7 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                 disabled={!recTitle.trim() || recPreviewCount <= 0}
                 className="rounded-xl bg-primary px-4 py-2.5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {t.todoRecurringCreate}
+                {editingSeriesId ? t.todoRecurringSave : t.todoRecurringCreate}
               </button>
             </div>
           </section>
@@ -636,10 +706,12 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
               {dayTodos.length === 0 && (
                 <p className="py-8 text-center text-sm text-app-text-secondary/70">{t.todoEmptyDay}</p>
               )}
-              {dayTodos.map((todo) => (
+              {dayTodos.map((todo) => {
+                const seriesId = getTodoSeriesId(todo);
+                return (
                 <div
                   key={todo.id}
-                  className="flex flex-col gap-2 rounded-xl border border-app-border/80 bg-app-bg/60 px-3 py-2.5 sm:flex-row sm:items-start sm:gap-2 dark:border-white/10 dark:bg-white/5"
+                  className="relative flex flex-col gap-2 rounded-xl border border-app-border/80 bg-app-bg/60 px-3 py-2.5 sm:flex-row sm:items-start sm:gap-2 dark:border-white/10 dark:bg-white/5"
                 >
                   <div className="flex min-w-0 flex-1 items-start gap-2">
                     <button
@@ -675,22 +747,35 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                         className="min-w-0 flex-1 rounded-lg border border-primary/40 bg-white px-2 py-1 text-[13.5px] text-app-text outline-none dark:bg-gray-800 dark:text-gray-100"
                       />
                     ) : (
-                      <button
-                        type="button"
-                        onDoubleClick={() => {
-                          setEditingId(todo.id);
-                          setEditValue(todo.title);
-                        }}
-                        onClick={() => {
-                          if (window.matchMedia('(pointer: coarse)').matches) {
+                      <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onDoubleClick={() => {
                             setEditingId(todo.id);
                             setEditValue(todo.title);
-                          }
-                        }}
-                        className={'min-w-0 flex-1 text-left text-[13.5px] leading-5 ' + (todo.done ? 'text-app-text-secondary line-through' : 'text-app-text dark:text-gray-100')}
-                      >
-                        {todo.title}
-                      </button>
+                          }}
+                          onClick={() => {
+                            if (window.matchMedia('(pointer: coarse)').matches) {
+                              setEditingId(todo.id);
+                              setEditValue(todo.title);
+                            }
+                          }}
+                          className={'w-full text-left text-[13.5px] leading-5 ' + (todo.done ? 'text-app-text-secondary line-through' : 'text-app-text dark:text-gray-100')}
+                        >
+                          {todo.title}
+                        </button>
+                        {seriesId && (
+                          <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M17 1l4 4-4 4" />
+                              <path d="M3 11V9a4 4 0 014-4h14" />
+                              <path d="M7 23l-4-4 4-4" />
+                              <path d="M21 13v2a4 4 0 01-4 4H3" />
+                            </svg>
+                            {t.todoSeriesBadge}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 pl-7 sm:pl-0 sm:justify-end">
@@ -713,9 +798,51 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                         ×
                       </button>
                     )}
+                    {seriesId && (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSeriesMenuId((prev) => (prev === todo.id ? null : todo.id));
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="rounded-lg px-2 py-1.5 text-xs font-bold text-primary hover:bg-primary/10"
+                          title={t.todoSeriesEdit}
+                          aria-label={t.todoSeriesEdit}
+                          aria-expanded={seriesMenuId === todo.id}
+                        >
+                          ⋯
+                        </button>
+                        {seriesMenuId === todo.id && (
+                          <div
+                            className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-xl border border-app-border bg-white py-1 shadow-lg dark:border-white/10 dark:bg-gray-900"
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => fillRecurringFormFromSeries(todo)}
+                              className="block w-full px-3 py-2 text-left text-[12.5px] font-semibold text-app-text hover:bg-app-bg dark:text-gray-100 dark:hover:bg-white/10"
+                            >
+                              {t.todoSeriesEdit}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => confirmDeleteSeries(todo)}
+                              className="block w-full px-3 py-2 text-left text-[12.5px] font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+                            >
+                              {t.todoSeriesDelete}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <button
                       type="button"
-                      onClick={() => deleteTodo(todo.id)}
+                      onClick={() => {
+                        setSeriesMenuId(null);
+                        deleteTodo(todo.id);
+                      }}
                       className="ml-auto rounded-lg px-2 py-1.5 text-xs text-app-text-secondary hover:bg-red-50 hover:text-red-600 sm:ml-0 dark:hover:bg-red-500/10"
                       title={t.todoDelete}
                     >
@@ -723,7 +850,8 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}

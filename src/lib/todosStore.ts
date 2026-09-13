@@ -1,8 +1,45 @@
-import type { TodoItem } from '../types';
+import type { TodoItem, TodoRecurrenceMeta } from '../types';
 
 export const TODOS_LS_KEY = 'malacadhati_todos';
 export const TODOS_DELETED_LS_KEY = 'malacadhati_todos_deleted';
 export const TODOS_UID_KEY = 'malacadhati_todos_uid';
+
+/** Legacy ids were `todo-rec-{ts}-{rand}-{index}` without a seriesId field. */
+const LEGACY_SERIES_ID_RE = /^todo-(rec-\d+-[a-z0-9]+)-\d+$/i;
+
+export function getTodoSeriesId(todo: Pick<TodoItem, 'id' | 'seriesId'>): string | undefined {
+  const explicit = String(todo.seriesId || '').trim();
+  if (explicit) return explicit;
+  const m = String(todo.id || '').match(LEGACY_SERIES_ID_RE);
+  return m?.[1];
+}
+
+export function todosInSeries(todos: TodoItem[], seriesId: string): TodoItem[] {
+  const id = seriesId.trim();
+  if (!id) return [];
+  return todos.filter((todo) => getTodoSeriesId(todo) === id);
+}
+
+function normalizeRecurrence(raw: unknown): TodoRecurrenceMeta | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Partial<TodoRecurrenceMeta>;
+  const mode = obj.mode;
+  if (mode !== 'daily' && mode !== 'weekly' && mode !== 'monthly') return undefined;
+  const startDate = String(obj.startDate || '').trim();
+  const endDate = String(obj.endDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return undefined;
+  const weekdays = Array.isArray(obj.weekdays)
+    ? obj.weekdays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    : undefined;
+  const monthDay = Number(obj.monthDay);
+  return {
+    mode,
+    startDate,
+    endDate,
+    ...(weekdays?.length ? { weekdays } : {}),
+    ...(Number.isFinite(monthDay) && monthDay >= 1 && monthDay <= 31 ? { monthDay: Math.round(monthDay) } : {}),
+  };
+}
 
 export function toDateKey(date: Date): string {
   const y = date.getFullYear();
@@ -77,7 +114,19 @@ export function normalizeTodo(raw: unknown): TodoItem | null {
   const createdAt = Number(obj.createdAt) || Date.now();
   const updatedAt = Number(obj.updatedAt) || createdAt;
   const time = normalizeTodoTime(obj.time);
-  return { id, title, done: !!obj.done, date, ...(time ? { time } : {}), createdAt, updatedAt };
+  const seriesId = getTodoSeriesId({ id, seriesId: obj.seriesId });
+  const recurrence = normalizeRecurrence(obj.recurrence);
+  return {
+    id,
+    title,
+    done: !!obj.done,
+    date,
+    ...(time ? { time } : {}),
+    ...(seriesId ? { seriesId } : {}),
+    ...(recurrence ? { recurrence } : {}),
+    createdAt,
+    updatedAt,
+  };
 }
 
 export function readTodosLocal(): TodoItem[] {

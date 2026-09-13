@@ -132,6 +132,15 @@ export interface QuizFolder {
   system?: 'restored' | 'favorites';
 }
 
+/** How a recurring to-do series was generated (stored on each expanded day). */
+export interface TodoRecurrenceMeta {
+  mode: 'daily' | 'weekly' | 'monthly';
+  weekdays?: number[];
+  monthDay?: number;
+  startDate: string;
+  endDate: string;
+}
+
 /** Calendar to-do item — dated task, independent of notes/quiz sync. */
 export interface TodoItem {
   id: string;
@@ -141,6 +150,10 @@ export interface TodoItem {
   date: string;
   /** Optional local time `HH:mm`. */
   time?: string;
+  /** Shared id for all days expanded from one recurring task. */
+  seriesId?: string;
+  /** Original recurrence settings (present on series members). */
+  recurrence?: TodoRecurrenceMeta;
   createdAt: number;
   updatedAt: number;
 }

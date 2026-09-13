@@ -1,38 +1,44 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ref as dbRef, remove, set } from 'firebase/database';
-import type { TodoItem } from '../types';
+import type { TodoItem, TodoRecurrenceMeta } from '../types';
 import { useAuth } from './AuthContext';
 import { database } from '../lib/firebase';
 import { rtdbFetch } from '../lib/rtdb';
 import {
+  expandRecurringTodoDates,
+  getTodoSeriesId,
   incompleteTodoCount,
   mergeTodos,
   normalizeTodo,
   normalizeTodoTime,
   readDeletedTodoIds,
   readTodosLocal,
-  expandRecurringTodoDates,
   TODOS_DELETED_LS_KEY,
   TODOS_LS_KEY,
   TODOS_UID_KEY,
+  todosInSeries,
   writeDeletedTodoIds,
   writeTodosLocal,
   type TodoRecurrenceMode,
 } from '../lib/todosStore';
 
+type RecurringOpts = {
+  title: string;
+  time?: string;
+  mode: TodoRecurrenceMode;
+  weekdays?: number[];
+  monthDay?: number;
+  startDate: string;
+  endDate: string;
+};
+
 interface TodosContextValue {
   todos: TodoItem[];
   incompleteCount: number;
   addTodo: (title: string, date: string, time?: string) => void;
-  addRecurringTodos: (opts: {
-    title: string;
-    time?: string;
-    mode: TodoRecurrenceMode;
-    weekdays?: number[];
-    monthDay?: number;
-    startDate: string;
-    endDate: string;
-  }) => number;
+  addRecurringTodos: (opts: RecurringOpts) => number;
+  updateRecurringSeries: (seriesId: string, opts: RecurringOpts) => number;
+  deleteSeries: (seriesId: string) => number;
   toggleTodo: (id: string) => void;
   renameTodo: (id: string, title: string) => void;
   setTodoTime: (id: string, time?: string) => void;
@@ -77,6 +83,45 @@ function removeTodoCloud(uid: string | null | undefined, id: string) {
   });
 }
 
+function buildRecurrenceMeta(opts: RecurringOpts): TodoRecurrenceMeta {
+  return {
+    mode: opts.mode,
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    ...(opts.mode === 'weekly' && opts.weekdays?.length ? { weekdays: [...opts.weekdays] } : {}),
+    ...(opts.mode === 'monthly' && opts.monthDay != null ? { monthDay: opts.monthDay } : {}),
+  };
+}
+
+function buildSeriesTodos(
+  opts: RecurringOpts,
+  seriesId: string,
+  doneByDate?: Map<string, boolean>,
+): TodoItem[] {
+  const trimmed = opts.title.trim();
+  if (!trimmed) return [];
+  const dates = expandRecurringTodoDates(opts.startDate, opts.endDate, opts.mode, {
+    weekdays: opts.weekdays,
+    monthDay: opts.monthDay,
+  });
+  if (!dates.length) return [];
+  const now = Date.now();
+  const normalizedTime = normalizeTodoTime(opts.time);
+  const recurrence = buildRecurrenceMeta(opts);
+  const stamp = `${now}-${Math.random().toString(36).slice(2, 6)}`;
+  return dates.map((date, i) => ({
+    id: `todo-${seriesId}-${stamp}-${i}`,
+    title: trimmed,
+    done: doneByDate?.get(date) ?? false,
+    date,
+    ...(normalizedTime ? { time: normalizedTime } : {}),
+    seriesId,
+    recurrence,
+    createdAt: now + i,
+    updatedAt: now + i,
+  }));
+}
+
 export function TodosProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [todos, setTodos] = useState<TodoItem[]>(() => readTodosLocal());
@@ -118,6 +163,13 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [user?.uid, commit]);
 
+  const markDeleted = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    deletedRef.current = [...new Set([...deletedRef.current, ...ids])];
+    writeDeletedTodoIds(deletedRef.current);
+    for (const id of ids) removeTodoCloud(user?.uid, id);
+  }, [user?.uid]);
+
   const addTodo = useCallback((title: string, date: string, time?: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
@@ -136,38 +188,39 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     persistTodoCloud(user?.uid, todo);
   }, [commit, user?.uid]);
 
-  const addRecurringTodos = useCallback((opts: {
-    title: string;
-    time?: string;
-    mode: TodoRecurrenceMode;
-    weekdays?: number[];
-    monthDay?: number;
-    startDate: string;
-    endDate: string;
-  }) => {
-    const trimmed = opts.title.trim();
-    if (!trimmed) return 0;
-    const dates = expandRecurringTodoDates(opts.startDate, opts.endDate, opts.mode, {
-      weekdays: opts.weekdays,
-      monthDay: opts.monthDay,
-    });
-    if (!dates.length) return 0;
-    const now = Date.now();
-    const normalizedTime = normalizeTodoTime(opts.time);
-    const series = `rec-${now}-${Math.random().toString(36).slice(2, 7)}`;
-    const created: TodoItem[] = dates.map((date, i) => ({
-      id: `todo-${series}-${i}`,
-      title: trimmed,
-      done: false,
-      date,
-      ...(normalizedTime ? { time: normalizedTime } : {}),
-      createdAt: now + i,
-      updatedAt: now + i,
-    }));
+  const addRecurringTodos = useCallback((opts: RecurringOpts) => {
+    const seriesId = `rec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const created = buildSeriesTodos(opts, seriesId);
+    if (!created.length) return 0;
     commit([...todosRef.current, ...created]);
     for (const todo of created) persistTodoCloud(user?.uid, todo);
     return created.length;
   }, [commit, user?.uid]);
+
+  const deleteSeries = useCallback((seriesId: string) => {
+    const id = seriesId.trim();
+    if (!id) return 0;
+    const members = todosInSeries(todosRef.current, id);
+    if (!members.length) return 0;
+    markDeleted(members.map((todo) => todo.id));
+    commit(todosRef.current.filter((todo) => getTodoSeriesId(todo) !== id));
+    return members.length;
+  }, [commit, markDeleted]);
+
+  const updateRecurringSeries = useCallback((seriesId: string, opts: RecurringOpts) => {
+    const id = seriesId.trim();
+    if (!id) return 0;
+    const existing = todosInSeries(todosRef.current, id);
+    const doneByDate = new Map(existing.map((todo) => [todo.date, todo.done]));
+    const created = buildSeriesTodos(opts, id, doneByDate);
+    if (!created.length) return 0;
+    const removeIds = existing.map((todo) => todo.id);
+    markDeleted(removeIds);
+    const kept = todosRef.current.filter((todo) => getTodoSeriesId(todo) !== id);
+    commit([...kept, ...created]);
+    for (const todo of created) persistTodoCloud(user?.uid, todo);
+    return created.length;
+  }, [commit, markDeleted, user?.uid]);
 
   const toggleTodo = useCallback((id: string) => {
     const next = todosRef.current.map((todo) => (
@@ -193,12 +246,9 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     const normalizedTime = normalizeTodoTime(time);
     const next = todosRef.current.map((todo) => {
       if (todo.id !== id) return todo;
+      const { time: _prev, ...rest } = todo;
       return {
-        id: todo.id,
-        title: todo.title,
-        done: todo.done,
-        date: todo.date,
-        createdAt: todo.createdAt,
+        ...rest,
         ...(normalizedTime ? { time: normalizedTime } : {}),
         updatedAt: Date.now(),
       };
@@ -209,22 +259,22 @@ export function TodosProvider({ children }: { children: ReactNode }) {
   }, [commit, user?.uid]);
 
   const deleteTodo = useCallback((id: string) => {
-    deletedRef.current = [...new Set([...deletedRef.current, id])];
-    writeDeletedTodoIds(deletedRef.current);
+    markDeleted([id]);
     commit(todosRef.current.filter((todo) => todo.id !== id));
-    removeTodoCloud(user?.uid, id);
-  }, [commit, user?.uid]);
+  }, [commit, markDeleted]);
 
   const value = useMemo<TodosContextValue>(() => ({
     todos,
     incompleteCount: incompleteTodoCount(todos),
     addTodo,
     addRecurringTodos,
+    updateRecurringSeries,
+    deleteSeries,
     toggleTodo,
     renameTodo,
     setTodoTime,
     deleteTodo,
-  }), [todos, addTodo, addRecurringTodos, toggleTodo, renameTodo, setTodoTime, deleteTodo]);
+  }), [todos, addTodo, addRecurringTodos, updateRecurringSeries, deleteSeries, toggleTodo, renameTodo, setTodoTime, deleteTodo]);
 
   return <TodosContext.Provider value={value}>{children}</TodosContext.Provider>;
 }
