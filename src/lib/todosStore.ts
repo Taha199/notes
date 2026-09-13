@@ -138,14 +138,19 @@ export function incompleteTodoCount(todos: TodoItem[]): number {
   return todos.filter((todo) => !todo.done).length;
 }
 
-export type TodoRecurrenceMode = 'daily' | 'weekly';
+export type TodoRecurrenceMode = 'daily' | 'weekly' | 'monthly';
 
-/** Inclusive date keys from start→end matching daily or a weekday (0=Sun … 6=Sat). */
+/**
+ * Inclusive date keys from start→end.
+ * - daily: every day
+ * - weekly: any of the given JS weekdays (0=Sun … 6=Sat)
+ * - monthly: same calendar day-of-month (skips months that lack that day)
+ */
 export function expandRecurringTodoDates(
   startKey: string,
   endKey: string,
   mode: TodoRecurrenceMode,
-  weekday?: number,
+  opts?: { weekdays?: number[]; monthDay?: number },
 ): string[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey)) return [];
   if (endKey < startKey) return [];
@@ -154,12 +159,24 @@ export function expandRecurringTodoDates(
   const out: string[] = [];
   const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
   const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const weekdaySet = new Set(
+    (opts?.weekdays ?? []).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
+  );
+  const monthDay = Math.round(Number(opts?.monthDay));
   const MAX = 400;
   while (cursor.getTime() <= last.getTime() && out.length < MAX) {
     const key = toDateKey(cursor);
     if (mode === 'daily') {
       out.push(key);
-    } else if (typeof weekday === 'number' && weekday >= 0 && weekday <= 6 && cursor.getDay() === weekday) {
+    } else if (mode === 'weekly' && weekdaySet.has(cursor.getDay())) {
+      out.push(key);
+    } else if (
+      mode === 'monthly'
+      && Number.isFinite(monthDay)
+      && monthDay >= 1
+      && monthDay <= 31
+      && cursor.getDate() === monthDay
+    ) {
       out.push(key);
     }
     cursor.setDate(cursor.getDate() + 1);

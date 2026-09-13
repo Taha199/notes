@@ -733,14 +733,20 @@ export interface Translation {
   todoRecurring: string;
   todoRecurringTitle: string;
   todoRecurringPh: string;
+  todoRecurringRepeat: string;
   todoRecurringEveryDay: string;
   todoRecurringEveryWeekday: string;
+  todoRecurringEveryMonth: string;
+  todoRecurringMonthDay: string;
+  todoRecurringRange: string;
   todoRecurringFrom: string;
   todoRecurringTo: string;
   todoRecurringCreate: string;
   todoRecurringCancel: string;
   todoRecurringCount: string;
   todoRecurringInvalidRange: string;
+  todoAddTask: string;
+  todoAddRecurring: string;
 }
 
 export const LANGS: Record<Lang, Translation> = {
@@ -1261,16 +1267,22 @@ export const LANGS: Record<Lang, Translation> = {
     todoTimeOptional: 'Time (optional)',
     todoClearTime: 'Clear time',
     todoRecurring: 'Recurring task',
-    todoRecurringTitle: 'Create recurring task',
-    todoRecurringPh: 'Task that repeats…',
+    todoRecurringTitle: 'Recurring task',
+    todoRecurringPh: 'What do you want to do?',
+    todoRecurringRepeat: 'Repeat',
     todoRecurringEveryDay: 'Every day',
-    todoRecurringEveryWeekday: 'Every selected weekday',
+    todoRecurringEveryWeekday: 'Every week on specific days',
+    todoRecurringEveryMonth: 'Every month (same date)',
+    todoRecurringMonthDay: 'Day of month:',
+    todoRecurringRange: 'Date range',
     todoRecurringFrom: 'From',
     todoRecurringTo: 'To',
-    todoRecurringCreate: 'Create series',
+    todoRecurringCreate: 'Create recurring task',
     todoRecurringCancel: 'Cancel',
     todoRecurringCount: '{count} days will be created',
     todoRecurringInvalidRange: 'Choose a valid date range',
+    todoAddTask: 'Add task',
+    todoAddRecurring: 'Add recurring task',
   },
   sv: {
     dir: 'ltr', htmlLang: 'sv', label: 'SV',
@@ -1789,15 +1801,21 @@ export const LANGS: Record<Lang, Translation> = {
     todoTimeOptional: 'Tid (valfritt)',
     todoClearTime: 'Ta bort tid',
     todoRecurring: 'Återkommande uppgift',
-    todoRecurringTitle: 'Skapa återkommande uppgift',
-    todoRecurringPh: 'Uppgift som upprepas…',
+    todoRecurringTitle: 'Återkommande uppgift',
+    todoRecurringPh: 'Vad vill du göra?',
+    todoRecurringRepeat: 'Upprepa',
     todoRecurringEveryDay: 'Varje dag',
-    todoRecurringEveryWeekday: 'Vald veckodag varje vecka',
+    todoRecurringEveryWeekday: 'Varje vecka på specifika dagar',
+    todoRecurringEveryMonth: 'Varje månad (samma datum)',
+    todoRecurringMonthDay: 'Dag i månaden:',
+    todoRecurringRange: 'Datumintervall',
     todoRecurringFrom: 'Från',
     todoRecurringTo: 'Till',
-    todoRecurringCreate: 'Skapa serie',
+    todoRecurringCreate: 'Skapa återkommande uppgift',
     todoRecurringCancel: 'Avbryt',
     todoRecurringCount: '{count} dagar skapas',
     todoRecurringInvalidRange: 'Välj ett giltigt datumintervall',
+    todoAddTask: 'Lägg till uppgift',
+    todoAddRecurring: 'Lägg till återkommande uppgift',
   },
 };

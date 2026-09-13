@@ -28,7 +28,8 @@ interface TodosContextValue {
     title: string;
     time?: string;
     mode: TodoRecurrenceMode;
-    weekday?: number;
+    weekdays?: number[];
+    monthDay?: number;
     startDate: string;
     endDate: string;
   }) => number;
@@ -139,18 +140,17 @@ export function TodosProvider({ children }: { children: ReactNode }) {
     title: string;
     time?: string;
     mode: TodoRecurrenceMode;
-    weekday?: number;
+    weekdays?: number[];
+    monthDay?: number;
     startDate: string;
     endDate: string;
   }) => {
     const trimmed = opts.title.trim();
     if (!trimmed) return 0;
-    const dates = expandRecurringTodoDates(
-      opts.startDate,
-      opts.endDate,
-      opts.mode,
-      opts.mode === 'weekly' ? opts.weekday : undefined,
-    );
+    const dates = expandRecurringTodoDates(opts.startDate, opts.endDate, opts.mode, {
+      weekdays: opts.weekdays,
+      monthDay: opts.monthDay,
+    });
     if (!dates.length) return 0;
     const now = Date.now();
     const normalizedTime = normalizeTodoTime(opts.time);

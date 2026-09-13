@@ -182,16 +182,21 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
   const [draftTime, setDraftTime] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
-  const [recurringOpen, setRecurringOpen] = useState(false);
+  const [panel, setPanel] = useState<'day' | 'recurring'>('day');
   const [recTitle, setRecTitle] = useState('');
-  const [recTime, setRecTime] = useState('');
   const [recMode, setRecMode] = useState<TodoRecurrenceMode>('daily');
-  const [recWeekdayMonIndex, setRecWeekdayMonIndex] = useState(() => {
+  const [recWeekdays, setRecWeekdays] = useState<number[]>(() => {
     const js = new Date(`${todayKey}T12:00:00`).getDay();
-    return WEEKDAY_JS_FROM_MONDAY.indexOf(js as 0 | 1 | 2 | 3 | 4 | 5 | 6);
+    return [js];
   });
+  const [recMonthDay, setRecMonthDay] = useState(1);
   const [recFrom, setRecFrom] = useState(todayKey);
-  const [recTo, setRecTo] = useState(todayKey);
+  const [recTo, setRecTo] = useState(() => {
+    const d = new Date(`${todayKey}T12:00:00`);
+    d.setMonth(d.getMonth() + 3);
+    return toDateKey(d);
+  });
+  const dayInputRef = useRef<HTMLInputElement>(null);
 
   const query = normalizeSearch(search);
   const visibleTodos = useMemo(
@@ -234,59 +239,59 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
     setDraftTime('');
   };
 
-  const weekdaysLong = useMemo(() => {
-    const monday = new Date(2026, 7, 10);
-    return Array.from({ length: 7 }, (_, i) => {
-      const day = new Date(monday);
-      day.setDate(monday.getDate() + i);
-      return capitalizeLabel(new Intl.DateTimeFormat(t.dateLocale, { weekday: 'long' }).format(day));
-    });
-  }, [t.dateLocale]);
-
-  const recPreviewCount = useMemo(() => {
-    const weekday = WEEKDAY_JS_FROM_MONDAY[recWeekdayMonIndex] ?? 1;
-    return expandRecurringTodoDates(
-      recFrom,
-      recTo,
-      recMode,
-      recMode === 'weekly' ? weekday : undefined,
-    ).length;
-  }, [recFrom, recTo, recMode, recWeekdayMonIndex]);
+  const recPreviewCount = useMemo(() => expandRecurringTodoDates(recFrom, recTo, recMode, {
+    weekdays: recMode === 'weekly' ? recWeekdays : undefined,
+    monthDay: recMode === 'monthly' ? recMonthDay : undefined,
+  }).length, [recFrom, recTo, recMode, recWeekdays, recMonthDay]);
 
   const openRecurringPanel = () => {
     setRecTitle('');
-    setRecTime('');
     setRecMode('daily');
     const js = new Date(`${selectedKey}T12:00:00`).getDay();
-    const monIdx = WEEKDAY_JS_FROM_MONDAY.indexOf(js as 0 | 1 | 2 | 3 | 4 | 5 | 6);
-    setRecWeekdayMonIndex(monIdx >= 0 ? monIdx : 0);
+    setRecWeekdays([js]);
+    setRecMonthDay(Math.min(28, Math.max(1, new Date(`${selectedKey}T12:00:00`).getDate())));
     setRecFrom(selectedKey);
-    setRecTo(selectedKey);
-    setRecurringOpen(true);
+    const end = new Date(`${selectedKey}T12:00:00`);
+    end.setMonth(end.getMonth() + 3);
+    setRecTo(toDateKey(end));
+    setPanel('recurring');
+  };
+
+  const openDayPanel = () => {
+    setPanel('day');
+    window.setTimeout(() => dayInputRef.current?.focus(), 50);
+  };
+
+  const toggleRecWeekday = (jsDay: number) => {
+    setRecWeekdays((prev) => {
+      if (prev.includes(jsDay)) {
+        const next = prev.filter((d) => d !== jsDay);
+        return next.length ? next : prev;
+      }
+      return [...prev, jsDay].sort((a, b) => a - b);
+    });
   };
 
   const submitRecurring = () => {
     if (!recTitle.trim() || recPreviewCount <= 0) return;
-    const weekday = WEEKDAY_JS_FROM_MONDAY[recWeekdayMonIndex] ?? 1;
     const n = addRecurringTodos({
       title: recTitle,
-      time: recTime,
       mode: recMode,
-      weekday: recMode === 'weekly' ? weekday : undefined,
+      weekdays: recMode === 'weekly' ? recWeekdays : undefined,
+      monthDay: recMode === 'monthly' ? recMonthDay : undefined,
       startDate: recFrom,
       endDate: recTo,
     });
     if (n > 0) {
-      setRecurringOpen(false);
+      setPanel('day');
       setRecTitle('');
-      setRecTime('');
     }
   };
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setCursor((prev) => addMonths(prev, -1))}
@@ -310,21 +315,55 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
           >
             ›
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              const now = new Date();
+              setCursor(new Date(now.getFullYear(), now.getMonth(), 1));
+              setSelectedKey(todayKey);
+              setPanel('day');
+            }}
+            className="rounded-xl border border-app-border bg-white px-3.5 py-2 text-[13px] font-semibold text-app-text hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
+          >
+            {t.todoToday}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            const now = new Date();
-            setCursor(new Date(now.getFullYear(), now.getMonth(), 1));
-            setSelectedKey(todayKey);
-          }}
-          className="rounded-xl border border-app-border bg-white px-3.5 py-2 text-[13px] font-semibold text-app-text hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-100"
-        >
-          {t.todoToday}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={openDayPanel}
+            className={
+              'inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition ' +
+              (panel === 'day'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-app-border bg-white text-app-text hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-100')
+            }
+          >
+            <span aria-hidden="true">+</span>
+            {t.todoAddTask}
+          </button>
+          <button
+            type="button"
+            onClick={openRecurringPanel}
+            className={
+              'inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition ' +
+              (panel === 'recurring'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-app-border bg-white text-app-text hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-100')
+            }
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M17 1l4 4-4 4" />
+              <path d="M3 11V9a4 4 0 014-4h14" />
+              <path d="M7 23l-4-4 4-4" />
+              <path d="M21 13v2a4 4 0 01-4 4H3" />
+            </svg>
+            {t.todoAddRecurring}
+          </button>
+        </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.9fr)]">
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(300px,0.95fr)]">
         <div className="overflow-hidden rounded-2xl border border-app-border bg-white shadow-sm dark:border-white/10 dark:bg-gray-900/70">
           <div className="grid grid-cols-[2.5rem_repeat(7,minmax(0,1fr))] border-b border-app-border bg-app-bg/80 px-1 py-2 dark:border-white/10 dark:bg-white/5">
             <div className="flex items-center justify-center">
@@ -360,7 +399,10 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                     <button
                       key={key}
                       type="button"
-                      onClick={() => setSelectedKey(key)}
+                      onClick={() => {
+                        setSelectedKey(key);
+                        if (panel === 'recurring') setPanel('day');
+                      }}
                       className={
                         'relative flex min-h-[4.4rem] flex-col items-center gap-0.5 border-b border-r border-app-border/70 px-1 py-1.5 text-sm transition-colors dark:border-white/10 ' +
                         (selected
@@ -410,112 +452,121 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
           </div>
         </div>
 
-        <section className="flex min-h-[22rem] flex-col rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-900/70">
-          <div className="mb-3">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.pageTodo}</p>
-            <h4 className="mt-0.5 text-base font-bold capitalize text-app-text dark:text-gray-100">{selectedLabel}</h4>
-          </div>
+        {panel === 'recurring' ? (
+          <section className="flex min-h-[22rem] flex-col rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-900/70">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <h4 className="text-base font-bold text-app-text dark:text-gray-100">{t.todoRecurringTitle}</h4>
+              <button
+                type="button"
+                onClick={() => setPanel('day')}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-app-text-secondary hover:bg-app-bg hover:text-app-text dark:hover:bg-white/10"
+                aria-label={t.todoRecurringCancel}
+              >
+                ✕
+              </button>
+            </div>
 
-          <button
-            type="button"
-            onClick={() => (recurringOpen ? setRecurringOpen(false) : openRecurringPanel())}
-            className={
-              'mb-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[13px] font-semibold transition ' +
-              (recurringOpen
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-app-border bg-app-bg text-app-text hover:border-primary/40 hover:text-primary dark:border-white/10 dark:bg-white/5 dark:text-gray-100')
-            }
-          >
-            <span aria-hidden="true">🔁</span>
-            {t.todoRecurring}
-          </button>
-
-          {recurringOpen && (
-            <div className="mb-3 space-y-2.5 rounded-2xl border border-primary/25 bg-primary/[0.04] p-3 dark:border-primary/30 dark:bg-primary/10">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-primary/80">{t.todoRecurringTitle}</p>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-0.5">
               <input
                 value={recTitle}
                 onChange={(e) => setRecTitle(e.target.value)}
                 placeholder={t.todoRecurringPh}
-                className="w-full rounded-xl border border-app-border bg-white px-3 py-2.5 text-[13.5px] text-app-text outline-none placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
+                autoFocus
+                className="w-full rounded-xl border border-app-border bg-app-bg px-3 py-2.5 text-[13.5px] text-app-text outline-none placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
               />
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRecMode('daily')}
-                  className={
-                    'rounded-xl border px-3 py-2 text-[12px] font-semibold transition ' +
-                    (recMode === 'daily'
-                      ? 'border-primary bg-primary text-white'
-                      : 'border-app-border bg-white text-app-text hover:border-primary/40 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100')
-                  }
-                >
-                  {t.todoRecurringEveryDay}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRecMode('weekly')}
-                  className={
-                    'rounded-xl border px-3 py-2 text-[12px] font-semibold transition ' +
-                    (recMode === 'weekly'
-                      ? 'border-primary bg-primary text-white'
-                      : 'border-app-border bg-white text-app-text hover:border-primary/40 dark:border-white/10 dark:bg-gray-800 dark:text-gray-100')
-                  }
-                >
-                  {t.todoRecurringEveryWeekday}
-                </button>
-              </div>
-              {recMode === 'weekly' && (
-                <div className="grid grid-cols-7 gap-1">
-                  {weekdaysLong.map((label, i) => (
-                    <button
-                      key={label}
-                      type="button"
-                      title={label}
-                      onClick={() => setRecWeekdayMonIndex(i)}
+
+              <div>
+                <p className="mb-2 text-[12px] font-bold text-app-text dark:text-gray-100">{t.todoRecurringRepeat}</p>
+                <div className="space-y-2">
+                  {([
+                    { key: 'daily' as const, label: t.todoRecurringEveryDay },
+                    { key: 'weekly' as const, label: t.todoRecurringEveryWeekday },
+                    { key: 'monthly' as const, label: t.todoRecurringEveryMonth },
+                  ]).map((opt) => (
+                    <label
+                      key={opt.key}
                       className={
-                        'rounded-lg px-0.5 py-2 text-[10px] font-bold uppercase transition ' +
-                        (recWeekdayMonIndex === i
-                          ? 'bg-primary text-white'
-                          : 'bg-white text-app-text-secondary hover:bg-app-bg dark:bg-gray-800 dark:text-gray-300')
+                        'flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition ' +
+                        (recMode === opt.key
+                          ? 'border-primary/40 bg-primary/5 dark:bg-primary/10'
+                          : 'border-app-border/80 hover:bg-app-bg dark:border-white/10 dark:hover:bg-white/5')
                       }
                     >
-                      {weekdays[i]?.slice(0, 2)}
-                    </button>
+                      <input
+                        type="radio"
+                        name="todo-recurrence"
+                        checked={recMode === opt.key}
+                        onChange={() => setRecMode(opt.key)}
+                        className="mt-0.5 accent-primary"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px] font-semibold text-app-text dark:text-gray-100">{opt.label}</span>
+                        {opt.key === 'weekly' && recMode === 'weekly' && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {WEEKDAY_JS_FROM_MONDAY.map((jsDay, i) => {
+                              const on = recWeekdays.includes(jsDay);
+                              return (
+                                <button
+                                  key={jsDay}
+                                  type="button"
+                                  onClick={() => toggleRecWeekday(jsDay)}
+                                  className={
+                                    'rounded-lg px-2 py-1 text-[11px] font-bold transition ' +
+                                    (on
+                                      ? 'bg-primary text-white'
+                                      : 'bg-white text-app-text-secondary ring-1 ring-app-border hover:text-primary dark:bg-gray-800 dark:ring-white/15')
+                                  }
+                                >
+                                  {weekdays[i]}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {opt.key === 'monthly' && recMode === 'monthly' && (
+                          <label className="mt-2 flex items-center gap-2 text-[12px] text-app-text-secondary">
+                            {t.todoRecurringMonthDay}
+                            <select
+                              value={recMonthDay}
+                              onChange={(e) => setRecMonthDay(Number(e.target.value))}
+                              className="rounded-lg border border-app-border bg-white px-2 py-1 text-[12px] font-semibold text-app-text dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                            >
+                              {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                                <option key={d} value={d}>{d}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                      </span>
+                    </label>
                   ))}
                 </div>
-              )}
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <label className="flex flex-col gap-1 text-[11px] font-semibold text-app-text-secondary">
-                  {t.todoRecurringFrom}
-                  <input
-                    type="date"
-                    value={recFrom}
-                    onChange={(e) => setRecFrom(e.target.value)}
-                    className="rounded-xl border border-app-border bg-white px-2.5 py-2 text-[13px] font-normal text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-[11px] font-semibold text-app-text-secondary">
-                  {t.todoRecurringTo}
-                  <input
-                    type="date"
-                    value={recTo}
-                    onChange={(e) => setRecTo(e.target.value)}
-                    className="rounded-xl border border-app-border bg-white px-2.5 py-2 text-[13px] font-normal text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
-                  />
-                </label>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="time"
-                  value={recTime}
-                  onChange={(e) => setRecTime(e.target.value)}
-                  aria-label={t.todoTimeOptional}
-                  title={t.todoTimeOptional}
-                  className="w-[7.25rem] rounded-xl border border-app-border bg-white px-2 py-2 text-[13px] text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
-                />
+
+              <div>
+                <p className="mb-2 text-[12px] font-bold text-app-text dark:text-gray-100">{t.todoRecurringRange}</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-[11px] font-semibold text-app-text-secondary">
+                    {t.todoRecurringFrom}
+                    <input
+                      type="date"
+                      value={recFrom}
+                      onChange={(e) => setRecFrom(e.target.value)}
+                      className="rounded-xl border border-app-border bg-app-bg px-2.5 py-2 text-[13px] font-normal text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[11px] font-semibold text-app-text-secondary">
+                    {t.todoRecurringTo}
+                    <input
+                      type="date"
+                      value={recTo}
+                      onChange={(e) => setRecTo(e.target.value)}
+                      className="rounded-xl border border-app-border bg-app-bg px-2.5 py-2 text-[13px] font-normal text-app-text outline-none focus:border-primary/50 dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                  </label>
+                </div>
                 <p className={
-                  'min-w-0 flex-1 text-[12px] ' +
+                  'mt-2 text-[12px] ' +
                   (recPreviewCount > 0 ? 'text-app-text-secondary' : 'text-red-600 dark:text-red-400')
                 }>
                   {recPreviewCount > 0
@@ -523,152 +574,159 @@ export function TodoCalendarPage({ search = '' }: { search?: string }) {
                     : t.todoRecurringInvalidRange}
                 </p>
               </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={submitRecurring}
-                  disabled={!recTitle.trim() || recPreviewCount <= 0}
-                  className="flex-1 rounded-xl bg-primary px-3 py-2.5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {t.todoRecurringCreate}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRecurringOpen(false)}
-                  className="rounded-xl border border-app-border px-3 py-2.5 text-[13px] font-semibold text-app-text-secondary hover:bg-app-bg dark:border-white/10"
-                >
-                  {t.todoRecurringCancel}
-                </button>
-              </div>
             </div>
-          )}
 
-          <form
-            className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-nowrap sm:items-stretch"
-            onSubmit={(e) => {
-              e.preventDefault();
-              submitDraft();
-            }}
-          >
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={t.todoAddPh}
-              className="min-w-0 w-full flex-1 rounded-xl border border-app-border bg-app-bg px-3 py-2.5 text-[13.5px] text-app-text outline-none placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 sm:py-2 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
-            />
-            <div className="flex items-stretch gap-2">
-              <input
-                type="time"
-                value={draftTime}
-                onChange={(e) => setDraftTime(e.target.value)}
-                aria-label={t.todoTimeOptional}
-                title={t.todoTimeOptional}
-                className="w-[7.25rem] flex-shrink-0 rounded-xl border border-app-border bg-app-bg px-2 py-2.5 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 sm:w-[5.1rem] sm:px-1 sm:py-2 sm:text-[12px] dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
-              />
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
-                type="submit"
-                disabled={!draft.trim()}
-                className="min-w-0 flex-1 rounded-xl bg-primary px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:px-3.5 sm:py-2"
+                type="button"
+                onClick={() => setPanel('day')}
+                className="rounded-xl border border-app-border px-4 py-2.5 text-[13px] font-semibold text-app-text-secondary hover:bg-app-bg dark:border-white/10"
               >
-                {t.todoAdd}
+                {t.todoRecurringCancel}
+              </button>
+              <button
+                type="button"
+                onClick={submitRecurring}
+                disabled={!recTitle.trim() || recPreviewCount <= 0}
+                className="rounded-xl bg-primary px-4 py-2.5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {t.todoRecurringCreate}
               </button>
             </div>
-          </form>
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
-            {dayTodos.length === 0 && (
-              <p className="py-8 text-center text-sm text-app-text-secondary/70">{t.todoEmptyDay}</p>
-            )}
-            {dayTodos.map((todo) => (
-              <div
-                key={todo.id}
-                className="flex flex-col gap-2 rounded-xl border border-app-border/80 bg-app-bg/60 px-3 py-2.5 sm:flex-row sm:items-start sm:gap-2 dark:border-white/10 dark:bg-white/5"
-              >
-                <div className="flex min-w-0 flex-1 items-start gap-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleTodo(todo.id)}
-                    className={
-                      'mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border text-[11px] ' +
-                      (todo.done
-                        ? 'border-emerald-400 bg-emerald-500 text-white'
-                        : 'border-app-border bg-white dark:border-white/20 dark:bg-gray-900')
-                    }
-                    title={todo.done ? t.todoUndone : t.todoDone}
-                  >
-                    {todo.done ? '✓' : ''}
-                  </button>
-                  {editingId === todo.id ? (
-                    <input
-                      autoFocus
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={() => {
-                        renameTodo(todo.id, editValue);
-                        setEditingId(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
+          </section>
+        ) : (
+          <section className="flex min-h-[22rem] flex-col rounded-2xl border border-app-border bg-white p-4 shadow-sm dark:border-white/10 dark:bg-gray-900/70">
+            <div className="mb-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-app-text-secondary/70">{t.pageTodo}</p>
+              <h4 className="mt-0.5 text-base font-bold capitalize text-app-text dark:text-gray-100">{selectedLabel}</h4>
+            </div>
+            <form
+              className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-nowrap sm:items-stretch"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitDraft();
+              }}
+            >
+              <input
+                ref={dayInputRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={t.todoAddPh}
+                className="min-w-0 w-full flex-1 rounded-xl border border-app-border bg-app-bg px-3 py-2.5 text-[13.5px] text-app-text outline-none placeholder:text-app-text-secondary/60 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 sm:py-2 dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
+              />
+              <div className="flex items-stretch gap-2">
+                <input
+                  type="time"
+                  value={draftTime}
+                  onChange={(e) => setDraftTime(e.target.value)}
+                  aria-label={t.todoTimeOptional}
+                  title={t.todoTimeOptional}
+                  className="w-[7.25rem] flex-shrink-0 rounded-xl border border-app-border bg-app-bg px-2 py-2.5 text-[13px] text-app-text outline-none focus:border-primary/50 focus:ring-4 focus:ring-primary/10 sm:w-[5.1rem] sm:px-1 sm:py-2 sm:text-[12px] dark:border-white/15 dark:bg-gray-800/90 dark:text-gray-100"
+                />
+                <button
+                  type="submit"
+                  disabled={!draft.trim()}
+                  className="min-w-0 flex-1 rounded-xl bg-primary px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none sm:px-3.5 sm:py-2"
+                >
+                  {t.todoAdd}
+                </button>
+              </div>
+            </form>
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+              {dayTodos.length === 0 && (
+                <p className="py-8 text-center text-sm text-app-text-secondary/70">{t.todoEmptyDay}</p>
+              )}
+              {dayTodos.map((todo) => (
+                <div
+                  key={todo.id}
+                  className="flex flex-col gap-2 rounded-xl border border-app-border/80 bg-app-bg/60 px-3 py-2.5 sm:flex-row sm:items-start sm:gap-2 dark:border-white/10 dark:bg-white/5"
+                >
+                  <div className="flex min-w-0 flex-1 items-start gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleTodo(todo.id)}
+                      className={
+                        'mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border text-[11px] ' +
+                        (todo.done
+                          ? 'border-emerald-400 bg-emerald-500 text-white'
+                          : 'border-app-border bg-white dark:border-white/20 dark:bg-gray-900')
+                      }
+                      title={todo.done ? t.todoUndone : t.todoDone}
+                    >
+                      {todo.done ? '✓' : ''}
+                    </button>
+                    {editingId === todo.id ? (
+                      <input
+                        autoFocus
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={() => {
                           renameTodo(todo.id, editValue);
                           setEditingId(null);
-                        }
-                        if (e.key === 'Escape') setEditingId(null);
-                      }}
-                      className="min-w-0 flex-1 rounded-lg border border-primary/40 bg-white px-2 py-1 text-[13.5px] text-app-text outline-none dark:bg-gray-800 dark:text-gray-100"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onDoubleClick={() => {
-                        setEditingId(todo.id);
-                        setEditValue(todo.title);
-                      }}
-                      onClick={() => {
-                        // Mobile: single tap to rename (double-click is awkward on phones).
-                        if (window.matchMedia('(pointer: coarse)').matches) {
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            renameTodo(todo.id, editValue);
+                            setEditingId(null);
+                          }
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                        className="min-w-0 flex-1 rounded-lg border border-primary/40 bg-white px-2 py-1 text-[13.5px] text-app-text outline-none dark:bg-gray-800 dark:text-gray-100"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onDoubleClick={() => {
                           setEditingId(todo.id);
                           setEditValue(todo.title);
-                        }
-                      }}
-                      className={'min-w-0 flex-1 text-left text-[13.5px] leading-5 ' + (todo.done ? 'text-app-text-secondary line-through' : 'text-app-text dark:text-gray-100')}
-                    >
-                      {todo.title}
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 pl-7 sm:pl-0 sm:justify-end">
-                  <input
-                    type="time"
-                    value={todo.time ?? ''}
-                    onChange={(e) => setTodoTime(todo.id, e.target.value)}
-                    aria-label={t.todoTimeOptional}
-                    title={t.todoTimeOptional}
-                    className="w-[7.25rem] flex-shrink-0 rounded-lg border border-app-border/80 bg-white px-2 py-1.5 text-[12px] text-app-text outline-none focus:border-primary/50 sm:w-[5rem] sm:px-1 sm:py-1 sm:text-[11px] dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
-                  />
-                  {todo.time && (
+                        }}
+                        onClick={() => {
+                          if (window.matchMedia('(pointer: coarse)').matches) {
+                            setEditingId(todo.id);
+                            setEditValue(todo.title);
+                          }
+                        }}
+                        className={'min-w-0 flex-1 text-left text-[13.5px] leading-5 ' + (todo.done ? 'text-app-text-secondary line-through' : 'text-app-text dark:text-gray-100')}
+                      >
+                        {todo.title}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 pl-7 sm:pl-0 sm:justify-end">
+                    <input
+                      type="time"
+                      value={todo.time ?? ''}
+                      onChange={(e) => setTodoTime(todo.id, e.target.value)}
+                      aria-label={t.todoTimeOptional}
+                      title={t.todoTimeOptional}
+                      className="w-[7.25rem] flex-shrink-0 rounded-lg border border-app-border/80 bg-white px-2 py-1.5 text-[12px] text-app-text outline-none focus:border-primary/50 sm:w-[5rem] sm:px-1 sm:py-1 sm:text-[11px] dark:border-white/15 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {todo.time && (
+                      <button
+                        type="button"
+                        onClick={() => setTodoTime(todo.id)}
+                        className="rounded-lg px-1.5 py-1 text-[11px] text-app-text-secondary hover:bg-app-bg hover:text-app-text dark:hover:bg-white/10"
+                        title={t.todoClearTime}
+                        aria-label={t.todoClearTime}
+                      >
+                        ×
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setTodoTime(todo.id)}
-                      className="rounded-lg px-1.5 py-1 text-[11px] text-app-text-secondary hover:bg-app-bg hover:text-app-text dark:hover:bg-white/10"
-                      title={t.todoClearTime}
-                      aria-label={t.todoClearTime}
+                      onClick={() => deleteTodo(todo.id)}
+                      className="ml-auto rounded-lg px-2 py-1.5 text-xs text-app-text-secondary hover:bg-red-50 hover:text-red-600 sm:ml-0 dark:hover:bg-red-500/10"
+                      title={t.todoDelete}
                     >
-                      ×
+                      🗑
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => deleteTodo(todo.id)}
-                    className="ml-auto rounded-lg px-2 py-1.5 text-xs text-app-text-secondary hover:bg-red-50 hover:text-red-600 sm:ml-0 dark:hover:bg-red-500/10"
-                    title={t.todoDelete}
-                  >
-                    🗑
-                  </button>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
