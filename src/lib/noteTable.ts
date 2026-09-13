@@ -567,40 +567,27 @@ export function deleteTable(ctx: TableCellContext) {
   ctx.wrap.remove();
 }
 
-function ensureToolbarSpacer(host: HTMLElement) {
-  let spacer = host.querySelector(':scope > .note-table-toolbar-spacer');
-  if (!(spacer instanceof HTMLElement)) {
-    // Clear leftover interactive chrome from older builds (menus used to live here).
-    host.replaceChildren();
-    spacer = document.createElement('div');
-    spacer.className = 'note-table-toolbar-spacer';
-    spacer.setAttribute('contenteditable', 'false');
-    spacer.setAttribute('aria-hidden', 'true');
-    host.appendChild(spacer);
-  }
-}
-
 function suppressToolbarHostCaret(host: HTMLElement) {
   // Never let nested controls become tab stops — Chrome will park focus on the first
   // <button> inside contenteditable ("Line above") when the main toolbar runs ed.focus().
   host.querySelectorAll('button, [href], input, select, textarea, [tabindex]').forEach((el) => {
     if (el instanceof HTMLElement) el.tabIndex = -1;
   });
-  // Host is a non-editable chrome strip. Interactive menus are portaled to <body>
-  // so keystrokes in cells can never land in button labels.
-  host.setAttribute('contenteditable', 'false');
-  host.setAttribute('spellcheck', 'false');
-  ensureToolbarSpacer(host);
   if (host.dataset.noteTableHostBound === '1') return;
   host.dataset.noteTableHostBound = '1';
+  // Do NOT set contenteditable=false on the host: in Chrome/Safari that makes the
+  // surrounding table wrap behave like a non-editable island, so clicks never land
+  // in cells. Keep the strip non-editable via preventDefault + CSS user-select.
   host.addEventListener('mousedown', (e) => {
-    // Always preventDefault so chrome never steals focus from the editor.
+    // Always preventDefault so nested controls never steal focus from the editor.
+    // Action handlers still run (React onMouseDown); they must not rely on focus.
     e.preventDefault();
   });
   host.addEventListener('focusin', (e) => {
     const t = e.target;
     if (!(t instanceof HTMLElement)) return;
     if (t === host) return;
+    // Kick focus off chrome controls back to the nearest contenteditable editor.
     t.blur();
     const ed = host.closest('[contenteditable="true"]');
     if (ed instanceof HTMLElement) ed.focus({ preventScroll: true });
@@ -617,7 +604,11 @@ export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTML
     toolbarHost.className = NOTE_TABLE_TOOLBAR_HOST;
     wrap.insertBefore(toolbarHost, wrap.firstChild);
   }
-  // Host must stay contenteditable=false (interactive menus are outside the editor).
+  // Legacy saved notes may still have contenteditable=false on the host — clear it.
+  toolbarHost.removeAttribute('contenteditable');
+  // Drop leftover spacers from the floating-toolbar experiment. Do NOT remove
+  // [data-note-table-toolbar] — React portals the live menu into this host.
+  toolbarHost.querySelectorAll(':scope > .note-table-toolbar-spacer').forEach((n) => n.remove());
   suppressToolbarHostCaret(toolbarHost);
 
   const table = wrap.querySelector(`:scope > table.${NOTE_TABLE_CLASS}`)
@@ -630,7 +621,6 @@ export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTML
       body.className = NOTE_TABLE_BODY;
       wrap.appendChild(body);
     }
-    // Keep body in the outer contenteditable — do not nest a second editable root.
     body.removeAttribute('contenteditable');
     if (table.parentElement !== body) body.appendChild(table);
     // Always pin: [toolbarHost, note-table-body, …]. Never leave the host under the table

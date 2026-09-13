@@ -480,18 +480,8 @@ body {
   border-bottom: none;
 }
 
-.note-content .note-table-toolbar-spacer,
-[contenteditable] .note-table-toolbar-spacer {
-  display: block;
-  width: 100%;
-  min-height: 2.75rem;
-  pointer-events: none;
-  user-select: none;
-}
-
 .note-content .note-table-toolbar,
-[contenteditable] .note-table-toolbar,
-.note-table-toolbar--floating {
+[contenteditable] .note-table-toolbar {
   display: flex;
   width: 100%;
   flex-wrap: wrap;
@@ -503,24 +493,15 @@ body {
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;
-}
-
-.note-table-toolbar--floating {
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px 10px 0 0;
-  background: color-mix(in srgb, var(--color-primary) 6%, #fff);
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  /* Keep menu labels out of the editable tree even if a browser parks the caret here. */
+  -webkit-user-modify: read-only;
 }
 
 .note-content .note-table-toolbar .note-table-toolbar__btn,
 [contenteditable] .note-table-toolbar .note-table-toolbar__btn,
 .note-content .note-table-toolbar button,
-[contenteditable] .note-table-toolbar button,
-.note-table-toolbar--floating .note-table-toolbar__btn,
-.note-table-toolbar--floating button {
+[contenteditable] .note-table-toolbar button {
   outline: none;
-  border: 0;
-  background: transparent;
 }
 
 .note-content .note-table-toolbar .note-table-toolbar__btn:focus,
@@ -626,10 +607,6 @@ body {
   background: color-mix(in srgb, var(--color-primary) 14%, transparent);
 }
 
-.dark .note-table-toolbar--floating {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: color-mix(in srgb, var(--color-primary) 14%, #111827);
-}
 
 .dark .note-content .note-table-wrap--active,
 .dark [contenteditable] .note-table-wrap--active {
