@@ -466,6 +466,36 @@ body {
   display: none;
 }
 
+[contenteditable] .note-table-wrap--edit-chrome {
+  padding-top: var(--note-table-chrome-h, 2.85rem);
+}
+
+.note-table-toolbar--floating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.45rem 0.55rem;
+  box-sizing: border-box;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--color-primary) 6%, #fff);
+}
+
+.note-table-toolbar--floating button {
+  outline: none;
+  border: 0;
+  background: transparent;
+}
+
+.dark .note-table-toolbar--floating {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--color-primary) 14%, #111827);
+}
+
 
 .note-content .note-table-body,
 [contenteditable] .note-table-body {
