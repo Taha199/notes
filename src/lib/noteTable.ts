@@ -568,10 +568,13 @@ export function deleteTable(ctx: TableCellContext) {
   ctx.wrap.remove();
 }
 
-export function ensureTableWrapStructure(wrap: HTMLElement): { table: HTMLTableElement | null } {
-  // Menus live outside contenteditable. Drop leftover in-table hosts/spacers so
-  // Chrome cannot park the caret on chrome after the first keystroke.
-  wrap.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST}, .note-table-toolbar-spacer, [data-note-table-toolbar]`).forEach((n) => n.remove());
+export function ensureTableWrapStructure(wrap: HTMLElement): { table: HTMLTableElement | null; changed: boolean } {
+  let changed = false;
+  const stale = wrap.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST}, .note-table-toolbar-spacer, [data-note-table-toolbar]`);
+  if (stale.length) {
+    stale.forEach((n) => n.remove());
+    changed = true;
+  }
 
   const table = wrap.querySelector(`:scope > table.${NOTE_TABLE_CLASS}`)
     ?? wrap.querySelector(`:scope > .${NOTE_TABLE_BODY} > table.${NOTE_TABLE_CLASS}`);
@@ -582,13 +585,23 @@ export function ensureTableWrapStructure(wrap: HTMLElement): { table: HTMLTableE
       body = document.createElement('div');
       body.className = NOTE_TABLE_BODY;
       wrap.appendChild(body);
+      changed = true;
     }
-    body.removeAttribute('contenteditable');
-    if (table.parentElement !== body) body.appendChild(table);
-    if (wrap.firstElementChild !== body) wrap.insertBefore(body, wrap.firstChild);
+    if (body.hasAttribute('contenteditable')) {
+      body.removeAttribute('contenteditable');
+      changed = true;
+    }
+    if (table.parentElement !== body) {
+      body.appendChild(table);
+      changed = true;
+    }
+    if (wrap.firstElementChild !== body) {
+      wrap.insertBefore(body, wrap.firstChild);
+      changed = true;
+    }
   }
 
-  return { table: table instanceof HTMLTableElement ? table : null };
+  return { table: table instanceof HTMLTableElement ? table : null, changed };
 }
 
 export function setActiveTableWrap(wrap: HTMLElement | null) {
@@ -779,8 +792,7 @@ export function normalizeTablesInEditor(root: HTMLElement): boolean {
 
     const activeWrap = table.closest(`.${NOTE_TABLE_WRAP}`);
     if (activeWrap instanceof HTMLElement) {
-      ensureTableWrapStructure(activeWrap);
-      changed = true;
+      if (ensureTableWrapStructure(activeWrap).changed) changed = true;
     }
 
     table.querySelectorAll('tr, td, th').forEach((el) => {

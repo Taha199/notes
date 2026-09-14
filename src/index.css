@@ -466,39 +466,6 @@ body {
   display: none;
 }
 
-[contenteditable] .note-table-wrap--edit-chrome {
-  padding-top: var(--note-table-chrome-h, 2.85rem);
-}
-
-.note-table-toolbar--floating {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.5rem 0.625rem;
-  box-sizing: border-box;
-  pointer-events: auto;
-  user-select: none;
-  -webkit-user-select: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px 10px 0 0;
-  background: color-mix(in srgb, var(--color-primary) 6%, #fff);
-}
-
-.note-table-toolbar--floating .note-table-toolbar__btn,
-.note-table-toolbar--floating button {
-  outline: none;
-  border: 0;
-  background: transparent;
-}
-
-.note-table-toolbar--floating .note-table-toolbar__btn:focus,
-.note-table-toolbar--floating .note-table-toolbar__btn:focus-visible,
-.note-table-toolbar--floating button:focus,
-.note-table-toolbar--floating button:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
 
 .note-content .note-table-body,
 [contenteditable] .note-table-body {
@@ -583,10 +550,6 @@ body {
   background: rgba(17, 24, 39, 0.96);
 }
 
-.dark .note-table-toolbar--floating {
-  border-bottom-color: rgba(255, 255, 255, 0.1);
-  background: color-mix(in srgb, var(--color-primary) 14%, #111827);
-}
 
 
 .dark .note-content .note-table-wrap--active,
