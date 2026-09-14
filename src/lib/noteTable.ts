@@ -2,6 +2,7 @@ export const NOTE_TABLE_CLASS = 'note-table';
 export const NOTE_TABLE_WRAP = 'note-table-wrap';
 export const NOTE_TABLE_ACTIVE_WRAP = 'note-table-wrap--active';
 export const NOTE_TABLE_TOOLBAR_HOST = 'note-table-toolbar-host';
+export const NOTE_TABLE_EDIT_CHROME = 'note-table-wrap--edit-chrome';
 export const NOTE_TABLE_BODY = 'note-table-body';
 export const NOTE_TABLE_BASE_FONT_PX = 15;
 export const NOTE_TABLE_MIN_FONT_PX = 9;
@@ -567,49 +568,10 @@ export function deleteTable(ctx: TableCellContext) {
   ctx.wrap.remove();
 }
 
-function suppressToolbarHostCaret(host: HTMLElement) {
-  // Never let nested controls become tab stops — Chrome will park focus on the first
-  // <button> inside contenteditable ("Line above") when the main toolbar runs ed.focus().
-  host.querySelectorAll('button, [href], input, select, textarea, [tabindex]').forEach((el) => {
-    if (el instanceof HTMLElement) el.tabIndex = -1;
-  });
-  if (host.dataset.noteTableHostBound === '1') return;
-  host.dataset.noteTableHostBound = '1';
-  // Do NOT set contenteditable=false on the host: in Chrome/Safari that makes the
-  // surrounding table wrap behave like a non-editable island, so clicks never land
-  // in cells. Keep the strip non-editable via preventDefault + CSS user-select.
-  host.addEventListener('mousedown', (e) => {
-    // Always preventDefault so nested controls never steal focus from the editor.
-    // Action handlers still run (React onMouseDown); they must not rely on focus.
-    e.preventDefault();
-  });
-  host.addEventListener('focusin', (e) => {
-    const t = e.target;
-    if (!(t instanceof HTMLElement)) return;
-    if (t === host) return;
-    // Kick focus off chrome controls back to the nearest contenteditable editor.
-    t.blur();
-    const ed = host.closest('[contenteditable="true"]');
-    if (ed instanceof HTMLElement) ed.focus({ preventScroll: true });
-  });
-}
-
-export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTMLElement; table: HTMLTableElement | null } {
-  const existingHost = wrap.querySelector(`:scope > .${NOTE_TABLE_TOOLBAR_HOST}`);
-  let toolbarHost: HTMLElement;
-  if (existingHost instanceof HTMLElement) {
-    toolbarHost = existingHost;
-  } else {
-    toolbarHost = document.createElement('div');
-    toolbarHost.className = NOTE_TABLE_TOOLBAR_HOST;
-    wrap.insertBefore(toolbarHost, wrap.firstChild);
-  }
-  // Legacy saved notes may still have contenteditable=false on the host — clear it.
-  toolbarHost.removeAttribute('contenteditable');
-  // Drop leftover spacers from the floating-toolbar experiment. Do NOT remove
-  // [data-note-table-toolbar] — React portals the live menu into this host.
-  toolbarHost.querySelectorAll(':scope > .note-table-toolbar-spacer').forEach((n) => n.remove());
-  suppressToolbarHostCaret(toolbarHost);
+export function ensureTableWrapStructure(wrap: HTMLElement): { table: HTMLTableElement | null } {
+  // Menus live outside contenteditable. Drop leftover in-table hosts/spacers so
+  // Chrome cannot park the caret on chrome after the first keystroke.
+  wrap.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST}, .note-table-toolbar-spacer, [data-note-table-toolbar]`).forEach((n) => n.remove());
 
   const table = wrap.querySelector(`:scope > table.${NOTE_TABLE_CLASS}`)
     ?? wrap.querySelector(`:scope > .${NOTE_TABLE_BODY} > table.${NOTE_TABLE_CLASS}`);
@@ -623,17 +585,10 @@ export function ensureTableWrapStructure(wrap: HTMLElement): { toolbarHost: HTML
     }
     body.removeAttribute('contenteditable');
     if (table.parentElement !== body) body.appendChild(table);
-    // Always pin: [toolbarHost, note-table-body, …]. Never leave the host under the table
-    // after serialize/selection refresh paths reattach chrome.
-    if (wrap.firstElementChild !== toolbarHost) wrap.insertBefore(toolbarHost, wrap.firstChild);
-    if (toolbarHost.nextElementSibling !== body) wrap.insertBefore(body, toolbarHost.nextSibling);
+    if (wrap.firstElementChild !== body) wrap.insertBefore(body, wrap.firstChild);
   }
 
-  return { toolbarHost, table: table instanceof HTMLTableElement ? table : null };
-}
-
-export function getTableToolbarHost(wrap: HTMLElement): HTMLElement {
-  return ensureTableWrapStructure(wrap).toolbarHost;
+  return { table: table instanceof HTMLTableElement ? table : null };
 }
 
 export function setActiveTableWrap(wrap: HTMLElement | null) {

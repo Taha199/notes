@@ -17,7 +17,7 @@ import {
   NOTE_YT_REMOVE,
 } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, getTableColumnWidths, hitTableColumnResize, resizeAdjacentTableColumns, fitNoteTableFontSize, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, getTableToolbarHost, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_BODY, NOTE_TABLE_COL_RESIZE_HOVER, NOTE_TABLE_COL_RESIZING, type TableCellContext, type TableColumnResizeHit, type TableEditPosition } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, getTableColumnWidths, hitTableColumnResize, resizeAdjacentTableColumns, fitNoteTableFontSize, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_EDIT_CHROME, NOTE_TABLE_BODY, NOTE_TABLE_COL_RESIZE_HOVER, NOTE_TABLE_COL_RESIZING, type TableCellContext, type TableColumnResizeHit, type TableEditPosition } from '../../lib/noteTable';
 import {
   closestTableCell,
   collectFormatTargetRanges as collectFormatTargetRangesFromLib,
@@ -879,31 +879,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       clearedYt.push(node);
       node.classList.remove('note-yt-frame--active');
     });
-    const unwrappedBodies: { wrap: HTMLElement; table: HTMLTableElement }[] = [];
-    ed.querySelectorAll(`.${NOTE_TABLE_BODY}`).forEach((node) => {
-      if (!(node instanceof HTMLElement) || !(node.parentElement instanceof HTMLElement)) return;
-      const table = node.querySelector(`table.${NOTE_TABLE_CLASS}`);
-      if (!(table instanceof HTMLTableElement)) return;
-      unwrappedBodies.push({ wrap: node.parentElement, table });
-      node.parentElement.insertBefore(table, node);
-      node.remove();
-    });
+    // Do NOT unwrap live `.note-table-body` or toggle table chrome classes here —
+    // moving the table resets the caret to the first cell after every keystroke.
     const html = ed.innerHTML;
-    unwrappedBodies.forEach(({ wrap, table }) => {
-      const nextBody = document.createElement('div');
-      nextBody.className = NOTE_TABLE_BODY;
-      wrap.insertBefore(nextBody, table);
-      nextBody.appendChild(table);
-    });
-    // Reattach chrome without moving table menus under the table.
-    // Image/YouTube hosts belong at the end of their frame; table toolbar hosts must
-    // stay pinned as the first child of the wrap (above `.note-table-body`).
+    // Image/YouTube hosts belong at the end of their frame. Table menus live
+    // outside the editor — never put a toolbar host back into the wrap.
     detached.forEach(({ parent, host }) => {
-      if (host.classList.contains(NOTE_TABLE_TOOLBAR_HOST) && parent.classList.contains(NOTE_TABLE_WRAP)) {
-        parent.insertBefore(host, parent.firstChild);
-        ensureTableWrapStructure(parent);
-        return;
-      }
+      if (host.classList.contains(NOTE_TABLE_TOOLBAR_HOST)) return;
       parent.appendChild(host);
     });
     clearedFrames.forEach(({ frame, scale, active, resizing }) => {
@@ -920,6 +902,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const serializeEditorHtmlSafe = (ed: HTMLElement): string => {
     const clone = ed.cloneNode(true) as HTMLElement;
     clone.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}, .${NOTE_TABLE_TOOLBAR_HOST}, .${NOTE_YT_REMOVE}`).forEach((n) => n.remove());
+    clone.querySelectorAll(`.${NOTE_TABLE_EDIT_CHROME}`).forEach((n) => {
+      if (n instanceof HTMLElement) {
+        n.classList.remove(NOTE_TABLE_EDIT_CHROME);
+        n.style.removeProperty('--note-table-chrome-h');
+      }
+    });
     clone.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
       node.classList.remove('note-img-frame--active', 'note-img-frame--resizing');
@@ -1106,7 +1094,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const tableWrapsRef = useRef<HTMLElement[]>([]);
   const tableCtxByWrapRef = useRef(new WeakMap<HTMLElement, TableCellContext>());
   const tableWrapIdSeqRef = useRef(0);
-  const tableToolbarHostsRef = useRef(new WeakMap<HTMLElement, HTMLElement>());
+  const [tableChromeLayout, setTableChromeLayout] = useState(0);
+  const tableToolbarElsRef = useRef(new Map<string, HTMLElement>());
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
@@ -1197,6 +1186,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   };
 
   const hideTableToolbar = () => {
+    tableWrapsRef.current.forEach((wrap) => {
+      wrap.classList.remove(NOTE_TABLE_EDIT_CHROME);
+      wrap.style.removeProperty('--note-table-chrome-h');
+    });
     clearActiveTableHighlight();
     tableWrapsRef.current = [];
     setTableWraps([]);
@@ -1208,8 +1201,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     }
     activeTableWrapRef.current = ctx.wrap;
     setActiveTableWrap(ctx.wrap);
-    const { toolbarHost } = ensureTableWrapStructure(ctx.wrap);
-    tableToolbarHostsRef.current.set(ctx.wrap, toolbarHost);
+    ensureTableWrapStructure(ctx.wrap);
+    ctx.wrap.classList.add(NOTE_TABLE_EDIT_CHROME);
     if (!ctx.wrap.dataset.noteTableId) {
       tableWrapIdSeqRef.current += 1;
       ctx.wrap.dataset.noteTableId = `nt-${tableWrapIdSeqRef.current}`;
@@ -1229,8 +1222,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         node instanceof HTMLElement && !!node.querySelector(`table.${NOTE_TABLE_CLASS}`),
     );
     wraps.forEach((wrap) => {
-      const { toolbarHost } = ensureTableWrapStructure(wrap);
-      tableToolbarHostsRef.current.set(wrap, toolbarHost);
+      ensureTableWrapStructure(wrap);
+      wrap.classList.add(NOTE_TABLE_EDIT_CHROME);
       if (!wrap.dataset.noteTableId) {
         tableWrapIdSeqRef.current += 1;
         wrap.dataset.noteTableId = `nt-${tableWrapIdSeqRef.current}`;
@@ -6534,6 +6527,30 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   }, [editable]);
 
   useEffect(() => {
+    if (!editable || tableWraps.length === 0) return;
+    let raf = 0;
+    const bump = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        setTableChromeLayout((n) => n + 1);
+      });
+    };
+    window.addEventListener('scroll', bump, true);
+    window.addEventListener('resize', bump);
+    const vv = window.visualViewport;
+    vv?.addEventListener('scroll', bump);
+    vv?.addEventListener('resize', bump);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', bump, true);
+      window.removeEventListener('resize', bump);
+      vv?.removeEventListener('scroll', bump);
+      vv?.removeEventListener('resize', bump);
+    };
+  }, [editable, tableWraps.length]);
+
+  useEffect(() => {
     if (!previewImage) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setPreviewImage(null); };
     window.addEventListener('keydown', handler);
@@ -7300,9 +7317,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         document.body,
       )}
 
-      {/* Table toolbars — pinned above every table while edit mode is open.
-          contentEditable=false on the menu keeps labels out of the editable tree. */}
+      {/* Table menus live on document.body — never inside contenteditable. */}
       {editable && tableWraps.map((wrap) => {
+        void tableChromeLayout;
         if (!wrap.isConnected) return null;
         const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
         if (!(table instanceof HTMLTableElement)) return null;
@@ -7312,11 +7329,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           : resolveTableContextAt(table, cached?.rowIndex ?? 0, cached?.colIndex ?? 0, editorRef.current);
         if (!ctx) return null;
         const wrapKey = wrap.dataset.noteTableId ?? `wrap-${tableWraps.indexOf(wrap)}`;
-        let host = tableToolbarHostsRef.current.get(wrap);
-        if (!host?.isConnected || !wrap.contains(host)) {
-          host = getTableToolbarHost(wrap);
-          tableToolbarHostsRef.current.set(wrap, host);
-        }
+        const rect = wrap.getBoundingClientRect();
+        if (rect.width < 8 || rect.bottom < 0 || rect.top > window.innerHeight) return null;
         const tableMenuBtn =
           'note-table-toolbar__btn cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium select-none';
         const onTableMenuDown = (e: React.MouseEvent, action: () => void) => {
@@ -7324,66 +7338,53 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           e.stopPropagation();
           tableToolbarClickRef.current = true;
           action();
+          setTableChromeLayout((n) => n + 1);
         };
         return (
-          <span key={wrapKey} style={{ display: 'contents' }}>
-            {createPortal(
-              <div
-                data-note-table-toolbar
-                className="note-table-toolbar"
-                contentEditable={false}
-                suppressContentEditableWarning
-                onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
-              >
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  contentEditable={false}
-                  title={t.titleInsertLineAboveBlock}
-                  onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, wrap); })}
-                  className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
-                >↵ {t.insertLineAboveBlock}</span>
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  contentEditable={false}
-                  title={t.titleInsertLineBelowBlock}
-                  onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineBelowBlock(ed, wrap); })}
-                  className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
-                >↵ {t.insertLineBelowBlock}</span>
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  contentEditable={false}
-                  title={t.titleMoveTableUp}
-                  onMouseDown={(e) => onTableMenuDown(e, () => moveTableVertically(wrap, 'up'))}
-                  className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
-                >⤒ {t.moveTableUp}</span>
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  contentEditable={false}
-                  title={t.titleMoveTableDown}
-                  onMouseDown={(e) => onTableMenuDown(e, () => moveTableVertically(wrap, 'down'))}
-                  className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}
-                >⤓ {t.moveTableDown}</span>
-                <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" contentEditable={false} />
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableAddRowAbove} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'above'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↑ {t.tableAddRowAbove}</span>
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableAddRowBelow} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'below'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↓ {t.tableAddRowBelow}</span>
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableRemoveRow} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => removeTableRow(c), wrap))} className={`${tableMenuBtn} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>− {t.tableRemoveRow}</span>
-                <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" contentEditable={false} />
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableAddColBefore} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableColumn(c, 'before'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>← {t.tableAddColBefore}</span>
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableAddColAfter} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableColumn(c, 'after'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>{t.tableAddColAfter} →</span>
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableRemoveCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => removeTableColumn(c), wrap))} className={`${tableMenuBtn} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>− {t.tableRemoveCol}</span>
-                <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" contentEditable={false} />
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableWidenCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => adjustTableColumnWidth(c, TABLE_COLUMN_WIDTH_STEP), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>←→ {t.tableWidenCol}</span>
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableNarrowCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => adjustTableColumnWidth(c, -TABLE_COLUMN_WIDTH_STEP), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>→← {t.tableNarrowCol}</span>
-                <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" contentEditable={false} />
-                <span role="button" tabIndex={-1} contentEditable={false} title={t.tableDelete} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => { deleteTable(c); return 'deleted'; }, wrap))} className={`${tableMenuBtn} font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>✕ {t.tableDelete}</span>
-              </div>,
-              host,
-            )}
-          </span>
+        <span key={wrapKey}>
+        {createPortal(
+          <div
+            key={wrapKey}
+            ref={(el) => {
+              if (el) {
+                tableToolbarElsRef.current.set(wrapKey, el);
+                wrap.style.setProperty('--note-table-chrome-h', `${el.offsetHeight}px`);
+              } else {
+                tableToolbarElsRef.current.delete(wrapKey);
+              }
+            }}
+            data-note-table-toolbar
+            className="note-table-toolbar--floating"
+            style={{
+              position: 'fixed',
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              zIndex: 35,
+            }}
+            onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
+          >
+            <button type="button" tabIndex={-1} title={t.titleInsertLineAboveBlock} onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, wrap); })} className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}>↵ {t.insertLineAboveBlock}</button>
+            <button type="button" tabIndex={-1} title={t.titleInsertLineBelowBlock} onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineBelowBlock(ed, wrap); })} className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}>↵ {t.insertLineBelowBlock}</button>
+            <button type="button" tabIndex={-1} title={t.titleMoveTableUp} onMouseDown={(e) => onTableMenuDown(e, () => moveTableVertically(wrap, 'up'))} className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}>⤒ {t.moveTableUp}</button>
+            <button type="button" tabIndex={-1} title={t.titleMoveTableDown} onMouseDown={(e) => onTableMenuDown(e, () => moveTableVertically(wrap, 'down'))} className={`${tableMenuBtn} font-semibold text-primary hover:bg-primary/10 dark:text-primary-200`}>⤓ {t.moveTableDown}</button>
+            <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+            <button type="button" tabIndex={-1} title={t.tableAddRowAbove} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'above'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↑ {t.tableAddRowAbove}</button>
+            <button type="button" tabIndex={-1} title={t.tableAddRowBelow} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableRow(c, 'below'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>↓ {t.tableAddRowBelow}</button>
+            <button type="button" tabIndex={-1} title={t.tableRemoveRow} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => removeTableRow(c), wrap))} className={`${tableMenuBtn} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>− {t.tableRemoveRow}</button>
+            <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+            <button type="button" tabIndex={-1} title={t.tableAddColBefore} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableColumn(c, 'before'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>← {t.tableAddColBefore}</button>
+            <button type="button" tabIndex={-1} title={t.tableAddColAfter} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => addTableColumn(c, 'after'), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>{t.tableAddColAfter} →</button>
+            <button type="button" tabIndex={-1} title={t.tableRemoveCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => removeTableColumn(c), wrap))} className={`${tableMenuBtn} text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>− {t.tableRemoveCol}</button>
+            <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+            <button type="button" tabIndex={-1} title={t.tableWidenCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => adjustTableColumnWidth(c, TABLE_COLUMN_WIDTH_STEP), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>←→ {t.tableWidenCol}</button>
+            <button type="button" tabIndex={-1} title={t.tableNarrowCol} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => adjustTableColumnWidth(c, -TABLE_COLUMN_WIDTH_STEP), wrap))} className={`${tableMenuBtn} text-app-text hover:bg-primary/10 dark:text-gray-100`}>→← {t.tableNarrowCol}</button>
+            <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
+            <button type="button" tabIndex={-1} title={t.tableDelete} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => { deleteTable(c); return 'deleted'; }, wrap))} className={`${tableMenuBtn} font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>✕ {t.tableDelete}</button>
+          </div>,
+          document.body,
+        )}
+        </span>
         );
       })}
 
