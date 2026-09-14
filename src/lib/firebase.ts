@@ -45,4 +45,4 @@ export const ADMIN_EMAIL = 'abdomar200@gmail.com';
  * Sidebar link + /admin route for Användarpanel.
  * Flip to true to restore — AdminPanel component and APIs stay wired.
  */
-export const SHOW_ADMIN_PANEL = false;
+export const SHOW_ADMIN_PANEL = true;
