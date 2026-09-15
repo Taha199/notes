@@ -650,7 +650,6 @@ function previewCacheKey(file: StoredFile): string {
 export function getCachedPreviewBlobUrl(file: StoredFile): string | null {
   const entry = previewBlobCache.get(file.id);
   if (!entry) return null;
-  if (entry.fileKey !== previewCacheKey(file)) return null;
   return entry.url;
 }
 
@@ -696,8 +695,11 @@ export async function loadPreviewBlobUrl(
     const blob = await loadFileBlob(file, onProgress, uid);
     const url = URL.createObjectURL(blob);
     const prev = previewBlobCache.get(file.id);
-    if (prev && prev.url !== url) {
-      try { URL.revokeObjectURL(prev.url); } catch { /* ignore */ }
+    // Keep the existing blob URL if the iframe is already showing it — revoking
+    // a live PDF blob crashes Chrome's PDF plugin (tab dies within ~30s).
+    if (prev?.url) {
+      try { URL.revokeObjectURL(url); } catch { /* unused duplicate */ }
+      return prev.url;
     }
     previewBlobCache.set(file.id, { url, fileKey: key });
     return url;

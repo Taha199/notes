@@ -84,6 +84,8 @@ export function FilesPage() {
   });
   const [fileSortMenuOpen, setFileSortMenuOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<StoredFile | null>(null);
+  const previewFileRef = useRef<StoredFile | null>(null);
+  previewFileRef.current = previewFile;
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadPct, setDownloadPct] = useState(0);
 
@@ -203,27 +205,28 @@ export function FilesPage() {
 
   // Keep open preview in sync when list heals URLs — never drop a hydrated dataUrl.
   useEffect(() => {
-    if (!previewFile) return;
-    const latest = files.find((f) => f.id === previewFile.id);
+    const open = previewFileRef.current;
+    if (!open) return;
+    const latest = files.find((f) => f.id === open.id);
     if (!latest) return;
     const merged: StoredFile = {
       ...latest,
-      dataUrl: latest.dataUrl || previewFile.dataUrl,
-      downloadUrl: latest.downloadUrl || previewFile.downloadUrl,
-      storagePath: latest.storagePath || previewFile.storagePath,
+      dataUrl: latest.dataUrl || open.dataUrl,
+      downloadUrl: latest.downloadUrl || open.downloadUrl,
+      storagePath: latest.storagePath || open.storagePath,
     };
     if (merged.dataUrl?.startsWith('data:')) {
       delete merged.inlinePending;
     }
     if (
-      merged.downloadUrl !== previewFile.downloadUrl
-      || merged.storagePath !== previewFile.storagePath
-      || merged.inlinePending !== previewFile.inlinePending
-      || merged.dataUrl !== previewFile.dataUrl
+      merged.downloadUrl !== open.downloadUrl
+      || merged.storagePath !== open.storagePath
+      || merged.inlinePending !== open.inlinePending
+      || merged.dataUrl !== open.dataUrl
     ) {
       setPreviewFile(merged);
     }
-  }, [files, previewFile]);
+  }, [files]);
 
   // Background-heal missing CDN URLs for Storage-backed files only (skip inline dataUrl).
   useEffect(() => {

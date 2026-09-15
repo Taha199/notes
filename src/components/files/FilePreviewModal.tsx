@@ -124,10 +124,12 @@ export function FilePreviewModal({
   }, [fileKey, uid, mode]);
 
   // PDF: blob URL (Chrome blanks Firebase CDN in iframes). Cache → instant reopen.
+  // Key only on file.id — healing downloadUrl/dataUrl must NOT remount the iframe
+  // or revoke the live blob (Chrome's PDF plugin crashes the tab).
   useEffect(() => {
     if (mode !== 'pdf') return;
     let cancelled = false;
-    const target = activeFile;
+    const target = file;
     const hit = getCachedPreviewBlobUrl(target);
     if (hit) {
       setBlobUrl(hit);
@@ -137,13 +139,11 @@ export function FilePreviewModal({
       setMissingInStorage(false);
       return;
     }
-    // Wait for inline hydrate when needed — don't race Storage first.
     if (isInlinePendingFile(target) && !fileHref(target)) return;
     setResolving(true);
     setLoadError(false);
     setMissingInStorage(false);
     setLoadProgress(0);
-    setBlobUrl(null);
     (async () => {
       try {
         const objectUrl = await loadPreviewBlobUrl(target, (loaded, total) => {
@@ -161,8 +161,8 @@ export function FilePreviewModal({
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable key
-  }, [fileKey, mode, uid, activeHref]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- file.id only; do not reload on URL heal
+  }, [file.id, mode, uid]);
 
   // Image recovery only when CDN/data URL fails — never the default path.
   useEffect(() => {
@@ -268,7 +268,7 @@ export function FilePreviewModal({
       role="dialog"
       aria-modal="true"
       aria-label={activeFile.name}
-      className="fixed inset-0 z-[10000] flex flex-col bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-[10000] flex flex-col bg-black/85"
       onClick={onClose}
     >
       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -316,9 +316,10 @@ export function FilePreviewModal({
             <PreviewResolveSpinner pct={loadProgress} />
           ) : blobUrl ? (
             <iframe
+              key={file.id}
               title={activeFile.name}
               src={blobUrl}
-              className="h-[85vh] w-full max-w-5xl rounded-lg bg-white shadow-2xl"
+              className="h-[85vh] w-full max-w-5xl bg-white shadow-2xl"
             />
           ) : null
         )}
