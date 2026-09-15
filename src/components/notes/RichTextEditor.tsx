@@ -1094,7 +1094,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const tableWrapsRef = useRef<HTMLElement[]>([]);
   const tableCtxByWrapRef = useRef(new WeakMap<HTMLElement, TableCellContext>());
   const tableWrapIdSeqRef = useRef(0);
-  const [tableChromeLayout, setTableChromeLayout] = useState(0);
+  const tableToolbarElsRef = useRef(new Map<string, HTMLElement>());
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
@@ -6527,6 +6527,24 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return () => document.removeEventListener('selectionchange', onSelectionChange);
   }, [editable]);
 
+  const positionTableToolbars = () => {
+    tableWrapsRef.current.forEach((wrap) => {
+      const key = wrap.dataset.noteTableId;
+      if (!key || !wrap.isConnected) return;
+      const el = tableToolbarElsRef.current.get(key);
+      if (!el) return;
+      const rect = wrap.getBoundingClientRect();
+      if (rect.width < 8 || rect.bottom < 0 || rect.top > window.innerHeight) {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = 'flex';
+      el.style.left = `${rect.left}px`;
+      el.style.top = `${rect.top}px`;
+      el.style.width = `${rect.width}px`;
+    });
+  };
+
   useEffect(() => {
     if (!editable || tableWraps.length === 0) return;
     let raf = 0;
@@ -6534,9 +6552,12 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        setTableChromeLayout((n) => n + 1);
+        // Move the overlay in the DOM only — never setState here (that loop
+        // froze the tab after a few seconds on notes with tables).
+        positionTableToolbars();
       });
     };
+    bump();
     window.addEventListener('scroll', bump, true);
     window.addEventListener('resize', bump);
     const vv = window.visualViewport;
@@ -7317,15 +7338,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       )}
 
       {/* Table menus sit on the table visually, but live on document.body so
-          typing in cells cannot land in the labels. */}
+          typing in cells cannot land in the labels. Position is updated via
+          DOM writes on scroll — never React state (that crashed the tab). */}
       {editable && tableWraps.map((wrap) => {
-        void tableChromeLayout;
         if (!wrap.isConnected) return null;
         const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
         if (!(table instanceof HTMLTableElement)) return null;
         const wrapKey = wrap.dataset.noteTableId ?? `wrap-${tableWraps.indexOf(wrap)}`;
-        const rect = wrap.getBoundingClientRect();
-        if (rect.width < 8 || rect.bottom < 0 || rect.top > window.innerHeight) return null;
         const tableMenuBtn =
           'cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium select-none text-app-text hover:bg-primary/10 dark:text-gray-100';
         const onTableMenuDown = (e: React.MouseEvent, action: () => void) => {
@@ -7333,28 +7352,26 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           e.stopPropagation();
           tableToolbarClickRef.current = true;
           action();
-          setTableChromeLayout((n) => n + 1);
+          requestAnimationFrame(() => positionTableToolbars());
         };
         return (
           <span key={wrapKey}>
             {createPortal(
               <div
                 ref={(el) => {
-                  if (!el) return;
-                  const h = `${el.offsetHeight}px`;
-                  if (wrap.style.getPropertyValue('--note-table-chrome-h') !== h) {
-                    wrap.style.setProperty('--note-table-chrome-h', h);
+                  if (el) {
+                    tableToolbarElsRef.current.set(wrapKey, el);
+                    const rect = wrap.getBoundingClientRect();
+                    el.style.left = `${rect.left}px`;
+                    el.style.top = `${rect.top}px`;
+                    el.style.width = `${rect.width}px`;
+                  } else {
+                    tableToolbarElsRef.current.delete(wrapKey);
                   }
                 }}
                 data-note-table-toolbar
                 className="note-table-toolbar--floating"
-                style={{
-                  position: 'fixed',
-                  left: rect.left,
-                  top: rect.top,
-                  width: rect.width,
-                  zIndex: 35,
-                }}
+                style={{ position: 'fixed', zIndex: 35 }}
                 onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
               >
                 <button type="button" tabIndex={-1} title={t.titleInsertLineAboveBlock} onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, wrap); })} className={`${tableMenuBtn} font-semibold text-primary dark:text-primary-200`}>↵ {t.insertLineAboveBlock}</button>

@@ -467,7 +467,8 @@ body {
 }
 
 [contenteditable] .note-table-wrap--edit-chrome {
-  padding-top: var(--note-table-chrome-h, 2.85rem);
+  /* Fixed slot so measuring toolbar height cannot loop with scroll/setState. */
+  padding-top: 4.5rem;
 }
 
 .note-table-toolbar--floating {
