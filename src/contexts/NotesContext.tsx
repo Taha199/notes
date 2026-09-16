@@ -9,13 +9,13 @@ import { useLanguage } from './LanguageContext';
 import { quizPatchChangesContent, quizzesEqualForUI, quizSetsEqualForUI } from '../lib/quizContent';
 import {
   clearQuizCompleteCache,
+  estimateQuizListsChars,
   persistQuizCompleteCache,
   pickBootQuizLists,
   quizSetsHaveCompleteBodies,
   readQuizCompleteCache,
   readQuizCompleteCacheIdb,
   shouldApplyBackgroundQuizUpdate,
-  QUIZ_COMPLETE_CACHE_LS_KEY,
 } from '../lib/quizCompleteCache';
 import {
   adoptByIdMembershipWhenRicher,
@@ -88,7 +88,7 @@ import {
 } from '../lib/recentEdits';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
 import { sortNotesByCreatedDesc } from '../lib/noteSort';
-import { safeLocalStorageSet } from '../lib/safeStorage';
+import { MAX_LOCALSTORAGE_VALUE_CHARS, safeLocalStorageSet } from '../lib/safeStorage';
 import { QUIZ_SET_COLORS } from '../lib/quizColors';
 import {
   clearNotesBootCache,
@@ -1405,6 +1405,55 @@ function writeQuizSetsShellJournal(sets: QuizSet[]) {
     };
   });
   safeSetItem(QUIZ_SETS_SHELL_KEY, JSON.stringify(shells));
+}
+
+/** Never JSON.stringify a multi-MB quiz library into localStorage (Chrome OOM). */
+function persistQuizzesToLs(quizzes: QuizItem[]) {
+  if (estimateQuizListsChars(quizzes, []) > MAX_LOCALSTORAGE_VALUE_CHARS) return;
+  try {
+    const raw = JSON.stringify(quizzes);
+    if (raw.length > MAX_LOCALSTORAGE_VALUE_CHARS) return;
+    safeSetItem('malacadhati_quiz', raw);
+  } catch {
+    /* ignore */
+  }
+}
+
+function persistQuizSetsToLs(sets: QuizSet[]) {
+  writeQuizSetsShellJournal(sets);
+  if (estimateQuizListsChars([], sets) > MAX_LOCALSTORAGE_VALUE_CHARS) return;
+  try {
+    const raw = JSON.stringify(sets);
+    if (raw.length > MAX_LOCALSTORAGE_VALUE_CHARS) return;
+    safeSetItem('malacadhati_quiz_sets', raw);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Length + timestamps — never stringify question bodies for realtime dedupe. */
+function cheapCollectionFingerprint(val: unknown): string {
+  if (val == null) return '';
+  const rows = Array.isArray(val)
+    ? val
+    : (typeof val === 'object' ? Object.values(val as Record<string, unknown>) : [val]);
+  let out = String(rows.length);
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') {
+      out += '|';
+      continue;
+    }
+    const o = row as Record<string, unknown>;
+    const q = typeof o.question === 'string' ? o.question : '';
+    const a = typeof o.answer === 'string' ? o.answer : '';
+    const html = typeof o.html === 'string' ? o.html : '';
+    const items = o.items;
+    const nItems = Array.isArray(items)
+      ? items.length
+      : (items && typeof items === 'object' ? Object.keys(items as object).length : 0);
+    out += `|${String(o.id ?? '')}:${String(o.updatedAt ?? '')}:${String(o.orderUpdatedAt ?? '')}:${String(o.savedAt ?? '')}:${o.trashed ? 1 : 0}:${q.length}:${a.length}:${html.length}:${nItems}:${q.slice(0, 24)}:${a.slice(0, 24)}`;
+  }
+  return out;
 }
 
 function readQuizSetsShellJournal(): QuizSet[] {
@@ -3236,9 +3285,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         // Never poison LS with an empty shell when we have ever had / know sets.
         && (countUserQuizSets(sets) > 0 || !everHadSetsRef.current)
       ) {
-        safeSetItem('malacadhati_quiz_sets', JSON.stringify(sets));
+        persistQuizSetsToLs(sets);
         writeQuizSetsShellJournal(sets);
-        safeSetItem('malacadhati_quiz', JSON.stringify(quizzesHonored));
+        persistQuizzesToLs(quizzesHonored);
       }
     };
     // Phase 0: IDB last-good complete cache (async, but local — beats network).
@@ -3867,7 +3916,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
         setQuizzes(quizzes);
         quizzesRef.current = quizzes;
-        safeSetItem('malacadhati_quiz', JSON.stringify(quizzes));
+        persistQuizzesToLs(quizzes);
 
         setChats(chats);
         safeSetItem('malacadhati_chats', JSON.stringify(chats));
@@ -3955,7 +4004,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
             historyRepair = true;
             recoveryLog('recovered quizzes from quiz set items', { count: fromSets.length });
             setQuizzes(quizzes);
-            safeSetItem('malacadhati_quiz', JSON.stringify(quizzes));
+            persistQuizzesToLs(quizzes);
           }
         }
 
@@ -4279,7 +4328,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       isQuizSetsLocalWriteSafe(next, maxKnownLiveBySetRef.current, paintedHonored)
       && (countUserQuizSets(next) > 0 || !everHadSetsRef.current)
     ) {
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+      persistQuizSetsToLs(next);
       writeQuizSetsShellJournal(next);
     }
     return next;
@@ -4332,7 +4381,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         safeSets,
         quizSetsListOrderRef.current ?? readQuizSetsListOrderLocal(),
       );
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(safeSets));
+      persistQuizSetsToLs(safeSets);
       writeQuizSetsShellJournal(safeSets);
       rememberLastGoodComplete(quizzesRef.current, safeSets);
     }
@@ -4480,7 +4529,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     changed?: QuizSet | QuizSet[],
   ): Promise<void> => {
     quizSetsRef.current = nextSets;
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizSetsToLs(nextSets);
     writeQuizSetsShellJournal(nextSets);
     rememberLastGoodComplete(quizzesRef.current, nextSets);
     persistQuizSetsListOrder(nextSets);
@@ -4790,17 +4839,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       ),
       permDeletedRef.current,
     );
-    if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
+    if (!quizzesEqualForUI(nextQuizzes, quizzesRef.current)) {
       const prevQ = quizzesRef.current;
       quizzesRef.current = nextQuizzes;
-      safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+      persistQuizzesToLs(nextQuizzes);
       if (!quizzesEqualForUI(nextQuizzes, prevQ)) setQuizzes(nextQuizzes);
     }
-    if (JSON.stringify(nextSets) !== JSON.stringify(quizSetsRef.current)) {
+    if (!quizSetsEqualForUI(nextSets, quizSetsRef.current)) {
       const prevSets = quizSetsRef.current;
       quizSetsRef.current = nextSets;
       lastPaintedQuizSetsRef.current = nextSets;
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+      persistQuizSetsToLs(nextSets);
       if (!quizSetsEqualForUI(nextSets, prevSets)) setQuizSets(nextSets);
     }
     if (JSON.stringify(nextFolders) !== JSON.stringify(quizFoldersRef.current)) {
@@ -4809,7 +4858,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setQuizFolders(nextFolders);
     }
     const nextNotes = applyTrashTombstones(notesRef.current, noteTrashTombstonesRef.current, stamp);
-    if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
+    if (!notesMetaEqual(nextNotes, notesRef.current)) {
       notesRef.current = nextNotes;
       setNotes(nextNotes);
       writeNotesListCache(nextNotes);
@@ -4882,7 +4931,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (filtered.length === quizSetsRef.current.length) return;
       quizSetsRef.current = filtered;
       setQuizSets(filtered);
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(filtered));
+      persistQuizSetsToLs(filtered);
       return;
     }
     const emptiedAt = readTrashEmptiedAt();
@@ -4943,7 +4992,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets((prev) => {
       const next = ensureFavoritesSet(prev);
       if (JSON.stringify(next) !== JSON.stringify(prev)) {
-        safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+        persistQuizSetsToLs(next);
       }
       return next;
     });
@@ -5003,7 +5052,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // the cloud copy that still has the photos.
     writeNotesListCache(notesRef.current);
     rememberNotesBootCache(notesRef.current);
-    safeSetItem('malacadhati_quiz', JSON.stringify(quizzesRef.current));
+    persistQuizzesToLs(quizzesRef.current);
     safeSetItem('malacadhati_drafts', JSON.stringify(draftsRef.current));
   };
 
@@ -5243,22 +5292,22 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
 
     let changed = false;
-    if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
+    if (!notesMetaEqual(nextNotes, notesRef.current)) {
       notesRef.current = nextNotes;
       setNotes(nextNotes);
       safeSetItem('malacadhati', JSON.stringify(nextNotes));
       changed = true;
     }
-    if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
+    if (!quizzesEqualForUI(nextQuizzes, quizzesRef.current)) {
       quizzesRef.current = nextQuizzes;
       setQuizzes(nextQuizzes);
-      safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+      persistQuizzesToLs(nextQuizzes);
       changed = true;
     }
-    if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
+    if (!quizSetsEqualForUI(normalizedSets, quizSetsRef.current)) {
       quizSetsRef.current = normalizedSets;
       setQuizSets(normalizedSets);
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(normalizedSets));
+      persistQuizSetsToLs(normalizedSets);
       changed = true;
     }
     if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
@@ -5277,10 +5326,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFolders?: QuizFolder[];
   }, at = Date.now()) => {
     lastPushedDataAtRef.current = at;
-    if (patch.notes) lastPushedPayloadRef.current.notes = JSON.stringify(patch.notes);
-    if (patch.quizzes) lastPushedPayloadRef.current.quizzes = JSON.stringify(patch.quizzes);
-    if (patch.quizSets) lastPushedPayloadRef.current.quizSets = JSON.stringify(patch.quizSets);
-    if (patch.quizFolders) lastPushedPayloadRef.current.quizFolders = JSON.stringify(patch.quizFolders);
+    if (patch.notes) lastPushedPayloadRef.current.notes = cheapCollectionFingerprint(patch.notes);
+    if (patch.quizzes) lastPushedPayloadRef.current.quizzes = cheapCollectionFingerprint(patch.quizzes);
+    if (patch.quizSets) lastPushedPayloadRef.current.quizSets = cheapCollectionFingerprint(patch.quizSets);
+    if (patch.quizFolders) lastPushedPayloadRef.current.quizFolders = cheapCollectionFingerprint(patch.quizFolders);
   };
 
   const shouldSkipRemoteEcho = (key: 'notes' | 'quizzes' | 'quizSets' | 'quizFolders', json: string) =>
@@ -5340,8 +5389,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ),
         notesRef.current,
       );
-      const json = JSON.stringify(merged);
-      if (!shouldSkipRemoteEcho('notes', json) && json !== JSON.stringify(notesRef.current)) {
+      const json = cheapCollectionFingerprint(merged);
+      if (!shouldSkipRemoteEcho('notes', json) && !notesMetaEqual(merged, notesRef.current)) {
         nextNotes = merged;
         changed = true;
       }
@@ -5355,8 +5404,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         ),
         tombstones,
       );
-      const json = JSON.stringify(merged);
-      if (!shouldSkipRemoteEcho('quizzes', json) && json !== JSON.stringify(quizzesRef.current)) {
+      const json = cheapCollectionFingerprint(merged);
+      if (!shouldSkipRemoteEcho('quizzes', json) && !quizzesEqualForUI(merged, quizzesRef.current)) {
         nextQuizzes = merged;
         changed = true;
       }
@@ -5379,10 +5428,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       merged = applyStoredQuizSetsListOrder(
         applyTrashTombstones(merged, quizSetTombstonesRef.current, nowStr()),
       );
-      const json = JSON.stringify(merged);
+      const json = cheapCollectionFingerprint(merged);
       const needsCloudHeal = quizSetsMissingFromRemote(merged, remoteSets)
         || quizSetsRemoteMembershipIncomplete(merged, remoteSets);
-      if ((!shouldSkipRemoteEcho('quizSets', json) && json !== JSON.stringify(quizSetsRef.current)) || needsCloudHeal) {
+      if ((!shouldSkipRemoteEcho('quizSets', json) && !quizSetsEqualForUI(merged, quizSetsRef.current)) || needsCloudHeal) {
         nextSets = merged;
         changed = true;
       }
@@ -5398,10 +5447,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         merged = mergeFoldersForSync(merged, quizFoldersByIdCacheRef.current, tombstones);
       }
       merged = applyTrashTombstones(merged, quizFolderTombstonesRef.current, nowStr());
-      const json = JSON.stringify(merged);
+      const json = cheapCollectionFingerprint(merged);
       const remoteLive = new Set(remoteFolders.filter((f) => !f.trashed && !f.system).map((f) => f.id));
       const needsCloudHeal = merged.some((f) => !f.trashed && !f.system && !remoteLive.has(f.id));
-      if ((!shouldSkipRemoteEcho('quizFolders', json) && json !== JSON.stringify(quizFoldersRef.current)) || needsCloudHeal) {
+      if ((!shouldSkipRemoteEcho('quizFolders', json) && json !== cheapCollectionFingerprint(quizFoldersRef.current)) || needsCloudHeal) {
         nextFolders = merged;
         changed = true;
       }
@@ -5444,12 +5493,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFoldersByIdCacheRef.current = mergeById(quizFoldersByIdCacheRef.current, normalizedFolders);
 
     const shouldReconcileQuizSets = patch.quizSets !== undefined && (
-      JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)
+      !quizSetsEqualForUI(normalizedSets, quizSetsRef.current)
       || quizSetsMissingFromRemote(normalizedSets, firebaseToArray<QuizSet>(patch.quizSets as QuizSet[] | Record<string, QuizSet>))
       || quizSetsRemoteMembershipIncomplete(normalizedSets, firebaseToArray<QuizSet>(patch.quizSets as QuizSet[] | Record<string, QuizSet>))
     );
     const shouldReconcileQuizzes = patch.quizzes !== undefined
-      && JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current);
+      && !quizzesEqualForUI(nextQuizzes, quizzesRef.current);
     const shouldReconcileFolders = patch.quizFolders !== undefined && (
       JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)
       || (() => {
@@ -5461,18 +5510,18 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
     isApplyingRemoteRef.current = true;
     try {
-      if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
+      if (!notesMetaEqual(nextNotes, notesRef.current)) {
         notesRef.current = nextNotes;
         setNotes(nextNotes);
         safeSetItem('malacadhati', JSON.stringify(nextNotes));
       }
-      if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
+      if (!quizzesEqualForUI(nextQuizzes, quizzesRef.current)) {
         const prevQuizzes = quizzesRef.current;
         quizzesRef.current = nextQuizzes;
-        safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+        persistQuizzesToLs(nextQuizzes);
         if (!quizzesEqualForUI(nextQuizzes, prevQuizzes)) setQuizzes(nextQuizzes);
       }
-      if (JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)) {
+      if (!quizSetsEqualForUI(normalizedSets, quizSetsRef.current)) {
         commitQuizSetsFromRemote(normalizedSets);
       }
       if (JSON.stringify(normalizedFolders) !== JSON.stringify(quizFoldersRef.current)) {
@@ -6152,9 +6201,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         rememberNotesBootCache(next, true);
       }));
     }
-    if (JSON.stringify(mergedQuizzes) !== JSON.stringify(quizzesRef.current)) {
+    if (!quizzesEqualForUI(mergedQuizzes, quizzesRef.current)) {
       setQuizzes(mergedQuizzes);
-      safeSetItem('malacadhati_quiz', JSON.stringify(mergedQuizzes));
+      persistQuizzesToLs(mergedQuizzes);
       changed = true;
     }
     if (JSON.stringify(mergedChats) !== JSON.stringify(chatsRef.current)) {
@@ -6165,7 +6214,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Always commit when UI is empty/under-hydrated even if refs already match
     // (ById fold may have updated refs without setQuizSets — classic 0-set bug).
     if (
-      JSON.stringify(normalizedSets) !== JSON.stringify(quizSetsRef.current)
+      !quizSetsEqualForUI(normalizedSets, quizSetsRef.current)
       || healQuizSets
       || shouldHydrateQuizSetsUi(lastPaintedQuizSetsRef.current, normalizedSets)
       || (lastPaintedQuizSetsRef.current.length === 0 && normalizedSets.length > 0)
@@ -6430,15 +6479,15 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       applyTrashTombstonesToState();
       const nextNotes = filterResurrectedTrash(notesRef.current, notesRef.current);
       const nextQuizzes = filterResurrectedTrash(quizzesRef.current, quizzesRef.current);
-      if (JSON.stringify(nextNotes) !== JSON.stringify(notesRef.current)) {
+      if (!notesMetaEqual(nextNotes, notesRef.current)) {
         notesRef.current = nextNotes;
         setNotes(nextNotes);
         safeSetItem('malacadhati', JSON.stringify(nextNotes));
       }
-      if (JSON.stringify(nextQuizzes) !== JSON.stringify(quizzesRef.current)) {
+      if (!quizzesEqualForUI(nextQuizzes, quizzesRef.current)) {
         quizzesRef.current = nextQuizzes;
         setQuizzes(nextQuizzes);
-        safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+        persistQuizzesToLs(nextQuizzes);
       }
     });
     // Whole-array nodes: Firebase re-delivers the complete value of every
@@ -6465,9 +6514,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         // (not loaded yet) must not poison the dedupe cache, or the change would
         // never be applied at all.
         if (val == null || !loadedRef.current) return;
-        const json = JSON.stringify(val);
-        if (lastAppliedArrayJson.get(key) === json) return;
-        lastAppliedArrayJson.set(key, json);
+        const fp = cheapCollectionFingerprint(val);
+        if (lastAppliedArrayJson.get(key) === fp) return;
+        lastAppliedArrayJson.set(key, fp);
         arrayPatch = { ...arrayPatch, [key]: map ? map(val) : val };
         if (arrayPatchTimer) return;
         arrayPatchTimer = setTimeout(flushArrayPatch, 60);
@@ -6488,7 +6537,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (quizSetsEqualForUI(next, quizSetsRef.current)) return;
       quizSetsRef.current = next;
       setQuizSets(next);
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+      persistQuizSetsToLs(next);
       writeQuizSetsShellJournal(next);
     });
 
@@ -6553,7 +6602,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (filtered.length === quizSetsRef.current.length) return;
         quizSetsRef.current = filtered;
         setQuizSets(filtered);
-        safeSetItem('malacadhati_quiz_sets', JSON.stringify(filtered));
+        persistQuizSetsToLs(filtered);
       }
     });
 
@@ -6693,8 +6742,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           permDeletedRef.current,
         ),
       };
-      const quizzesChanged = JSON.stringify(applied.quizzes) !== JSON.stringify(quizzesRef.current);
-      const setsChanged = JSON.stringify(applied.sets) !== JSON.stringify(quizSetsRef.current);
+      const quizzesChanged = !quizzesEqualForUI(applied.quizzes, quizzesRef.current);
+      const setsChanged = !quizSetsEqualForUI(applied.sets, quizSetsRef.current);
       if (!quizzesChanged && !setsChanged) {
         if (quizItemApplyQueue.length) {
           const more = quizItemApplyQueue;
@@ -6708,7 +6757,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (quizzesChanged) {
           const prev = quizzesRef.current;
           quizzesRef.current = applied.quizzes;
-          safeSetItem('malacadhati_quiz', JSON.stringify(applied.quizzes));
+          persistQuizzesToLs(applied.quizzes);
           if (!quizzesEqualForUI(applied.quizzes, prev)) setQuizzes(applied.quizzes);
         }
         if (setsChanged) {
@@ -6760,12 +6809,12 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         if (nextQuizzes.length !== quizzesRef.current.length) {
           quizzesRef.current = nextQuizzes;
           setQuizzes(nextQuizzes);
-          safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+          persistQuizzesToLs(nextQuizzes);
         }
-        if (JSON.stringify(nextSets) !== JSON.stringify(quizSetsRef.current)) {
+        if (!quizSetsEqualForUI(nextSets, quizSetsRef.current)) {
           quizSetsRef.current = nextSets;
           setQuizSets(nextSets);
-          safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+          persistQuizSetsToLs(nextSets);
         }
         return;
       }
@@ -7286,7 +7335,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = [...quizzesRef.current, newItem];
     quizzesRef.current = next;
     setQuizzes(next);
-    safeSetItem('malacadhati_quiz', JSON.stringify(next));
+    persistQuizzesToLs(next);
     everHadQuizzesRef.current = true;
     // Field-level cloud write only (never force a full-user PATCH that could wipe notes).
     persist({ quizzes: next }, false);
@@ -7384,8 +7433,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
     rememberLastGoodComplete(nextQuizzes, nextSets);
-    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizzesToLs(nextQuizzes);
+    persistQuizSetsToLs(nextSets);
     // Instant cross-device delete: tiny single-item write first, then the big
     // quizSets array in the background. Other devices listen to quizItemsById.
     void tombstoneQuizItemDurable(userRef.current?.uid, trashedItem, touchedSetId);
@@ -7458,8 +7507,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
     rememberLastGoodComplete(nextQuizzes, nextSets);
-    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizzesToLs(nextQuizzes);
+    persistQuizSetsToLs(nextSets);
     void persistQuizItemDurable(userRef.current?.uid, live, RESTORED_QUESTIONS_SET_ID, { immediate: true });
     persist({ quizzes: nextQuizzes, quizSets: nextSets }, true);
     persistSets(nextSets, true, true);
@@ -7515,8 +7564,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizzes(nextQuizzes);
     setQuizSets(nextSets);
     rememberLastGoodComplete(nextQuizzes, nextSets, true);
-    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizzesToLs(nextQuizzes);
+    persistQuizSetsToLs(nextSets);
     // Push cleaned set shells so quizSetsById cannot keep re-unioning the ghost.
     for (const setId of touchedSetIds) {
       const cleaned = nextSets.find((s) => s.id === setId);
@@ -7543,7 +7592,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!forceCloud) return;
     recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: updated });
     setQuizzes(next);
-    safeSetItem('malacadhati_quiz', JSON.stringify(next));
+    persistQuizzesToLs(next);
     persist({ quizzes: next }, true);
     scheduleInstantDataCloudSave({ quizzes: next });
   };
@@ -7632,7 +7681,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const nextSets = quizSetsRef.current.filter((s) => s.id !== id);
     quizSetsRef.current = nextSets;
     setQuizSets(nextSets);
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizSetsToLs(nextSets);
     persistSets(nextSets, true, true);
     quizSetTombstonesRef.current = clearTrashTombstone(QUIZ_SET_TRASH_TOMBSTONE_KEY, quizSetTombstonesRef.current, id);
     const uid = userRef.current?.uid;
@@ -7839,7 +7888,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizFoldersRef.current = nextFolders;
     setQuizSets(nextSets);
     setQuizFolders(nextFolders);
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizSetsToLs(nextSets);
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     persist({ quizSets: nextSets, quizFolders: nextFolders }, true);
     quizFolderTombstonesRef.current = clearTrashTombstone(QUIZ_FOLDER_TRASH_TOMBSTONE_KEY, quizFolderTombstonesRef.current, id);
@@ -7999,10 +8048,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
     safeSetItem('malacadhati', JSON.stringify(nextNotes));
-    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    persistQuizzesToLs(nextQuizzes);
     safeSetItem('malacadhati_chats', JSON.stringify(nextChats));
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizSetsToLs(nextSets);
     markEverHadContent(nextNotes, nextQuizzes, nextSets);
     persist({ notes: nextNotes, quizzes: nextQuizzes, chats: nextChats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await rtdbFetch(`/users/${user.uid}/quizSets`, {
@@ -8043,10 +8092,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
     safeSetItem('malacadhati', JSON.stringify(snapshot.notes));
-    safeSetItem('malacadhati_quiz', JSON.stringify(snapshot.quizzes));
+    persistQuizzesToLs(snapshot.quizzes);
     safeSetItem('malacadhati_chats', JSON.stringify(snapshot.chats));
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizSetsToLs(nextSets);
     markEverHadContent(snapshot.notes, snapshot.quizzes, nextSets);
     persist({ notes: snapshot.notes, quizzes: snapshot.quizzes, chats: snapshot.chats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await rtdbFetch(`/users/${user!.uid}/quizSets`, {
@@ -8194,10 +8243,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
     safeSetItem('malacadhati', JSON.stringify(nextNotes));
-    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
+    persistQuizzesToLs(nextQuizzes);
     safeSetItem('malacadhati_chats', JSON.stringify(nextChats));
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizSetsToLs(nextSets);
     persist({ notes: nextNotes, quizzes: nextQuizzes, chats: nextChats, quizSets: nextSets, quizFolders: nextFolders }, true);
     await fetch(`${FB_DB_URL}/users/${user.uid}/quizSets.json`, {
       method: 'PUT',
@@ -8246,7 +8295,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     quizSetsRef.current = next;
     setQuizSets(next);
     rememberLastGoodComplete(quizzesRef.current, next);
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+    persistQuizSetsToLs(next);
     everHadSetsRef.current = true;
     persistSets(next, true, true);
     scheduleInstantDataCloudSave({ quizSets: next });
@@ -8291,7 +8340,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (touched) maxKnownLiveBySetRef.current.set(setId, countLiveItemsInSet(touched));
     setQuizSets(next);
     rememberLastGoodComplete(quizzesRef.current, next);
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+    persistQuizSetsToLs(next);
     if (existing) {
       void tombstoneQuizItemDurable(userRef.current?.uid, {
         ...existing,
@@ -8327,7 +8376,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     recordRecentEdit({ kind: 'setItem', at: Date.now(), setId, item: updated });
     setQuizSets(next);
     rememberLastGoodComplete(quizzesRef.current, next);
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+    persistQuizSetsToLs(next);
     persistSets(next, true, true);
     scheduleInstantDataCloudSave({ quizSets: next });
   };
@@ -8388,7 +8437,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const next = quizzesRef.current.map(swapQuizItem);
       quizzesRef.current = next;
       setQuizzes(next);
-      safeSetItem('malacadhati_quiz', JSON.stringify(next));
+      persistQuizzesToLs(next);
       next.filter(quizItemHasUrl).forEach((q) => {
         void persistQuizItemDurable(uid, q, null);
       });
@@ -8406,7 +8455,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       ));
       quizSetsRef.current = next;
       setQuizSets(next);
-      safeSetItem('malacadhati_quiz_sets', JSON.stringify(next));
+      persistQuizSetsToLs(next);
       next.forEach((s) => {
         s.items.filter(quizItemHasUrl).forEach((q) => {
           void persistQuizItemDurable(uid, q, s.id);
@@ -8795,8 +8844,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizFolders(nextFolders);
 
     safeSetItem('malacadhati', JSON.stringify(nextNotes));
-    safeSetItem('malacadhati_quiz', JSON.stringify(nextQuizzes));
-    safeSetItem('malacadhati_quiz_sets', JSON.stringify(nextSets));
+    persistQuizzesToLs(nextQuizzes);
+    persistQuizSetsToLs(nextSets);
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
     writeTrashEmptiedAt(emptiedAtMs);
     quizSetTombstonesRef.current = pruneSoftTombstonesAfterEmpty(

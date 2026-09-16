@@ -21,11 +21,43 @@ import {
   unionQuizSetsForCommit,
 } from './quizSetMerge';
 import { honorQuizListsWithTrashTombstones, pruneQuizListsAgainstTrashState } from './quizTrashTombstones';
-import { safeLocalStorageRemove, safeLocalStorageSet } from './safeStorage';
+import {
+  MAX_LOCALSTORAGE_VALUE_CHARS,
+  safeLocalStorageRemove,
+  safeLocalStorageSet,
+} from './safeStorage';
 
 export { quizListsHaveNewerOrderStamps, quizListsHaveStrictlyNewerItems };
 
 export const QUIZ_COMPLETE_CACHE_LS_KEY = 'malacadhati_quiz_sets_complete_cache';
+export { MAX_LOCALSTORAGE_VALUE_CHARS };
+
+/** In-memory last-good — avoids getItem+JSON.parse of a multi-MB LS blob on every persist. */
+let lastGoodMemory: QuizCompleteCacheSnapshot | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingPersist: { quizzes: QuizItem[]; sets: QuizSet[]; opts?: { force?: boolean } } | null = null;
+
+/** Cheap size estimate so we never JSON.stringify a quiz library that cannot fit in LS. */
+export function estimateQuizListsChars(quizzes: QuizItem[], sets: QuizSet[]): number {
+  let n = 80;
+  const addItem = (item: QuizItem | undefined) => {
+    if (!item) return;
+    n += 120;
+    n += String(item.question || '').length;
+    n += String(item.answer || '').length;
+    n += String(item.noteTitle || '').length;
+    n += String(item.explanation || '').length;
+    if (Array.isArray(item.options)) {
+      for (const opt of item.options) n += String(opt || '').length + 8;
+    }
+  };
+  for (const q of quizzes) addItem(q);
+  for (const set of sets) {
+    n += 180 + String(set.name || '').length;
+    for (const item of set.items ?? []) addItem(item);
+  }
+  return n;
+}
 
 const IDB_NAME = 'malacadhati_items_v1';
 const COMPLETE_STORE = 'quizCompleteCache';
@@ -78,20 +110,50 @@ function parseSnapshot(raw: unknown): QuizCompleteCacheSnapshot | null {
   return normalizeSnapshot(pruned.quizzes, pruned.sets, typeof obj.savedAt === 'number' ? obj.savedAt : Date.now());
 }
 
-/** Sync read — used on first paint. */
-export function readQuizCompleteCache(): QuizCompleteCacheSnapshot | null {
+function readQuizCompleteCacheFromLs(): QuizCompleteCacheSnapshot | null {
   try {
     const raw = localStorage.getItem(QUIZ_COMPLETE_CACHE_LS_KEY);
     if (!raw) return null;
+    if (raw.length > MAX_LOCALSTORAGE_VALUE_CHARS) {
+      safeLocalStorageRemove(QUIZ_COMPLETE_CACHE_LS_KEY);
+      return null;
+    }
     return parseSnapshot(JSON.parse(raw) as unknown);
   } catch {
     return null;
   }
 }
 
+/** Sync read — used on first paint. Re-honors trash tombstones on every call. */
+export function readQuizCompleteCache(): QuizCompleteCacheSnapshot | null {
+  if (lastGoodMemory) return parseSnapshot(lastGoodMemory);
+  const fromLs = readQuizCompleteCacheFromLs();
+  lastGoodMemory = fromLs;
+  return fromLs;
+}
+
+function commitCompleteCacheToLs(snap: QuizCompleteCacheSnapshot): boolean {
+  if (estimateQuizListsChars(snap.quizzes, snap.sets) > MAX_LOCALSTORAGE_VALUE_CHARS) {
+    safeLocalStorageRemove(QUIZ_COMPLETE_CACHE_LS_KEY);
+    return true;
+  }
+  try {
+    const raw = JSON.stringify(snap);
+    if (raw.length > MAX_LOCALSTORAGE_VALUE_CHARS) {
+      safeLocalStorageRemove(QUIZ_COMPLETE_CACHE_LS_KEY);
+      return true;
+    }
+    return safeLocalStorageSet(QUIZ_COMPLETE_CACHE_LS_KEY, raw);
+  } catch {
+    safeLocalStorageRemove(QUIZ_COMPLETE_CACHE_LS_KEY);
+    return true;
+  }
+}
+
 /**
  * Persist last-good. Never overwrite a richer complete snapshot with a shorter
  * incomplete shell (classic 11→9 poison). Soft-deletes that explain shrink win.
+ * Oversized snapshots stay in memory (+ IndexedDB via persist) and never enter LS.
  */
 export function writeQuizCompleteCache(
   quizzes: QuizItem[],
@@ -102,7 +164,7 @@ export function writeQuizCompleteCache(
   quizzes = pruned.quizzes;
   sets = pruned.sets;
   if (!sets.length || !quizSetsHaveCompleteBodies(sets)) return false;
-  const prev = readQuizCompleteCache();
+  const prev = lastGoodMemory ?? readQuizCompleteCacheFromLs();
   if (prev && !opts?.force) {
     const maxKnown = new Map<string, number>();
     bumpMaxKnownLiveBySet(maxKnown, prev.sets);
@@ -116,10 +178,17 @@ export function writeQuizCompleteCache(
     }
   }
   const snap = normalizeSnapshot(quizzes, sets);
-  return safeLocalStorageSet(QUIZ_COMPLETE_CACHE_LS_KEY, JSON.stringify(snap));
+  lastGoodMemory = snap;
+  return commitCompleteCacheToLs(snap);
 }
 
 export function clearQuizCompleteCache(): void {
+  lastGoodMemory = null;
+  pendingPersist = null;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
   safeLocalStorageRemove(QUIZ_COMPLETE_CACHE_LS_KEY);
   void clearQuizCompleteCacheIdb();
 }
@@ -211,14 +280,34 @@ async function clearQuizCompleteCacheIdb(): Promise<void> {
   }
 }
 
-/** Persist both LS (sync boot) and IDB (quota / durability). */
+function flushPendingCompleteCache(): void {
+  persistTimer = null;
+  const pending = pendingPersist;
+  pendingPersist = null;
+  if (!pending) return;
+  writeQuizCompleteCache(pending.quizzes, pending.sets, pending.opts);
+  void writeQuizCompleteCacheIdb(pending.quizzes, pending.sets, pending.opts);
+}
+
+/** Persist both LS (sync boot) and IDB (quota / durability). Debounced to avoid stringify storms. */
 export function persistQuizCompleteCache(
   quizzes: QuizItem[],
   sets: QuizSet[],
   opts?: { force?: boolean },
 ): void {
-  writeQuizCompleteCache(quizzes, sets, opts);
-  void writeQuizCompleteCacheIdb(quizzes, sets, opts);
+  if (opts?.force) {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    pendingPersist = null;
+    writeQuizCompleteCache(quizzes, sets, opts);
+    void writeQuizCompleteCacheIdb(quizzes, sets, opts);
+    return;
+  }
+  pendingPersist = { quizzes, sets, opts };
+  if (persistTimer) return;
+  persistTimer = setTimeout(flushPendingCompleteCache, 1_500);
 }
 
 /**

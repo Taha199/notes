@@ -4,6 +4,11 @@
  * once the origin is full of legacy multi-MB quiz/note caches).
  */
 
+/** Skip (and never retry) payloads that can OOM Chrome during setItem. */
+export const MAX_LOCALSTORAGE_VALUE_CHARS = 1_500_000;
+/** After a quota prune, only retry values small enough to actually fit. */
+export const MAX_LOCALSTORAGE_RETRY_CHARS = 400_000;
+
 /** Disposable caches — durable copies live in IndexedDB / Firebase. */
 const PRUNE_ON_QUOTA = [
   'malacadhati_quiz_sets',
@@ -27,39 +32,24 @@ function pruneLocalStorageCaches(exceptKey?: string) {
       /* ignore */
     }
   }
-  // Drop any oversized leftover keys (except the one we are writing).
-  try {
-    const keys: string[] = [];
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const k = localStorage.key(i);
-      if (k) keys.push(k);
-    }
-    for (const key of keys) {
-      if (exceptKey && key === exceptKey) continue;
-      if (!key.startsWith('malacadhati')) continue;
-      try {
-        const size = (localStorage.getItem(key) || '').length;
-        if (size > 200_000) localStorage.removeItem(key);
-      } catch {
-        /* ignore */
-      }
-    }
-  } catch {
-    /* ignore */
-  }
 }
 
 export function safeLocalStorageSet(key: string, value: string): boolean {
+  if (typeof value !== 'string' || value.length > MAX_LOCALSTORAGE_VALUE_CHARS) {
+    return false;
+  }
   try {
     localStorage.setItem(key, value);
     return true;
-  } catch (first) {
+  } catch {
     pruneLocalStorageCaches(key);
+    if (value.length > MAX_LOCALSTORAGE_RETRY_CHARS) {
+      return false;
+    }
     try {
       localStorage.setItem(key, value);
       return true;
-    } catch (second) {
-      console.error('[localStorage] setItem failed for', key, second || first);
+    } catch {
       return false;
     }
   }

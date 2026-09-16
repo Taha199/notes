@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   clearQuizCompleteCache,
+  estimateQuizListsChars,
   pickBootQuizLists,
   quizSetsHaveCompleteBodies,
   readQuizCompleteCache,
@@ -8,6 +9,7 @@ import {
   writeQuizCompleteCache,
   QUIZ_COMPLETE_CACHE_LS_KEY,
 } from './quizCompleteCache';
+import { MAX_LOCALSTORAGE_VALUE_CHARS } from './safeStorage';
 import { countLiveQuizItems, decideQuizListsUiPaint } from './quizSetMerge';
 import { quizzesEqualForUI, quizSetsEqualForUI } from './quizContent';
 import { QUIZ_ITEM_TRASH_TOMBSTONE_KEY, PERM_DELETED_KEY, TRASH_EMPTIED_AT_KEY } from './quizTrashTombstones';
@@ -353,5 +355,30 @@ describe('background updates after last-good paint', () => {
       quizzesEqualForUI: quizzesEqualForUI,
     });
     expect(decision).toEqual({ paint: false, reason: 'skip' });
+  });
+
+  it('keeps oversized complete snapshots in memory, not localStorage', () => {
+    const blob = 'x'.repeat(80_000);
+    const items = Array.from({ length: 20 }, (_, i) =>
+      item(i + 1, blob, '2026-08-11T12:00:00.000Z', { answer: blob }),
+    );
+    const huge = [
+      set({
+        id: 'huge',
+        name: 'Huge',
+        items,
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }),
+    ];
+    expect(estimateQuizListsChars([], huge)).toBeGreaterThan(MAX_LOCALSTORAGE_VALUE_CHARS);
+    expect(writeQuizCompleteCache([], huge)).toBe(true);
+    expect(localStorage.getItem(QUIZ_COMPLETE_CACHE_LS_KEY)).toBeNull();
+    expect(readQuizCompleteCache()?.sets[0].items).toHaveLength(20);
+  });
+
+  it('drops an already-oversized complete-cache key on read', () => {
+    localStorage.setItem(QUIZ_COMPLETE_CACHE_LS_KEY, 'y'.repeat(MAX_LOCALSTORAGE_VALUE_CHARS + 8));
+    expect(readQuizCompleteCache()).toBeNull();
+    expect(localStorage.getItem(QUIZ_COMPLETE_CACHE_LS_KEY)).toBeNull();
   });
 });
