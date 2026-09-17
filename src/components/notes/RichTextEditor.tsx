@@ -1105,7 +1105,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   const tableWrapsRef = useRef<HTMLElement[]>([]);
   const tableCtxByWrapRef = useRef(new WeakMap<HTMLElement, TableCellContext>());
   const tableWrapIdSeqRef = useRef(0);
-  const tableToolbarElsRef = useRef(new Map<string, HTMLElement>());
   const [imgResizeMode, setImgResizeMode] = useState(false);
   const imgResizeModeRef = useRef(false);
   imgResizeModeRef.current = imgResizeMode;
@@ -6541,61 +6540,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return () => document.removeEventListener('selectionchange', onSelectionChange);
   }, [editable]);
 
-  const placeTableToolbar = (wrap: HTMLElement, el: HTMLElement) => {
-    const rect = wrap.getBoundingClientRect();
-    if (rect.width < 8 || rect.bottom < 0 || rect.top > window.innerHeight) {
-      el.style.display = 'none';
-      return;
-    }
-    el.style.display = 'flex';
-    el.style.left = `${rect.left}px`;
-    el.style.top = `${rect.top}px`;
-    el.style.width = `${rect.width}px`;
-    const chromeH = Math.ceil(el.getBoundingClientRect().height);
-    if (chromeH > 0) {
-      wrap.style.setProperty('--note-table-chrome-h', `${chromeH}px`);
-      const spacer = wrap.querySelector(`:scope > .${NOTE_TABLE_TOOLBAR_SPACER}`);
-      if (spacer instanceof HTMLElement) spacer.style.height = `${chromeH}px`;
-    }
-  };
-
-  const positionTableToolbars = () => {
-    tableWrapsRef.current.forEach((wrap) => {
-      const key = wrap.dataset.noteTableId;
-      if (!key || !wrap.isConnected) return;
-      const el = tableToolbarElsRef.current.get(key);
-      if (!el) return;
-      placeTableToolbar(wrap, el);
-    });
-  };
-
-  useEffect(() => {
-    if (!editable || tableWraps.length === 0) return;
-    let raf = 0;
-    const bump = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        // Move the overlay in the DOM only — never setState here (that loop
-        // froze the tab after a few seconds on notes with tables).
-        positionTableToolbars();
-      });
-    };
-    bump();
-    window.addEventListener('scroll', bump, true);
-    window.addEventListener('resize', bump);
-    const vv = window.visualViewport;
-    vv?.addEventListener('scroll', bump);
-    vv?.addEventListener('resize', bump);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', bump, true);
-      window.removeEventListener('resize', bump);
-      vv?.removeEventListener('scroll', bump);
-      vv?.removeEventListener('resize', bump);
-    };
-  }, [editable, tableWraps.length]);
-
   useEffect(() => {
     if (!previewImage) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setPreviewImage(null); };
@@ -7361,13 +7305,16 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         document.body,
       )}
 
-      {/* Table menus sit on the table visually, but live on document.body so
-          typing in cells cannot land in the labels. Position is updated via
-          DOM writes on scroll — never React state (that crashed the tab). */}
+      {/* Table menus live in an in-flow spacer above the table body — not a
+          position:fixed overlay. The overlay sat at wrap.top (often under the
+          sticky format bar) and hid the header row. Spacer is contenteditable=false
+          so typing still cannot land in the labels. */}
       {editable && tableWraps.map((wrap) => {
         if (!wrap.isConnected) return null;
         const table = wrap.querySelector(`table.${NOTE_TABLE_CLASS}`);
         if (!(table instanceof HTMLTableElement)) return null;
+        const spacer = wrap.querySelector(`:scope > .${NOTE_TABLE_TOOLBAR_SPACER}`);
+        if (!(spacer instanceof HTMLElement)) return null;
         const wrapKey = wrap.dataset.noteTableId ?? `wrap-${tableWraps.indexOf(wrap)}`;
         const tableMenuBtn =
           'cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium select-none text-app-text hover:bg-primary/10 dark:text-gray-100';
@@ -7376,23 +7323,13 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
           e.stopPropagation();
           tableToolbarClickRef.current = true;
           action();
-          requestAnimationFrame(() => positionTableToolbars());
         };
         return (
           <span key={wrapKey}>
             {createPortal(
               <div
-                ref={(el) => {
-                  if (el) {
-                    tableToolbarElsRef.current.set(wrapKey, el);
-                    placeTableToolbar(wrap, el);
-                  } else {
-                    tableToolbarElsRef.current.delete(wrapKey);
-                  }
-                }}
                 data-note-table-toolbar
-                className="note-table-toolbar--floating"
-                style={{ position: 'fixed', zIndex: 35 }}
+                className="note-table-toolbar--inflow"
                 onMouseDown={(e) => { e.preventDefault(); tableToolbarClickRef.current = true; }}
               >
                 <button type="button" tabIndex={-1} title={t.titleInsertLineAboveBlock} onMouseDown={(e) => onTableMenuDown(e, () => { const ed = editorRef.current; if (ed) insertEmptyLineAboveBlock(ed, wrap); })} className={`${tableMenuBtn} font-semibold text-primary dark:text-primary-200`}>↵ {t.insertLineAboveBlock}</button>
@@ -7413,7 +7350,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                 <span className="mx-0.5 h-4 w-px bg-app-border/60 dark:bg-white/12" />
                 <button type="button" tabIndex={-1} title={t.tableDelete} onMouseDown={(e) => onTableMenuDown(e, () => runTableAction((c) => { deleteTable(c); return 'deleted'; }, wrap))} className={`${tableMenuBtn} font-semibold text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10`}>✕ {t.tableDelete}</button>
               </div>,
-              document.body,
+              spacer,
             )}
           </span>
         );

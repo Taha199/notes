@@ -474,21 +474,22 @@ body {
   user-select: none;
 }
 
-/* In-flow slot for the floating table chrome. Padding on the wrap was clipped
-   by overflow:hidden, so the header row sat under the overlay. */
+/* In-flow host for table actions. Must sit in document flow above the table
+   body — a position:fixed overlay at wrap.top covered the header and the
+   format toolbar. */
 [contenteditable] .note-table-wrap > .note-table-toolbar-spacer {
   display: block;
   box-sizing: border-box;
-  /* 3 wrapped Swedish action rows until JS measures the overlay. */
-  height: var(--note-table-chrome-h, 7.75rem);
-  min-height: 7.75rem;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
 }
 
 [contenteditable] .note-table-wrap--edit-chrome {
   padding-top: 0;
 }
 
-.note-table-toolbar--floating {
+.note-table-toolbar--inflow {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -499,17 +500,16 @@ body {
   user-select: none;
   -webkit-user-select: none;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px 10px 0 0;
   background: color-mix(in srgb, var(--color-primary) 6%, #fff);
 }
 
-.note-table-toolbar--floating button {
+.note-table-toolbar--inflow button {
   outline: none;
   border: 0;
   background: transparent;
 }
 
-.dark .note-table-toolbar--floating {
+.dark .note-table-toolbar--inflow {
   border-bottom-color: rgba(255, 255, 255, 0.1);
   background: color-mix(in srgb, var(--color-primary) 14%, #111827);
 }
