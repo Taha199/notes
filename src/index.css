@@ -467,8 +467,8 @@ body {
 }
 
 [contenteditable] .note-table-wrap--edit-chrome {
-  /* Fixed slot so measuring toolbar height cannot loop with scroll/setState. */
-  padding-top: 4.5rem;
+  /* Fallback until JS measures the floating chrome (2 wrapped Swedish rows). */
+  padding-top: var(--note-table-chrome-h, 6.75rem);
 }
 
 .note-table-toolbar--floating {

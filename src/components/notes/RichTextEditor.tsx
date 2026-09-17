@@ -906,6 +906,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       if (n instanceof HTMLElement) {
         n.classList.remove(NOTE_TABLE_EDIT_CHROME);
         n.style.removeProperty('--note-table-chrome-h');
+        n.style.removeProperty('padding-top');
       }
     });
     clone.querySelectorAll(`.${NOTE_IMG_FRAME}`).forEach((node) => {
@@ -1188,6 +1189,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     tableWrapsRef.current.forEach((wrap) => {
       wrap.classList.remove(NOTE_TABLE_EDIT_CHROME);
       wrap.style.removeProperty('--note-table-chrome-h');
+      wrap.style.removeProperty('padding-top');
     });
     clearActiveTableHighlight();
     tableWrapsRef.current = [];
@@ -6527,21 +6529,32 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     return () => document.removeEventListener('selectionchange', onSelectionChange);
   }, [editable]);
 
+  const placeTableToolbar = (wrap: HTMLElement, el: HTMLElement) => {
+    const rect = wrap.getBoundingClientRect();
+    if (rect.width < 8 || rect.bottom < 0 || rect.top > window.innerHeight) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'flex';
+    el.style.left = `${rect.left}px`;
+    el.style.top = `${rect.top}px`;
+    el.style.width = `${rect.width}px`;
+    // Toolbar sits on the wrap's top edge. Pad the table so row 1 (headers)
+    // is never covered — 4.5rem was shorter than two wrapped Swedish rows.
+    const chromeH = Math.ceil(el.getBoundingClientRect().height);
+    if (chromeH > 0) {
+      wrap.style.setProperty('--note-table-chrome-h', `${chromeH}px`);
+      wrap.style.paddingTop = `${chromeH}px`;
+    }
+  };
+
   const positionTableToolbars = () => {
     tableWrapsRef.current.forEach((wrap) => {
       const key = wrap.dataset.noteTableId;
       if (!key || !wrap.isConnected) return;
       const el = tableToolbarElsRef.current.get(key);
       if (!el) return;
-      const rect = wrap.getBoundingClientRect();
-      if (rect.width < 8 || rect.bottom < 0 || rect.top > window.innerHeight) {
-        el.style.display = 'none';
-        return;
-      }
-      el.style.display = 'flex';
-      el.style.left = `${rect.left}px`;
-      el.style.top = `${rect.top}px`;
-      el.style.width = `${rect.width}px`;
+      placeTableToolbar(wrap, el);
     });
   };
 
@@ -7361,10 +7374,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
                 ref={(el) => {
                   if (el) {
                     tableToolbarElsRef.current.set(wrapKey, el);
-                    const rect = wrap.getBoundingClientRect();
-                    el.style.left = `${rect.left}px`;
-                    el.style.top = `${rect.top}px`;
-                    el.style.width = `${rect.width}px`;
+                    placeTableToolbar(wrap, el);
                   } else {
                     tableToolbarElsRef.current.delete(wrapKey);
                   }
