@@ -80,7 +80,7 @@ import {
   tombstoneQuizItemDurable,
   type StoredQuizItem,
 } from '../lib/itemsStore';
-import { onEditorImageSwap, pendingEditorUploads, clearPendingEditorUploads, uploadEditorImage } from '../lib/imageUpload';
+import { onEditorImageSwap, pendingEditorUploads, clearPendingEditorUploads, uploadEditorImage, isCloudStorageBlocked } from '../lib/imageUpload';
 import {
   applyRecentEditsToData,
   loadRecentEdits,
@@ -88,7 +88,8 @@ import {
 } from '../lib/recentEdits';
 import { extractPlainText, hasRichContent } from '../lib/richContent';
 import { sortNotesByCreatedDesc } from '../lib/noteSort';
-import { MAX_LOCALSTORAGE_VALUE_CHARS, safeLocalStorageSet } from '../lib/safeStorage';
+import { MAX_LOCALSTORAGE_VALUE_CHARS, safeLocalStorageSet, safeLocalStorageRemove } from '../lib/safeStorage';
+import { htmlHasInlineImage } from '../lib/inlineImages';
 import { QUIZ_SET_COLORS } from '../lib/quizColors';
 import {
   clearNotesBootCache,
@@ -1316,7 +1317,12 @@ function mergeById<T extends { id: string }>(...lists: T[][]): T[] {
 function readLocalJson<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
+    if (!raw) return null;
+    if (raw.length > MAX_LOCALSTORAGE_VALUE_CHARS) {
+      try { localStorage.removeItem(key); } catch { /* ignore */ }
+      return null;
+    }
+    return JSON.parse(raw) as T;
   } catch {
     return null;
   }
@@ -1409,6 +1415,9 @@ function writeQuizSetsShellJournal(sets: QuizSet[]) {
 
 /** Never JSON.stringify a multi-MB quiz library into localStorage (Chrome OOM). */
 function persistQuizzesToLs(quizzes: QuizItem[]) {
+  if (quizzes.some((q) => htmlHasInlineImage(q.question) || htmlHasInlineImage(q.answer) || htmlHasInlineImage(q.explanation))) {
+    return;
+  }
   if (estimateQuizListsChars(quizzes, []) > MAX_LOCALSTORAGE_VALUE_CHARS) return;
   try {
     const raw = JSON.stringify(quizzes);
@@ -1421,11 +1430,40 @@ function persistQuizzesToLs(quizzes: QuizItem[]) {
 
 function persistQuizSetsToLs(sets: QuizSet[]) {
   writeQuizSetsShellJournal(sets);
+  if (sets.some((s) => (s.items ?? []).some((q) => htmlHasInlineImage(q.question) || htmlHasInlineImage(q.answer) || htmlHasInlineImage(q.explanation)))) {
+    return;
+  }
   if (estimateQuizListsChars([], sets) > MAX_LOCALSTORAGE_VALUE_CHARS) return;
   try {
     const raw = JSON.stringify(sets);
     if (raw.length > MAX_LOCALSTORAGE_VALUE_CHARS) return;
     safeSetItem('malacadhati_quiz_sets', raw);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Full note HTML (base64 photos) must never be JSON.stringified into LS on work PCs. */
+function persistNotesToLs(notes: Note[]) {
+  writeNotesListCache(notes);
+  rememberNotesBootCache(notes);
+  if (notes.some((n) => htmlHasInlineImage(n.html))) {
+    safeLocalStorageRemove('malacadhati');
+    return;
+  }
+  let chars = 0;
+  for (const note of notes) chars += (note.html || '').length + (note.title || '').length;
+  if (chars > MAX_LOCALSTORAGE_VALUE_CHARS) {
+    safeLocalStorageRemove('malacadhati');
+    return;
+  }
+  try {
+    const raw = JSON.stringify(notes);
+    if (raw.length > MAX_LOCALSTORAGE_VALUE_CHARS) {
+      safeLocalStorageRemove('malacadhati');
+      return;
+    }
+    safeSetItem('malacadhati', raw);
   } catch {
     /* ignore */
   }
@@ -3912,7 +3950,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         }
 
         commitNotes(mergeNotesPreferRicher(notesRef.current, notes));
-        safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+        persistNotesToLs(notesRef.current);
 
         setQuizzes(quizzes);
         quizzesRef.current = quizzes;
@@ -4863,7 +4901,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       setNotes(nextNotes);
       writeNotesListCache(nextNotes);
       rememberNotesBootCache(nextNotes, true);
-      safeSetItem('malacadhati', JSON.stringify(nextNotes));
+      persistNotesToLs(nextNotes);
     }
   };
 
@@ -5295,7 +5333,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     if (!notesMetaEqual(nextNotes, notesRef.current)) {
       notesRef.current = nextNotes;
       setNotes(nextNotes);
-      safeSetItem('malacadhati', JSON.stringify(nextNotes));
+      persistNotesToLs(nextNotes);
       changed = true;
     }
     if (!quizzesEqualForUI(nextQuizzes, quizzesRef.current)) {
@@ -5513,7 +5551,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!notesMetaEqual(nextNotes, notesRef.current)) {
         notesRef.current = nextNotes;
         setNotes(nextNotes);
-        safeSetItem('malacadhati', JSON.stringify(nextNotes));
+        persistNotesToLs(nextNotes);
       }
       if (!quizzesEqualForUI(nextQuizzes, quizzesRef.current)) {
         const prevQuizzes = quizzesRef.current;
@@ -6482,7 +6520,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (!notesMetaEqual(nextNotes, notesRef.current)) {
         notesRef.current = nextNotes;
         setNotes(nextNotes);
-        safeSetItem('malacadhati', JSON.stringify(nextNotes));
+        persistNotesToLs(nextNotes);
       }
       if (!quizzesEqualForUI(nextQuizzes, quizzesRef.current)) {
         quizzesRef.current = nextQuizzes;
@@ -6927,7 +6965,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       if (next.length === notesRef.current.length) return;
       notesRef.current = next;
       setNotes(next);
-      safeSetItem('malacadhati', JSON.stringify(next));
+      persistNotesToLs(next);
     });
 
     // Returning to the tab used to trigger a full pull every time. On iOS
@@ -7128,7 +7166,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     draftsRef.current = nextDrafts;
     setDrafts(nextDrafts);
     safeSetItem('malacadhati_drafts', JSON.stringify(nextDrafts));
-    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    persistNotesToLs(nextNotes);
 
     // One tracked save for durable + notes-only instant sync. Do NOT call
     // persist() — that schedules a full-user PATCH and left "Saving…" stuck.
@@ -7175,7 +7213,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       const next = notesRef.current.map((n) => (n.id === id ? merged : n));
       notesRef.current = next;
       setNotes(next);
-      safeSetItem('malacadhati', JSON.stringify(next));
+      persistNotesToLs(next);
       // Single in-flight tracker for durable + notes-only instant write.
       // Previously both persistNoteDurable AND scheduleInstantDataCloudSave
       // incremented, and persist() also queued a full-user PATCH — any hang in
@@ -7209,7 +7247,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const next = notesRef.current.map((n) => (n.id === id ? merged : n));
     notesRef.current = next;
     setNotes(next);
-    safeSetItem('malacadhati', JSON.stringify(next));
+    persistNotesToLs(next);
     void persistNoteDurable(userRef.current?.uid, merged).catch(() => false);
     persist({ notes: next }, instant);
     if (instant) scheduleInstantDataCloudSave({ notes: next });
@@ -8047,7 +8085,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setChats(nextChats);
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    persistNotesToLs(nextNotes);
     persistQuizzesToLs(nextQuizzes);
     safeSetItem('malacadhati_chats', JSON.stringify(nextChats));
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
@@ -8091,7 +8129,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setChats(snapshot.chats);
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    safeSetItem('malacadhati', JSON.stringify(snapshot.notes));
+    persistNotesToLs(snapshot.notes);
     persistQuizzesToLs(snapshot.quizzes);
     safeSetItem('malacadhati_chats', JSON.stringify(snapshot.chats));
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
@@ -8242,7 +8280,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setChats(nextChats);
     setQuizFolders(nextFolders);
     setQuizSets(nextSets);
-    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    persistNotesToLs(nextNotes);
     persistQuizzesToLs(nextQuizzes);
     safeSetItem('malacadhati_chats', JSON.stringify(nextChats));
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
@@ -8402,7 +8440,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       ));
       notesRef.current = next;
       setNotes(next);
-      safeSetItem('malacadhati', JSON.stringify(next));
+      persistNotesToLs(next);
       // Always persist the changed notes one-by-one (durable). Full-array cloud
       // sync is skipped in quiet/migration mode — that was what kept "Saving…"
       // and the leave-page warning stuck for minutes while 60 images migrated.
@@ -8492,27 +8530,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
 
   const syncNoteImagesToCloud = async () => {
     const uid = userRef.current?.uid;
-    if (!uid) return;
-    beginTrackedSave();
-    try {
-      const inline = [...new Set(notesRef.current.flatMap((n) => collectNoteInlineImageUrls(n.html)))];
-      for (const dataUrl of inline) {
-        if (!userRef.current) return;
+    if (!uid || isCloudStorageBlocked()) return;
+    // One note / one image at a time. Never assemble every data-URL in an array —
+    // that duplicated tens of MB and OOMed hospital Chrome (CORS + blob decode).
+    for (const note of notesRef.current) {
+      if (!userRef.current || isCloudStorageBlocked()) return;
+      const html = note.html || '';
+      if (!htmlHasInlineImage(html)) continue;
+      const urls = collectNoteInlineImageUrls(html);
+      for (const dataUrl of urls) {
+        if (!userRef.current || isCloudStorageBlocked()) return;
         try {
           const remoteUrl = await uploadEditorImage(dataUrl, { trackPending: false });
-          if (remoteUrl) replaceEditorImageUrl(dataUrl, remoteUrl, true);
+          if (!remoteUrl) return;
+          replaceEditorImageUrl(dataUrl, remoteUrl, true);
         } catch {
-          /* keep the base64 copy — retried next session */
+          return;
         }
       }
-      const imageNotes = notesRef.current.filter((n) => noteHasDisplayableImage(n.html));
-      const pushedAt = new Date().toISOString();
-      for (const note of imageNotes) {
-        if (!userRef.current) return;
-        await persistNoteDurable(uid, { ...note, savedAt: pushedAt }).catch(() => false);
-      }
-    } finally {
-      endTrackedSave();
     }
   };
 
@@ -8526,7 +8561,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Home PC: IDB already has the photos. Push them (as Storage URLs) so the
     // hospital PC can load notes the same way Quiz already does.
     noteImageSyncRanRef.current = true;
-    const timer = setTimeout(() => { void syncNoteImagesToCloud(); }, 600);
+    const timer = setTimeout(() => { void syncNoteImagesToCloud(); }, 15_000);
     return () => clearTimeout(timer);
   }, [user?.uid, notes]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -8745,7 +8780,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     void tombstoneNoteDurable(userRef.current?.uid, trashedNote);
     notesRef.current = notesRef.current.map((n) => (n.id === id ? trashedNote : n));
     setNotes(notesRef.current);
-    safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+    persistNotesToLs(notesRef.current);
     persist({ notes: notesRef.current }, true);
     scheduleInstantDataCloudSave({ notes: notesRef.current });
   };
@@ -8767,7 +8802,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     void persistNoteDurable(userRef.current?.uid, restored);
     notesRef.current = notesRef.current.map((n) => (n.id === id ? restored : n));
     setNotes(notesRef.current);
-    safeSetItem('malacadhati', JSON.stringify(notesRef.current));
+    persistNotesToLs(notesRef.current);
     persist({ notes: notesRef.current }, true);
     scheduleInstantDataCloudSave({ notes: notesRef.current });
   };
@@ -8790,7 +8825,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     );
     notesRef.current = nextNotes;
     setNotes(nextNotes);
-    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    persistNotesToLs(nextNotes);
     // Single targeted delete — never re-scrub the whole notesById tree on sync.
     void removeNoteDurable(userRef.current?.uid, numId);
     persist({ notes: nextNotes }, true);
@@ -8843,7 +8878,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     setQuizSets(nextSets);
     setQuizFolders(nextFolders);
 
-    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    persistNotesToLs(nextNotes);
     persistQuizzesToLs(nextQuizzes);
     persistQuizSetsToLs(nextSets);
     safeSetItem('malacadhati_quiz_folders', JSON.stringify(nextFolders));
@@ -8940,7 +8975,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     const nextNotes = notesRef.current.filter((n) => !idSet.has(n.id));
     notesRef.current = nextNotes;
     setNotes(nextNotes);
-    safeSetItem('malacadhati', JSON.stringify(nextNotes));
+    persistNotesToLs(nextNotes);
     ids.forEach((id) => { void removeNoteDurable(userRef.current?.uid, id); });
     persist({ notes: nextNotes }, true);
     void pushPermDeletedCloud({ notes: nextNotes });

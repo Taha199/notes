@@ -3,8 +3,41 @@ import { auth, storage, storageLegacy } from './firebase';
 import { dataUrlToBlob } from './files/fileStorage';
 import { withTimeout } from './files/fileTypes';
 
-const UPLOAD_TIMEOUT_MS = 45_000;
-const DOWNLOAD_URL_TIMEOUT_MS = 15_000;
+const UPLOAD_TIMEOUT_MS = 8_000;
+const DOWNLOAD_URL_TIMEOUT_MS = 6_000;
+
+/** Session-wide: firebasestorage is blocked (CORS / hospital firewall). */
+let cloudStorageBlocked = false;
+
+export function isCloudStorageBlocked(): boolean {
+  return cloudStorageBlocked;
+}
+
+export function markCloudStorageBlocked(): void {
+  cloudStorageBlocked = true;
+}
+
+export function resetCloudStorageBlockedForTests(): void {
+  cloudStorageBlocked = false;
+}
+
+export function isLikelyStorageNetworkBlock(err: unknown): boolean {
+  const code = String((err as { code?: string } | null)?.code || '');
+  const msg = String((err as { message?: string } | null)?.message || err || '');
+  if (cloudStorageBlocked) return true;
+  if (/cors|xmlhttprequest|err_failed|failed to fetch|network error|network-request-failed/i.test(msg)) {
+    return true;
+  }
+  if (
+    code === 'storage/retry-limit-exceeded'
+    || code === 'storage/canceled'
+    || code === 'storage/unknown'
+    || code.includes('network')
+  ) {
+    return true;
+  }
+  return false;
+}
 
 /**
  * Broadcast for "base64 image finished uploading, use this URL instead".
@@ -69,6 +102,7 @@ export async function uploadEditorImage(
   dataUrl: string,
   opts?: { trackPending?: boolean },
 ): Promise<string | null> {
+  if (cloudStorageBlocked) return null;
   const uid = auth.currentUser?.uid;
   if (!uid) return null;
   let blob: Blob;
@@ -87,10 +121,15 @@ export async function uploadEditorImage(
     try {
       return await uploadToBucket(storage, path, blob);
     } catch (primaryErr) {
+      if (isLikelyStorageNetworkBlock(primaryErr)) {
+        markCloudStorageBlocked();
+        return null;
+      }
       console.warn('[imageUpload] primary bucket failed, trying legacy', primaryErr);
       return await uploadToBucket(storageLegacy, path, blob);
     }
   } catch (err) {
+    if (isLikelyStorageNetworkBlock(err)) markCloudStorageBlocked();
     console.error('[imageUpload] both buckets failed', err);
     return null;
   } finally {

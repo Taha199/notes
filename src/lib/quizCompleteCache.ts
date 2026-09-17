@@ -21,6 +21,7 @@ import {
   unionQuizSetsForCommit,
 } from './quizSetMerge';
 import { honorQuizListsWithTrashTombstones, pruneQuizListsAgainstTrashState } from './quizTrashTombstones';
+import { htmlHasInlineImage, stripInlineDataImages } from './inlineImages';
 import {
   MAX_LOCALSTORAGE_VALUE_CHARS,
   safeLocalStorageRemove,
@@ -84,6 +85,33 @@ export function quizSetsHaveCompleteBodies(sets: QuizSet[]): boolean {
   return false;
 }
 
+function stripItemInlineImages(item: QuizItem): QuizItem {
+  const has = htmlHasInlineImage(item.question)
+    || htmlHasInlineImage(item.answer)
+    || htmlHasInlineImage(item.explanation)
+    || (item.options ?? []).some((opt) => htmlHasInlineImage(opt));
+  if (!has) return item;
+  return {
+    ...item,
+    question: stripInlineDataImages(item.question || ''),
+    answer: stripInlineDataImages(item.answer || ''),
+    explanation: item.explanation ? stripInlineDataImages(item.explanation) : item.explanation,
+    options: item.options ? item.options.map(stripInlineDataImages) : item.options,
+  };
+}
+
+/** Last-good must not clone multi-MB base64 images (Chrome OOM on work PCs). */
+function snapshotWithoutInlineImages(snap: QuizCompleteCacheSnapshot): QuizCompleteCacheSnapshot {
+  return {
+    ...snap,
+    quizzes: snap.quizzes.map(stripItemInlineImages),
+    sets: snap.sets.map((set) => ({
+      ...set,
+      items: (set.items ?? []).map(stripItemInlineImages),
+    })),
+  };
+}
+
 function normalizeSnapshot(
   quizzes: QuizItem[],
   sets: QuizSet[],
@@ -133,12 +161,13 @@ export function readQuizCompleteCache(): QuizCompleteCacheSnapshot | null {
 }
 
 function commitCompleteCacheToLs(snap: QuizCompleteCacheSnapshot): boolean {
-  if (estimateQuizListsChars(snap.quizzes, snap.sets) > MAX_LOCALSTORAGE_VALUE_CHARS) {
+  const slim = snapshotWithoutInlineImages(snap);
+  if (estimateQuizListsChars(slim.quizzes, slim.sets) > MAX_LOCALSTORAGE_VALUE_CHARS) {
     safeLocalStorageRemove(QUIZ_COMPLETE_CACHE_LS_KEY);
     return true;
   }
   try {
-    const raw = JSON.stringify(snap);
+    const raw = JSON.stringify(slim);
     if (raw.length > MAX_LOCALSTORAGE_VALUE_CHARS) {
       safeLocalStorageRemove(QUIZ_COMPLETE_CACHE_LS_KEY);
       return true;
@@ -235,7 +264,8 @@ export async function writeQuizCompleteCacheIdb(
     bumpMaxKnownLiveBySet(maxKnown, prev.sets);
     if (!isQuizSetsLocalWriteSafe(sets, maxKnown, prev.sets)) return false;
   }
-  const snap = { id: COMPLETE_KEY, ...normalizeSnapshot(quizzes, sets) };
+  const slim = snapshotWithoutInlineImages(normalizeSnapshot(quizzes, sets));
+  const snap = { id: COMPLETE_KEY, ...slim };
   try {
     const db = await openCompleteDb();
     await new Promise<void>((resolve, reject) => {

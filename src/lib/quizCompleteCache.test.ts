@@ -381,4 +381,20 @@ describe('background updates after last-good paint', () => {
     expect(readQuizCompleteCache()).toBeNull();
     expect(localStorage.getItem(QUIZ_COMPLETE_CACHE_LS_KEY)).toBeNull();
   });
+
+  it('does not persist base64 images inside the complete-cache localStorage blob', () => {
+    const img = `<p>q</p><img src="data:image/png;base64,${'B'.repeat(120)}">`;
+    const painted = [
+      set({
+        id: 'img',
+        name: 'Img',
+        items: [item(1, img, '2026-01-01T00:00:00.000Z', { answer: img })],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    expect(writeQuizCompleteCache([], painted)).toBe(true);
+    const raw = localStorage.getItem(QUIZ_COMPLETE_CACHE_LS_KEY) || '';
+    expect(raw.includes('data:image')).toBe(false);
+    expect(readQuizCompleteCache()?.sets[0].items[0].question.includes('q')).toBe(true);
+  });
 });

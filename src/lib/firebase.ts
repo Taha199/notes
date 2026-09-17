@@ -31,6 +31,13 @@ export const storage = getStorage(firebaseApp);
  */
 export const storageLegacy = getStorage(firebaseApp, 'gs://noteclaude-a5b3b.appspot.com');
 
+// Hospital / locked-down PCs block firebasestorage.googleapis.com (CORS).
+// Default SDK retries keep the file in RAM for minutes and OOM the tab.
+storage.maxUploadRetryTime = 2_000;
+storage.maxOperationRetryTime = 2_000;
+storageLegacy.maxUploadRetryTime = 2_000;
+storageLegacy.maxOperationRetryTime = 2_000;
+
 /** Both buckets to search when resolving existing files. Legacy first (old files). */
 export const storageBuckets: FirebaseStorage[] = [storageLegacy, storage];
 
