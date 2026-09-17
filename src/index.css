@@ -466,9 +466,26 @@ body {
   display: none;
 }
 
+.note-table-toolbar-spacer {
+  display: none;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* In-flow slot for the floating table chrome. Padding on the wrap was clipped
+   by overflow:hidden, so the header row sat under the overlay. */
+[contenteditable] .note-table-wrap > .note-table-toolbar-spacer {
+  display: block;
+  box-sizing: border-box;
+  /* 3 wrapped Swedish action rows until JS measures the overlay. */
+  height: var(--note-table-chrome-h, 7.75rem);
+  min-height: 7.75rem;
+}
+
 [contenteditable] .note-table-wrap--edit-chrome {
-  /* Fallback until JS measures the floating chrome (2 wrapped Swedish rows). */
-  padding-top: var(--note-table-chrome-h, 6.75rem);
+  padding-top: 0;
 }
 
 .note-table-toolbar--floating {

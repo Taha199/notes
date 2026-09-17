@@ -4,6 +4,7 @@ export const NOTE_TABLE_ACTIVE_WRAP = 'note-table-wrap--active';
 export const NOTE_TABLE_TOOLBAR_HOST = 'note-table-toolbar-host';
 export const NOTE_TABLE_EDIT_CHROME = 'note-table-wrap--edit-chrome';
 export const NOTE_TABLE_BODY = 'note-table-body';
+export const NOTE_TABLE_TOOLBAR_SPACER = 'note-table-toolbar-spacer';
 export const NOTE_TABLE_BASE_FONT_PX = 15;
 export const NOTE_TABLE_MIN_FONT_PX = 9;
 
@@ -570,7 +571,7 @@ export function deleteTable(ctx: TableCellContext) {
 
 export function ensureTableWrapStructure(wrap: HTMLElement): { table: HTMLTableElement | null; changed: boolean } {
   let changed = false;
-  const stale = wrap.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST}, .note-table-toolbar-spacer, [data-note-table-toolbar]`);
+  const stale = wrap.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST}, [data-note-table-toolbar]`);
   if (stale.length) {
     stale.forEach((n) => n.remove());
     changed = true;
@@ -595,8 +596,23 @@ export function ensureTableWrapStructure(wrap: HTMLElement): { table: HTMLTableE
       body.appendChild(table);
       changed = true;
     }
-    if (wrap.firstElementChild !== body) {
-      wrap.insertBefore(body, wrap.firstChild);
+
+    let spacer = wrap.querySelector(`:scope > .${NOTE_TABLE_TOOLBAR_SPACER}`);
+    if (!(spacer instanceof HTMLElement)) {
+      spacer = document.createElement('div');
+      spacer.className = NOTE_TABLE_TOOLBAR_SPACER;
+      spacer.setAttribute('contenteditable', 'false');
+      spacer.setAttribute('aria-hidden', 'true');
+      changed = true;
+    }
+    // Spacer must stay above the table — padding-top on overflow:hidden wrap
+    // does not reserve space, so the floating chrome covered row 1.
+    if (wrap.firstElementChild !== spacer) {
+      wrap.insertBefore(spacer, wrap.firstChild);
+      changed = true;
+    }
+    if (spacer.nextElementSibling !== body) {
+      wrap.insertBefore(body, spacer.nextSibling);
       changed = true;
     }
   }

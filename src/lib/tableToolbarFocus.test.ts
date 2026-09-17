@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ensureTableWrapStructure, NOTE_TABLE_BODY, NOTE_TABLE_TOOLBAR_SPACER } from './noteTable';
 
 /**
  * Reproduces the Chrome focus-steal: a <button> inside contenteditable becomes
@@ -61,6 +62,17 @@ describe('table toolbar focus isolation', () => {
     expect(closestToolbar(document.activeElement)).toBeNull();
     expect(sel.toString()).toBe('hello');
     ed.remove();
+  });
+
+  it('keeps an in-flow spacer above the table body so edit chrome cannot cover row 1', () => {
+    const wrap = document.createElement('div');
+    wrap.className = 'note-table-wrap';
+    wrap.innerHTML = `<div class="${NOTE_TABLE_BODY}"><table class="note-table"><tr><th>Hb</th></tr></table></div>`;
+    document.body.appendChild(wrap);
+    ensureTableWrapStructure(wrap);
+    expect(wrap.firstElementChild?.classList.contains(NOTE_TABLE_TOOLBAR_SPACER)).toBe(true);
+    expect(wrap.firstElementChild?.nextElementSibling?.classList.contains(NOTE_TABLE_BODY)).toBe(true);
+    wrap.remove();
   });
 });
 

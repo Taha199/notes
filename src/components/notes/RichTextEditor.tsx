@@ -17,7 +17,7 @@ import {
   NOTE_YT_REMOVE,
 } from '../../lib/youtubeEmbed';
 import { insertAutoLinkAtRange, isPlainUrl, normalizeAutoLinks } from '../../lib/autoLink';
-import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, getTableColumnWidths, hitTableColumnResize, resizeAdjacentTableColumns, fitNoteTableFontSize, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_EDIT_CHROME, NOTE_TABLE_BODY, NOTE_TABLE_COL_RESIZE_HOVER, NOTE_TABLE_COL_RESIZING, type TableCellContext, type TableColumnResizeHit, type TableEditPosition } from '../../lib/noteTable';
+import { buildEmptyTableHtml, extractTableHtmlFromClipboard, normalizeTablesInEditor, plainTextToTableHtml, resolveTableContext, resolveTableContextAt, placeCaretInTableCell, addTableRow, removeTableRow, addTableColumn, removeTableColumn, adjustTableColumnWidth, getTableColumnWidths, hitTableColumnResize, resizeAdjacentTableColumns, fitNoteTableFontSize, TABLE_COLUMN_WIDTH_STEP, deleteTable, ensureTableWrapStructure, setActiveTableWrap, NOTE_TABLE_CLASS, NOTE_TABLE_WRAP, NOTE_TABLE_TOOLBAR_HOST, NOTE_TABLE_EDIT_CHROME, NOTE_TABLE_BODY, NOTE_TABLE_TOOLBAR_SPACER, NOTE_TABLE_COL_RESIZE_HOVER, NOTE_TABLE_COL_RESIZING, type TableCellContext, type TableColumnResizeHit, type TableEditPosition } from '../../lib/noteTable';
 import {
   closestTableCell,
   collectFormatTargetRanges as collectFormatTargetRangesFromLib,
@@ -881,7 +881,17 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     });
     // Do NOT unwrap live `.note-table-body` or toggle table chrome classes here —
     // moving the table resets the caret to the first cell after every keystroke.
+    const spacers: { wrap: HTMLElement; spacer: HTMLElement }[] = [];
+    ed.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_SPACER}`).forEach((node) => {
+      if (node instanceof HTMLElement && node.parentElement instanceof HTMLElement) {
+        spacers.push({ wrap: node.parentElement, spacer: node });
+        node.remove();
+      }
+    });
     const html = ed.innerHTML;
+    spacers.forEach(({ wrap, spacer }) => {
+      wrap.insertBefore(spacer, wrap.firstChild);
+    });
     // Image/YouTube hosts belong at the end of their frame. Table menus live
     // outside the editor — never put a toolbar host back into the wrap.
     detached.forEach(({ parent, host }) => {
@@ -901,7 +911,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   /** Undo/redo snapshot HTML without touching the live editor (keeps selection alive). */
   const serializeEditorHtmlSafe = (ed: HTMLElement): string => {
     const clone = ed.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}, .${NOTE_TABLE_TOOLBAR_HOST}, .${NOTE_YT_REMOVE}`).forEach((n) => n.remove());
+    clone.querySelectorAll(`.${NOTE_IMG_TOOLBAR_HOST}, .${NOTE_TABLE_TOOLBAR_HOST}, .${NOTE_YT_REMOVE}, .${NOTE_TABLE_TOOLBAR_SPACER}`).forEach((n) => n.remove());
     clone.querySelectorAll(`.${NOTE_TABLE_EDIT_CHROME}`).forEach((n) => {
       if (n instanceof HTMLElement) {
         n.classList.remove(NOTE_TABLE_EDIT_CHROME);
@@ -1190,6 +1200,8 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       wrap.classList.remove(NOTE_TABLE_EDIT_CHROME);
       wrap.style.removeProperty('--note-table-chrome-h');
       wrap.style.removeProperty('padding-top');
+      const spacer = wrap.querySelector(`:scope > .${NOTE_TABLE_TOOLBAR_SPACER}`);
+      if (spacer instanceof HTMLElement) spacer.style.removeProperty('height');
     });
     clearActiveTableHighlight();
     tableWrapsRef.current = [];
@@ -6539,12 +6551,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     el.style.left = `${rect.left}px`;
     el.style.top = `${rect.top}px`;
     el.style.width = `${rect.width}px`;
-    // Toolbar sits on the wrap's top edge. Pad the table so row 1 (headers)
-    // is never covered — 4.5rem was shorter than two wrapped Swedish rows.
     const chromeH = Math.ceil(el.getBoundingClientRect().height);
     if (chromeH > 0) {
       wrap.style.setProperty('--note-table-chrome-h', `${chromeH}px`);
-      wrap.style.paddingTop = `${chromeH}px`;
+      const spacer = wrap.querySelector(`:scope > .${NOTE_TABLE_TOOLBAR_SPACER}`);
+      if (spacer instanceof HTMLElement) spacer.style.height = `${chromeH}px`;
     }
   };
 
