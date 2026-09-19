@@ -310,25 +310,14 @@ export async function putNoteCloud(uid: string, note: Note): Promise<boolean> {
   }
 }
 
-/** Tiny server list: ids + read/archive/fav. Same count on every device.
- *  Never GET `/notes` — that array embeds every base64 photo and OOMs work PCs. */
+/** Tiny server list: ids + read/archive/fav. Same count on every device. */
 export async function prefetchNotesCatalog(uid: string): Promise<Note[]> {
   try {
-    const keys = await fetchNotesByIdKeysCloud(uid);
-    if (!keys.length) return peekServerNotesCatalog();
-    const existing = new Map(
-      peekServerNotesCatalog().map((note) => [Number(note.id), note]),
-    );
-    const notes: Note[] = keys.map((id) => existing.get(id) ?? {
-      id,
-      title: '',
-      html: '',
-      text: '',
-      date: '',
-      fav: false,
-      read: false,
-      archived: false,
-    });
+    const res = await rtdbFetch(`/users/${uid}/notes`);
+    if (!res.ok) return peekServerNotesCatalog();
+    const data = await res.json();
+    const raw = Array.isArray(data) ? data : data && typeof data === 'object' ? Object.values(data) : [];
+    const notes = (raw as Note[]).filter((n) => n && typeof n === 'object' && n.id != null);
     rememberServerNotesCatalog(notes);
     return notes;
   } catch {
@@ -361,20 +350,15 @@ export async function fetchNoteByIdCloud(uid: string, id: number, timeoutMs = 90
 }
 
 export async function fetchNotesByIdCloud(uid: string): Promise<Note[]> {
-  // One-note-at-a-time — never JSON.parse the whole notesById tree (base64 OOM).
-  const keys = await fetchNotesByIdKeysCloud(uid);
-  if (!keys.length) return [];
-  const out: Note[] = [];
-  let cursor = 0;
-  const worker = async () => {
-    while (cursor < keys.length) {
-      const id = keys[cursor++];
-      const one = await fetchNoteByIdCloud(uid, id, 20_000);
-      if (one) out.push(one);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(4, keys.length) }, () => worker()));
-  return out;
+  try {
+    const res = await rtdbFetch(`/users/${uid}/notesById`, undefined, 90_000);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    return Object.values(data as Record<string, Note>).filter((n) => n && typeof n === 'object' && n.id != null);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -708,23 +692,14 @@ export async function fetchQuizSetsByIdCloud(uid: string): Promise<QuizSet[]> {
     if (!data || typeof data !== 'object') return [];
     return Object.values(data as Record<string, QuizSet>)
       .filter((s) => s && typeof s === 'object' && s.id != null)
-      .map((set) => {
-      const items = Array.isArray(set.items)
+      .map((set) => ({
+      ...set,
+      items: Array.isArray(set.items)
         ? set.items
         : set.items && typeof set.items === 'object'
           ? Object.values(set.items as Record<string, QuizItem>).filter(Boolean)
-          : [];
-      // Question bodies with data-URI photos live in quizItemsById. Keeping
-      // them on every set shell doubles memory and crashes work-PC Chrome.
-      if (items.some((q) =>
-        (typeof q.question === 'string' && q.question.includes('data:image'))
-        || (typeof q.answer === 'string' && q.answer.includes('data:image'))
-        || (typeof q.explanation === 'string' && q.explanation.includes('data:image'))
-      )) {
-        return quizSetShell({ ...set, items });
-      }
-      return { ...set, items };
-    });
+          : [],
+    }));
   } catch {
     return [];
   }
