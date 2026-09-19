@@ -74,6 +74,30 @@ describe('table toolbar focus isolation', () => {
     expect(wrap.firstElementChild?.nextElementSibling?.classList.contains(NOTE_TABLE_BODY)).toBe(true);
     wrap.remove();
   });
+
+  it('keeps a live spacer toolbar across structure refresh', () => {
+    const wrap = document.createElement('div');
+    wrap.className = 'note-table-wrap';
+    wrap.innerHTML = `
+      <div class="note-table-toolbar-host">
+        <div data-note-table-toolbar class="note-table-toolbar">stale host</div>
+      </div>
+      <div class="${NOTE_TABLE_BODY}"><table class="note-table"><tr><th>Hb</th></tr></table></div>`;
+    document.body.appendChild(wrap);
+    ensureTableWrapStructure(wrap);
+    const spacer = wrap.querySelector(`.${NOTE_TABLE_TOOLBAR_SPACER}`);
+    expect(spacer).toBeTruthy();
+    const live = document.createElement('div');
+    live.setAttribute('data-note-table-toolbar', '');
+    live.className = 'note-table-toolbar--inflow';
+    live.textContent = 'Add row';
+    spacer!.appendChild(live);
+    ensureTableWrapStructure(wrap);
+    expect(wrap.querySelector('.note-table-toolbar-host')).toBeNull();
+    expect(spacer!.contains(live)).toBe(true);
+    expect(spacer!.querySelector('[data-note-table-toolbar]')).toBe(live);
+    wrap.remove();
+  });
 });
 
 function closestToolbar(node: Element | null) {

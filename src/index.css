@@ -483,6 +483,7 @@ body {
   height: auto;
   min-height: 0;
   overflow: visible;
+  pointer-events: auto;
 }
 
 [contenteditable] .note-table-wrap--edit-chrome {

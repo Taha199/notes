@@ -571,11 +571,18 @@ export function deleteTable(ctx: TableCellContext) {
 
 export function ensureTableWrapStructure(wrap: HTMLElement): { table: HTMLTableElement | null; changed: boolean } {
   let changed = false;
-  const stale = wrap.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST}, [data-note-table-toolbar]`);
-  if (stale.length) {
-    stale.forEach((n) => n.remove());
+  // Legacy in-editor hosts from older HTML. Do NOT remove a live React portal
+  // sitting in the spacer (`[data-note-table-toolbar]`) — click/selection
+  // refresh used to delete it, so the options bar vanished on table click.
+  wrap.querySelectorAll(`.${NOTE_TABLE_TOOLBAR_HOST}`).forEach((n) => {
+    n.remove();
     changed = true;
-  }
+  });
+  wrap.querySelectorAll('[data-note-table-toolbar]').forEach((n) => {
+    if (n.closest(`.${NOTE_TABLE_TOOLBAR_SPACER}`)) return;
+    n.remove();
+    changed = true;
+  });
 
   const table = wrap.querySelector(`:scope > table.${NOTE_TABLE_CLASS}`)
     ?? wrap.querySelector(`:scope > .${NOTE_TABLE_BODY} > table.${NOTE_TABLE_CLASS}`);
