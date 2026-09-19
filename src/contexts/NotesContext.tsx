@@ -50,7 +50,6 @@ import { getRtdbAuthToken, rtdbFetch } from '../lib/rtdb';
 import {
   applyDurableQuizItems,
   fetchNoteByIdCloud,
-  fetchNotesByIdCloud,
   fetchNotesByIdKeysCloud,
   fetchQuizFoldersByIdCloud,
   fetchQuizItemsByIdCloud,
@@ -1752,7 +1751,7 @@ function resolveDraftsFromSources(
 }
 
 /**
- * The only fields any merge path reads out of the user node.
+ * Lightweight fields any merge path still reads from the user node.
  *
  * Reading `/users/{uid}` wholesale also downloaded `dataHistory` (up to 48 full
  * snapshots of notes + quizzes + sets), `quizFoldersHistory` (40 more), every
@@ -1761,12 +1760,14 @@ function resolveDraftsFromSources(
  * every window focus, every 60s, and on every cloudSyncAt bump from the other
  * device. On mobile the parse alone froze the main thread long enough to look
  * like the page had reloaded itself.
+ *
+ * `notes`, `quizzes`, and `quizSets` stay off this list on purpose. ById +
+ * IndexedDB already hydrate those trees. JSON.parsing them again on every boot
+ * (and every visibility pull) duplicates tens of MB of base64 and OOMs
+ * locked-down work PCs.
  */
 const CLOUD_SYNC_FIELDS = [
-  'notes',
-  'quizzes',
   'chats',
-  'quizSets',
   'quizFolders',
   'drafts',
   'draftContents',
@@ -1777,6 +1778,10 @@ const CLOUD_SYNC_FIELDS = [
   'cloudSyncAt',
   'tokenUsage',
 ] as const;
+
+function cloudHasArrayField(cloud: Record<string, unknown> | null | undefined, field: string): boolean {
+  return !!cloud && field in cloud;
+}
 
 /**
  * Field-scoped replacement for a whole-node read. Fields whose value is null are
@@ -3554,7 +3559,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     // Notes cloud fetch is independent of quiz — apply as soon as IDB+cloud are ready
     // (morning-fast path). Do NOT wait for durableSetsReady / last-good quiz.
     const notesCloudGenAtStart = notesCloudGenRef.current;
-    const notesCloudPromise = fetchNotesByIdCloud(user.uid);
+    // Do not REST-download the whole notesById tree on boot. IDB + per-id
+    // fetches + listeners hydrate bodies without JSON.parsing tens of MB.
+    const notesCloudPromise = Promise.resolve([] as Note[]);
     const quizItemsCloudPromise = fetchQuizItemsByIdCloud(user.uid);
     const cloudBodiesPromise = Promise.all([notesCloudPromise, quizItemsCloudPromise]);
 
@@ -3848,16 +3855,26 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         const liveQuizzes = quizzesRef.current;
         const liveChats = chatsRef.current;
 
-        const cloudNotes = cloud ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>) : [];
+        const notesFetched = cloudHasArrayField(cloud, 'notes');
+        const cloudNotes = notesFetched
+          ? firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>)
+          : [];
         let notes = filterResurrectedTrash(mergeNotesForSync(liveNotes, cloudNotes, tombstones), liveNotes);
-        let notesRepair = notes.length > cloudNotes.length
+        let notesRepair = notesFetched && (
+          notes.length > cloudNotes.length
           || (liveNotes.length > 0 && cloudNotes.length === 0)
-          || (liveNotes.length > 0 && notes.length > cloudNotes.length);
+          || (liveNotes.length > 0 && notes.length > cloudNotes.length)
+        );
 
-        const cloudQuizzes = cloud ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>) : [];
+        const quizzesFetched = cloudHasArrayField(cloud, 'quizzes');
+        const cloudQuizzes = quizzesFetched
+          ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>)
+          : [];
         let quizzes = filterResurrectedTrash(mergeQuizzesForSync(liveQuizzes, cloudQuizzes, tombstones), liveQuizzes);
-        let quizzesRepair = quizzes.length > cloudQuizzes.length
-          || (liveQuizzes.length > 0 && cloudQuizzes.length === 0);
+        let quizzesRepair = quizzesFetched && (
+          quizzes.length > cloudQuizzes.length
+          || (liveQuizzes.length > 0 && cloudQuizzes.length === 0)
+        );
 
         const cloudChatsRaw = cloud ? firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>) : [];
         let chats = mergeChatsForSync(liveChats, cloudChatsRaw).map((c) => ({
@@ -3889,34 +3906,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        const historySnapshots = await fetchAllDataHistorySnapshots(user.uid);
-        for (const snapshot of historySnapshots) {
-          const liveTombs = {
-            ...permDeletedRef.current,
-            notes: [...new Set([
-              ...permDeletedRef.current.notes,
-              ...pruneRejectedNoteIds(rejectedNoteIdsRef.current),
-            ])],
-          };
-          const trashedIds = new Set(
-            notes.filter((n) => n.trashed).map((n) => Number(n.id)),
-          );
-          for (const id of localTrashIdsRef.current) trashedIds.add(id);
-          const before = notes.length;
-          notes = mergeNotesForSync(
-            notes,
-            snapshot.notes.filter((n) => !n.trashed && !trashedIds.has(Number(n.id))),
-            liveTombs,
-          );
-          if (notes.length > before) {
-            notesRepair = true;
-            historyRepair = true;
-            recoveryLog('restored notes from dataHistory snapshot', { before, after: notes.length, savedAt: snapshot.savedAt });
-          }
-          const quizzesBefore = quizzes.length;
-          quizzes = mergeQuizzesForSync(quizzes, snapshot.quizzes.filter((q) => !q.trashed), tombstones);
-          if (quizzes.length > quizzesBefore) quizzesRepair = true;
-        }
+        // Never download up to 48 full dataHistory snapshots on a normal boot.
+        // Each snapshot is another copy of notes + quizzes + quizSets (base64
+        // and all). Work-PC Chrome dies with Out of Memory. Empty-account
+        // recovery above already reads the single latest snapshot.
 
         // Re-apply durable single-item mirrors AFTER the giant-array merge so a
         // stale/incomplete notes[] can never wipe a note that notesById / IndexedDB
@@ -3960,16 +3953,17 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         safeSetItem('malacadhati_chats', JSON.stringify(chats));
 
         const cloudFolders = cloud ? firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>) : [];
-        const cloudSets = cloud
+        const setsFetched = cloudHasArrayField(cloud, 'quizSets');
+        const cloudSets = setsFetched
           ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>).map((set) => ({ ...set, items: set.items ?? [] }))
           : [];
-        // These used to be two extra reads of /quizFolders and /quizSets — the
-        // very nodes the bundle above already fetched. quizSets carries every
-        // question and inline image, so re-downloading it doubled boot traffic.
+        // quizSets is no longer in the boot bundle — ById + catalog already
+        // hydrated membership. Treating a missing field as "cloud is empty"
+        // used to trigger a full-library JSON.stringify PUT and crash Chrome.
         const dedicatedFolders = cloudFolders;
         const dedicatedSets = cloudSets;
         const cloudFoldersEmpty = cloud && 'quizFolders' in cloud && cloudFolders.length === 0;
-        const cloudSetsEmpty = cloud && 'quizSets' in cloud && cloudSets.length === 0;
+        const cloudSetsEmpty = setsFetched && cloudSets.length === 0;
         const dedicatedFoldersEmpty = dedicatedFolders.length === 0;
         const dedicatedSetsEmpty = dedicatedSets.length === 0;
 
@@ -4031,7 +4025,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           repairQuizStructure = true;
         }
         // Fuller merged membership must heal incomplete cloud quizSets[] (classic 10→3).
-        if (countLiveQuizItems(rawSets) > countLiveQuizItems(cloudSets)) {
+        // Skip when the giant array was never fetched — ById is authority then.
+        if (setsFetched && countLiveQuizItems(rawSets) > countLiveQuizItems(cloudSets)) {
           repairQuizStructure = true;
         }
         if (quizzes.length === 0) {
@@ -4152,14 +4147,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
         });
         markQuizContentReady(quizAuthoritativeByIdSeenRef.current ? 'byid' : 'fallback');
 
-        const liveNormalized = countLiveQuizItems(quizSetsRef.current);
-        const liveCloud = countLiveQuizItems(cloudSets);
-        const maxKnownLive = [...maxKnownLiveBySetRef.current.values()].reduce((a, b) => a + b, 0);
-        // Never heal-push a shorter items[] snapshot over richer cloud/local/known.
-        const safeToPushQuizSets = liveNormalized >= liveCloud
-          && liveNormalized >= maxKnownLive;
-        const needsMembershipHeal = quizSetsRemoteMembershipIncomplete(quizSetsRef.current, cloudSets)
-          || quizSetsMissingFromRemote(quizSetsRef.current, cloudSets);
+        const needsMembershipHeal = setsFetched && (
+          quizSetsRemoteMembershipIncomplete(quizSetsRef.current, cloudSets)
+          || quizSetsMissingFromRemote(quizSetsRef.current, cloudSets)
+        );
         // Never treat local-only folders as repair authority — that re-uploaded
         // deleted folders from a stale work-PC cache.
         const needsRepair = !accountSwitched && !isAccountSwitchPending(user.uid) && (
@@ -4188,26 +4179,14 @@ export function NotesProvider({ children }: { children: ReactNode }) {
           const repairBody: Record<string, unknown> = { chats };
           // Folders: quizFoldersById is the source — never PATCH/PUT the array from
           // a local ghost list (that resurrected deleted folders like "mapp").
-          if (notesRef.current.length > 0) repairBody.notes = notesRef.current;
-          if (quizzes.length > 0) repairBody.quizzes = quizzes;
-          if (safeToPushQuizSets && countUserQuizSets(quizSetsRef.current) > 0) {
-            repairBody.quizSets = quizSetsRef.current;
-          }
+          // Never JSON.stringify notes / quizzes / quizSets here — those trees
+          // hold inline images and crash work-PC Chrome on boot. ById writes
+          // already keep the durable copies.
           void rtdbFetch(`/users/${user.uid}`, {
             method: 'PATCH',
             body: JSON.stringify(repairBody),
             headers: { 'Content-Type': 'application/json' },
           });
-          if (
-            safeToPushQuizSets
-            && (repairQuizStructure || (cloudSetsEmpty && dedicatedSetsEmpty && liveSets.length > 0))
-          ) {
-            void rtdbFetch(`/users/${user.uid}/quizSets`, {
-              method: 'PUT',
-              body: JSON.stringify(quizSetsRef.current),
-              headers: { 'Content-Type': 'application/json' },
-            });
-          }
         }
 
         const cloudDrafts = parseCloudDrafts(cloud);
@@ -6123,15 +6102,24 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       emptiedAtPull,
     );
     const tombstones = permDeletedRef.current;
-    const remoteNotes = incomingNotesSafe(
-      firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>),
-    );
+    const notesFetched = cloudHasArrayField(cloud, 'notes');
+    const quizzesFetched = cloudHasArrayField(cloud, 'quizzes');
+    const setsFetched = cloudHasArrayField(cloud, 'quizSets');
+    const remoteNotes = notesFetched
+      ? incomingNotesSafe(
+        firebaseToArray<Note>(cloud.notes as Note[] | Record<string, Note>),
+      )
+      : [];
     if (remoteNotes.length) rememberServerNotesCatalog(remoteNotes);
-    const remoteQuizzes = firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>);
+    const remoteQuizzes = quizzesFetched
+      ? firebaseToArray<QuizItem>(cloud.quizzes as QuizItem[] | Record<string, QuizItem>)
+      : [];
     const remoteChats = firebaseToArray<ChatConversation>(cloud.chats as ChatConversation[] | Record<string, ChatConversation>)
       .map((c) => ({ ...c, messages: c.messages ?? [] }));
-    const remoteSets = firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>)
-      .map((set) => ({ ...set, items: set.items ?? [] }));
+    const remoteSets = setsFetched
+      ? firebaseToArray<QuizSet>(cloud.quizSets as QuizSet[] | Record<string, QuizSet>)
+        .map((set) => ({ ...set, items: set.items ?? [] }))
+      : [];
     const remoteFolders = firebaseToArray<QuizFolder>(cloud.quizFolders as QuizFolder[] | Record<string, QuizFolder>);
     const remoteDrafts = parseCloudDrafts(cloud).filter((draft) => !pendingDeletedDraftIdsRef.current.has(draft.id));
     lastCloudDraftIdsRef.current = new Set(parseCloudDrafts(cloud).map((d) => d.id));
@@ -6192,8 +6180,10 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       tombstones,
     );
     mergedFolders = applyTrashTombstones(mergedFolders, quizFolderTombstonesRef.current, trashStamp);
-    const healQuizSets = quizSetsMissingFromRemote(mergedSets, remoteSets)
-      || quizSetsRemoteMembershipIncomplete(mergedSets, remoteSets);
+    const healQuizSets = setsFetched && (
+      quizSetsMissingFromRemote(mergedSets, remoteSets)
+      || quizSetsRemoteMembershipIncomplete(mergedSets, remoteSets)
+    );
     const recentDraftEdit = Date.now() - lastDraftEditAt.current < 12_000;
     const mergedDrafts = recentDraftEdit
       ? filterVisibleDrafts(draftsRef.current, pendingDeletedDraftIdsRef.current, pendingLocalDraftIdsRef.current)
