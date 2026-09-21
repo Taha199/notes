@@ -5,9 +5,18 @@ import { withTimeout } from './files/fileTypes';
 
 const UPLOAD_TIMEOUT_MS = 8_000;
 const DOWNLOAD_URL_TIMEOUT_MS = 6_000;
+const STORAGE_BLOCKED_KEY = 'malacadhati_storage_blocked';
+
+function readStoredStorageBlocked(): boolean {
+  try {
+    return sessionStorage.getItem(STORAGE_BLOCKED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 /** Session-wide: firebasestorage is blocked (CORS / hospital firewall). */
-let cloudStorageBlocked = false;
+let cloudStorageBlocked = readStoredStorageBlocked();
 
 export function isCloudStorageBlocked(): boolean {
   return cloudStorageBlocked;
@@ -15,10 +24,20 @@ export function isCloudStorageBlocked(): boolean {
 
 export function markCloudStorageBlocked(): void {
   cloudStorageBlocked = true;
+  try {
+    sessionStorage.setItem(STORAGE_BLOCKED_KEY, '1');
+  } catch {
+    /* ignore quota / private mode */
+  }
 }
 
 export function resetCloudStorageBlockedForTests(): void {
   cloudStorageBlocked = false;
+  try {
+    sessionStorage.removeItem(STORAGE_BLOCKED_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function isLikelyStorageNetworkBlock(err: unknown): boolean {

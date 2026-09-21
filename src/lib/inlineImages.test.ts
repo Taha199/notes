@@ -35,4 +35,10 @@ describe('cloud storage circuit breaker', () => {
     markCloudStorageBlocked();
     expect(isCloudStorageBlocked()).toBe(true);
   });
+
+  it('remembers a blocked Storage session across module checks', () => {
+    markCloudStorageBlocked();
+    expect(sessionStorage.getItem('malacadhati_storage_blocked')).toBe('1');
+    expect(isCloudStorageBlocked()).toBe(true);
+  });
 });

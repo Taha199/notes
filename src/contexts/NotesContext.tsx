@@ -79,7 +79,7 @@ import {
   tombstoneQuizItemDurable,
   type StoredQuizItem,
 } from '../lib/itemsStore';
-import { onEditorImageSwap, pendingEditorUploads, clearPendingEditorUploads, uploadEditorImage, isCloudStorageBlocked } from '../lib/imageUpload';
+import { onEditorImageSwap, pendingEditorUploads, clearPendingEditorUploads } from '../lib/imageUpload';
 import {
   applyRecentEditsToData,
   loadRecentEdits,
@@ -8503,57 +8503,9 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     replaceEditorImageUrl(from, to, true);
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Legacy inline-image migration ─────────────────────────────────────────
-  // Old notes/questions still embed images as base64, which keeps localStorage
-  // near its quota permanently — the reason fresh saves' local writes can fail
-  // silently. Once per session, quietly upload those to Storage and swap the
-  // content to short URLs, a few images at a time.
-  const collectNoteInlineImageUrls = (html?: string): string[] => {
-    if (!html) return [];
-    const found: string[] = [];
-    const re = /src=["'](data:image\/[^"']+)["']/gi;
-    for (let match = re.exec(html); match; match = re.exec(html)) {
-      if (match[1] && match[1].length > 80) found.push(match[1]);
-    }
-    return found;
-  };
-
-  const syncNoteImagesToCloud = async () => {
-    const uid = userRef.current?.uid;
-    if (!uid || isCloudStorageBlocked()) return;
-    // One note / one image at a time. Never assemble every data-URL in an array —
-    // that duplicated tens of MB and OOMed hospital Chrome (CORS + blob decode).
-    for (const note of notesRef.current) {
-      if (!userRef.current || isCloudStorageBlocked()) return;
-      const html = note.html || '';
-      if (!htmlHasInlineImage(html)) continue;
-      const urls = collectNoteInlineImageUrls(html);
-      for (const dataUrl of urls) {
-        if (!userRef.current || isCloudStorageBlocked()) return;
-        try {
-          const remoteUrl = await uploadEditorImage(dataUrl, { trackPending: false });
-          if (!remoteUrl) return;
-          replaceEditorImageUrl(dataUrl, remoteUrl, true);
-        } catch {
-          return;
-        }
-      }
-    }
-  };
-
-  const noteImageSyncRanRef = useRef(false);
-  useEffect(() => {
-    if (!user || noteImageSyncRanRef.current) return;
-    const hasImages = notes.some((n) => (
-      noteHasDisplayableImage(n.html) || /data:image\//i.test(n.html || '')
-    ));
-    if (!hasImages) return;
-    // Home PC: IDB already has the photos. Push them (as Storage URLs) so the
-    // hospital PC can load notes the same way Quiz already does.
-    noteImageSyncRanRef.current = true;
-    const timer = setTimeout(() => { void syncNoteImagesToCloud(); }, 15_000);
-    return () => clearTimeout(timer);
-  }, [user?.uid, notes]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Do NOT auto-upload inline photos on boot. Hospital PCs block
+  // firebasestorage.googleapis.com (CORS); cloning data-URLs into blobs
+  // and retrying POST then OOMs Chrome. Images stay as data-URI / IDB.
 
   const moveItemInSet = (setId: string, itemId: number, direction: 'up' | 'down') => {
     setQuizSets((prev) => {
