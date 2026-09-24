@@ -555,6 +555,14 @@ body {
 .dark [contenteditable] table.note-table th,
 .dark [contenteditable] table.note-table td {
   border-color: rgba(255, 255, 255, 0.12);
+  /* Cells keep the light-mode inline color (near-black). Force readable
+     text only in dark mode — light mode stays unchanged. */
+  color: #f3f4f6 !important;
+}
+
+.dark .note-content table.note-table :is(th, td) *:not(.note-search-hit),
+.dark [contenteditable] table.note-table :is(th, td) *:not(.note-search-hit) {
+  color: inherit !important;
 }
 
 .dark .note-content table.note-table th,
