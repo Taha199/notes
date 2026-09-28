@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { compressImageForInline } from '../../lib/imageCompress';
 import { emitEditorImageSwap, uploadEditorImage } from '../../lib/imageUpload';
-import { applyHtmlPreservingImageSrcs, lookupInlineImage, registerInlineImage, serializeHtmlPreservingImageSrcs } from '../../lib/editorImageHtml';
+import { applyHtmlPreservingImageSrcs, bindInlineImageToElement, lookupInlineImage, persistableImageSrc, serializeHtmlPreservingImageSrcs } from '../../lib/editorImageHtml';
 import { auth } from '../../lib/firebase';
 import {
   extractYouTubeVideoId,
@@ -6182,19 +6182,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     frame.setAttribute('dir', 'auto');
     frame.style.width = '160px';
     frame.style.maxWidth = '100%';
-    const img = document.createElement('img');
-    img.alt = '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.style.display = 'block';
-    img.style.width = '100%';
-    img.style.height = 'auto';
-    img.style.maxHeight = 'none';
-    img.style.cursor = 'zoom-in';
-    const mounted = registerInlineImage(url);
-    img.setAttribute('data-tn-img', mounted.id);
-    img.src = mounted.blobUrl;
-    frame.appendChild(img);
     const after = document.createElement('div');
     after.setAttribute('dir', 'auto');
     after.appendChild(document.createElement('br'));
@@ -6214,6 +6201,18 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       liveEd.appendChild(frame);
       liveEd.appendChild(after);
     }
+    // Bind after insert — contenteditable sanitizes imgs created outside the tree.
+    const liveImg = document.createElement('img');
+    liveImg.alt = '';
+    liveImg.loading = 'lazy';
+    liveImg.decoding = 'async';
+    liveImg.style.display = 'block';
+    liveImg.style.width = '100%';
+    liveImg.style.height = 'auto';
+    liveImg.style.maxHeight = 'none';
+    liveImg.style.cursor = 'zoom-in';
+    bindInlineImageToElement(liveImg, url);
+    frame.appendChild(liveImg);
     normalizeEditorImages(liveEd);
     separateEmbedsFromTextBlocks(liveEd);
     saveSel();
@@ -6228,7 +6227,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     liveEd.querySelectorAll('img').forEach((img) => {
       const id = img.getAttribute('data-tn-img');
       const stored = lookupInlineImage(id);
-      if (img.getAttribute('src') === fromUrl || stored === fromUrl) {
+      if (img.getAttribute('src') === fromUrl || persistableImageSrc(img) === fromUrl || stored === fromUrl) {
         img.src = toUrl;
         img.removeAttribute('data-tn-img');
         swapped = true;

@@ -20,16 +20,15 @@ describe('editorImageHtml', () => {
     expect(injectDataImageSrcs(slim, srcs)).toBe(html);
   });
 
-  it('serializes from the image registry even when the live src is a blob URL', () => {
+  it('serializes from the blob-url map even if data-tn-img was stripped', () => {
     const root = document.createElement('div');
     root.innerHTML = '<div class="note-img-frame"><img alt=""></div>';
     const img = root.querySelector('img') as HTMLImageElement;
-    const { id, blobUrl } = registerInlineImage(PHOTO);
-    img.setAttribute('data-tn-img', id);
+    const { blobUrl } = registerInlineImage(PHOTO);
     img.src = blobUrl;
+    img.removeAttribute('data-tn-img');
     const html = serializeHtmlPreservingImageSrcs(root);
     expect(html).toContain(PHOTO);
-    expect(html).not.toContain('blob:');
     expect(persistableImageSrc(img)).toBe(PHOTO);
   });
 

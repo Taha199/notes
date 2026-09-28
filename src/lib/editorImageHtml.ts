@@ -7,6 +7,8 @@ const TOKEN_RE = /^data:image\/tn,(\d+)$/;
 const SRC_DATA_ATTR_RE = /src=(["'])(data:image\/(?!tn,)[\s\S]*?)\1/gi;
 
 const registry = new Map<string, string>();
+const blobToData = new Map<string, string>();
+const elToData = new WeakMap<HTMLImageElement, string>();
 
 export function registerInlineImage(dataUrl: string): { id: string; blobUrl: string } {
   const id = `tnimg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -19,6 +21,7 @@ export function registerInlineImage(dataUrl: string): { id: string; blobUrl: str
   } catch {
     blobUrl = dataUrl;
   }
+  blobToData.set(blobUrl, dataUrl);
   return { id, blobUrl };
 }
 
@@ -27,18 +30,34 @@ export function lookupInlineImage(id: string | null | undefined): string | undef
   return registry.get(id);
 }
 
+export function bindInlineImageToElement(
+  img: HTMLImageElement,
+  dataUrl: string,
+  mounted?: { id: string; blobUrl: string },
+): { id: string; blobUrl: string } {
+  const rec = mounted ?? registerInlineImage(dataUrl);
+  blobToData.set(rec.blobUrl, dataUrl);
+  elToData.set(img, dataUrl);
+  img.setAttribute('data-tn-img', rec.id);
+  img.src = rec.blobUrl;
+  return rec;
+}
+
 export function persistableImageSrc(img: HTMLImageElement): string {
-  const id = img.getAttribute('data-tn-img');
-  const fromReg = lookupInlineImage(id);
+  const bound = elToData.get(img);
+  if (bound) return bound;
+  const fromReg = lookupInlineImage(img.getAttribute('data-tn-img'));
   if (fromReg) return fromReg;
   const attr = img.getAttribute('src') || '';
+  const fromBlob = blobToData.get(attr) || blobToData.get(img.src);
+  if (fromBlob) return fromBlob;
   if (attr.startsWith('data:image/') && !attr.startsWith('data:image/tn,') && attr.length > 32) {
     return attr;
   }
   if (img.src.startsWith('data:image/') && !img.src.startsWith('data:image/tn,') && img.src.length > 32) {
     return img.src;
   }
-  if (/^https?:/i.test(attr) && !attr.includes('#tnimg-')) return attr;
+  if (/^https?:/i.test(attr) && !attr.includes('#tnimg-') && !attr.includes('data:image')) return attr;
   return '';
 }
 
@@ -60,12 +79,9 @@ export function injectDataImageSrcs(html: string, srcs: string[]): string {
   return out;
 }
 
-function restoreLiveImgSrc(img: HTMLImageElement, src: string, id?: string) {
-  if (id) img.setAttribute('data-tn-img', id);
+function restoreLiveImgSrc(img: HTMLImageElement, src: string) {
   if (src.startsWith('data:image/') && !src.startsWith('data:image/tn,')) {
-    const mounted = registerInlineImage(src);
-    img.setAttribute('data-tn-img', mounted.id);
-    img.src = mounted.blobUrl;
+    bindInlineImageToElement(img, src);
     return;
   }
   if (src) img.src = src;
