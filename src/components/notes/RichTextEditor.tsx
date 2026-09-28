@@ -6172,46 +6172,49 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     const liveEd = editorRef.current;
     if (!liveEd) return;
     ensureFocus(true);
-    // Never put a multi-hundred-KB data URL through execCommand('insertHTML').
-    // Chrome truncates or drops the src, leaving an empty .note-img-frame that
-    // renders as a 1px hairline after save.
-    const token = `tnimg${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-    document.execCommand(
-      'insertHTML',
-      false,
-      `<div class="${NOTE_IMG_FRAME}" contenteditable="false" dir="auto" style="width:160px;max-width:100%"><img data-tn-pending="${token}" alt="" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;max-height:none;cursor:zoom-in;" /></div><div dir="auto"><br></div>`,
-    );
-    let img = liveEd.querySelector(`img[data-tn-pending="${token}"]`) as HTMLImageElement | null;
-    if (!img) {
-      const frame = document.createElement('div');
-      frame.className = NOTE_IMG_FRAME;
-      frame.setAttribute('contenteditable', 'false');
-      frame.setAttribute('dir', 'auto');
-      frame.style.width = '160px';
-      frame.style.maxWidth = '100%';
-      img = document.createElement('img');
-      img.setAttribute('data-tn-pending', token);
-      img.alt = '';
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.style.display = 'block';
-      img.style.width = '100%';
-      img.style.height = 'auto';
-      img.style.maxHeight = 'none';
-      img.style.cursor = 'zoom-in';
-      frame.appendChild(img);
-      const after = document.createElement('div');
-      after.setAttribute('dir', 'auto');
-      after.appendChild(document.createElement('br'));
+    // Set src on the node before attaching. execCommand('insertHTML') with a
+    // huge data URL truncates; inserting an empty <img> hid the frame and
+    // saved a blank photo.
+    const frame = document.createElement('div');
+    frame.className = NOTE_IMG_FRAME;
+    frame.setAttribute('contenteditable', 'false');
+    frame.setAttribute('dir', 'auto');
+    frame.style.width = '160px';
+    frame.style.maxWidth = '100%';
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.style.display = 'block';
+    img.style.width = '100%';
+    img.style.height = 'auto';
+    img.style.maxHeight = 'none';
+    img.style.cursor = 'zoom-in';
+    img.src = url;
+    frame.appendChild(img);
+    const after = document.createElement('div');
+    after.setAttribute('dir', 'auto');
+    after.appendChild(document.createElement('br'));
+
+    const range = liveRange();
+    if (range) {
+      range.deleteContents();
+      range.insertNode(after);
+      range.insertNode(frame);
+      const caret = document.createRange();
+      caret.setStart(after, 0);
+      caret.collapse(true);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(caret);
+    } else {
       liveEd.appendChild(frame);
       liveEd.appendChild(after);
     }
-    img.removeAttribute('data-tn-pending');
-    img.src = url;
     normalizeEditorImages(liveEd);
     separateEmbedsFromTextBlocks(liveEd);
     saveSel();
-    emitHtml();
+    flushEmitHtml();
   };
 
   /** Replace an inserted image's src (base64 → Storage URL) if still in the editor. */

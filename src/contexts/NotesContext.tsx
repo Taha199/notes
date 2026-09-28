@@ -1427,13 +1427,6 @@ function persistQuizzesToLs(quizzes: QuizItem[]) {
   }
 }
 
-function quizItemHasInlineImages(item: QuizItem): boolean {
-  return htmlHasInlineImage(item.question)
-    || htmlHasInlineImage(item.answer)
-    || htmlHasInlineImage(item.explanation)
-    || (item.options ?? []).some((opt) => htmlHasInlineImage(opt));
-}
-
 function persistQuizSetsToLs(sets: QuizSet[]) {
   writeQuizSetsShellJournal(sets);
   if (sets.some((s) => (s.items ?? []).some((q) => htmlHasInlineImage(q.question) || htmlHasInlineImage(q.answer) || htmlHasInlineImage(q.explanation)))) {
@@ -4420,13 +4413,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
       itemTrash,
     );
     // Never force a full-user PATCH here — that raced with empty notes and wiped the cloud.
-    // Also never JSON.stringify a quiz library that still holds data-URI photos.
-    const setsHaveInlineImages = safeSets.some((s) =>
-      (s.items ?? []).some((q) => quizItemHasInlineImages(q)),
-    );
-    if (!setsHaveInlineImages) {
-      persist({ quizSets: safeSets }, false);
-    }
+    persist({ quizSets: safeSets }, false);
     if (user && loadedRef.current && forceCloud) {
       // Only skip when the array is truly empty — a soft-deleted row is real
       // data that must still reach cloud, or the delete resurrects on refresh.
@@ -7634,10 +7621,8 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     recordRecentEdit({ kind: 'quiz', at: Date.now(), quiz: updated });
     setQuizzes(next);
     persistQuizzesToLs(next);
-    if (!quizItemHasInlineImages(updated)) {
-      persist({ quizzes: next }, true);
-      scheduleInstantDataCloudSave({ quizzes: next });
-    }
+    persist({ quizzes: next }, true);
+    scheduleInstantDataCloudSave({ quizzes: next });
   };
 
   const addQuizSet = async (name: string, folderId?: string): Promise<QuizSet> => {
@@ -8341,9 +8326,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     persistQuizSetsToLs(next);
     everHadSetsRef.current = true;
     persistSets(next, true, true);
-    if (!quizItemHasInlineImages(newItem)) {
-      scheduleInstantDataCloudSave({ quizSets: next });
-    }
+    scheduleInstantDataCloudSave({ quizSets: next });
     return newId;
   };
 
@@ -8423,9 +8406,7 @@ export function NotesProvider({ children }: { children: ReactNode }) {
     rememberLastGoodComplete(quizzesRef.current, next);
     persistQuizSetsToLs(next);
     persistSets(next, true, true);
-    if (!quizItemHasInlineImages(updated)) {
-      scheduleInstantDataCloudSave({ quizSets: next });
-    }
+    scheduleInstantDataCloudSave({ quizSets: next });
   };
 
   // ── Editor image → Storage URL swap ──────────────────────────────────────
