@@ -27,8 +27,47 @@ import { rtdbFetch } from './rtdb';
 import { rememberServerNotesCatalog, peekServerNotesCatalog } from './notesListCache';
 import { isNoteTrashTombstoned } from './quizTrashTombstones';
 
+/** Omit undefined without JSON.parse(JSON.stringify) — that duplicates multi-MB data URLs and OOMs. */
 function stripUndefined<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripUndefined(entry)) as T;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (nested === undefined) continue;
+    out[key] = stripUndefined(nested);
+  }
+  return out as T;
+}
+
+function quizHtmlHasDataImage(html: string | undefined): boolean {
+  return typeof html === 'string' && html.includes('data:image');
+}
+
+function quizHtmlIsStrippedImage(html: string | undefined): boolean {
+  return typeof html === 'string' && html.includes('data-tn-stripped');
+}
+
+function quizItemHasDataImage(item: QuizItem): boolean {
+  return quizHtmlHasDataImage(item.question)
+    || quizHtmlHasDataImage(item.answer)
+    || quizHtmlHasDataImage(item.explanation)
+    || (item.options ?? []).some((opt) => quizHtmlHasDataImage(opt));
+}
+
+function quizItemIsStrippedImage(item: QuizItem): boolean {
+  return quizHtmlIsStrippedImage(item.question)
+    || quizHtmlIsStrippedImage(item.answer)
+    || quizHtmlIsStrippedImage(item.explanation)
+    || (item.options ?? []).some((opt) => quizHtmlIsStrippedImage(opt));
+}
+
+/** Last-good LS snapshots strip base64 src="". Never let that beat a durable photo. */
+function incomingQuizBodyWins(existing: QuizItem, incoming: QuizItem): boolean {
+  if (quizItemIsStrippedImage(existing) && quizItemHasDataImage(incoming)) return true;
+  if (quizItemHasDataImage(existing) && quizItemIsStrippedImage(incoming)) return false;
+  return false;
 }
 
 const IDB_NAME = 'malacadhati_items_v1';
@@ -798,12 +837,16 @@ export function applyDurableQuizItems(
         // trashed:false locally first and clears the tombstone.
         if (existing.trashed && !bare.trashed) return set;
         if (existing.trashed && syncTime(existing) > syncTime(bare)) return set;
-        if (syncTime(existing) > syncTime(bare)) return set;
+        if (syncTime(existing) > syncTime(bare) && !incomingQuizBodyWins(existing, bare)) return set;
         // Prefer incoming when timestamps tie but content changed (live typing).
         if (syncTime(existing) === syncTime(bare)
           && existing.question === bare.question
           && existing.answer === bare.answer
           && existing.explanation === bare.explanation) {
+          return set;
+        }
+        if (syncTime(existing) >= syncTime(bare) && !incomingQuizBodyWins(existing, bare)
+          && quizItemHasDataImage(existing) && !quizItemHasDataImage(bare)) {
           return set;
         }
         return {
@@ -825,7 +868,7 @@ export function applyDurableQuizItems(
       if (existing) {
         if (existing.trashed && !bare.trashed) continue;
         if (existing.trashed && syncTime(existing) > syncTime(bare)) continue;
-        if (syncTime(existing) > syncTime(bare)) continue;
+        if (syncTime(existing) > syncTime(bare) && !incomingQuizBodyWins(existing, bare)) continue;
         nextQuizzes = nextQuizzes.map((q) => (q.id === bare.id ? bare : q));
       } else if (!setId) {
         nextQuizzes = [...nextQuizzes, bare];

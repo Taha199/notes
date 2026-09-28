@@ -357,6 +357,26 @@ describe('applyDurableQuizItems keep-more-data', () => {
     expect(nextSets[0].items.find((i) => i.id === 12)?.trashed).toBe(true);
     expect(nextQuizzes.find((q) => q.id === 12)?.trashed).toBe(true);
   });
+
+  it('lets a durable data-URI photo replace a stripped last-good hairline', () => {
+    const stripped = '<div class="note-img-frame"><img src="" data-tn-stripped="1"></div>';
+    const photo = `<div class="note-img-frame"><img src="data:image/png;base64,${'A'.repeat(40)}"></div>`;
+    const stamp = '2026-09-28T19:53:06.000Z';
+    const sets: QuizSet[] = [
+      set({
+        id: 's1',
+        name: 'Set',
+        items: [item(5, '', stamp, { answer: stripped })],
+        createdAt: stamp,
+      }),
+    ];
+    const durable: StoredQuizItem[] = [
+      { ...item(5, '', stamp, { answer: photo }), setId: 's1' },
+    ];
+    const { sets: next } = applyDurableQuizItems([], sets, durable);
+    expect(next[0].items[0].answer).toContain('data:image');
+    expect(next[0].items[0].answer).not.toContain('data-tn-stripped');
+  });
 });
 
 describe('notes-like union commit (no paint gates)', () => {
