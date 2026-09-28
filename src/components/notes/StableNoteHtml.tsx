@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
+import { applyHtmlPreservingImageSrcs } from '../../lib/editorImageHtml';
 import { normalizeYouTubeEmbeds } from '../../lib/youtubeEmbed';
 import { fitAllNoteTables, normalizeTablesInEditor } from '../../lib/noteTable';
 
@@ -23,7 +24,7 @@ export function StableNoteHtml({ html, className, dir = 'auto' }: StableNoteHtml
     const el = ref.current;
     if (!el || stableHtmlEqual(safeHtml, lastHtmlRef.current)) return;
     lastHtmlRef.current = safeHtml;
-    el.innerHTML = safeHtml;
+    applyHtmlPreservingImageSrcs(el, safeHtml);
     normalizeYouTubeEmbeds(el);
     normalizeTablesInEditor(el);
     fitAllNoteTables(el);

@@ -5,6 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { compressImageForInline } from '../../lib/imageCompress';
 import { emitEditorImageSwap, uploadEditorImage } from '../../lib/imageUpload';
+import { applyHtmlPreservingImageSrcs, persistableImageSrc, serializeHtmlPreservingImageSrcs } from '../../lib/editorImageHtml';
 import { auth } from '../../lib/firebase';
 import {
   extractYouTubeVideoId,
@@ -888,7 +889,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
         node.remove();
       }
     });
-    const html = ed.innerHTML;
+    const html = serializeHtmlPreservingImageSrcs(ed);
     spacers.forEach(({ wrap, spacer }) => {
       wrap.insertBefore(spacer, wrap.firstChild);
     });
@@ -934,7 +935,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       node.parentElement.insertBefore(table, node);
       node.remove();
     });
-    return normalizePseudoListsInHtmlString(clone.innerHTML);
+    return normalizePseudoListsInHtmlString(serializeHtmlPreservingImageSrcs(clone));
   };
 
   const youtubeRemoveLabel = lang === 'sv' ? 'Ta bort video' : 'Remove video';
@@ -1719,10 +1720,10 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!ed) return;
     isRestoringUndoRef.current = true;
     hideImageToolbar();
-    ed.innerHTML = snap.html;
+    applyHtmlPreservingImageSrcs(ed, snap.html);
     normalizeEditorImages(ed);
     normalizeTablesInEditor(ed);
-    lastLocalHtmlRef.current = ed.innerHTML;
+    lastLocalHtmlRef.current = serializeHtmlPreservingImageSrcs(ed);
     restoreEditorSelection(ed, snap.selection);
     isRestoringUndoRef.current = false;
     readCommandState();
@@ -5013,11 +5014,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
   // ── Initial content ───────────────────────────────────────────────────
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== html) {
-      editorRef.current.innerHTML = html;
+      applyHtmlPreservingImageSrcs(editorRef.current, html);
       normalizeEditorImages(editorRef.current);
       normalizeTablesInEditor(editorRef.current);
       promotePseudoListsToNative(editorRef.current);
-      lastLocalHtmlRef.current = editorRef.current.innerHTML;
+      lastLocalHtmlRef.current = serializeHtmlPreservingImageSrcs(editorRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -5062,7 +5063,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     // Skip only stale echoes of our own edits; deliberate parent updates still apply.
     if (!propChanged && ed.innerHTML === lastLocalHtmlRef.current && html !== lastLocalHtmlRef.current) return;
     hideImageToolbar();
-    ed.innerHTML = html;
+    applyHtmlPreservingImageSrcs(ed, html);
     normalizeEditorImages(ed);
     normalizeTablesInEditor(ed);
     if (promotePseudoListsToNative(ed)) {
@@ -5070,7 +5071,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       onLiveChangeRef.current?.(lastLocalHtmlRef.current);
       onChangeRef.current(lastLocalHtmlRef.current);
     } else {
-      lastLocalHtmlRef.current = ed.innerHTML;
+      lastLocalHtmlRef.current = serializeHtmlPreservingImageSrcs(ed);
     }
     resetEditorUndoHistory();
   }, [html]);
@@ -6191,6 +6192,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     img.style.maxHeight = 'none';
     img.style.cursor = 'zoom-in';
     img.src = url;
+    if (!persistableImageSrc(img).startsWith('data:image')) {
+      img.src = url;
+    }
     frame.appendChild(img);
     const after = document.createElement('div');
     after.setAttribute('dir', 'auto');
@@ -6211,6 +6215,7 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       liveEd.appendChild(frame);
       liveEd.appendChild(after);
     }
+    img.src = url;
     normalizeEditorImages(liveEd);
     separateEmbedsFromTextBlocks(liveEd);
     saveSel();

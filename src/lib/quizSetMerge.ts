@@ -7,6 +7,7 @@
  */
 import type { QuizItem, QuizSet } from '../types';
 import { mergeQuizSections, pruneQuizSections } from './quizSections';
+import { htmlHasInlineImage } from './inlineImages';
 
 /**
  * Firebase RTDB often stores arrays as objects (`{ "0": … }`). Calling
@@ -203,7 +204,29 @@ export function pickNewerQuizItem(a: QuizItem, b: QuizItem): QuizItem {
     // Soft-delete wins unless a restore/edit is strictly newer.
     return quizItemSyncTime(live) > quizItemSyncTime(trashed) ? live : trashed;
   }
+  const aPhoto = quizItemHasDataImage(a);
+  const bPhoto = quizItemHasDataImage(b);
+  if (aPhoto !== bPhoto) {
+    const stripped = aPhoto ? b : a;
+    const photo = aPhoto ? a : b;
+    // Last-good cache strips src="". Never let that beat a real photo.
+    if (quizItemHasStrippedImage(stripped) || quizItemSyncTime(photo) >= quizItemSyncTime(stripped)) {
+      return photo;
+    }
+  }
   return quizItemSyncTime(b) >= quizItemSyncTime(a) ? b : a;
+}
+
+function quizItemHasDataImage(item: QuizItem): boolean {
+  return htmlHasInlineImage(item.question)
+    || htmlHasInlineImage(item.answer)
+    || htmlHasInlineImage(item.explanation);
+}
+
+function quizItemHasStrippedImage(item: QuizItem): boolean {
+  return (item.question || '').includes('data-tn-stripped')
+    || (item.answer || '').includes('data-tn-stripped')
+    || (item.explanation || '').includes('data-tn-stripped');
 }
 
 /**

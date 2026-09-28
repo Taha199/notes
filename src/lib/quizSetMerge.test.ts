@@ -13,6 +13,7 @@ import {
   orderQuizSetsByListAuthority,
   pickBetterQuizSet,
   pickBetterQuizSetsListOrder,
+  pickNewerQuizItem,
   preferRicherQuizSetsMembership,
   applyQuizSetsListOrder,
   quizSetsMembershipGrew,
@@ -376,6 +377,18 @@ describe('applyDurableQuizItems keep-more-data', () => {
     const { sets: next } = applyDurableQuizItems([], sets, durable);
     expect(next[0].items[0].answer).toContain('data:image');
     expect(next[0].items[0].answer).not.toContain('data-tn-stripped');
+  });
+
+  it('pickNewerQuizItem keeps a data-URI photo over a stripped last-good copy', () => {
+    const stamp = '2026-09-28T20:15:30.000Z';
+    const stripped = item(4, 'Q', stamp, {
+      answer: '<div class="note-img-frame"><img src="" data-tn-stripped="1"></div>',
+    });
+    const photo = item(4, 'Q', stamp, {
+      answer: `<div class="note-img-frame"><img src="data:image/png;base64,${'A'.repeat(40)}"></div>`,
+    });
+    expect(pickNewerQuizItem(stripped, photo).answer).toContain('data:image');
+    expect(pickNewerQuizItem(photo, stripped).answer).toContain('data:image');
   });
 });
 
