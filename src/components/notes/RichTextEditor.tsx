@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { NOTE_IMG_FRAME, NOTE_IMG_TOOLBAR, NOTE_IMG_TOOLBAR_HOST, resolveNoteImage } from '../../lib/noteImage';
 import { compressImageForInline } from '../../lib/imageCompress';
 import { emitEditorImageSwap, uploadEditorImage } from '../../lib/imageUpload';
-import { applyHtmlPreservingImageSrcs, persistableImageSrc, serializeHtmlPreservingImageSrcs } from '../../lib/editorImageHtml';
+import { applyHtmlPreservingImageSrcs, lookupInlineImage, registerInlineImage, serializeHtmlPreservingImageSrcs } from '../../lib/editorImageHtml';
 import { auth } from '../../lib/firebase';
 import {
   extractYouTubeVideoId,
@@ -6191,10 +6191,9 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     img.style.height = 'auto';
     img.style.maxHeight = 'none';
     img.style.cursor = 'zoom-in';
-    img.src = url;
-    if (!persistableImageSrc(img).startsWith('data:image')) {
-      img.src = url;
-    }
+    const mounted = registerInlineImage(url);
+    img.setAttribute('data-tn-img', mounted.id);
+    img.src = mounted.blobUrl;
     frame.appendChild(img);
     const after = document.createElement('div');
     after.setAttribute('dir', 'auto');
@@ -6215,7 +6214,6 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
       liveEd.appendChild(frame);
       liveEd.appendChild(after);
     }
-    img.src = url;
     normalizeEditorImages(liveEd);
     separateEmbedsFromTextBlocks(liveEd);
     saveSel();
@@ -6228,8 +6226,11 @@ export function RichTextEditor({ html, onChange, onLiveChange, syncUpdatedAt, pl
     if (!liveEd) return;
     let swapped = false;
     liveEd.querySelectorAll('img').forEach((img) => {
-      if (img.getAttribute('src') === fromUrl) {
-        img.setAttribute('src', toUrl);
+      const id = img.getAttribute('data-tn-img');
+      const stored = lookupInlineImage(id);
+      if (img.getAttribute('src') === fromUrl || stored === fromUrl) {
+        img.src = toUrl;
+        img.removeAttribute('data-tn-img');
         swapped = true;
       }
     });
